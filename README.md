@@ -21,6 +21,27 @@ Ricky is designed to work through three co-equal interfaces:
 
 Slack is a surface, not the product identity.
 
+## CLI onboarding
+
+Ricky's CLI should be intentionally welcoming and user-friendly.
+
+The CLI onboarding experience should:
+- greet users with a recognizable ASCII-art version of the Ricky logo
+- help users understand the difference between local/BYOH and Cloud usage
+- make the first useful action obvious instead of dropping users into a blank tool
+- walk users toward Cloud setup when they want hosted workflow execution
+
+At minimum, Ricky's CLI should be able to guide users through:
+- local-first workflow authoring and execution
+- Cloud connect commands for supported providers
+- connecting a Google account for Cloud-backed usage
+- connecting the GitHub app through the Cloud/Nango dashboard flow
+
+Known Cloud connect command pattern from the Cloud repo:
+- `npx agent-relay cloud connect google`
+
+For GitHub-app connection flow, Ricky should direct users into the Cloud dashboard integration flow rather than inventing an ad hoc local-only path.
+
 ## Positioning
 
 Ricky sits between Sage and NightCTO:

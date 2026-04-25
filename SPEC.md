@@ -237,6 +237,21 @@ Ricky should support:
   - return downloadable code/artifacts
   - optionally launch the workflow and track its result
 
+### 5.5 A user-friendly onboarding CLI
+Ricky's CLI should be a product surface, not just a developer entrypoint.
+
+The CLI should:
+- welcome users with an ASCII-art rendering inspired by the Ricky logo
+- help first-time users choose between local/BYOH and Cloud usage
+- explain the next useful action instead of forcing users to read docs first
+- guide users through Cloud setup when they want hosted workflow execution
+- surface friendly setup prompts for Google and GitHub integration paths
+
+The Cloud-side provider connect command pattern should align with existing Cloud commands such as:
+- `npx agent-relay cloud connect google`
+
+For GitHub app setup, Ricky should point users into the existing Cloud dashboard / Nango-backed integration flow rather than inventing a parallel ad hoc path.
+
 ---
 
 ## 6. What Ricky Should Not Be
@@ -292,7 +307,19 @@ Ricky should:
 4. monitor progress / failure state
 5. return resulting code artifacts, logs, and outcomes
 
-### 7.4 Proactive workflow failure notification
+### 7.4 CLI onboarding and cloud connection guidance
+Input:
+- first-time CLI user or user requesting Cloud-backed workflow execution
+
+Ricky should:
+1. greet the user with a recognizable ASCII-art welcome
+2. explain local/BYOH versus Cloud modes clearly
+3. show the correct Cloud connect command when provider auth is needed
+4. guide the user to connect Google for Cloud-backed usage
+5. guide the user to the Cloud dashboard integration flow for GitHub app / Nango-backed connection
+6. keep the experience friendly and concise rather than documentation-heavy
+
+### 7.5 Proactive workflow failure notification
 
 ### 7.3 Proactive workflow failure notification
 Input:
@@ -323,6 +350,7 @@ Ricky should follow this split:
 
 - **Ingress / surfaces**
   - local/BYOH invocation
+  - CLI onboarding and command surface
   - API endpoint in Cloud for workflow generation/execution requests
   - Slack interactive surface
 - **Assistant runtime**
@@ -341,6 +369,14 @@ Ricky should follow this split:
 
 #### A. Ricky surfaces
 Initial surfaces should include:
+
+#### CLI onboarding + invocation
+Should support:
+- ASCII-art welcome experience
+- first-run guidance
+- mode selection between local/BYOH and Cloud
+- provider connect guidance for Cloud-backed usage
+- friendly commands and help text rather than bare infrastructure jargon
 
 #### Slack ingress
 Should mirror proven Slack patterns from Sage/NightCTO:
@@ -478,6 +514,11 @@ A Cloud-hosted Ricky endpoint should eventually accept requests like:
 - `POST /api/v1/ricky/workflows/generate-and-run`
 - `POST /api/v1/ricky/workflows/debug`
 - `POST /api/v1/ricky/workflows/restart`
+
+Cloud-connected CLI onboarding should also be able to point users at existing provider connect flows, including current Cloud command patterns such as:
+- `npx agent-relay cloud connect google`
+
+GitHub app connection should route through the Cloud dashboard integration experience backed by Nango, rather than a Ricky-specific bespoke auth flow.
 
 ### 11.2 Request shape
 At minimum:
@@ -620,6 +661,8 @@ ricky/
       ricky-cloud-api.md
       ricky-workflow-generation-pipeline.md
   src/
+    cli/
+      (later: onboarding, ASCII welcome, setup guidance)
     (later)
   slack/
     manifest.json
