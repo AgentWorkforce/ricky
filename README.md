@@ -1,19 +1,30 @@
 # Ricky
 
-Ricky is a Slack-native workflow runner and workflow reliability agent.
+Ricky is a workflow reliability, workflow coordination, and workflow authoring product for AgentWorkforce.
 
-It is built to:
+Ricky is built to:
 - debug failed workflows
+- fix broken workflows
 - restart or rerun them safely when appropriate
 - proactively report workflow failures from Cloud
 - analyze workflow quality over time
 - suggest concrete workflow improvements
 - help users generate high-quality workflows for local BYOH or Cloud execution
+- coordinate workflow runs and return resulting artifacts
+
+## Interfaces
+
+Ricky is designed to work through three co-equal interfaces:
+- **Local / BYOH**
+- **Cloud API**
+- **Slack**
+
+Slack is a surface, not the product identity.
 
 ## Positioning
 
 Ricky sits between Sage and NightCTO:
-- like **Sage**, it is a user-facing Slack agent with BYOH and Cloud modes
+- like **Sage**, it supports user-facing interaction and BYOH/runtime flexibility
 - like **NightCTO**, it is proactive, analytics-driven, and operationally opinionated
 - like **Relay**, it is deeply workflow-native rather than just LLM-chat-native
 - like **Agent Assistant**, it should reuse shared assistant/runtime packages instead of rebuilding those seams locally

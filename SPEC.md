@@ -2,20 +2,25 @@
 
 ## 1. Overview
 
-Ricky is a workflow reliability agent and workflow runner product for AgentWorkforce.
+Ricky is a workflow reliability, workflow coordination, and workflow authoring product for AgentWorkforce.
 
 Ricky's core job is not generic assistant chat. Ricky is specifically responsible for:
 - understanding Agent Relay workflows deeply
 - generating new workflows from user intent/specs
 - debugging workflow failures
 - fixing broken workflows
+- coordinating workflow execution
 - restarting or rerunning workflows safely when needed
 - proactively notifying users about workflow failures and degraded workflow health
 - analyzing workflow runs over time and suggesting concrete workflow improvements
+- returning resulting workflow artifacts when Ricky writes or coordinates runs
 
-Ricky should work in two execution modes:
+Ricky should work through three co-equal interfaces:
 - **Local / BYOH mode**: runs against local repos, local tools, local agent-relay, and local skill loading
-- **Cloud mode**: hosted through `AgentWorkforce/cloud`, with an API surface that can generate workflows from a spec, return downloadable artifacts, and optionally kick off execution and return resulting code artifacts
+- **Cloud API**: hosted through `AgentWorkforce/cloud`, with an API surface that can generate workflows from a spec, return downloadable artifacts, and optionally kick off execution and return resulting code artifacts
+- **Slack**: an interactive surface for workflow debugging, generation, coordination, and proactive notifications
+
+Slack is a product surface, not Ricky's core identity.
 
 Ricky should be implemented on top of **Agent Assistant** rather than as a standalone runtime stack.
 
@@ -91,7 +96,7 @@ Ricky should be a product built **on** Agent Assistant, not a competing assistan
 
 ### 3.3 `sage`
 
-**What matters:** Sage provides the closest product/runtime reference for a Slack agent that can run in cloud and BYOH modes.
+**What matters:** Sage provides the closest product/runtime reference for an agent product that can run in cloud and BYOH modes, with Slack as one major surface.
 
 Key evidence:
 - `sage/package.json`
@@ -193,14 +198,15 @@ That narrower scope is a feature.
 
 Ricky should be:
 
-### 5.1 A workflow-native Slack agent
-Users should be able to ask Ricky things like:
+### 5.1 A workflow-native product across local, API, and Slack surfaces
+Users should be able to ask or invoke Ricky through local tooling, API calls, or Slack for things like:
 - “Why did this workflow fail?”
 - “Fix this workflow and rerun it.”
 - “Generate a workflow from this spec.”
 - “What swarm pattern should this workflow use?”
 - “Why is this workflow hanging?”
 - “How can we reduce workflow runtime and retries?”
+- “Write this workflow, run it, and return the artifacts.”
 
 ### 5.2 A proactive workflow operations agent
 Ricky should proactively:
@@ -272,7 +278,21 @@ Ricky should:
 3. select/apply relevant skills
 4. produce workflow artifact(s)
 5. validate with dry-run and bounded deterministic checks
-6. return downloadable files or kick off execution in Cloud
+6. return downloadable files, or kick off execution in Cloud/local mode when requested
+
+### 7.3 Coordinate and run a workflow
+Input:
+- workflow spec or existing workflow artifact
+- execution preference (local/BYOH or Cloud)
+
+Ricky should:
+1. determine the right execution environment
+2. prepare or update the workflow artifact if needed
+3. coordinate workflow launch
+4. monitor progress / failure state
+5. return resulting code artifacts, logs, and outcomes
+
+### 7.4 Proactive workflow failure notification
 
 ### 7.3 Proactive workflow failure notification
 Input:
@@ -302,8 +322,9 @@ Ricky should:
 Ricky should follow this split:
 
 - **Ingress / surfaces**
-  - Slack first
+  - local/BYOH invocation
   - API endpoint in Cloud for workflow generation/execution requests
+  - Slack interactive surface
 - **Assistant runtime**
   - Agent Assistant packages
 - **Workflow domain logic**
@@ -318,13 +339,29 @@ Ricky should follow this split:
 
 ### 8.2 Internal subsystems
 
-#### A. Ricky Gateway / Slack ingress
-Initial surface should mirror proven Slack patterns from Sage/NightCTO:
+#### A. Ricky surfaces
+Initial surfaces should include:
+
+#### Slack ingress
+Should mirror proven Slack patterns from Sage/NightCTO:
 - signature verification
 - dedup
 - thread handling
 - outbound delivery
 - health route
+
+#### Local/BYOH invocation
+Should support:
+- local repo inspection
+- local workflow artifact creation
+- local `agent-relay` validation/run coordination
+- local log and artifact return
+
+#### Cloud API ingress
+Should support:
+- authenticated workflow generation requests
+- authenticated workflow coordination/run requests
+- artifact return/download flows
 
 #### B. Ricky Domain Core
 The Ricky-owned core should classify requests into domains like:
@@ -516,12 +553,13 @@ That means Ricky must reason about environment assumptions rather than generatin
 ## 15. Recommended Initial MVP
 
 ### MVP scope
-1. Slack ingress
-2. Local/BYOH workflow debugging and authoring assistant
-3. workflow generation from a spec
-4. dry-run validation + bounded local proof loop
-5. proactive notification for failed workflow runs in Cloud
-6. simple workflow health analytics digest
+1. Local/BYOH workflow debugging and authoring assistant
+2. Cloud API for workflow generation / coordination / execution
+3. Slack surface for interactive requests and proactive notifications
+4. workflow generation from a spec
+5. dry-run validation + bounded local proof loop
+6. proactive notification for failed workflow runs in Cloud
+7. simple workflow health analytics digest
 
 ### Explicitly out of MVP
 - full autonomous workflow repair at scale
