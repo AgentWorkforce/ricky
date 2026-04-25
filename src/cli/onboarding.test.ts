@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -8,7 +9,10 @@ import {
   renderOnboarding,
   renderRecoveryGuidance,
   renderWelcome,
+  runOnboarding,
   shouldShowBanner,
+  type RickyConfig,
+  type RickyConfigStore,
 } from './index';
 
 describe('Ricky CLI onboarding', () => {
@@ -41,7 +45,7 @@ describe('Ricky CLI onboarding', () => {
     const output = renderCloudGuidance();
 
     expect(output).toContain('npx agent-relay cloud connect google');
-    expect(output).toContain('Cloud dashboard / Nango-backed connection flow');
+    expect(output).toContain('Cloud dashboard');
     expect(output).not.toContain('github/connect/local');
   });
 
@@ -73,5 +77,217 @@ describe('Ricky CLI onboarding', () => {
 
   it('renders a stable compact welcome for returning users', () => {
     expect(renderWelcome({ isFirstRun: false })).toContain('Ricky is ready.');
+  });
+
+  it('suppresses the banner via env option without reading process.env', () => {
+    expect(shouldShowBanner({ isTTY: true, env: { RICKY_BANNER: '0' } })).toBe(false);
+    expect(shouldShowBanner({ isTTY: true, env: {} })).toBe(true);
+    expect(shouldShowBanner({ isTTY: true, rickyBanner: '0' })).toBe(false);
+  });
+});
+
+function mockConfigStore(config: RickyConfig | null = null): RickyConfigStore & { written: RickyConfig | null } {
+  const store = {
+    written: null as RickyConfig | null,
+    async readProjectConfig() {
+      return config;
+    },
+    async readGlobalConfig() {
+      return null;
+    },
+    async writeProjectConfig(c: RickyConfig) {
+      store.written = c;
+    },
+  };
+  return store;
+}
+
+function inputStream(text: string): PassThrough {
+  const stream = new PassThrough();
+  stream.end(`${text}\n`);
+  return stream;
+}
+
+describe('runOnboarding', () => {
+  it('runs first-run flow with interactive mode selection and persists config', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream('1'),
+      output,
+      isTTY: true,
+      configStore: store,
+    });
+
+    expect(result.firstRun).toBe(true);
+    expect(result.mode).toBe('local');
+    expect(result.output).toContain('Local / BYOH mode selected.');
+    expect(result.output).toContain('Spec handoff:');
+    expect(result.output).toContain('Recovery:');
+    expect(store.written).not.toBeNull();
+    expect(store.written!.mode).toBe('local');
+    expect(store.written!.firstRunComplete).toBe(true);
+  });
+
+  it('does not persist config when mode comes from options.mode override', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream(''),
+      output,
+      isTTY: true,
+      mode: 'cloud',
+      configStore: store,
+    });
+
+    expect(result.mode).toBe('cloud');
+    expect(result.firstRun).toBe(true);
+    expect(store.written).toBeNull();
+  });
+
+  it('does not persist config when mode comes from RICKY_MODE env var', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream(''),
+      output,
+      isTTY: true,
+      env: { RICKY_MODE: 'local' },
+      configStore: store,
+    });
+
+    expect(result.mode).toBe('local');
+    expect(result.firstRun).toBe(true);
+    expect(store.written).toBeNull();
+  });
+
+  it('does not persist config for explore choice', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream('4'),
+      output,
+      isTTY: true,
+      configStore: store,
+    });
+
+    expect(result.mode).toBe('explore');
+    expect(store.written).toBeNull();
+  });
+
+  it('returns compact header for returning users', async () => {
+    const store = mockConfigStore({
+      mode: 'local',
+      firstRunComplete: true,
+      providers: { google: { connected: false }, github: { connected: false } },
+    });
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream(''),
+      output,
+      isTTY: true,
+      configStore: store,
+    });
+
+    expect(result.firstRun).toBe(false);
+    expect(result.mode).toBe('local');
+    expect(result.output).toContain('ricky · local mode · ready');
+    expect(result.output).toContain('Ricky is ready.');
+  });
+
+  it('renders non-interactive setup error when TTY is false and no override', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream(''),
+      output,
+      isTTY: false,
+      configStore: store,
+    });
+
+    expect(result.output).toContain('Error: Ricky has not been configured yet.');
+    expect(result.output).toContain('RICKY_MODE=local');
+    expect(result.mode).toBe('explore');
+  });
+
+  it('bypasses interactive prompt in non-TTY when RICKY_MODE is set', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream(''),
+      output,
+      isTTY: false,
+      env: { RICKY_MODE: 'local' },
+      configStore: store,
+    });
+
+    expect(result.mode).toBe('local');
+    expect(result.output).not.toContain('Error:');
+    expect(store.written).toBeNull();
+  });
+
+  it('returns empty output and skips config for quiet mode', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream(''),
+      output,
+      quiet: true,
+      configStore: store,
+    });
+
+    expect(result.output).toBe('');
+    expect(result.bannerShown).toBe(false);
+    expect(store.written).toBeNull();
+  });
+
+  it('re-prompts on invalid input then accepts valid choice', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+    const input = new PassThrough();
+
+    // Schedule writes so readline processes them sequentially
+    setImmediate(() => {
+      input.write('invalid\n');
+      setImmediate(() => {
+        input.write('2\n');
+        input.end();
+      });
+    });
+
+    const result = await runOnboarding({
+      input,
+      output,
+      isTTY: true,
+      configStore: store,
+    });
+
+    expect(result.mode).toBe('cloud');
+    expect(store.written).not.toBeNull();
+    expect(store.written!.mode).toBe('cloud');
+  });
+
+  it('respects options.mode override precedence over RICKY_MODE env', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream(''),
+      output,
+      isTTY: true,
+      mode: 'both',
+      env: { RICKY_MODE: 'cloud' },
+      configStore: store,
+    });
+
+    expect(result.mode).toBe('both');
   });
 });

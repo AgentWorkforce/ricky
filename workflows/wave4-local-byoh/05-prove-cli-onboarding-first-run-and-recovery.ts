@@ -75,7 +75,8 @@ Requirements:
 - Expose deterministic proof evaluators over the current CLI onboarding implementation.
 - Cover first-run, returning-user, local/BYOH, Cloud, Google guidance, GitHub dashboard/Nango guidance, handoff language, and recovery behavior.
 - Do not modify any other file.
-- Write the file to disk, then exit cleanly.`,
+- This is a file-writing step, not a report-writing step. Do not emit a long stdout deliverable.
+- After the file is written, emit at most a short one-line completion note and exit immediately.`,
       verification: { type: 'file_exists', value: 'src/cli/proof/onboarding-proof.ts' },
     })
     .step('verify-proof-helper', {
@@ -99,7 +100,8 @@ Requirements:
 - Assert the proof harness covers first-run, returning-user, local/BYOH, Cloud, Google guidance, GitHub dashboard/Nango guidance, handoff language, and recovery behavior.
 - Keep the tests deterministic and bounded.
 - Do not modify any other file.
-- Write the file to disk, then exit cleanly.`,
+- This is a file-writing step, not a report-writing step. Do not emit a long stdout deliverable.
+- After the file is written, emit at most a short one-line completion note and exit immediately.`,
       verification: { type: 'file_exists', value: 'src/cli/proof/onboarding-proof.test.ts' },
     })
     .step('post-proof-file-gate', {

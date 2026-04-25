@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateOnboardingProof, summarizeOnboardingProof } from './onboarding-proof';
+import {
+  evaluateOnboardingProof,
+  evaluateOnboardingProofCase,
+  getOnboardingProofCases,
+  summarizeOnboardingProof,
+  type ProofCaseName,
+} from './onboarding-proof';
 
 describe('Ricky CLI onboarding proof', () => {
   it('proves all required onboarding cases', () => {
@@ -10,20 +16,22 @@ describe('Ricky CLI onboarding proof', () => {
     expect(summary.failures).toEqual([]);
   });
 
-  it('covers first-run, returning-user, parity, guidance, handoff, and recovery cases', () => {
-    const results = evaluateOnboardingProof();
-    const names = results.map((result) => result.name);
+  it('covers every proof case required by the UX contract', () => {
+    const names = getOnboardingProofCases().map((proofCase) => proofCase.name);
 
     expect(names).toEqual([
-      'first-run-banner-and-welcome',
-      'returning-user-compact-flow',
-      'local-and-cloud-parity',
-      'real-cloud-guidance',
-      'handoff-language',
-      'recovery-path',
+      'implementation-modules-present',
+      'first-run-experience',
+      'returning-user-compact-header',
+      'local-byoh-path',
+      'cloud-path',
+      'google-connect-guidance',
+      'github-dashboard-nango-guidance',
+      'cli-mcp-handoff-language',
+      'recovery-paths',
+      'banner-suppression',
+      'narrow-terminal-fallback',
     ]);
-
-    expect(results.every((result) => result.passed)).toBe(true);
   });
 
   it('keeps evidence user-visible and non-empty', () => {
@@ -32,6 +40,27 @@ describe('Ricky CLI onboarding proof', () => {
     for (const result of results) {
       expect(result.evidence.length).toBeGreaterThan(0);
       expect(result.evidence[0].trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it.each([
+    ['first-run-experience', ['Welcome to Ricky', 'Local / BYOH', 'Cloud', 'Recovery']],
+    ['returning-user-compact-header', ['Ricky is ready', 'ricky · local mode · ready']],
+    ['local-byoh-path', ['generate workflows into your local repo', 'No Cloud credentials required']],
+    ['cloud-path', ['Cloud mode selected', 'AgentWorkforce Cloud', 'Cloud dashboard']],
+    ['google-connect-guidance', ['npx agent-relay cloud connect google']],
+    ['github-dashboard-nango-guidance', ['GitHub', 'Cloud dashboard']],
+    ['cli-mcp-handoff-language', ['Claude', 'CLI', 'MCP', 'ricky.generate']],
+    ['recovery-paths', ['agent-relay is missing', 'continue in local mode']],
+    ['banner-suppression', ['quiet: suppressed', 'RICKY_BANNER=0: suppressed']],
+    ['narrow-terminal-fallback', ['ricky · workflow reliability for AgentWorkforce']],
+  ] satisfies Array<[ProofCaseName, string[]]>)('%s exposes bounded proof evidence', (name, expectedEvidence) => {
+    const result = evaluateOnboardingProofCase(name);
+    const evidence = result.evidence.join('\n');
+
+    expect(result.passed).toBe(true);
+    for (const expected of expectedEvidence) {
+      expect(evidence).toContain(expected);
     }
   });
 });

@@ -1,6 +1,6 @@
 export type BannerVariant = 'full' | 'compact';
 
-export const RICKY_BANNER = String.raw`        __
+export const RICKY_BANNER = String.raw`        __             RRRR
    ____/  \__        RICKY
   <__  _    _>
      \_\>--'
@@ -19,6 +19,16 @@ const ANSI_RESET = '\x1b[0m';
 export interface RenderBannerOptions {
   color?: boolean;
   variant?: BannerVariant;
+}
+
+export interface ShouldShowBannerOptions {
+  quiet?: boolean;
+  noBanner?: boolean;
+  isTTY?: boolean;
+  isFirstRun?: boolean;
+  forceOnboarding?: boolean;
+  env?: { RICKY_BANNER?: string };
+  rickyBanner?: string;
 }
 
 export function chooseBannerVariant(columns?: number): BannerVariant {
@@ -56,13 +66,7 @@ export function renderBanner(options: RenderBannerOptions | BannerVariant = {}):
   ].join('\n');
 }
 
-export function shouldShowBanner(options: {
-  quiet?: boolean;
-  noBanner?: boolean;
-  isTTY?: boolean;
-  isFirstRun?: boolean;
-  forceOnboarding?: boolean;
-} = {}): boolean {
+export function shouldShowBanner(options: ShouldShowBannerOptions = {}): boolean {
   if (options.quiet === true || options.noBanner === true) {
     return false;
   }
@@ -71,7 +75,9 @@ export function shouldShowBanner(options: {
     return false;
   }
 
-  if (process.env.RICKY_BANNER === '0') {
+  const rickyBanner =
+    options.rickyBanner ?? options.env?.RICKY_BANNER ?? (options.env ? undefined : process.env.RICKY_BANNER);
+  if (rickyBanner === '0') {
     return false;
   }
 
