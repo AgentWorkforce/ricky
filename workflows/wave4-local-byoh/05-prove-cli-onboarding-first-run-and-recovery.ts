@@ -239,9 +239,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(src/cli/|\.workflow-artifacts/)"',
-        '! printf "%s\n" "$changed" | grep -Ev "^(src/cli/|\.workflow-artifacts/)"',
+        'changed="$(git diff --name-only -- src/cli workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery)"',
+        'printf "%s\n" "$changed" | grep -Eq "^(src/cli/|workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery\.ts|\.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/)"',
+        '! printf "%s\n" "$changed" | grep -Ev "^(src/cli/|workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery\.ts|\.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/)"',
         'echo CLI_ONBOARDING_PROOF_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,

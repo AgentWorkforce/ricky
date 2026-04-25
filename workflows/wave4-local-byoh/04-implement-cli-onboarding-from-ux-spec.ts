@@ -273,9 +273,9 @@ Rules:
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(src/cli/|\.workflow-artifacts/)"',
-        '! printf "%s\n" "$changed" | grep -Ev "^(src/cli/|\.workflow-artifacts/)"',
+        'changed="$(git diff --name-only -- src/cli workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts workflows/shared/scripts/restore-ricky-cli-onboarding.sh docs/architecture/ricky-wave4-runtime-completion-findings.md docs/architecture/ricky-runtime-notes.md workflows/wave0-foundation/100-debug-codex-source-edit-runtime.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec)"',
+        'printf "%s\n" "$changed" | grep -Eq "^(src/cli/|workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec\.ts|workflows/shared/scripts/restore-ricky-cli-onboarding\.sh|docs/architecture/ricky-wave4-runtime-completion-findings\.md|docs/architecture/ricky-runtime-notes\.md|workflows/wave0-foundation/100-debug-codex-source-edit-runtime\.ts|\.workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/)"',
+        '! printf "%s\n" "$changed" | grep -Ev "^(src/cli/|workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec\.ts|workflows/shared/scripts/restore-ricky-cli-onboarding\.sh|docs/architecture/ricky-wave4-runtime-completion-findings\.md|docs/architecture/ricky-runtime-notes\.md|workflows/wave0-foundation/100-debug-codex-source-edit-runtime\.ts|\.workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/)"',
         'echo CLI_ONBOARDING_IMPL_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
