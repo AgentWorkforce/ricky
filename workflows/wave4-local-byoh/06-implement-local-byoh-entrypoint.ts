@@ -9,6 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
+    .agent('impl-claude', {
+      cli: 'claude',
+      preset: 'worker',
+      role: 'Implements the local/BYOH entrypoint surface and tests in bounded local files.',
+      retries: 2,
+    })
     .agent('reviewer-claude', {
       cli: 'claude',
       preset: 'reviewer',
@@ -67,9 +73,29 @@ async function main() {
       failOnError: true,
     })
 
+    .step('implement-local-entrypoint', {
+      agent: 'impl-claude',
+      dependsOn: ['read-product-spec', 'read-backlog-plan', 'read-local-context', 'read-workflow-standards'],
+      task: `Implement the Ricky local/BYOH entrypoint in only these files:
+- src/local/entrypoint.ts
+- src/local/request-normalizer.ts
+- src/local/entrypoint.test.ts
+- src/local/index.ts
+
+Requirements:
+- accept spec handoff from CLI, MCP, Claude-style structured handoff, or workflow artifact path
+- normalize inputs into one local invocation request contract
+- keep local/BYOH explicit and do not route through Cloud by default
+- return artifact, log, warning, and next-action fields in the local response contract
+- keep execution seams injectable or mockable for tests
+- keep tests deterministic and bounded
+
+This is bounded product implementation work. Write the files to disk, then exit cleanly.`,
+      verification: { type: 'file_exists', value: 'src/local/entrypoint.ts' },
+    })
     .step('implementation-file-gate', {
       type: 'deterministic',
-      dependsOn: ['read-product-spec', 'read-backlog-plan', 'read-local-context', 'read-workflow-standards'],
+      dependsOn: ['implement-local-entrypoint'],
       command: [
         'test -f src/local/entrypoint.ts',
         'test -f src/local/request-normalizer.ts',
