@@ -1,0 +1,341 @@
+# Ricky Surfaces and Ingress
+
+## Purpose
+
+This document describes every surface through which users and systems interact with Ricky, how requests enter the system, and how they converge into a unified domain model. Wave 1 through Wave 4 implementers should read this before adding or modifying any ingress path.
+
+---
+
+## 1. Surface equality principle
+
+All Ricky surfaces are co-equal product interfaces. No surface is a wrapper around another. Every surface must:
+
+- Converge on the same internal domain model (`LocalInvocationRequest` for local paths, `CloudGenerateRequest` for cloud paths)
+- Provide the same quality of onboarding and guidance
+- Support the same routing decisions (local vs cloud, generate vs debug vs coordinate)
+- Return outcomes in a format appropriate to the surface
+
+CLI is not the "real" interface with Slack as an afterthought. Slack is not the primary surface with CLI as a developer shortcut. They are peers.
+
+---
+
+## 2. CLI surface
+
+### Entry point
+
+`src/commands/cli-main.ts` parses command-line arguments:
+
+```
+ricky                    # Interactive (default)
+ricky --mode local       # Override mode
+ricky help               # Usage
+ricky version            # Version
+```
+
+Returns a structured `CliMainResult` with exit code, output lines, and optional `InteractiveCliResult`.
+
+### Onboarding flow
+
+`src/cli/onboarding.ts` orchestrates the first-run experience:
+
+1. **Banner** - ASCII art from `src/cli/ascii-art.ts`
+2. **Welcome** - first-run vs returning user messaging from `src/cli/welcome.ts`
+3. **Mode selection** - local, cloud, both, or explore via `src/cli/mode-selector.ts`
+4. **Provider guidance** - next-step instructions per selected mode
+
+### Configuration
+
+Two-tier config store:
+- Project-level: `.ricky/config.json`
+- Global: `~/.config/ricky/config.json`
+
+Project-level config overrides global config. Both are plain JSON.
+
+### Mode selection
+
+`src/cli/mode-selector.ts` accepts four modes:
+
+| Mode | Behavior |
+|---|---|
+| `local` | Route to LocalExecutor for BYOH execution |
+| `cloud` | Route to CloudExecutor for hosted execution |
+| `both` | Route to LocalExecutor with cloud fallback |
+| `explore` | Informational mode, no execution |
+
+Accepts numeric input (1-4) or text aliases. Defaults to `local` if no input.
+
+---
+
+## 3. Request normalization
+
+### The normalizer
+
+`src/local/request-normalizer.ts` accepts requests from four ingress types and normalizes them into a single contract.
+
+### Four handoff types
+
+**CliHandoff** - direct CLI submission
+- Source: `--spec "string"` argument or stdin
+- Contains: raw spec string
+
+**McpHandoff** - structured MCP tool invocation
+- Source: `ricky.generate` MCP tool call from a connected assistant
+- Contains: structured spec, optional metadata
+
+**ClaudeHandoff** - spec from Claude or similar LLM
+- Source: conversation handoff from Claude session
+- Contains: spec string, optional conversation context for routing
+
+**WorkflowArtifactHandoff** - existing workflow file
+- Source: path to a workflow file on disk
+- Contains: file path, optional metadata
+
+### Normalized output
+
+All handoff types normalize to `LocalInvocationRequest`:
+
+- `spec` - the workflow spec string
+- `source` - label identifying the handoff origin
+- `mode` - local, cloud, or both
+- `specPath` - optional path to spec file on disk
+- `metadata` - optional structured metadata from the source
+
+### Rule for implementers
+
+Adding a new ingress type means adding a new handoff variant to the normalizer. The normalizer is the only place where surface-specific input shapes are translated into domain contracts. No downstream code should know which surface originated the request.
+
+---
+
+## 4. Cloud API surface
+
+### Endpoint
+
+`src/cloud/api/generate-endpoint.ts` handles hosted workflow generation.
+
+**Route:** `POST /api/v1/ricky/workflows/generate` (constant `CLOUD_GENERATE_ROUTE`)
+
+### Request contract (`CloudGenerateRequest`)
+
+```typescript
+{
+  auth: {
+    token: string;
+    tokenType?: 'bearer' | 'api-key';
+  };
+  workspace: {
+    workspaceId: string;
+    environment?: string;
+  };
+  body: {
+    spec: string;
+    specPath?: string;
+    mode?: 'cloud' | 'both';
+    metadata?: Record<string, unknown>;
+  };
+}
+```
+
+### Response contract (`CloudGenerateResponse`)
+
+```typescript
+{
+  ok: boolean;
+  status: number;
+  artifacts: CloudArtifact[];
+  warnings: CloudWarning[];
+  followUpActions: CloudFollowUpAction[];
+  requestId: string;
+}
+```
+
+### Validation
+
+- Auth token required (non-empty string)
+- Workspace ID required
+- Spec required (non-empty string)
+- Returns typed errors: 401 for auth failure, 400 for validation failure, 500 for server error
+
+### Future endpoints (per SPEC.md)
+
+- `POST /api/v1/ricky/workflows/generate-and-run`
+- `POST /api/v1/ricky/workflows/debug`
+- `POST /api/v1/ricky/workflows/restart`
+
+These are not yet implemented. Implementers should follow the same request/response contract pattern established by the generate endpoint.
+
+---
+
+## 5. Slack surface
+
+### Manifest
+
+`slack/manifest.json` defines the Slack app configuration:
+
+- **Webhook:** `POST https://ricky.agentrelay.com/api/webhooks/slack`
+- **Interactivity:** `POST https://ricky.agentrelay.com/api/slack/interactivity`
+- **Bot events:** `app_mention`, `message.im`
+- **Scopes:** channels:history, channels:read, chat:write, im:history, im:read, im:write, users:read
+
+### Implementation approach
+
+Slack ingress is implemented through Agent Assistant packages, not custom webhook handling:
+
+- `@agent-assistant/surfaces` for Slack surface abstraction
+- `@agent-assistant/webhook-runtime` for signature verification, dedup, thread handling, outbound delivery
+
+### Capabilities
+
+Slack users can:
+- Ask Ricky to debug, generate, or coordinate workflows via @mention or DM
+- Receive proactive failure notifications
+- Get onboarding guidance for first-time interaction
+
+### Rule for implementers
+
+Slack-specific logic (formatting, thread management, interactive components) belongs in the surface layer. Domain logic (what Ricky does with the request) must go through the same normalizer and executor path as every other surface.
+
+---
+
+## 6. MCP and Claude handoff surface
+
+### MCP handoff
+
+Ricky exposes a `ricky.generate` MCP tool that connected assistants (Claude, etc.) can invoke to hand off workflow specs.
+
+The MCP handoff preserves structured context so Ricky can determine whether the user wants generation, execution, debugging, or coordination without re-asking.
+
+### Claude handoff
+
+When a user drafts a spec in a Claude session and hands it to Ricky, the handoff includes:
+- The spec itself
+- Optional conversation context (what the user discussed, what they intend)
+
+This context helps Ricky route the request correctly without degrading to a generic "what would you like to do?" prompt.
+
+### Rule for implementers
+
+MCP and Claude handoffs must normalize through `request-normalizer.ts` like every other surface. The conversation context is metadata, not a separate execution path.
+
+---
+
+## 7. Web surface
+
+Per SPEC.md, Ricky will have a browser-based onboarding and interaction surface. This surface is not yet implemented, but the ingress contract is defined here so implementers build to the same normalization path as every other surface.
+
+### Expected capabilities
+
+- First-run onboarding for non-CLI users
+- Account and integration connection flows
+- Spec submission and workflow launch entrypoints
+- Transition into cloud-backed execution
+
+### Expected ingress route
+
+**Route:** `POST /api/v1/ricky/web/submit` (browser-initiated requests)
+
+The web handler should accept:
+
+```typescript
+{
+  auth: {
+    sessionToken: string;       // browser session or OAuth token
+    tokenType: 'session' | 'oauth';
+  };
+  body: {
+    spec: string;               // workflow spec from the web form
+    mode?: 'local' | 'cloud' | 'both';
+    metadata?: Record<string, unknown>;
+  };
+}
+```
+
+### Handler boundary
+
+The web handler validates the session/auth, extracts the spec and mode, and produces either a `CloudGenerateRequest` (when mode is `cloud` or `both`) or a `LocalInvocationRequest` (when mode is `local`) via the same normalizer used by all other surfaces. The handler itself owns only auth/session validation and request shaping — no domain logic.
+
+### Auth and session expectations
+
+- Browser sessions use OAuth or session-token auth, validated against the Cloud auth layer
+- The web surface does not introduce a separate auth mechanism; it delegates to the same workspace-scoped auth as the Cloud API surface
+
+### Rule for implementers
+
+When the web surface is implemented, it must follow the same surface equality principle: converge on the same domain model, use the same normalizer contract, and support the same routing decisions. The web handler must normalize through `request-normalizer.ts` — adding a `WebHandoff` variant — and must not short-circuit to executors directly.
+
+---
+
+## 8. Local/BYOH surface
+
+### Capabilities
+
+The local surface supports:
+- Local repo inspection and context detection
+- Local workflow artifact creation on disk
+- Local `agent-relay` validation and dry-run
+- Local execution coordination
+- Local log and artifact return
+
+### Execution path
+
+```
+LocalInvocationRequest
+  -> LocalExecutor.execute()
+  -> workflow generation + local agent-relay coordination
+  -> LocalResponse with artifacts, logs, outcomes
+```
+
+### Environment awareness
+
+Ricky's local surface must distinguish between:
+- Workflows intended for local execution
+- Workflows intended for cloud execution
+- Workflows that should support both
+
+This means the local surface reasons about environment assumptions (available tools, local config, agent-relay installation) rather than generating one-size-fits-all workflow code.
+
+---
+
+## 9. Provider connection guidance
+
+### Google (Cloud)
+
+For cloud-backed usage requiring Google auth, Ricky directs users to the existing Cloud connect command:
+
+```
+npx agent-relay cloud connect google
+```
+
+This is surfaced during CLI onboarding when the user selects cloud or both mode.
+
+### GitHub
+
+For GitHub app setup, Ricky points users to the existing Cloud dashboard integration flow backed by Nango. Ricky does not implement a separate GitHub auth flow.
+
+### Rule for implementers
+
+Provider connection guidance uses existing AgentWorkforce Cloud infrastructure. Do not create Ricky-specific auth flows when Cloud already provides them.
+
+---
+
+## 10. Ingress routing decision
+
+After normalization, the mode field in the request determines the execution path:
+
+```
+mode = "local"  -> LocalExecutor.execute()
+mode = "cloud"  -> CloudExecutor.generate()
+mode = "both"   -> LocalExecutor.execute() with cloud fallback
+mode = "explore" -> informational response, no execution
+```
+
+The orchestrator (`src/entrypoint/interactive-cli.ts`) makes this routing decision. No surface should pre-decide the execution path; that is the orchestrator's responsibility.
+
+---
+
+## 11. Key rules for implementers
+
+1. **Never assume one privileged surface.** Code that works only from CLI or only from Slack is a bug.
+2. **All surfaces converge on the same domain model.** Surface-specific input shapes are translated in the normalizer, nowhere else.
+3. **Provider connect uses existing Cloud commands.** Do not invent parallel auth flows.
+4. **Surface layer owns presentation, not logic.** Formatting, thread management, and interactive components stay in the surface layer. Domain routing and execution stay in the orchestrator and executors.
+5. **New surfaces require a new handoff variant.** The normalizer is the single integration point for new ingress types.
