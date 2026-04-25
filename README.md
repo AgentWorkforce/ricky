@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/ricky-logo.svg" alt="Ricky runner logo" width="180" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/ricky-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/ricky-logo-light.png">
+    <img src="assets/ricky-logo-light.png" alt="Ricky runner logo" width="180">
+  </picture>
 </p>
 
 <p align="center"><strong>Workflow reliability at runner speed.</strong></p>
