@@ -6,7 +6,9 @@ Ricky is a workflow reliability, workflow coordination, and workflow authoring p
 
 Ricky's core job is not generic assistant chat. Ricky is specifically responsible for:
 - understanding Agent Relay workflows deeply
+- allowing users to consume workflow power without hand-authoring workflows themselves
 - generating new workflows from user intent/specs
+- accepting specs and requests from LLM surfaces, CLI, and MCP-connected tools
 - debugging workflow failures
 - fixing broken workflows
 - coordinating workflow execution
@@ -199,7 +201,7 @@ That narrower scope is a feature.
 Ricky should be:
 
 ### 5.1 A workflow-native product across local, API, and Slack surfaces
-Users should be able to ask or invoke Ricky through local tooling, API calls, or Slack for things like:
+Users should be able to ask or invoke Ricky through local tooling, API calls, Slack, CLI, or MCP-connected assistants for things like:
 - “Why did this workflow fail?”
 - “Fix this workflow and rerun it.”
 - “Generate a workflow from this spec.”
@@ -207,6 +209,7 @@ Users should be able to ask or invoke Ricky through local tooling, API calls, or
 - “Why is this workflow hanging?”
 - “How can we reduce workflow runtime and retries?”
 - “Write this workflow, run it, and return the artifacts.”
+- “Here is the spec I just worked out with Claude, hand it to Ricky and execute the right path.”
 
 ### 5.2 A proactive workflow operations agent
 Ricky should proactively:
@@ -246,6 +249,8 @@ The CLI should:
 - explain the next useful action instead of forcing users to read docs first
 - guide users through Cloud setup when they want hosted workflow execution
 - surface friendly setup prompts for Google and GitHub integration paths
+- accept specs and requests directly from conversational LLM workflows, including handoff from Claude sessions
+- support both direct CLI usage and MCP-mediated handoff into Ricky
 
 The Cloud-side provider connect command pattern should align with existing Cloud commands such as:
 - `npx agent-relay cloud connect google`
@@ -295,7 +300,19 @@ Ricky should:
 5. validate with dry-run and bounded deterministic checks
 6. return downloadable files, or kick off execution in Cloud/local mode when requested
 
-### 7.3 Coordinate and run a workflow
+### 7.3 Accept spec handoff from Claude, CLI, or MCP
+Input:
+- a spec drafted in Claude or another LLM tool
+- a direct CLI request or MCP-mediated handoff into Ricky
+
+Ricky should:
+1. accept the spec without requiring the user to rewrite it as a workflow manually
+2. normalize the request into Ricky's workflow/domain model
+3. decide whether the right next step is generation, debugging, coordination, or execution
+4. route the work through local/BYOH or Cloud as appropriate
+5. return outcomes, artifacts, and follow-up options cleanly
+
+### 7.4 Coordinate and run a workflow
 Input:
 - workflow spec or existing workflow artifact
 - execution preference (local/BYOH or Cloud)
@@ -307,7 +324,7 @@ Ricky should:
 4. monitor progress / failure state
 5. return resulting code artifacts, logs, and outcomes
 
-### 7.4 CLI onboarding and cloud connection guidance
+### 7.5 CLI onboarding and cloud connection guidance
 Input:
 - first-time CLI user or user requesting Cloud-backed workflow execution
 
@@ -319,7 +336,7 @@ Ricky should:
 5. guide the user to the Cloud dashboard integration flow for GitHub app / Nango-backed connection
 6. keep the experience friendly and concise rather than documentation-heavy
 
-### 7.5 Proactive workflow failure notification
+### 7.6 Proactive workflow failure notification
 
 ### 7.3 Proactive workflow failure notification
 Input:
@@ -351,6 +368,7 @@ Ricky should follow this split:
 - **Ingress / surfaces**
   - local/BYOH invocation
   - CLI onboarding and command surface
+  - MCP / assistant handoff surface for specs coming from Claude and similar tools
   - API endpoint in Cloud for workflow generation/execution requests
   - Slack interactive surface
 - **Assistant runtime**
@@ -377,6 +395,13 @@ Should support:
 - mode selection between local/BYOH and Cloud
 - provider connect guidance for Cloud-backed usage
 - friendly commands and help text rather than bare infrastructure jargon
+- direct spec submission without requiring users to hand-write workflow files
+
+#### MCP / assistant handoff
+Should support:
+- passing a spec directly from Claude or another connected assistant into Ricky
+- preserving enough structured context for Ricky to understand whether the user wants generation, execution, debugging, or coordination
+- the same domain routing behavior as direct CLI usage rather than a degraded import path
 
 #### Slack ingress
 Should mirror proven Slack patterns from Sage/NightCTO:

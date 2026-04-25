@@ -71,6 +71,16 @@ Current bootstrap commands:
 Convenience script:
 - `bash ./skills.sh`
 
+## Product direction
+
+Ricky should make workflows feel accessible to normal users, not just workflow authors.
+
+The product goal is:
+- users can rely on workflows heavily without ever hand-writing one
+- users can talk through a spec with Claude or another LLM, then hand that spec directly to Ricky
+- Ricky can receive that handoff via CLI or MCP, normalize it, and route it correctly through local/BYOH or Cloud execution
+- Ricky should feel fully connected across CLI and Cloud, not like separate disconnected tools
+
 ## Initial repo shape
 
 This repo starts spec-first. No implementation should begin until the spec is reviewed and the first architecture slice is approved.
