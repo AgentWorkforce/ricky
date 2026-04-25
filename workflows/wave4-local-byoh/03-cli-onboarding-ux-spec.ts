@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      preset: 'worker',
       role: 'UX/product lead who keeps Ricky onboarding welcoming, truthful, omnichannel, and grounded in real Cloud and local/BYOH behavior.',
       retries: 1,
     })
@@ -131,7 +132,7 @@ Verification:
 Commit/PR boundary:
 - Keep edits scoped to docs/product/ricky-cli-onboarding-ux-spec.md unless a tiny README link is truly necessary.
 
-Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md ending with CLI_UX_SPEC_PLAN_READY.`,
+Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md with concrete headings and implementation-ready bullets. End with CLI_UX_SPEC_PLAN_READY.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md' },
     })
 

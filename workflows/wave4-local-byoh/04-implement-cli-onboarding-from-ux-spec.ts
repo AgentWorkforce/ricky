@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      preset: 'worker',
       role: 'Implementation lead who keeps the CLI onboarding behavior aligned with the Ricky UX spec and product truth.',
       retries: 1,
     })
@@ -107,7 +108,7 @@ Verification:
 - Tests must prove Google connect guidance and GitHub dashboard/Nango guidance.
 - Tests must cover at least one recovery path.
 
-Write .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md ending with CLI_ONBOARDING_IMPL_PLAN_READY.`,
+Write .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md with concrete file-by-file guidance and test expectations. End with CLI_ONBOARDING_IMPL_PLAN_READY.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md' },
     })
 

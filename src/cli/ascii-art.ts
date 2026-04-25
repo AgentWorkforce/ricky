@@ -1,43 +1,79 @@
 export type BannerVariant = 'full' | 'compact';
 
-const FULL_BANNER = String.raw`RRRR   III   CCCC  K   K  Y   Y
-R   R   I   C      K  K    Y Y
-RRRR    I   C      KKK      Y
-R  R    I   C      K  K     Y
-R   R  III   CCCC  K   K    Y`;
+export const RICKY_BANNER = String.raw`        __
+   ____/  \__        RICKY
+  <__  _    _>
+     \_\>--'
+      /  \__
+     / /\__/
+    /_/  \_\
+workflow reliability for AgentWorkforce`;
 
-const COMPACT_BANNER = 'ricky · workflow reliability for AgentWorkforce';
+export const RICKY_COMPACT_BANNER = 'ricky · workflow reliability for AgentWorkforce';
 
-export function renderBanner(variant: BannerVariant = 'full'): string {
-  return variant === 'compact' ? COMPACT_BANNER : FULL_BANNER;
+const ANSI_CYAN = '\x1b[36m';
+const ANSI_BOLD = '\x1b[1m';
+const ANSI_DIM = '\x1b[2m';
+const ANSI_RESET = '\x1b[0m';
+
+export interface RenderBannerOptions {
+  color?: boolean;
+  variant?: BannerVariant;
 }
 
 export function chooseBannerVariant(columns?: number): BannerVariant {
-  if (typeof columns === 'number' && columns > 0 && columns < 60) {
-    return 'compact';
+  return typeof columns === 'number' && columns > 0 && columns < 60 ? 'compact' : 'full';
+}
+
+export function shouldUseColor(options: { color?: boolean; isTTY?: boolean; noColor?: boolean } = {}): boolean {
+  if (typeof options.color === 'boolean') {
+    return options.color;
   }
 
-  return 'full';
+  const isTTY = options.isTTY ?? process.stdout.isTTY === true;
+  const noColor = options.noColor ?? process.env.NO_COLOR !== undefined;
+  return isTTY && !noColor;
+}
+
+export function renderBanner(options: RenderBannerOptions | BannerVariant = {}): string {
+  const normalized = typeof options === 'string' ? { variant: options } : options;
+  const variant = normalized.variant ?? 'full';
+
+  if (variant === 'compact') {
+    return RICKY_COMPACT_BANNER;
+  }
+
+  if (normalized.color !== true) {
+    return RICKY_BANNER;
+  }
+
+  const lines = RICKY_BANNER.split('\n');
+  return [
+    `${ANSI_CYAN}${lines[0]}${ANSI_RESET}`,
+    `${ANSI_CYAN}   ____/  \\__        ${ANSI_RESET}${ANSI_BOLD}RICKY${ANSI_RESET}`,
+    ...lines.slice(2, -1).map((line) => `${ANSI_CYAN}${line}${ANSI_RESET}`),
+    `${ANSI_DIM}${lines.at(-1) ?? ''}${ANSI_RESET}`,
+  ].join('\n');
 }
 
 export function shouldShowBanner(options: {
-  isFirstRun?: boolean;
-  isTTY?: boolean;
   quiet?: boolean;
   noBanner?: boolean;
+  isTTY?: boolean;
+  isFirstRun?: boolean;
   forceOnboarding?: boolean;
 } = {}): boolean {
-  const {
-    isFirstRun = false,
-    isTTY = true,
-    quiet = false,
-    noBanner = false,
-    forceOnboarding = false,
-  } = options;
-
-  if (!isTTY || quiet || noBanner) {
+  if (options.quiet === true || options.noBanner === true) {
     return false;
   }
 
-  return isFirstRun || forceOnboarding;
+  if (options.isTTY === false) {
+    return false;
+  }
+
+  if (process.env.RICKY_BANNER === '0') {
+    return false;
+  }
+
+  return true;
 }

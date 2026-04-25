@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      preset: 'worker',
       role: 'Proof lead who keeps onboarding validation focused on user-visible behavior and honest recovery evidence.',
       retries: 1,
     })
@@ -58,9 +59,9 @@ async function main() {
     .step('read-cli-implementation-context', {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
-      command: 'find src/cli -maxdepth 2 -type f 2>/dev/null | sort | xargs -I{} sh -c "printf \"FILE: {}\\n\"; sed -n \"1,220p\" {} ; printf \"\\n---\\n\\n\""',
+      command: "python3 - <<'PY'\nfrom pathlib import Path\nfor path in sorted(Path('src/cli').rglob('*')):\n    if path.is_file():\n        print(f'FILE: {path}')\n        print(path.read_text())\n        print('\n---\n')\nPY",
       captureOutput: true,
-      failOnError: false,
+      failOnError: true,
     })
     .step('read-workflow-standards', {
       type: 'deterministic',
@@ -107,7 +108,7 @@ Verification:
 - The proof must compare behavior against the UX spec, not just test helper internals.
 - If implementation is missing, the workflow should fail honestly or surface the blocker clearly.
 
-Write .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md ending with CLI_ONBOARDING_PROOF_PLAN_READY.`,
+Write .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md with concrete proof cases, expected evidence, and failure conditions. End with CLI_ONBOARDING_PROOF_PLAN_READY.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md' },
     })
 

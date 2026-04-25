@@ -4,7 +4,7 @@
 
 Define the first-run and early-returning-user CLI experience for Ricky so onboarding feels welcoming, truthful, and implementation-ready.
 
-This spec turns the current banner and ASCII-art requirement into a concrete product contract.
+This spec turns the current banner and ASCII-art requirement into a concrete product contract. A follow-on implementation workflow should be able to build the CLI onboarding modules from this spec without guessing behavior.
 
 ## 2. Product truth
 
@@ -16,24 +16,22 @@ The CLI is not a thin wrapper around Slack or Cloud. It is a first-class Ricky s
 - interactive surfaces such as Slack and web
 - spec handoff paths from Claude, CLI, and MCP
 
-## 3. UX goals
+## 3. Target users
 
-The CLI onboarding experience should:
-- feel friendly and high-confidence on first launch
-- show that Ricky can help without making users hand-write workflows
-- keep local/BYOH and Cloud as co-equal paths
-- make the next useful action obvious within one screenful when possible
-- explain real provider connection options without inventing fake setup URLs
-- handle environment/setup blockers honestly
-- create a stable copy contract that tests can assert
+| User type | What they need from CLI onboarding |
+|---|---|
+| **Workflow author** | Quick local setup, spec submission, immediate generation |
+| **Operator / team lead** | Cloud connect for hosted execution, provider auth guidance |
+| **Claude / LLM user** | Handoff from a Claude session into Ricky via CLI or MCP |
+| **First-time explorer** | Understand what Ricky does and reach a useful action fast |
 
-## 4. Target users
+## 4. UX goals
 
-Primary audiences:
-- builders who want Ricky locally or in BYOH mode
-- users who want to connect Cloud providers and use Ricky through Cloud-backed flows
-- users bringing a spec from Claude, CLI, or MCP and wanting Ricky to take it from there
-- users who are curious but do not yet know whether they need local or Cloud mode
+1. **Recognize** — the user immediately knows they are in Ricky (ASCII banner + name) within 1 second
+2. **Orient** — the user understands the two primary modes (local/BYOH and Cloud) within one screen
+3. **Choose** — the user selects a mode or defers the choice
+4. **Act** — the user reaches a concrete next action within 30 seconds
+5. **Recover** — if anything fails, the user sees a specific remediation step, not a stack trace
 
 ## 5. Experience principles
 
@@ -44,102 +42,255 @@ Primary audiences:
 5. The CLI should help users start, recover, and hand off work, not just print commands.
 6. Every onboarding branch should end in a concrete next step.
 
+---
+
 ## 6. Banner and ASCII-art contract
 
-### 6.1 When the banner appears
+### 6.1 Visual identity
 
-Show the full Ricky banner when:
-- the user runs Ricky for the first time in a workspace
-- the user explicitly requests help or onboarding
-- the user runs a dedicated onboarding command
+The ASCII banner must be a simplified rendering of the Ricky roadrunner logo (`assets/ricky-logo.svg`). The logo is a stylized teal and navy roadrunner in front of a cloud outline.
 
-Do not show the full large banner on every command after setup.
+The ASCII art must convey:
+- a recognizable bird/roadrunner silhouette (the primary mark)
+- the word "RICKY" adjacent to or below the silhouette
+- a tagline: "workflow reliability for AgentWorkforce"
 
-For returning users, prefer a compact header unless they enter an onboarding or recovery flow.
-
-### 6.2 Banner behavior
-
-The banner should:
-- render instantly with no network dependency
-- be deterministic plain text
-- degrade cleanly in narrow terminals
-- remain recognizable in copy/paste logs
-
-### 6.3 Example ASCII treatment
-
-This is an illustrative contract, not final art:
+### 6.2 Reference ASCII art
 
 ```text
-RRRR   III   CCCC  K   K  Y   Y
-R   R   I   C      K  K    Y Y
-RRRR    I   C      KKK      Y
-R  R    I   C      K  K     Y
-R   R  III   CCCC  K   K    Y
-
-Workflows, without the mess.
+        __
+   ____/  \__        RICKY
+  <__  _    _>
+     \_\>--'
+      /  \__
+     / /\__/
+    /_/  \_\
+workflow reliability for AgentWorkforce
 ```
 
-### 6.4 Banner copy block
+The left silhouette represents the roadrunner: tail, head/beak, wing, and running legs. The exact rendering may be refined during implementation, but the contract is:
+- the silhouette must be recognizable as a bird/roadrunner, not abstract ASCII decoration or a text-only wordmark
+- "RICKY" must appear in the banner, not only below it
+- the tagline must appear on the last line
 
-Immediately below the banner, Ricky should present one short framing block:
+### 6.3 Sizing rules
 
-- what Ricky is
-- what Ricky can do next
-- which mode the user can choose
+- Maximum width: 72 columns (safe for standard terminals)
+- Maximum height: 10 lines (banner + tagline, excluding surrounding blank lines)
+- No trailing whitespace on any line
 
-Example:
+### 6.4 Color rules
+
+| Condition | Behavior |
+|---|---|
+| `stdout` is a TTY and `NO_COLOR` is not set | ANSI color output |
+| `NO_COLOR=1` is set | Plain ASCII, no escape codes |
+| Non-TTY (piped output) | Plain ASCII, no escape codes |
+
+Color mapping when ANSI is enabled:
+- Roadrunner silhouette: teal/cyan (ANSI 36 or 96, matching the logo gradient)
+- "RICKY" text: bold
+- Tagline: dim/muted (ANSI 2)
+
+### 6.5 Display rules
+
+| Condition | Banner behavior |
+|---|---|
+| First run (no prior config) | Full banner + tagline |
+| Returning user, no command provided | Compact one-line header + suggested next action |
+| Returning user, command provided | Compact one-line header only when useful; never block the command |
+| `npx ricky welcome` or `npx ricky setup --show-banner` | Full banner + tagline |
+| `--quiet` or `-q` flag | No banner, no non-essential output |
+| `--no-banner` flag | No banner, rest of output unchanged |
+| Non-TTY (piped output) | No banner |
+| `NO_COLOR=1` | Banner without ANSI colors |
+| `RICKY_BANNER=0` env var | No banner |
+
+### 6.6 Compact header for returning users
+
+After first-run setup, returning users see a compact header instead of the full banner unless they explicitly ask for the welcome/setup screen:
 
 ```text
-Ricky helps you generate, debug, recover, and run workflows.
-You can start locally, bring your own harness, or connect Cloud providers.
-Tell Ricky what you want done. You should not need to hand-write workflows.
+ricky · local mode · ready
 ```
+
+or:
+
+```text
+ricky · cloud mode · google connected
+```
+
+The compact header is one line, no ASCII art.
+
+### 6.7 Export contract
+
+`src/cli/ascii-art.ts` must export:
+- `RICKY_BANNER: string` — the plain-text banner (no ANSI codes)
+- `renderBanner(options?: { color?: boolean }): string` — returns the banner with or without ANSI color codes
+- `shouldShowBanner(options: { quiet?: boolean; noBanner?: boolean; isTTY?: boolean }): boolean` — pure function encapsulating display logic
+
+---
 
 ## 7. First-run flow
 
 ### 7.1 First-run sequence
 
 Order:
-1. render banner
-2. render one-paragraph product framing
-3. ask or present mode choices
-4. present the next action for the chosen mode
-5. offer spec handoff examples
-6. surface blockers if setup is incomplete
+1. Render banner
+2. Render one-paragraph product framing
+3. Present mode choices
+4. Present the next action for the chosen mode
+5. Offer spec handoff examples
+6. Surface blockers if setup is incomplete
 
-### 7.2 First-run screen content
-
-First-run output should contain:
-- banner
-- short description of Ricky
-- mode chooser
-- one example local/BYOH next step
-- one example Cloud next step
-- one example spec handoff
-- recovery/help hint
-
-### 7.3 First-run mode chooser
-
-The CLI should present local/BYOH and Cloud as co-equal options.
-
-Example:
+### 7.2 Complete first-run terminal session
 
 ```text
-Choose how you want to start:
+$ npx ricky
 
-1. Local / BYOH
-   Use your local environment and agent setup.
-   Best when you want direct control and local proof.
+        __
+   ____/  \__        RICKY
+  <__  _    _>
+     \_\>--'
+      /  \__
+     / /\__/
+    /_/  \_\
+workflow reliability for AgentWorkforce
 
-2. Cloud
-   Connect providers and use Ricky with Cloud-backed integrations.
-   Best when you want hosted coordination and shared access.
+  Welcome to Ricky! Let's get you set up.
+
+  Ricky helps you generate, debug, recover, and run workflows.
+  You can start locally, bring your own harness, or connect Cloud providers.
+  Tell Ricky what you want done. You should not need to hand-write workflows.
+
+  How would you like to use Ricky?
+
+  > [1] Local / BYOH  — run workflows against your local repo and tools
+    [2] Cloud         — run workflows on AgentWorkforce Cloud
+    [3] Both          — set up local now, connect Cloud later
+    [4] Just explore  — skip setup, show me what Ricky can do
+
+  Choice [1]:
 ```
 
-## 8. Returning-user behavior
+### 7.3 Non-interactive behavior
 
-Returning users should usually see:
-- a compact Ricky header
+When stdin is not a TTY (piped, CI, scripted):
+
+```text
+$ echo '{"spec": "..."}' | npx ricky generate
+
+Error: Ricky has not been configured yet.
+
+Run `npx ricky` interactively to complete first-run setup,
+or set RICKY_MODE=local to skip setup and use local mode.
+```
+
+Environment variable `RICKY_MODE` can be set to `local` or `cloud` to bypass interactive setup in CI/scripting contexts.
+
+---
+
+## 8. Mode selection UX
+
+### 8.1 Design principle
+
+Local/BYOH and Cloud are co-equal modes. Neither is presented as the "real" mode with the other as a fallback. Local appears first in the list because it requires no external setup.
+
+### 8.2 Option 1: Local / BYOH
+
+```text
+  Local / BYOH mode selected.
+
+  In this mode, Ricky will:
+  - generate workflows into your local repo
+  - validate workflows using local tools (tsc, vitest, agent-relay)
+  - run workflows via local agent-relay
+  - return artifacts and logs locally
+
+  No Cloud credentials required.
+
+  Next steps:
+  - Submit a workflow spec:    npx ricky generate --spec "your spec here"
+  - Submit a spec from file:   npx ricky generate --spec-file spec.md
+  - Debug a failed workflow:   npx ricky debug --workflow <path>
+  - See all commands:          npx ricky help
+
+  Ready to go!
+```
+
+### 8.3 Option 2: Cloud
+
+```text
+  Cloud mode selected.
+
+  In this mode, Ricky will:
+  - generate and run workflows on AgentWorkforce Cloud
+  - return downloadable artifacts and execution results
+  - support proactive failure notifications
+
+  Let's connect your Cloud providers.
+
+  Step 1: Connect Google (required for Cloud execution)
+  Run: npx agent-relay cloud connect google
+
+  Step 2: Connect GitHub (optional, for repo-connected workflows)
+  Visit your Cloud dashboard to install the GitHub app:
+  → Open your AgentWorkforce Cloud settings → Integrations → GitHub
+
+  After connecting, verify with:
+  $ npx ricky status
+
+  Need help? See: npx ricky help cloud
+```
+
+### 8.4 Option 3: Both
+
+```text
+  Local + Cloud mode selected.
+
+  Local mode is ready now — you can start generating and running
+  workflows immediately against your local repo.
+
+  To also enable Cloud execution, connect providers when ready:
+  - Google:  npx agent-relay cloud connect google
+  - GitHub:  Cloud dashboard → Integrations → GitHub
+
+  Next steps:
+  - Submit a workflow spec:    npx ricky generate --spec "your spec here"
+  - Check Cloud status:        npx ricky status
+  - See all commands:          npx ricky help
+```
+
+### 8.5 Option 4: Just explore
+
+```text
+  Explore mode — no setup needed.
+
+  Here's what Ricky can do:
+
+  Generate workflows    npx ricky generate --spec "describe your workflow"
+  Debug failures        npx ricky debug --workflow <path>
+  Fix broken workflows  npx ricky fix --workflow <path>
+  Analyze workflow runs npx ricky analyze
+  Check status          npx ricky status
+
+  When you're ready to set up, run: npx ricky setup
+```
+
+### 8.6 Mode persistence
+
+- Selected mode is stored in `.ricky/config.json` (project-local) or `~/.config/ricky/config.json` (global fallback)
+- Mode can be overridden per-invocation with `--mode local` or `--mode cloud`
+- Mode can be overridden via `RICKY_MODE` env var
+- Precedence: `--mode` flag > `RICKY_MODE` env var > project config > global config
+- `npx ricky setup` re-runs mode selection at any time
+
+---
+
+## 9. Returning-user behavior
+
+Returning users should see:
+- a compact one-line header (not the full banner)
 - current mode or detected context
 - the next most useful action
 - warnings only when relevant
@@ -149,218 +300,439 @@ Do not force the full onboarding narrative every time.
 Examples:
 - if the user has a local workspace and no Cloud setup, bias toward local continuation
 - if the user has already connected Cloud providers, surface the next useful Cloud action
-- if the user arrived with a spec payload, skip long onboarding and route into intake with a compact confirmation
+- if the user arrived with a spec payload, skip onboarding and route into intake with a compact confirmation
 
-## 9. Local and BYOH onboarding path
+---
 
-### 9.1 Promise
+## 10. Provider connection guidance
 
-Local/BYOH must be treated as a first-class way to use Ricky, not a fallback.
+### 10.1 Source-backed commands only
 
-### 9.2 Local onboarding output
+This spec only references commands and flows that exist in the current codebase.
 
-The local/BYOH branch should explain:
-- Ricky can use local repo context and local agent-relay execution
-- the user can hand Ricky a plain-language spec, workflow artifact, or Claude/MCP handoff
-- local environment blockers will be surfaced explicitly
+### 10.2 Google Cloud connect
 
-### 9.3 Example next actions
+Command: `npx agent-relay cloud connect google`
 
-Examples:
+This is a real, existing command. The CLI must display it verbatim.
 
 ```text
-Try one of these:
-- Give Ricky a plain-language workflow request
-- Hand Ricky a spec file
-- Hand Ricky a Claude or MCP-produced spec
-- Ask Ricky to inspect the current repo and propose the next workflow
+  Connect Google for Cloud execution:
+  $ npx agent-relay cloud connect google
 ```
 
-### 9.4 Local environment checks
+### 10.3 GitHub app connect
 
-Before deep local execution, Ricky should detect and report whether basics are present, such as:
-- Node/toolchain availability when required
-- agent-relay availability when required
-- workspace/repo context when relevant
-- missing spec or artifact input when the chosen command requires it
-
-## 10. Cloud onboarding path
-
-### 10.1 Promise
-
-Cloud is a first-class path for hosted coordination, provider connections, and shared integrations.
-
-### 10.2 Cloud guidance rules
-
-Use only real command patterns or source-backed guidance.
-
-For Google, the canonical example is:
+GitHub app installation uses the existing Cloud dashboard integration flow backed by Nango. There is no CLI command for this.
 
 ```text
-npx agent-relay cloud connect google
+  Connect GitHub for repo-connected workflows:
+  Open your AgentWorkforce Cloud settings → Integrations → GitHub
+  The GitHub app is installed through the Cloud dashboard.
 ```
 
-For GitHub or other dashboard-managed integrations, do not invent a local URL or fake direct connect path. Point users to the Cloud dashboard / Nango-backed integration flow.
+The CLI must NOT:
+- invent a `npx ricky connect github` command
+- generate or guess a Cloud dashboard URL
+- attempt to open a browser to an unverified URL
+- create a bespoke OAuth flow for GitHub
 
-### 10.3 Cloud next-action copy
-
-Example:
+### 10.4 Provider status check
 
 ```text
-To connect Google in Cloud:
-  npx agent-relay cloud connect google
+$ npx ricky status
 
-For GitHub and other dashboard-managed integrations:
-  Open the Cloud dashboard and complete the provider connection flow.
+  Ricky Status
+  ─────────────
+  Mode:     cloud
+  Google:   connected
+  GitHub:   not connected (optional)
+  Local:    ready (agent-relay found)
 ```
 
-## 11. Spec handoff paths
+---
 
-Ricky should make it obvious that users do not need to translate their intent into handwritten workflows.
+## 11. Claude / CLI / MCP handoff story
 
-### 11.1 Accepted handoff sources
+### 11.1 Direct CLI spec submission
 
-Ricky onboarding should explicitly mention:
-- Claude-developed specs
-- CLI-authored plain-language specs
-- MCP-provided structured specs
-- workflow artifact inputs
-
-### 11.2 Handoff copy examples
-
-Example:
+Users can pass a spec directly from any source:
 
 ```text
-Already worked out the problem in Claude?
-Hand Ricky the spec and let it turn that into the next workflow or execution step.
+$ npx ricky generate --spec "Generate a workflow that runs tests across 3 repos"
 
-Using MCP?
-Pass Ricky the structured request directly instead of rewriting it by hand.
+$ npx ricky generate --spec-file ~/specs/my-workflow-spec.md
+
+$ cat spec.md | npx ricky generate --spec-stdin
 ```
 
-### 11.3 Handoff UX rule
+### 11.2 Claude session handoff
 
-If a spec or structured request is already present, Ricky should prefer a compact confirmation and intake summary over replaying the full onboarding story.
+When a user drafts a spec in a Claude session, they can hand it to Ricky:
+
+```text
+# In Claude conversation:
+"Here's my workflow spec. Hand this to Ricky."
+
+# Claude can suggest:
+$ npx ricky generate --spec-file /tmp/claude-spec-output.md
+```
+
+### 11.3 MCP-mediated handoff
+
+When Ricky is registered as an MCP tool, Claude or other assistants can invoke it directly:
+
+- MCP tool name: `ricky.generate`
+- Input: `{ spec: "...", mode: "local" | "cloud", source: "claude" | "mcp" | "cli" }`
+- Output: `{ artifacts: [...], warnings: [...], nextActions: [...] }`
+
+The CLI and MCP paths must produce the same domain behavior. MCP is a transport, not a different product.
+
+### 11.4 Handoff onboarding copy
+
+```text
+  Tip: You can hand specs from Claude directly to Ricky.
+  In a Claude session, ask Claude to write a workflow spec,
+  then run: npx ricky generate --spec-file <path>
+
+  Using MCP? Pass Ricky the structured request directly.
+```
+
+### 11.5 Handoff UX rule
+
+If a spec or structured request is already present in the invocation, Ricky should prefer a compact confirmation and intake summary over replaying the full onboarding story.
+
+---
 
 ## 12. Relationship to web and Slack
 
-Ricky supports onboarding from Slack, web, and CLI.
+CLI, web, and Slack are co-equal onboarding surfaces. None is the "primary" path.
 
-But in the CLI spec:
-- CLI remains first-class
-- Slack is a surface, not Ricky's identity
-- web and Slack should be described as sibling entry points, not the canonical product home
+### Cross-surface consistency
 
-Suggested phrasing:
+| Aspect | CLI | Web | Slack |
+|---|---|---|---|
+| First-run welcome | ASCII banner + mode selection | Visual welcome + mode cards | DM welcome + guided thread |
+| Mode selection | Interactive prompt or `--mode` flag | Radio buttons / cards | Slack buttons |
+| Provider connect | Shows command / dashboard link | Inline OAuth flows | Shows command / link |
+| Spec submission | `--spec` / `--spec-file` / stdin | Text area / file upload | Message or thread |
+| Result delivery | Terminal output + local files | Web UI | Thread reply |
 
-```text
-You can start in the CLI, from the web, or from Slack.
-Ricky keeps the workflow intent consistent across surfaces.
-```
+### CLI must not
 
-## 13. Recovery and blocker flows
+- Tell users to "go to Slack for the full experience"
+- Subordinate CLI features to Slack-first flows
+- Require Slack for any core functionality
+- Present CLI as a developer-only tool while Slack is the "real" product
 
-The CLI must not fail silently or imply the environment is fine when it is not.
-
-### 13.1 Missing local toolchain
-
-If the CLI detects missing local prerequisites, it should:
-- say what is missing
-- say which path is blocked
-- suggest the nearest unblocked next action
-
-Example:
+Suggested cross-surface phrasing:
 
 ```text
-Ricky can continue, but local execution is not ready yet.
-Missing: agent-relay
-You can install/fix the local runtime, or continue with Cloud setup instead.
+  You can also use Ricky from the web or Slack.
+  Ricky keeps the workflow intent consistent across surfaces.
 ```
 
-### 13.2 Missing Cloud connection
+---
 
-If the user chooses Cloud but no provider connection exists:
-- say Cloud is not fully connected yet
-- show the next real command or dashboard step
-- do not pretend the provider is ready
+## 13. Concrete copy examples
 
-### 13.3 Ambiguous user intent
+### 13.1 Help text
 
-If the user starts Ricky without a clear goal:
-- keep the mode chooser visible
-- give 2-4 concrete examples
-- offer help phrased around outcomes, not internal implementation terms
+```text
+$ npx ricky help
 
-### 13.4 Stale or contaminated local runtime state
+  Ricky — workflow reliability for AgentWorkforce
+
+  Commands:
+    generate    Generate a workflow from a spec
+    debug       Debug a failed workflow
+    fix         Fix a broken workflow and optionally rerun
+    analyze     Analyze workflow runs and suggest improvements
+    status      Show Ricky configuration and provider status
+    setup       Re-run first-time setup
+    help        Show this help
+
+  Options:
+    --mode <local|cloud>   Override execution mode
+    --quiet, -q            Suppress banner and non-essential output
+    --no-banner            Suppress only the ASCII banner
+    --version, -v          Show version
+
+  Examples:
+    npx ricky generate --spec "test runner for 3 repos"
+    npx ricky generate --spec-file spec.md
+    npx ricky debug --workflow workflows/wave2/10-test-runner.ts
+    npx ricky status
+```
+
+### 13.2 Error: missing agent-relay (local mode)
+
+```text
+$ npx ricky generate --spec "test runner"
+
+  Error: agent-relay not found.
+
+  Ricky needs agent-relay for local workflow execution.
+  Install it with: npm install -g @agent-relay/cli
+
+  Or switch to Cloud mode: npx ricky setup
+```
+
+### 13.3 Error: Cloud not connected
+
+```text
+$ npx ricky generate --spec "test runner" --mode cloud
+
+  Error: No Cloud providers connected.
+
+  Connect Google to use Cloud mode:
+  $ npx agent-relay cloud connect google
+
+  Or use local mode:
+  $ npx ricky generate --spec "test runner" --mode local
+```
+
+### 13.4 Error: unconfigured non-interactive
+
+```text
+$ echo '{}' | npx ricky generate
+
+  Error: Ricky has not been configured yet.
+
+  Run `npx ricky` interactively to complete first-run setup,
+  or set RICKY_MODE=local to skip setup and use local mode.
+```
+
+---
+
+## 14. Happy-path and recovery-path flows
+
+### 14.1 Happy path: local first-run
+
+1. User runs `npx ricky`
+2. Banner displays
+3. User selects "Local / BYOH"
+4. Next-steps shown with example commands
+5. User runs `npx ricky generate --spec "my workflow"`
+6. Ricky generates workflow, validates locally, returns artifact path
+
+### 14.2 Happy path: Cloud first-run
+
+1. User runs `npx ricky`
+2. Banner displays
+3. User selects "Cloud"
+4. Provider connect instructions shown
+5. User runs `npx agent-relay cloud connect google`
+6. User runs `npx ricky status` to verify
+7. User runs `npx ricky generate --spec "my workflow" --mode cloud`
+8. Ricky generates and optionally executes on Cloud
+
+### 14.3 Happy path: Claude handoff
+
+1. User drafts spec in Claude session
+2. Claude suggests `npx ricky generate --spec-file <path>` or invokes via MCP
+3. Ricky normalizes the spec, selects mode, generates workflow
+4. Artifacts returned to user
+
+### 14.4 Recovery: setup interrupted
+
+```text
+  It looks like setup was interrupted.
+  Run `npx ricky setup` to restart, or use --mode local to skip setup.
+```
+
+### 14.5 Recovery: provider connect fails
+
+```text
+  Google connect failed. Common causes:
+  - Network connectivity issue
+  - Browser did not complete OAuth flow
+  - Expired or revoked credentials
+
+  Try again: npx agent-relay cloud connect google
+  Or continue in local mode: npx ricky --mode local
+```
+
+### 14.6 Recovery: workflow generation fails
+
+```text
+  Workflow generation failed.
+
+  Error: TypeScript compilation error in generated workflow
+  File: /tmp/ricky-gen-abc123/workflow.ts:42
+
+  Ricky will attempt to fix this automatically...
+  [fix attempt 1/3]
+```
+
+---
+
+## 15. Failure / unblocker guidance
+
+### 15.1 Environment issues
+
+| Issue | Detection | User-facing message |
+|---|---|---|
+| Node.js not found or too old | `process.version` check | "Ricky requires Node.js 18+. Current: {version}" |
+| agent-relay not installed | `which agent-relay` fails | "Install agent-relay: npm install -g @agent-relay/cli" |
+| No write permission | `fs.access` check on project dir | "Cannot write to {dir}. Check permissions or run from a writable directory." |
+| No network (Cloud mode) | Connection test fails | "Cannot reach AgentWorkforce Cloud. Check your network or use local mode." |
+| TypeScript not available | `which tsc` or project check | "TypeScript not found. Install: npm install -D typescript" |
+
+### 15.2 Auth issues
+
+| Issue | Detection | User-facing message |
+|---|---|---|
+| Google not connected | Config check | "Run: npx agent-relay cloud connect google" |
+| Google token expired | API error on Cloud call | "Google credentials expired. Re-run: npx agent-relay cloud connect google" |
+| GitHub app not installed | Cloud API check | "Install the GitHub app from your Cloud dashboard: Settings → Integrations → GitHub" |
+
+### 15.3 Error message principle
+
+Every error message must include:
+1. What went wrong (one sentence)
+2. The most likely cause
+3. The exact command or action to fix it
+
+Never show a raw stack trace to an interactive user. Stack traces go to `--verbose` output or log files only.
+
+### 15.4 Stale or contaminated local state
 
 If Ricky detects local runtime contamination or stale state:
 - surface it explicitly
 - avoid claiming a reliable local run is possible until cleared
 - offer a cleanup or recovery suggestion
 
-This matters because Ricky is explicitly learning from environment and orchestration failure classes.
+---
 
-## 14. Copy tone
+## 16. Copy tone
 
 The voice should be:
-- warm
-- bright
-- confident
-- concise
-- not corporate
-- not cheesy
+- warm, bright, confident, concise
+- not corporate, not cheesy
 
 Good:
-- “Let’s get you started.”
-- “You can start locally or connect Cloud providers.”
-- “Hand Ricky the spec. You don’t need to rewrite it as a workflow.”
+- "Let's get you started."
+- "You can start locally or connect Cloud providers."
+- "Hand Ricky the spec. You don't need to rewrite it as a workflow."
 
 Avoid:
 - hypey claims
 - fake certainty
-- “magic” language that hides real prerequisites
+- "magic" language that hides real prerequisites
 
-## 15. Implementation guidance
+---
 
-A follow-on implementation workflow should be able to build at least these modules from this spec:
-- `src/cli/ascii-art.ts`
-- `src/cli/welcome.ts`
-- `src/cli/mode-selector.ts`
-- `src/cli/onboarding.ts`
-- `src/cli/index.ts`
-- `src/cli/onboarding.test.ts`
+## 17. Implementation guidance
 
-Suggested responsibilities:
-- `ascii-art.ts`: banner rendering and compact/fallback variants
-- `welcome.ts`: product framing and greeting blocks
-- `mode-selector.ts`: mode definitions and mode-selection copy contracts
-- `onboarding.ts`: first-run and returning-user composition
-- `index.ts`: public CLI onboarding exports
-- `onboarding.test.ts`: user-visible text and flow assertions
+### 17.1 File targets
 
-## 16. Test and acceptance contract
+| File | Purpose |
+|---|---|
+| `src/cli/ascii-art.ts` | ASCII banner constant and render function |
+| `src/cli/welcome.ts` | First-run welcome text and product framing |
+| `src/cli/mode-selector.ts` | Mode selection prompt, descriptions, and persistence |
+| `src/cli/onboarding.ts` | Orchestrates welcome + mode + provider + next-action |
+| `src/cli/index.ts` | Public exports for the CLI onboarding module |
+| `src/cli/onboarding.test.ts` | Tests for user-visible onboarding contracts |
+
+### 17.2 Export contract
+
+`src/cli/index.ts` must export:
+
+```typescript
+// From ascii-art.ts
+export const RICKY_BANNER: string;
+export function renderBanner(options?: { color?: boolean }): string;
+export function shouldShowBanner(options: {
+  quiet?: boolean;
+  noBanner?: boolean;
+  isTTY?: boolean;
+}): boolean;
+
+// From welcome.ts
+export function renderWelcome(): string;
+
+// From onboarding.ts
+export function runOnboarding(options?: OnboardingOptions): Promise<OnboardingResult>;
+
+// From mode-selector.ts
+export type RickyMode = 'local' | 'cloud' | 'both';
+export function renderModeSelection(): string;
+```
+
+### 17.3 Config file shape
+
+Location: `.ricky/config.json` (project-local, takes precedence) or `~/.config/ricky/config.json` (global fallback).
+
+```json
+{
+  "mode": "local",
+  "firstRunComplete": true,
+  "providers": {
+    "google": { "connected": false },
+    "github": { "connected": false }
+  }
+}
+```
+
+Override precedence: `--mode` flag > `RICKY_MODE` env var > project config > global config.
+
+### 17.4 Testability requirements
+
+- All user-visible output must be deterministic (no random elements, no live timestamps in tests)
+- Mode selection must accept injected input (not hardcoded to `process.stdin`)
+- Provider status checks must be injectable/mockable
+- Banner display logic (`shouldShowBanner`) must be a pure function of its options
+- File I/O for config must be injectable for testing
+
+### 17.5 Dependency rule
+
+The onboarding module must not add external dependencies for:
+- Terminal colors (use raw ANSI codes or a minimal internal helper)
+- Interactive prompts (use built-in `readline` or accept injected input)
+- File I/O beyond config persistence
+
+---
+
+## 18. Test and acceptance contract
 
 Implementation should pass when:
-- the banner behavior is deterministic and testable
-- local/BYOH and Cloud are both visible as first-class modes
-- Google Cloud connect guidance uses `npx agent-relay cloud connect google`
-- GitHub guidance references the Cloud dashboard / Nango-backed flow rather than an invented URL
-- CLI/MCP/Claude handoff language is present
-- at least one recovery path is represented in output or documented flow contracts
-- returning-user mode is distinct from first-run mode
+- the banner renders a recognizable roadrunner silhouette
+- the banner behavior is deterministic and testable via `shouldShowBanner()`
+- local/BYOH and Cloud are both visible as first-class modes in mode selection output
+- Google Cloud connect guidance uses the literal text `npx agent-relay cloud connect google`
+- GitHub guidance references the Cloud dashboard / Nango-backed flow, not an invented URL
+- CLI/MCP/Claude handoff language is present in onboarding output
+- at least one recovery path is represented in tests
+- returning-user compact header is distinct from first-run banner
+- `--quiet` and `--no-banner` suppress the banner
+- non-TTY invocations do not render the banner
 
-## 17. Open questions
+---
 
-These remain open but should not block implementation:
-- whether the default first-run mode chooser is interactive, flag-based, or both
-- how aggressively the CLI should auto-detect repo/workspace context before showing choices
-- whether the banner gets a second compact variant for very narrow terminals
-- how much onboarding history should persist per workspace
+## 19. Open questions
 
-## 18. Immediate recommended follow-on
+1. **ASCII art fidelity** — Should the roadrunner be a detailed multi-line rendering or a minimal 3-4 line silhouette? This spec proposes ~8 lines; implementation may simplify as long as it remains recognizable as a bird.
+
+2. **Interactive prompt library** — Should onboarding use Node's built-in `readline` or a lightweight prompt library? Proposed: built-in `readline` to avoid dependencies.
+
+3. **MCP tool registration** — How and where is Ricky registered as an MCP tool? This spec defines the interface but not the registration mechanism.
+
+4. **Version-gated re-onboarding** — Should a major version bump re-trigger first-run setup? Proposed: no, but `npx ricky setup` is always available.
+
+5. **Offline/air-gapped local mode** — Should local mode work fully offline? Proposed: core local mode works offline; skill loading may require network.
+
+6. **Narrow terminal fallback** — Should the banner degrade to a 2-line text-only version below 60 columns? Proposed: yes, fall back to `ricky · workflow reliability for AgentWorkforce`.
+
+---
+
+## 20. Immediate recommended follow-on
 
 After this spec, the next implementation workflow should:
 - implement the CLI onboarding modules and tests defined here
 - prove the user-visible output with deterministic tests
 - keep local/BYOH and Cloud co-equal in both code and copy
 - include at least one recovery-path test for missing local runtime or missing Cloud setup
+- validate that `shouldShowBanner()` correctly handles all display rules
+- confirm the roadrunner ASCII art is recognizable
