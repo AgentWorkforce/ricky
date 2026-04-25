@@ -112,9 +112,21 @@ Write .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-re
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md' },
     })
 
+    .step('plan-artifact-ready', {
+      type: 'deterministic',
+      dependsOn: ['lead-plan'],
+      command: [
+        'test -f .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md',
+        'tail -n 5 .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md | grep -q "READY"',
+        'echo PLAN_ARTIFACT_READY',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('implement-proof-harness', {
       agent: 'impl-proof-codex',
-      dependsOn: ['lead-plan'],
+      dependsOn: ['plan-artifact-ready'],
       task: `Implement the deterministic proof harness for Ricky CLI onboarding.
 
 Deliverables:

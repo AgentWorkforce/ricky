@@ -136,9 +136,21 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md with c
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md' },
     })
 
+    .step('plan-artifact-ready', {
+      type: 'deterministic',
+      dependsOn: ['lead-plan'],
+      command: [
+        'test -f .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md',
+        'tail -n 5 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md | grep -q "READY"',
+        'echo PLAN_ARTIFACT_READY',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('write-cli-ux-spec', {
       agent: 'writer-primary-codex',
-      dependsOn: ['lead-plan'],
+      dependsOn: ['plan-artifact-ready'],
       task: `Write the dedicated Ricky CLI onboarding UX spec.
 
 Deliverables:

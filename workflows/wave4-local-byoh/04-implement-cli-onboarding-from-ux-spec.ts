@@ -112,9 +112,21 @@ Write .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md' },
     })
 
+    .step('plan-artifact-ready', {
+      type: 'deterministic',
+      dependsOn: ['lead-plan'],
+      command: [
+        'test -f .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md',
+        'tail -n 5 .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md | grep -q "READY"',
+        'echo PLAN_ARTIFACT_READY',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('implement-cli-modules', {
       agent: 'impl-primary-codex',
-      dependsOn: ['lead-plan'],
+      dependsOn: ['plan-artifact-ready'],
       task: `Implement the CLI onboarding modules from the UX spec.
 
 Requirements:
