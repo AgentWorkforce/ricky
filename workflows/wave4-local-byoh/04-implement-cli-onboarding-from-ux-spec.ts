@@ -2,29 +2,23 @@ import { workflow } from '@agent-relay/sdk/workflows';
 
 async function main() {
   const result = await workflow('ricky-wave4-implement-cli-onboarding-from-ux-spec')
-    .description('Implement the Ricky CLI onboarding modules from the dedicated UX spec with deterministic tests and user-visible contracts.')
+    .description('Implement the Ricky CLI onboarding modules from the dedicated UX spec with narrower file-scoped worker steps and deterministic gates.')
     .pattern('dag')
     .channel('wf-ricky-wave4-cli-onboarding-impl')
     .maxConcurrency(4)
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', {
-      cli: 'claude',
-      preset: 'worker',
-      role: 'Implementation lead who keeps the CLI onboarding behavior aligned with the Ricky UX spec and product truth.',
-      retries: 1,
-    })
     .agent('impl-primary-codex', {
       cli: 'codex',
       preset: 'worker',
-      role: 'Primary implementer for Ricky CLI onboarding modules and exports.',
+      role: 'Primary implementer for tightly bounded CLI onboarding file edits.',
       retries: 2,
     })
     .agent('impl-tests-codex', {
       cli: 'codex',
       preset: 'worker',
-      role: 'Test implementer for first-run, returning-user, local/BYOH, Cloud, handoff, and recovery-path contracts.',
+      role: 'Test implementer for deterministic onboarding test coverage.',
       retries: 2,
     })
     .agent('reviewer-claude', {
@@ -78,40 +72,98 @@ async function main() {
       failOnError: true,
     })
 
-    .step('implement-cli-modules', {
+    .step('write-ascii-art', {
       agent: 'impl-primary-codex',
       dependsOn: ['read-ux-spec', 'read-product-spec', 'read-workflow-standards'],
-      task: `Implement the CLI onboarding modules from the UX spec using the already-read deterministic context.
+      task: `Edit only src/cli/ascii-art.ts.
 
-Deliverables:
-- src/cli/ascii-art.ts
-- src/cli/welcome.ts
-- src/cli/mode-selector.ts
+Requirements:
+- Support a recognizable full banner and a compact fallback.
+- Export deterministic banner rendering helpers.
+- Keep banner visibility logic pure and testable.
+- Do not modify any other file.
+- Write the file to disk, then exit cleanly.`,
+      verification: { type: 'file_exists', value: 'src/cli/ascii-art.ts' },
+    })
+    .step('verify-ascii-art', {
+      type: 'deterministic',
+      dependsOn: ['write-ascii-art'],
+      command: [
+        'test -f src/cli/ascii-art.ts',
+        'grep -q "banner\|compact\|show" src/cli/ascii-art.ts',
+        'echo CLI_ASCII_ART_READY',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('write-welcome', {
+      agent: 'impl-primary-codex',
+      dependsOn: ['verify-ascii-art'],
+      task: `Edit only src/cli/welcome.ts.
+
+Requirements:
+- Support first-run framing and compact returning-user framing.
+- Keep the copy warm, deterministic, and aligned with the UX spec.
+- Do not modify any other file.
+- Write the file to disk, then exit cleanly.`,
+      verification: { type: 'file_exists', value: 'src/cli/welcome.ts' },
+    })
+    .step('verify-welcome', {
+      type: 'deterministic',
+      dependsOn: ['write-welcome'],
+      command: [
+        'test -f src/cli/welcome.ts',
+        'grep -q "firstRun\|Ricky" src/cli/welcome.ts',
+        'echo CLI_WELCOME_READY',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('write-mode-selector', {
+      agent: 'impl-primary-codex',
+      dependsOn: ['verify-welcome'],
+      task: `Edit only src/cli/mode-selector.ts.
+
+Requirements:
+- Expose local/BYOH and Cloud as co-equal options.
+- Keep the descriptions concise and user-facing.
+- Do not modify any other file.
+- Write the file to disk, then exit cleanly.`,
+      verification: { type: 'file_exists', value: 'src/cli/mode-selector.ts' },
+    })
+    .step('verify-mode-selector', {
+      type: 'deterministic',
+      dependsOn: ['write-mode-selector'],
+      command: [
+        'test -f src/cli/mode-selector.ts',
+        'grep -q "local\|BYOH" src/cli/mode-selector.ts',
+        'grep -q "Cloud" src/cli/mode-selector.ts',
+        'echo CLI_MODE_SELECTOR_READY',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('write-onboarding-and-index', {
+      agent: 'impl-primary-codex',
+      dependsOn: ['verify-mode-selector'],
+      task: `Edit only these two files:
 - src/cli/onboarding.ts
 - src/cli/index.ts
 
 Requirements:
-- ascii-art.ts must support a recognizable full banner and a compact fallback.
-- welcome.ts must support first-run framing and compact returning-user framing.
-- mode-selector.ts must expose local/BYOH and Cloud as co-equal options.
-- onboarding.ts must compose mode selection, guidance, handoff examples, and recovery text into deterministic output helpers.
+- onboarding.ts must compose banner, welcome, mode selection, Cloud guidance, handoff guidance, and recovery guidance into deterministic output helpers.
 - index.ts must export the public onboarding contract.
-
-Non-goals:
-- No live external calls.
-- No speculative commands beyond source-backed guidance.
-- No hidden dependency on Slack or web runtime.
-
-Verification:
-- Keep user-visible strings deterministic and easy to assert.
-- Keep the module boundaries aligned with the UX spec.
-- Use docs/product/ricky-cli-onboarding-ux-spec.md as the source of truth instead of waiting for a separate plan artifact.
-- Write only the requested files to disk, then exit cleanly.`,
+- Use docs/product/ricky-cli-onboarding-ux-spec.md as the source of truth.
+- Do not modify any other file.
+- Write both files to disk, then exit cleanly.`,
       verification: { type: 'file_exists', value: 'src/cli/onboarding.ts' },
     })
     .step('post-implementation-file-gate', {
       type: 'deterministic',
-      dependsOn: ['implement-cli-modules'],
+      dependsOn: ['write-onboarding-and-index'],
       command: [
         'test -f src/cli/ascii-art.ts',
         'test -f src/cli/welcome.ts',
@@ -131,7 +183,7 @@ Verification:
     .step('implement-cli-tests', {
       agent: 'impl-tests-codex',
       dependsOn: ['post-implementation-file-gate'],
-      task: `Implement deterministic tests for the CLI onboarding modules.
+      task: `Edit only src/cli/onboarding.test.ts.
 
 Coverage must include:
 - first-run output

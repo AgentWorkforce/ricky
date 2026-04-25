@@ -2,23 +2,17 @@ import { workflow } from '@agent-relay/sdk/workflows';
 
 async function main() {
   const result = await workflow('ricky-wave4-prove-cli-onboarding-first-run-and-recovery')
-    .description('Prove the Ricky CLI onboarding experience end-to-end through deterministic first-run, returning-user, and recovery-path evidence.')
+    .description('Prove the Ricky CLI onboarding experience end-to-end through narrower deterministic proof steps and evidence checks.')
     .pattern('dag')
     .channel('wf-ricky-wave4-cli-onboarding-proof')
     .maxConcurrency(4)
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', {
-      cli: 'claude',
-      preset: 'worker',
-      role: 'Proof lead who keeps onboarding validation focused on user-visible behavior and honest recovery evidence.',
-      retries: 1,
-    })
     .agent('impl-proof-codex', {
       cli: 'codex',
       preset: 'worker',
-      role: 'Implements proof harnesses, fixtures, and deterministic validation helpers for CLI onboarding output.',
+      role: 'Implements tightly bounded proof files and deterministic validation helpers for CLI onboarding output.',
       retries: 2,
     })
     .agent('reviewer-claude', {
@@ -60,7 +54,7 @@ async function main() {
     .step('read-cli-implementation-context', {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
-      command: "python3 - <<'PY'\nfrom pathlib import Path\nfor path in sorted(Path('src/cli').rglob('*')):\n    if path.is_file():\n        print(f'FILE: {path}')\n        print(path.read_text())\n        print('\n---\n')\nPY",
+      command: "python3 - <<'PY'\nfrom pathlib import Path\nfor path in sorted(Path('src/cli').rglob('*')):\n    if path.is_file():\n        print(f'FILE: {path}')\n        print(path.read_text())\n        print('\\n---\\n')\nPY",
       captureOutput: true,
       failOnError: true,
     })
@@ -72,41 +66,45 @@ async function main() {
       failOnError: true,
     })
 
-    .step('implement-proof-harness', {
+    .step('write-proof-helper', {
       agent: 'impl-proof-codex',
       dependsOn: ['read-ux-spec', 'read-cli-implementation-context', 'read-workflow-standards'],
-      task: `Implement the deterministic proof harness for Ricky CLI onboarding using the already-read deterministic context.
+      task: `Edit only src/cli/proof/onboarding-proof.ts.
 
-Deliverables:
-- src/cli/proof/onboarding-proof.ts should expose helpers or evaluators that render or inspect onboarding outputs against proof cases.
-- src/cli/proof/onboarding-proof.test.ts should assert first-run, returning-user, local/BYOH, Cloud, provider guidance, handoff, and recovery behavior.
+Requirements:
+- Expose deterministic proof evaluators over the current CLI onboarding implementation.
+- Cover first-run, returning-user, local/BYOH, Cloud, Google guidance, GitHub dashboard/Nango guidance, handoff language, and recovery behavior.
+- Do not modify any other file.
+- Write the file to disk, then exit cleanly.`,
+      verification: { type: 'file_exists', value: 'src/cli/proof/onboarding-proof.ts' },
+    })
+    .step('verify-proof-helper', {
+      type: 'deterministic',
+      dependsOn: ['write-proof-helper'],
+      command: [
+        'test -f src/cli/proof/onboarding-proof.ts',
+        'grep -q "first-run\|returning\|Cloud\|recovery" src/cli/proof/onboarding-proof.ts',
+        'echo CLI_ONBOARDING_PROOF_HELPER_READY',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
 
-Proof cases must include:
-- first-run experience
-- returning-user experience
-- local/BYOH path visibility
-- Cloud path visibility
-- Google connect guidance
-- GitHub dashboard/Nango guidance
-- CLI or MCP handoff language
-- at least one blocked or recovery path
+    .step('write-proof-tests', {
+      agent: 'impl-proof-codex',
+      dependsOn: ['verify-proof-helper'],
+      task: `Edit only src/cli/proof/onboarding-proof.test.ts.
 
-Non-goals:
-- Do not add flaky snapshots.
-- Do not hide missing implementation behind fake mocks that prove nothing.
-- Do not touch unrelated CLI files unless a tiny import fix is truly required.
-
-Verification:
-- Tests must prove the user-visible contract.
-- If implementation files are missing, surface that honestly.
-- Use docs/product/ricky-cli-onboarding-ux-spec.md and src/cli/ as source context instead of waiting for a separate plan artifact.
-- Keep evidence deterministic and bounded.
-- Write only the requested proof files to disk, then exit cleanly.`,
+Requirements:
+- Assert the proof harness covers first-run, returning-user, local/BYOH, Cloud, Google guidance, GitHub dashboard/Nango guidance, handoff language, and recovery behavior.
+- Keep the tests deterministic and bounded.
+- Do not modify any other file.
+- Write the file to disk, then exit cleanly.`,
       verification: { type: 'file_exists', value: 'src/cli/proof/onboarding-proof.test.ts' },
     })
     .step('post-proof-file-gate', {
       type: 'deterministic',
-      dependsOn: ['implement-proof-harness'],
+      dependsOn: ['write-proof-tests'],
       command: [
         'test -f src/cli/proof/onboarding-proof.ts',
         'test -f src/cli/proof/onboarding-proof.test.ts',
