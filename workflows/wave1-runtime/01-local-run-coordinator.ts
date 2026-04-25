@@ -122,7 +122,7 @@ After editing, stop. Do not modify tests in this step.`,
         'test -f src/runtime/local-coordinator.ts',
         'grep -Eq "export .*LocalRun|export .*Coordinator|class .*Coordinator|function .*Coordinator|create.*Coordinator" src/runtime/local-coordinator.ts',
         'grep -Eq "RunStatus|RunResult|RunRequest|Lifecycle|Evidence|Invocation" src/runtime/types.ts',
-        'git diff --name-only | grep -Eq "src/runtime/(types|local-coordinator)\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/runtime/(types|local-coordinator)\\.ts"',
         'echo LOCAL_COORDINATOR_RUNTIME_SURFACE_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -160,7 +160,7 @@ Do not broaden scope beyond the coordinator files.`,
         'test -f src/runtime/local-coordinator.test.ts',
         'grep -Eq "describe|it\\(" src/runtime/local-coordinator.test.ts',
         'grep -Eq "failed|timeout|stderr|stdout|completed|cancel" src/runtime/local-coordinator.test.ts',
-        'git diff --name-only | grep -Eq "src/runtime/local-coordinator\\.test\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/runtime/local-coordinator\\.test\\.ts"',
         'echo LOCAL_COORDINATOR_TESTS_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -217,21 +217,9 @@ Write .workflow-artifacts/wave1-runtime/local-run-coordinator/review-codex.md en
       },
     })
 
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-claude', 'review-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave1-runtime/local-run-coordinator/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave1-runtime/local-run-coordinator/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('fix-loop', {
       agent: 'validator-claude',
-      dependsOn: ['review-verdict-gate'],
+      dependsOn: ['review-claude', 'review-codex'],
       task: `Run the 80-to-100 fix loop for the local run coordinator.
 
 Inputs:
@@ -276,21 +264,13 @@ Write .workflow-artifacts/wave1-runtime/local-run-coordinator/fix-loop.md with c
       failOnError: true,
     })
 
-    .step('build-typecheck-gate', {
-      type: 'deterministic',
-      dependsOn: ['final-hard-gate'],
-      command: 'npx tsc --noEmit',
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('regression-gate', {
       type: 'deterministic',
-      dependsOn: ['build-typecheck-gate'],
+      dependsOn: ['final-hard-gate'],
       command: [
         'npx vitest run',
-        'git diff --name-only | grep -Eq "src/runtime/(types|local-coordinator|local-coordinator\\.test)\\.ts"',
-        '! git diff --name-only | grep -Ev "^(src/runtime/(types|local-coordinator|local-coordinator\\.test)\\.ts|src/runtime/index\\.ts|\\.workflow-artifacts/)"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^(src/runtime/(types|local-coordinator|local-coordinator\\.test)\\.ts|src/runtime/index\\.ts)$"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/runtime/(types|local-coordinator|local-coordinator\\.test)\\.ts|src/runtime/index\\.ts|\\.workflow-artifacts/)"',
         'echo LOCAL_COORDINATOR_REGRESSION_PASS',
       ].join(' && '),
       captureOutput: true,

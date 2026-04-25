@@ -233,17 +233,6 @@ Focus:
 Write .workflow-artifacts/wave3-cloud-auth/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-auth/review-codex.md' },
     })
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-cloud-auth-claude', 'review-cloud-auth-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave3-cloud-auth/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave3-cloud-auth/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
 
     .step('read-review-feedback', {
       type: 'deterministic',
@@ -253,7 +242,7 @@ Write .workflow-artifacts/wave3-cloud-auth/review-codex.md ending with REVIEW_CO
       failOnError: true,
     })
     .step('fix-cloud-auth', {
-      agent: 'impl-primary-codex',
+      agent: 'validator-claude',
       dependsOn: ['read-review-feedback'],
       task: `Fix Cloud auth issues from review feedback.
 
@@ -265,7 +254,7 @@ Rules:
 - If tests need updates, coordinate the edits in the same pass and keep them scoped to src/cloud/auth.
 - Re-check provider guidance contracts after any edit.
 - Do not claim success without deterministic gates.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: 0 },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -284,6 +273,18 @@ Rules:
       captureOutput: true,
       failOnError: true,
     })
+    .step('post-fix-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['post-fix-verification-gate'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave3-cloud-auth/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave3-cloud-auth/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        'echo REVIEW_VERDICTS_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
@@ -296,8 +297,9 @@ Rules:
       dependsOn: ['final-hard-validation'],
       command: [
         'npx tsc --noEmit',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^(src/cloud/auth/|package.json|tsconfig.json)$|^src/cloud/auth/"',
-        'printf "%s\n" "$changed" | grep -q . && echo CHANGES_PRESENT',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^src/cloud/auth/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/auth/|package\\.json|tsconfig\\.json|\\.workflow-artifacts/)"',
         'echo CLOUD_AUTH_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,

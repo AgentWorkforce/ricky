@@ -179,7 +179,7 @@ Verification commands to keep green:
 - npx tsc --noEmit
 
 Write files to disk and keep the implementation compact.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: '0' },
     })
 
     .step('verify-materialized-files', {
@@ -235,7 +235,7 @@ Verification commands:
 - grep -q "export" src/shared/models/index.ts
 
 If the soft typecheck failed because the repository lacks TypeScript setup, document the blocker in .workflow-artifacts/wave0-foundation/shared-models/validation-notes.md and make the smallest repo-appropriate fix only if obvious.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: '0' },
     })
 
     .step('review-shared-models-claude', {
@@ -285,18 +285,6 @@ Write .workflow-artifacts/wave0-foundation/shared-models/review-codex.md and end
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/shared-models/review-codex.md' },
     })
 
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-shared-models-claude', 'review-shared-models-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave0-foundation/shared-models/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave0-foundation/shared-models/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('fix-review-feedback', {
       agent: 'impl-primary-codex',
       dependsOn: ['review-shared-models-claude', 'review-shared-models-codex'],
@@ -318,7 +306,19 @@ Only edit:
 - tsconfig.json only if validation already introduced it for an explicit TypeScript setup blocker
 
 Do not broaden scope. Re-run mentally against the review checklist and exit only after targeted fixes are written.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: '0' },
+    })
+
+    .step('post-fix-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['post-fix-verification-gate'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        'echo REVIEW_VERDICTS_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step('final-hard-typecheck', {
@@ -347,7 +347,12 @@ Do not broaden scope. Re-run mentally against the review checklist and exit only
     .step('regression-scope-gate', {
       type: 'deterministic',
       dependsOn: ['final-hard-structure-gate'],
-      command: 'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^(src/shared/models/workflow-evidence.ts|src/shared/models/workflow-config.ts|src/shared/models/index.ts|src/shared/constants.ts|tsconfig.json)$" && printf "%s\n" "$changed" | grep -Ev "^(src/shared/models/workflow-evidence.ts|src/shared/models/workflow-config.ts|src/shared/models/index.ts|src/shared/constants.ts|tsconfig.json|\.workflow-artifacts/)" >/tmp/w0_shared_models_unexpected.txt || true; test ! -s /tmp/w0_shared_models_unexpected.txt && echo W0_SHARED_MODELS_REGRESSION_SCOPE_PASS',
+      command: [
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^(src/shared/(models/|constants\\.ts)|tsconfig\\.json)"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/shared/(models/|constants\\.ts)|tsconfig\\.json|\\.workflow-artifacts/)"',
+        'echo W0_SHARED_MODELS_REGRESSION_SCOPE_PASS',
+      ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })

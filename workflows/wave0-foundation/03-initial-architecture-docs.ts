@@ -25,6 +25,12 @@ async function main() {
       role: 'Reviews architecture docs for implementation usefulness, testable contracts, and missing deterministic proof.',
       retries: 1,
     })
+    .agent('validator-claude', {
+      cli: 'claude',
+      preset: 'worker',
+      role: 'Validation owner who writes the final signoff after all gates pass.',
+      retries: 1,
+    })
 
     .step('prepare-artifacts', {
       type: 'deterministic',
@@ -169,7 +175,7 @@ Verification commands to keep green:
 - wc -l docs/architecture/ricky-*.md
 
 Write files to disk and keep each doc detailed but reviewable.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: '0' },
     })
 
     .step('verify-materialized-docs', {
@@ -236,7 +242,7 @@ Only edit:
 - docs/architecture/ricky-specialist-boundaries.md
 
 Do not add extra docs or source code. If the review passes, make no unrelated edits.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: '0' },
     })
 
     .step('final-hard-structure-gate', {
@@ -260,7 +266,12 @@ Do not add extra docs or source code. If the review passes, make no unrelated ed
     .step('regression-scope-gate', {
       type: 'deterministic',
       dependsOn: ['final-hard-structure-gate'],
-      command: 'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^(docs/architecture/ricky-runtime-architecture.md|docs/architecture/ricky-surfaces-and-ingress.md|docs/architecture/ricky-specialist-boundaries.md)$" && printf "%s\n" "$changed" | grep -Ev "^(docs/architecture/ricky-runtime-architecture.md|docs/architecture/ricky-surfaces-and-ingress.md|docs/architecture/ricky-specialist-boundaries.md|\.workflow-artifacts/)" >/tmp/w0_architecture_docs_unexpected.txt || true; test ! -s /tmp/w0_architecture_docs_unexpected.txt && echo W0_ARCHITECTURE_DOCS_REGRESSION_SCOPE_PASS',
+      command: [
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^docs/architecture/ricky-"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(docs/architecture/ricky-|\\.workflow-artifacts/)"',
+        'echo W0_ARCHITECTURE_DOCS_REGRESSION_SCOPE_PASS',
+      ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })

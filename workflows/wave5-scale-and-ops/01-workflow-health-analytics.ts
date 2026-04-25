@@ -228,17 +228,6 @@ Focus:
 Write .workflow-artifacts/wave5-health-analytics/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-health-analytics/review-codex.md' },
     })
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-claude', 'review-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave5-health-analytics/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave5-health-analytics/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
 
     .step('read-review-feedback', {
       type: 'deterministic',
@@ -248,7 +237,7 @@ Write .workflow-artifacts/wave5-health-analytics/review-codex.md ending with REV
       failOnError: true,
     })
     .step('fix-health-analytics', {
-      agent: 'impl-primary-codex',
+      agent: 'validator-claude',
       dependsOn: ['read-review-feedback'],
       task: `Fix workflow health analytics issues from review feedback.
 
@@ -260,7 +249,7 @@ Rules:
 - Update tests when contracts change.
 - Do not add live telemetry dependencies.
 - Re-run deterministic gates after changes.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: 0 },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -279,6 +268,18 @@ Rules:
       captureOutput: true,
       failOnError: true,
     })
+    .step('post-fix-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['post-fix-verification-gate'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave5-health-analytics/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave5-health-analytics/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        'echo REVIEW_VERDICTS_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
@@ -291,8 +292,9 @@ Rules:
       dependsOn: ['final-hard-validation'],
       command: [
         'npx tsc --noEmit',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^(src/analytics/|src/runtime/)"',
-        'printf "%s\n" "$changed" | grep -q . && echo CHANGES_PRESENT',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^src/analytics/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/analytics/|src/runtime/|\\.workflow-artifacts/)"',
         'echo HEALTH_ANALYTICS_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,

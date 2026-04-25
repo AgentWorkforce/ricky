@@ -98,11 +98,10 @@ Context inputs:
 {{steps.read-product-spec.output}}
 
 Deliverables:
-- src/cloud/api/generate.ts
-- src/cloud/api/routes.ts
-- src/cloud/api/response-builder.ts
-- src/cloud/api/types.ts
-- src/cloud/api/generate.test.ts
+- src/cloud/api/generate-endpoint.ts
+- src/cloud/api/request-types.ts
+- src/cloud/api/response-types.ts
+- src/cloud/api/generate-endpoint.test.ts
 - src/cloud/api/index.ts
 
 Non-goals:
@@ -111,9 +110,9 @@ Non-goals:
 - Do not implement a full HTTP server if the repo has no server surface yet; expose a route/handler contract that Cloud can mount.
 
 Verification:
-- routes.ts must register or expose POST /api/v1/ricky/workflows/generate.
-- generate.ts must require authenticated workspace context, workflow spec input, and mode handling for generate-only/artifact return.
-- response-builder.ts must return artifact bundle, warnings or assumptions, and suggested follow-up actions.
+- generate-endpoint.ts must expose POST /api/v1/ricky/workflows/generate as a mountable handler contract.
+- request-types.ts must require authenticated workspace context, workflow spec input, and mode handling for generate-only/artifact return.
+- response-types.ts must return artifact bundle, warnings or assumptions, run receipts when applicable, and suggested follow-up actions.
 - Tests must cover success, missing auth/workspace, missing spec, and validation failure mapping.
 - Every implementation phase must be followed by deterministic file or grep gates.
 
@@ -130,10 +129,10 @@ Write .workflow-artifacts/wave3-generate-endpoint/plan.md ending with GENERATE_E
       task: `Implement the Cloud generation endpoint contract.
 
 Deliverables:
-- generate.ts should expose a handler/function for POST /api/v1/ricky/workflows/generate that accepts an authenticated request with workspace context and a natural-language or structured workflow spec.
-- routes.ts should expose the exact path /api/v1/ricky/workflows/generate and HTTP method POST.
-- response-builder.ts should normalize artifact bundle responses, warnings, assumptions, validation status, and suggested follow-up actions.
-- types.ts and index.ts should export the endpoint contract.
+- generate-endpoint.ts should expose a handler/function for POST /api/v1/ricky/workflows/generate that accepts an authenticated request with workspace context and a natural-language or structured workflow spec.
+- request-types.ts should define the authenticated request, workspace context, generation mode, and spec payload contract.
+- response-types.ts should define artifact bundle responses, run receipt fields when execution is requested, warnings, assumptions, validation status, and suggested follow-up actions.
+- index.ts should export the endpoint contract.
 
 Non-goals:
 - Do not start a server process.
@@ -144,20 +143,19 @@ Verification:
 - Use explicit typed contracts rather than opaque any objects where practical.
 - Preserve Cloud/local mode distinctions from the product spec.
 - Make route path and response shape easy to grep and test.`,
-      verification: { type: 'file_exists', value: 'src/cloud/api/routes.ts' },
+      verification: { type: 'file_exists', value: 'src/cloud/api/generate-endpoint.ts' },
     })
     .step('post-implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-endpoint'],
       command: [
-        'test -f src/cloud/api/generate.ts',
-        'test -f src/cloud/api/routes.ts',
-        'test -f src/cloud/api/response-builder.ts',
-        'test -f src/cloud/api/types.ts',
+        'test -f src/cloud/api/generate-endpoint.ts',
+        'test -f src/cloud/api/request-types.ts',
+        'test -f src/cloud/api/response-types.ts',
         'test -f src/cloud/api/index.ts',
-        'grep -q "/api/v1/ricky/workflows/generate" src/cloud/api/routes.ts',
-        'grep -q "POST\\|post" src/cloud/api/routes.ts',
-        'grep -q "artifact\\|bundle" src/cloud/api/response-builder.ts',
+        'grep -q "/api/v1/ricky/workflows/generate" src/cloud/api/generate-endpoint.ts',
+        'grep -q "POST\\|post" src/cloud/api/generate-endpoint.ts',
+        'grep -q "artifact\\|bundle" src/cloud/api/response-types.ts',
         'echo GENERATE_ENDPOINT_IMPLEMENTATION_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -170,7 +168,7 @@ Verification:
       task: `Add tests for the Cloud generation endpoint.
 
 Deliverables:
-- src/cloud/api/generate.test.ts should cover route path/method, successful generation response, missing authentication/workspace, missing spec, validation failure, and artifact bundle response contract.
+- src/cloud/api/generate-endpoint.test.ts should cover route path/method, successful generation response, missing authentication/workspace, missing spec, validation failure, and artifact bundle response contract.
 
 Non-goals:
 - Do not require network calls.
@@ -180,17 +178,17 @@ Verification:
 - Tests must assert /api/v1/ricky/workflows/generate.
 - Tests must assert artifact bundle or file return fields.
 - Tests must assert warnings/assumptions or follow-up actions are represented.`,
-      verification: { type: 'file_exists', value: 'src/cloud/api/generate.test.ts' },
+      verification: { type: 'file_exists', value: 'src/cloud/api/generate-endpoint.test.ts' },
     })
     .step('post-test-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-endpoint-tests'],
       command: [
-        'test -f src/cloud/api/generate.test.ts',
-        'grep -q "/api/v1/ricky/workflows/generate" src/cloud/api/generate.test.ts src/cloud/api/routes.ts',
-        'grep -q "artifact\\|bundle" src/cloud/api/generate.test.ts src/cloud/api/response-builder.ts',
-        'grep -q "workspace\\|auth" src/cloud/api/generate.test.ts src/cloud/api/generate.ts',
-        'git diff --name-only | grep -E "^src/cloud/api/"',
+        'test -f src/cloud/api/generate-endpoint.test.ts',
+        'grep -q "/api/v1/ricky/workflows/generate" src/cloud/api/generate-endpoint.test.ts src/cloud/api/generate-endpoint.ts',
+        'grep -q "artifact\\|bundle" src/cloud/api/generate-endpoint.test.ts src/cloud/api/response-types.ts',
+        'grep -q "workspace\\|auth" src/cloud/api/generate-endpoint.test.ts src/cloud/api/generate-endpoint.ts src/cloud/api/request-types.ts',
+        'changed="$(git diff --name-only -- src/cloud/api; git ls-files --others --exclude-standard -- src/cloud/api)" && printf "%s\\n" "$changed" | grep -Eq "^src/cloud/api/"',
         'echo GENERATE_ENDPOINT_TEST_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -233,17 +231,6 @@ Focus:
 Write .workflow-artifacts/wave3-generate-endpoint/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-generate-endpoint/review-codex.md' },
     })
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-claude', 'review-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave3-generate-endpoint/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave3-generate-endpoint/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
 
     .step('read-review-feedback', {
       type: 'deterministic',
@@ -253,7 +240,7 @@ Write .workflow-artifacts/wave3-generate-endpoint/review-codex.md ending with RE
       failOnError: true,
     })
     .step('fix-endpoint', {
-      agent: 'impl-primary-codex',
+      agent: 'validator-claude',
       dependsOn: ['read-review-feedback'],
       task: `Fix Cloud generation endpoint issues from review feedback.
 
@@ -265,25 +252,36 @@ Rules:
 - Keep auth/workspace contract explicit.
 - Update tests when behavior changes.
 - Re-run deterministic gates after edits.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: 0 },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
       dependsOn: ['fix-endpoint'],
       command: [
-        'test -f src/cloud/api/generate.ts',
-        'test -f src/cloud/api/routes.ts',
-        'test -f src/cloud/api/response-builder.ts',
-        'test -f src/cloud/api/types.ts',
-        'test -f src/cloud/api/generate.test.ts',
+        'test -f src/cloud/api/generate-endpoint.ts',
+        'test -f src/cloud/api/request-types.ts',
+        'test -f src/cloud/api/response-types.ts',
+        'test -f src/cloud/api/generate-endpoint.test.ts',
         'test -f src/cloud/api/index.ts',
-        'grep -q "/api/v1/ricky/workflows/generate" src/cloud/api/routes.ts',
-        'grep -q "artifact\\|bundle" src/cloud/api/response-builder.ts src/cloud/api/generate.test.ts',
+        'grep -q "/api/v1/ricky/workflows/generate" src/cloud/api/generate-endpoint.ts',
+        'grep -q "artifact\\|bundle" src/cloud/api/response-types.ts src/cloud/api/generate-endpoint.test.ts',
         'echo GENERATE_ENDPOINT_POST_FIX_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })
+    .step('post-fix-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['post-fix-verification-gate'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave3-generate-endpoint/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave3-generate-endpoint/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        'echo REVIEW_VERDICTS_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
@@ -296,8 +294,9 @@ Rules:
       dependsOn: ['final-hard-validation'],
       command: [
         'npx tsc --noEmit',
-        'git diff --name-only | grep -E "^(src/cloud/api/|src/cloud/auth/|src/product/generation/|src/product/spec-intake/)"',
-        'printf "%s\n" "$changed" | grep -q . && echo CHANGES_PRESENT',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^src/cloud/api/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/api/|src/cloud/auth/|src/product/generation/|src/product/spec-intake/|\\.workflow-artifacts/)"',
         'echo GENERATE_ENDPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,

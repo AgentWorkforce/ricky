@@ -25,6 +25,12 @@ async function main() {
       role: 'Reviews convention updates for product alignment, enforceability, and missing workflow safety rules.',
       retries: 1,
     })
+    .agent('validator-claude', {
+      cli: 'claude',
+      preset: 'worker',
+      role: 'Validation owner who writes the final signoff after all gates pass.',
+      retries: 1,
+    })
 
     .step('prepare-artifacts', {
       type: 'deterministic',
@@ -158,7 +164,7 @@ Verification commands to keep green:
 - grep -Eq "Must-do|Must-not" workflows/shared/WORKFLOW_AUTHORING_RULES.md
 
 Write changes to disk. Do not print complete file contents.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: '0' },
     })
 
     .step('verify-materialized-files', {
@@ -224,7 +230,7 @@ Re-check these expectations before exiting:
 - Deterministic gates and review stages are required.
 - Wave folder structure is documented.
 - Commit/PR boundary remains limited to the target files.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: '0' },
     })
 
     .step('final-hard-gate', {
@@ -247,7 +253,12 @@ Re-check these expectations before exiting:
     .step('regression-scope-gate', {
       type: 'deterministic',
       dependsOn: ['final-hard-gate'],
-      command: 'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^(AGENTS.md|CLAUDE.md|workflows/README.md|workflows/shared/WORKFLOW_AUTHORING_RULES.md)$" && printf "%s\n" "$changed" | grep -Ev "^(AGENTS.md|CLAUDE.md|workflows/README.md|workflows/shared/WORKFLOW_AUTHORING_RULES.md|\.workflow-artifacts/)" >/tmp/w0_repo_standards_unexpected.txt || true; test ! -s /tmp/w0_repo_standards_unexpected.txt && echo W0_REPO_STANDARDS_REGRESSION_SCOPE_PASS',
+      command: [
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^(AGENTS.md|CLAUDE.md|workflows/README.md|workflows/shared/WORKFLOW_AUTHORING_RULES.md)$"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(AGENTS.md|CLAUDE.md|workflows/README.md|workflows/shared/WORKFLOW_AUTHORING_RULES.md|\\.workflow-artifacts/)"',
+        'echo W0_REPO_STANDARDS_REGRESSION_SCOPE_PASS',
+      ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })

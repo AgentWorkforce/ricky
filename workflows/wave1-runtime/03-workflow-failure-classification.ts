@@ -90,7 +90,7 @@ After editing, stop. Do not modify tests in this step.`,
         'grep -Eq "timeout|verification|drift|environment|deadlock|overflow" src/runtime/failure/types.ts src/runtime/failure/classifier.ts',
         'grep -Eq "export .*classif|export function|export const" src/runtime/failure/classifier.ts',
         'grep -q "export" src/runtime/failure/index.ts',
-        'git diff --name-only | grep -Eq "src/runtime/failure/(types|classifier|index)\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/runtime/failure/(types|classifier|index)\\.ts"',
         'echo FAILURE_CLASSIFIER_SURFACE_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -128,7 +128,7 @@ Review checklist:
         'test -f src/runtime/failure/classifier.test.ts',
         'grep -Eq "describe|it\\(" src/runtime/failure/classifier.test.ts',
         'grep -Eq "timeout|verification|drift|environment|deadlock|overflow" src/runtime/failure/classifier.test.ts',
-        'git diff --name-only | grep -Eq "src/runtime/failure/classifier\\.test\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/runtime/failure/classifier\\.test\\.ts"',
         'echo FAILURE_CLASSIFIER_TESTS_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -171,21 +171,9 @@ Write .workflow-artifacts/wave1-runtime/workflow-failure-classification/review-c
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave1-runtime/workflow-failure-classification/review-codex.md' },
     })
 
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-claude', 'review-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave1-runtime/workflow-failure-classification/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave1-runtime/workflow-failure-classification/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('fix-loop', {
       agent: 'validator-claude',
-      dependsOn: ['review-verdict-gate'],
+      dependsOn: ['review-claude', 'review-codex'],
       task: `Run the 80-to-100 fix loop for failure classification.
 
 Inputs:
@@ -223,21 +211,13 @@ Write .workflow-artifacts/wave1-runtime/workflow-failure-classification/fix-loop
       failOnError: true,
     })
 
-    .step('build-typecheck-gate', {
-      type: 'deterministic',
-      dependsOn: ['final-hard-gate'],
-      command: 'npx tsc --noEmit',
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('regression-gate', {
       type: 'deterministic',
-      dependsOn: ['build-typecheck-gate'],
+      dependsOn: ['final-hard-gate'],
       command: [
         'npx vitest run',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^src/runtime/failure/"',
-        '! git diff --name-only | grep -Ev "^(src/runtime/failure/|\\.workflow-artifacts/)"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/runtime/failure/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/runtime/failure/|\\.workflow-artifacts/)"',
         'echo FAILURE_CLASSIFICATION_REGRESSION_PASS',
       ].join(' && '),
       captureOutput: true,

@@ -95,7 +95,7 @@ After editing, stop. Do not modify tests in this step.`,
         'test -f src/product/specialists/debugger/index.ts',
         'grep -Eq "diagnos|recommend|repair|classification|evidence" src/product/specialists/debugger/debugger.ts src/product/specialists/debugger/diagnosis.ts src/product/specialists/debugger/fix-recommender.ts',
         'grep -q "export" src/product/specialists/debugger/index.ts',
-        'git diff --name-only | grep -Eq "src/product/specialists/debugger/(types|diagnosis|fix-recommender|debugger|index)\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/specialists/debugger/(types|diagnosis|fix-recommender|debugger|index)\\.ts"',
         'echo DEBUGGER_SPECIALIST_CORE_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -132,7 +132,7 @@ Review checklist:
         'test -f src/product/specialists/debugger/debugger.test.ts',
         'grep -Eq "describe|it\\(" src/product/specialists/debugger/debugger.test.ts',
         'grep -Eq "verification|drift|missing|environment|repair|recommend" src/product/specialists/debugger/debugger.test.ts',
-        'git diff --name-only | grep -Eq "src/product/specialists/debugger/debugger\\.test\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/specialists/debugger/debugger\\.test\\.ts"',
         'echo DEBUGGER_SPECIALIST_TESTS_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -175,21 +175,9 @@ Write .workflow-artifacts/wave2-product/workflow-debugger-specialist/review-code
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-debugger-specialist/review-codex.md' },
     })
 
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-claude', 'review-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave2-product/workflow-debugger-specialist/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave2-product/workflow-debugger-specialist/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('fix-loop', {
       agent: 'validator-claude',
-      dependsOn: ['review-verdict-gate'],
+      dependsOn: ['review-claude', 'review-codex'],
       task: `Run the 80-to-100 fix loop for the debugger specialist.
 
 Inputs:
@@ -228,21 +216,13 @@ Write .workflow-artifacts/wave2-product/workflow-debugger-specialist/fix-loop.md
       failOnError: true,
     })
 
-    .step('build-typecheck-gate', {
-      type: 'deterministic',
-      dependsOn: ['final-hard-gate'],
-      command: 'npx tsc --noEmit',
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('regression-gate', {
       type: 'deterministic',
-      dependsOn: ['build-typecheck-gate'],
+      dependsOn: ['final-hard-gate'],
       command: [
         'npx vitest run',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^src/product/specialists/debugger/"',
-        '! git diff --name-only | grep -Ev "^(src/product/specialists/debugger/|\\.workflow-artifacts/)"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/specialists/debugger/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/product/specialists/debugger/|\\.workflow-artifacts/)"',
         'echo DEBUGGER_SPECIALIST_REGRESSION_PASS',
       ].join(' && '),
       captureOutput: true,

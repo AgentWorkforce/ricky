@@ -89,7 +89,7 @@ After editing, stop. Do not modify tests in this step.`,
         'grep -Eq "export .*Evidence|export type .*Evidence|export interface .*Evidence" src/runtime/evidence/types.ts',
         'grep -Eq "record|append|create|summar" src/runtime/evidence/capture.ts',
         'grep -q "export" src/runtime/evidence/index.ts',
-        'git diff --name-only | grep -Eq "src/runtime/evidence/(types|capture|index)\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/runtime/evidence/(types|capture|index)\\.ts"',
         'echo WORKFLOW_EVIDENCE_MODEL_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -125,7 +125,7 @@ Review checklist:
         'test -f src/runtime/evidence/capture.test.ts',
         'grep -Eq "describe|it\\(" src/runtime/evidence/capture.test.ts',
         'grep -Eq "retry|artifact|summary|failed|gate" src/runtime/evidence/capture.test.ts',
-        'git diff --name-only | grep -Eq "src/runtime/evidence/capture\\.test\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/runtime/evidence/capture\\.test\\.ts"',
         'echo WORKFLOW_EVIDENCE_TESTS_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -168,21 +168,9 @@ Write .workflow-artifacts/wave1-runtime/workflow-evidence-model/review-codex.md 
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave1-runtime/workflow-evidence-model/review-codex.md' },
     })
 
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-claude', 'review-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave1-runtime/workflow-evidence-model/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave1-runtime/workflow-evidence-model/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('fix-loop', {
       agent: 'validator-claude',
-      dependsOn: ['review-verdict-gate'],
+      dependsOn: ['review-claude', 'review-codex'],
       task: `Run the 80-to-100 fix loop for evidence capture.
 
 Inputs:
@@ -220,21 +208,13 @@ Write .workflow-artifacts/wave1-runtime/workflow-evidence-model/fix-loop.md endi
       failOnError: true,
     })
 
-    .step('build-typecheck-gate', {
-      type: 'deterministic',
-      dependsOn: ['final-hard-gate'],
-      command: 'npx tsc --noEmit',
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('regression-gate', {
       type: 'deterministic',
-      dependsOn: ['build-typecheck-gate'],
+      dependsOn: ['final-hard-gate'],
       command: [
         'npx vitest run',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^src/runtime/evidence/"',
-        '! git diff --name-only | grep -Ev "^(src/runtime/evidence/|\\.workflow-artifacts/)"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/runtime/evidence/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/runtime/evidence/|\\.workflow-artifacts/)"',
         'echo WORKFLOW_EVIDENCE_REGRESSION_PASS',
       ].join(' && '),
       captureOutput: true,

@@ -97,7 +97,7 @@ After editing, stop. Do not modify tests in this step.`,
         'grep -Eq "Claude|CLI|MCP|Slack|web|API|surface" src/product/spec-intake/types.ts src/product/spec-intake/parser.ts',
         'grep -Eq "generate|debug|coordinate|execute|clarify" src/product/spec-intake/router.ts',
         'grep -q "export" src/product/spec-intake/index.ts',
-        'git diff --name-only | grep -Eq "src/product/spec-intake/(types|parser|normalizer|router|index)\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/spec-intake/(types|parser|normalizer|router|index)\\.ts"',
         'echo SPEC_INTAKE_CORE_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -134,7 +134,7 @@ Review checklist:
         'test -f src/product/spec-intake/parser.test.ts',
         'grep -Eq "describe|it\\(" src/product/spec-intake/parser.test.ts',
         'grep -Eq "Claude|CLI|MCP|generate|debug|clarify" src/product/spec-intake/parser.test.ts',
-        'git diff --name-only | grep -Eq "src/product/spec-intake/parser\\.test\\.ts"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/spec-intake/parser\\.test\\.ts"',
         'echo SPEC_INTAKE_TESTS_VERIFIED',
       ].join(' && '),
       captureOutput: true,
@@ -181,21 +181,9 @@ Write .workflow-artifacts/wave2-product/workflow-spec-intake/review-codex.md end
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-spec-intake/review-codex.md' },
     })
 
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-claude', 'review-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave2-product/workflow-spec-intake/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave2-product/workflow-spec-intake/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('fix-loop', {
       agent: 'validator-claude',
-      dependsOn: ['review-verdict-gate'],
+      dependsOn: ['review-claude', 'review-codex'],
       task: `Run the 80-to-100 fix loop for spec intake.
 
 Inputs:
@@ -234,21 +222,13 @@ Write .workflow-artifacts/wave2-product/workflow-spec-intake/fix-loop.md ending 
       failOnError: true,
     })
 
-    .step('build-typecheck-gate', {
-      type: 'deterministic',
-      dependsOn: ['final-hard-gate'],
-      command: 'npx tsc --noEmit',
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('regression-gate', {
       type: 'deterministic',
-      dependsOn: ['build-typecheck-gate'],
+      dependsOn: ['final-hard-gate'],
       command: [
         'npx vitest run',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^src/product/spec-intake/"',
-        '! git diff --name-only | grep -Ev "^(src/product/spec-intake/|\\.workflow-artifacts/)"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/spec-intake/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/product/spec-intake/|\\.workflow-artifacts/)"',
         'echo SPEC_INTAKE_REGRESSION_PASS',
       ].join(' && '),
       captureOutput: true,

@@ -235,17 +235,6 @@ Focus:
 Write .workflow-artifacts/wave4-cli-onboarding/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-cli-onboarding/review-codex.md' },
     })
-    .step('review-verdict-gate', {
-      type: 'deterministic',
-      dependsOn: ['review-cli-claude', 'review-cli-codex'],
-      command: [
-        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/wave4-cli-onboarding/review-claude.md',
-        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/wave4-cli-onboarding/review-codex.md',
-        'echo REVIEW_VERDICTS_RECORDED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
 
     .step('read-review-feedback', {
       type: 'deterministic',
@@ -255,7 +244,7 @@ Write .workflow-artifacts/wave4-cli-onboarding/review-codex.md ending with REVIE
       failOnError: true,
     })
     .step('fix-cli-onboarding', {
-      agent: 'impl-primary-codex',
+      agent: 'validator-claude',
       dependsOn: ['read-review-feedback'],
       task: `Fix Ricky CLI onboarding issues from review feedback.
 
@@ -267,7 +256,7 @@ Rules:
 - Preserve user-visible Google and GitHub guidance contracts.
 - Update tests for any behavior changes.
 - Keep the implementation deterministic and easy to test.`,
-      verification: { type: 'exit_code' },
+      verification: { type: 'exit_code', value: 0 },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -287,6 +276,18 @@ Rules:
       captureOutput: true,
       failOnError: true,
     })
+    .step('post-fix-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['post-fix-verification-gate'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave4-cli-onboarding/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave4-cli-onboarding/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        'echo REVIEW_VERDICTS_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
@@ -299,8 +300,9 @@ Rules:
       dependsOn: ['final-hard-validation'],
       command: [
         'npx tsc --noEmit',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\n" "$changed" | grep -Eq "^(src/cli/|src/cloud/auth/)"',
-        'printf "%s\n" "$changed" | grep -q . && echo CHANGES_PRESENT',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^src/cli/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cli/|src/shared/|\\.workflow-artifacts/)"',
         'echo CLI_ONBOARDING_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
