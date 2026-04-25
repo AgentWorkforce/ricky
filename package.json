@@ -7,6 +7,7 @@
     "bootstrap": "npm run bootstrap:skills && npm run bootstrap:deps",
     "bootstrap:skills": "bash ./skills.sh",
     "bootstrap:deps": "npm install",
+    "start": "npx ts-node src/commands/cli-main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
