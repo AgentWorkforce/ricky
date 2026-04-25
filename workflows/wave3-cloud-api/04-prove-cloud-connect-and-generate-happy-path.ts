@@ -9,6 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
+    .agent('impl-claude', {
+      cli: 'claude',
+      preset: 'worker',
+      role: 'Implements the bounded Cloud proof helpers and tests.',
+      retries: 2,
+    })
     .agent('reviewer-claude', {
       cli: 'claude',
       preset: 'reviewer',
@@ -54,9 +60,27 @@ async function main() {
       failOnError: true,
     })
 
+    .step('implement-cloud-proof', {
+      agent: 'impl-claude',
+      dependsOn: ['read-backlog-plan', 'read-cloud-implementation-context', 'read-workflow-standards'],
+      task: `Implement the Ricky Cloud proof surface in only these files:
+- src/cloud/api/proof/cloud-generate-proof.ts
+- src/cloud/api/proof/cloud-generate-proof.test.ts
+
+Requirements:
+- prove request validation for missing auth, workspace, and spec
+- prove successful generate response shape including artifacts, warnings, follow-up actions, and request id
+- prove explicit auth/workspace context is passed through
+- remain honest that the current executor is a stubbed runtime seam
+- keep proof deterministic and bounded
+- tests should evaluate user-visible Cloud contract behavior, not implementation trivia
+
+Write the files to disk, then exit cleanly.`,
+      verification: { type: 'file_exists', value: 'src/cloud/api/proof/cloud-generate-proof.ts' },
+    })
     .step('proof-file-gate', {
       type: 'deterministic',
-      dependsOn: ['read-backlog-plan', 'read-cloud-implementation-context', 'read-workflow-standards'],
+      dependsOn: ['implement-cloud-proof'],
       command: [
         'test -f src/cloud/api/proof/cloud-generate-proof.ts',
         'test -f src/cloud/api/proof/cloud-generate-proof.test.ts',
