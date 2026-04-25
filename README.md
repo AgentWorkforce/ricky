@@ -14,10 +14,12 @@ Ricky is built to:
 
 ## Interfaces
 
-Ricky is designed to work through three co-equal interfaces:
+Ricky is designed to work through these co-equal interfaces and onboarding surfaces:
+- **Slack**
+- **Web**
+- **CLI**
 - **Local / BYOH**
 - **Cloud API**
-- **Slack**
 
 Slack is a surface, not the product identity.
 
@@ -31,11 +33,12 @@ The CLI onboarding experience should:
 - make the first useful action obvious instead of dropping users into a blank tool
 - walk users toward Cloud setup when they want hosted workflow execution
 
-At minimum, Ricky's CLI should be able to guide users through:
+At minimum, Ricky's onboarding surfaces should be able to guide users through:
 - local-first workflow authoring and execution
 - Cloud connect commands for supported providers
 - connecting a Google account for Cloud-backed usage
 - connecting the GitHub app through the Cloud/Nango dashboard flow
+- starting from Slack, web, or CLI without needing a special privileged setup path
 
 Known Cloud connect command pattern from the Cloud repo:
 - `npx agent-relay cloud connect google`

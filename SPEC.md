@@ -17,10 +17,12 @@ Ricky's core job is not generic assistant chat. Ricky is specifically responsibl
 - analyzing workflow runs over time and suggesting concrete workflow improvements
 - returning resulting workflow artifacts when Ricky writes or coordinates runs
 
-Ricky should work through three co-equal interfaces:
+Ricky should work through co-equal interfaces and onboarding surfaces:
+- **Slack**: an interactive surface for workflow debugging, generation, coordination, proactive notifications, and onboarding
+- **Web**: a browser-based onboarding and interaction surface for connecting accounts, starting from a spec, and launching Cloud-backed flows
+- **CLI**: a local-first onboarding and command surface for direct invocation, spec handoff, and local/Cloud routing
 - **Local / BYOH mode**: runs against local repos, local tools, local agent-relay, and local skill loading
 - **Cloud API**: hosted through `AgentWorkforce/cloud`, with an API surface that can generate workflows from a spec, return downloadable artifacts, and optionally kick off execution and return resulting code artifacts
-- **Slack**: an interactive surface for workflow debugging, generation, coordination, and proactive notifications
 
 Slack is a product surface, not Ricky's core identity.
 
@@ -201,7 +203,7 @@ That narrower scope is a feature.
 Ricky should be:
 
 ### 5.1 A workflow-native product across local, API, and Slack surfaces
-Users should be able to ask or invoke Ricky through local tooling, API calls, Slack, CLI, or MCP-connected assistants for things like:
+Users should be able to ask or invoke Ricky through Slack, web, CLI, local tooling, API calls, or MCP-connected assistants for things like:
 - “Why did this workflow fail?”
 - “Fix this workflow and rerun it.”
 - “Generate a workflow from this spec.”
@@ -251,6 +253,7 @@ The CLI should:
 - surface friendly setup prompts for Google and GitHub integration paths
 - accept specs and requests directly from conversational LLM workflows, including handoff from Claude sessions
 - support both direct CLI usage and MCP-mediated handoff into Ricky
+- feel consistent with Slack and web onboarding rather than like a separate expert-only path
 
 The Cloud-side provider connect command pattern should align with existing Cloud commands such as:
 - `npx agent-relay cloud connect google`
@@ -324,17 +327,19 @@ Ricky should:
 4. monitor progress / failure state
 5. return resulting code artifacts, logs, and outcomes
 
-### 7.5 CLI onboarding and cloud connection guidance
+### 7.5 Omnichannel onboarding and cloud connection guidance
 Input:
-- first-time CLI user or user requesting Cloud-backed workflow execution
+- first-time user arriving from Slack, web, or CLI
+- user requesting Cloud-backed workflow execution
 
 Ricky should:
-1. greet the user with a recognizable ASCII-art welcome
-2. explain local/BYOH versus Cloud modes clearly
-3. show the correct Cloud connect command when provider auth is needed
-4. guide the user to connect Google for Cloud-backed usage
-5. guide the user to the Cloud dashboard integration flow for GitHub app / Nango-backed connection
-6. keep the experience friendly and concise rather than documentation-heavy
+1. support onboarding from Slack, web, and CLI without assuming one privileged path
+2. greet CLI users with a recognizable ASCII-art welcome
+3. explain local/BYOH versus Cloud modes clearly
+4. show the correct Cloud connect command when provider auth is needed
+5. guide the user to connect Google for Cloud-backed usage
+6. guide the user to the Cloud dashboard integration flow for GitHub app / Nango-backed connection
+7. keep the experience friendly and concise rather than documentation-heavy
 
 ### 7.6 Proactive workflow failure notification
 
@@ -368,6 +373,7 @@ Ricky should follow this split:
 - **Ingress / surfaces**
   - local/BYOH invocation
   - CLI onboarding and command surface
+  - web onboarding and interaction surface
   - MCP / assistant handoff surface for specs coming from Claude and similar tools
   - API endpoint in Cloud for workflow generation/execution requests
   - Slack interactive surface
@@ -410,6 +416,14 @@ Should mirror proven Slack patterns from Sage/NightCTO:
 - thread handling
 - outbound delivery
 - health route
+- onboarding handoff into Ricky for first-time users
+
+#### Web onboarding and interaction
+Should support:
+- first-run onboarding for non-CLI users
+- account and integration connection flows
+- spec submission and workflow launch entrypoints
+- clear transition into Cloud-backed execution
 
 #### Local/BYOH invocation
 Should support:
