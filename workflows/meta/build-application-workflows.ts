@@ -332,7 +332,7 @@ mkdir -p .workflow-artifacts/ricky-meta/dryrun
 for f in $(find workflows/wave0-foundation workflows/wave1-runtime workflows/wave2-product workflows/wave3-cloud-api workflows/wave4-local-byoh workflows/wave5-scale-and-ops -maxdepth 1 -name '*.ts' | sort); do
   base=$(basename "$f" .ts)
   echo "=== DRY RUN $f ==="
-  if ! agent-relay run --dry-run "$f" > ".workflow-artifacts/ricky-meta/dryrun/${base}.txt" 2>&1; then
+  if ! agent-relay run --dry-run "$f" > ".workflow-artifacts/ricky-meta/dryrun/$base.txt" 2>&1; then
     echo "DRYRUN_FAIL:$f"
     failed=1
   else
