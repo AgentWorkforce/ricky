@@ -38,8 +38,11 @@ Each generated workflow should include:
 8. deterministic file/materialization gate
 9. review phase
 10. fix phase when review/test feedback exists
-11. final hard verification gate
-12. explicit run cwd
+11. post-fix validation phase
+12. final review phase over the fixed state
+13. final review-pass gate
+14. final hard verification gate
+15. explicit run cwd
 
 ## Required content expectations inside tasks
 
@@ -60,9 +63,14 @@ For generated implementation workflows:
 3. implementation
 4. file verification
 5. review
-6. fix loop
-7. tests/build/dry-run validation
-8. final signoff
+6. read review feedback
+7. fix loop
+8. post-fix validation
+9. final re-review on the fixed state
+10. final review-pass gate
+11. final hard validation
+12. regression/build gate
+13. final signoff
 
 ## Generated workflow constraints
 
@@ -70,5 +78,8 @@ For generated implementation workflows:
 - no blind swarm defaulting
 - no missing deterministic gates after agent edits
 - no missing review stage
+- no fix loop that depends on a pass-only review gate
+- no final signoff that depends on stale pre-fix review artifacts
 - no broad single-step ownership of many files unless the workflow is explicitly doc-only and bounded
+- no broad regression allowlists unless the workflow declares an explicit dependency-change manifest and validates against it
 - no final “done” without a deterministic gate

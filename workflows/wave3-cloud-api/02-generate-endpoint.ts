@@ -46,7 +46,7 @@ async function main() {
     .step('prepare-artifacts', {
       type: 'deterministic',
       command: [
-        'mkdir -p .workflow-artifacts/wave3-generate-endpoint',
+        'mkdir -p .workflow-artifacts/wave3-cloud-api/generate-endpoint',
         'mkdir -p src/cloud/api',
         'echo RICKY_WAVE3_GENERATE_ENDPOINT_READY',
       ].join(' && '),
@@ -119,8 +119,8 @@ Verification:
 Commit/PR boundary:
 - Keep changes scoped to src/cloud/api and any required imports from Cloud auth/product generation contracts.
 
-Write .workflow-artifacts/wave3-generate-endpoint/plan.md ending with GENERATE_ENDPOINT_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-generate-endpoint/plan.md' },
+Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/plan.md ending with GENERATE_ENDPOINT_PLAN_READY.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/plan.md' },
     })
 
     .step('implement-endpoint', {
@@ -214,8 +214,8 @@ Focus:
 - Cloud/local mode distinction is not erased.
 - Response contract is user-visible and useful, not just internal status.
 
-Write .workflow-artifacts/wave3-generate-endpoint/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-generate-endpoint/review-claude.md' },
+Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md' },
     })
     .step('review-endpoint-codex', {
       agent: 'reviewer-codex',
@@ -228,14 +228,14 @@ Focus:
 - Practical integration boundary with generation pipeline.
 - Error handling for invalid request and validation failure.
 
-Write .workflow-artifacts/wave3-generate-endpoint/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-generate-endpoint/review-codex.md' },
+Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/review-codex.md' },
     })
 
     .step('read-review-feedback', {
       type: 'deterministic',
       dependsOn: ['review-endpoint-claude', 'review-endpoint-codex'],
-      command: 'cat .workflow-artifacts/wave3-generate-endpoint/review-claude.md .workflow-artifacts/wave3-generate-endpoint/review-codex.md',
+      command: 'cat .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-codex.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -252,7 +252,7 @@ Rules:
 - Keep auth/workspace contract explicit.
 - Update tests when behavior changes.
 - Re-run deterministic gates after edits.`,
-      verification: { type: 'exit_code', value: 0 },
+      verification: { type: 'exit_code', value: '0' },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -270,21 +270,55 @@ Rules:
       captureOutput: true,
       failOnError: true,
     })
-    .step('post-fix-review-pass-gate', {
+    .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
+      command: 'npx tsc --noEmit && npx vitest run src/cloud/api/',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    .step('final-review-endpoint-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the Cloud generation endpoint after fixes and post-fix validation.
+
+Read src/cloud/api/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm prior review findings are fixed or explicitly non-blocking. Re-check alignment with Ricky product journey, auth/workspace boundary, Cloud/local mode distinction, and response contract.
+
+Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md' },
+    })
+    .step('final-review-endpoint-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the Cloud generation endpoint code and tests after fixes.
+
+Read src/cloud/api/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm deterministic gates, route/handler contract, generation pipeline integration, and error handling are ready for final hard gates.
+
+Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-endpoint-claude', 'final-review-endpoint-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave3-generate-endpoint/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave3-generate-endpoint/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
-        'echo REVIEW_VERDICTS_PASS',
+        'tail -n 1 .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        'echo GENERATE_ENDPOINT_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })
-
     .step('final-hard-validation', {
       type: 'deterministic',
-      dependsOn: ['post-fix-verification-gate'],
+      dependsOn: ['final-review-pass-gate'],
       command: 'npx tsc --noEmit && npx vitest run src/cloud/api/',
       captureOutput: true,
       failOnError: true,
@@ -296,7 +330,7 @@ Rules:
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
         'printf "%s\\n" "$changed" | grep -Eq "^src/cloud/api/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/api/|src/cloud/auth/|src/product/generation/|src/product/spec-intake/|\\.workflow-artifacts/)"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/api/|\\.workflow-artifacts/)"',
         'echo GENERATE_ENDPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -305,11 +339,11 @@ Rules:
     .step('final-signoff', {
       agent: 'validator-claude',
       dependsOn: ['regression-gate'],
-      task: `Write .workflow-artifacts/wave3-generate-endpoint/signoff.md.
+      task: `Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/signoff.md.
 
 Include files changed, validation commands, endpoint contract summary, and any residual integration risks.
 End with GENERATE_ENDPOINT_WORKFLOW_COMPLETE.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-generate-endpoint/signoff.md' },
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/signoff.md' },
     })
 
     .run({ cwd: process.cwd() });

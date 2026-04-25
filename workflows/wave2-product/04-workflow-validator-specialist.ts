@@ -76,6 +76,8 @@ Own only:
 Requirements:
 - Enforce Ricky workflow standards on generated or repaired workflows before signoff.
 - Structural checks must verify workflow(), dedicated wf-ricky-* channel, explicit pattern, maxConcurrency, timeout, deterministic steps, review stage, deliverables, non-goals, verification language, failOnError false initial gate, failOnError true final gate, typecheck/test/build gate, regression gate, and .run({ cwd: process.cwd() }).
+- Structural checks must detect stale pre-fix review gates: if a workflow checks initial review verdicts after a fix loop instead of running a final re-review, flag it as a blocking finding. The correct shape is fix -> post-fix validation -> final-review -> final-review-pass-gate.
+- Structural checks must detect over-broad regression allowlists: if a regression gate allows directories outside the workflow's declared file targets and .workflow-artifacts/, flag it as a warning with a recommendation to restrict to exact target paths.
 - Proof loop must explicitly model initial soft run, fix loop, final hard gate, build/typecheck gate, and regression gate.
 - Produce structured findings with severity, path/location when available, fix hint, and blocking status.
 - Return a signoff verdict that refuses ready status when deterministic verification is missing.
@@ -117,6 +119,8 @@ Required coverage:
 - missing initial failOnError false soft gate blocks 80-to-100 signoff.
 - failed dry-run command is reported as blocking.
 - failed regression gate keeps verdict not ready.
+- stale pre-fix review gate (checking initial review verdicts after fix loop instead of running final re-review) is flagged as blocking.
+- over-broad regression allowlist (allowing directories outside declared file targets) is flagged as a warning.
 
 Review checklist:
 - Tests do not execute agent-relay or shell commands.
@@ -208,17 +212,73 @@ Write .workflow-artifacts/wave2-product/workflow-validator-specialist/fix-loop.m
       failOnError: true,
     })
 
-    .step('final-hard-gate', {
+    .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-file-gate'],
       command: 'npx tsc --noEmit && npx vitest run src/product/specialists/validator/',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    .step('final-review-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review validator specialist after the fix loop.
+
+Read src/product/specialists/validator/, the fix-loop artifact, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm prior findings are fixed or explicitly non-blocking, and that the validator enforces Ricky's 80-to-100 bar, dry-run/structural checks, proof loops, and honest signoff for generated and repaired workflows.
+
+Write .workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-claude.md' },
+    })
+
+    .step('final-review-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review validator specialist implementation and tests after fixes.
+
+Read src/product/specialists/validator/, the fix-loop artifact, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm structural checks, proof-loop modeling, TypeScript contracts, and tests are ready for final hard gates.
+
+Write .workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-codex.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-claude', 'final-review-codex'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        'echo VALIDATOR_SPECIALIST_FINAL_REVIEW_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('final-hard-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-pass-gate'],
+      command: 'npx vitest run src/product/specialists/validator/',
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('build-typecheck-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-hard-gate'],
+      command: 'npx tsc --noEmit',
       captureOutput: true,
       failOnError: true,
     })
 
     .step('regression-gate', {
       type: 'deterministic',
-      dependsOn: ['final-hard-gate'],
+      dependsOn: ['build-typecheck-gate'],
       command: [
         'npx vitest run',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/specialists/validator/"',

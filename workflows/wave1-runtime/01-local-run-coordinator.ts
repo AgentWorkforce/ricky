@@ -256,17 +256,79 @@ Write .workflow-artifacts/wave1-runtime/local-run-coordinator/fix-loop.md with c
       failOnError: true,
     })
 
-    .step('final-hard-gate', {
+    .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-file-gate'],
       command: 'npx tsc --noEmit && npx vitest run src/runtime/local-coordinator.test.ts',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    .step('final-review-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the fixed local coordinator after the fix loop.
+
+Read the implementation, tests, fix-loop artifact, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm all previous review findings are either fixed or explicitly non-blocking, and that the coordinator still preserves Ricky's generated-workflow execution boundary.
+
+Write .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+      verification: {
+        type: 'file_exists',
+        value: '.workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-claude.md',
+      },
+    })
+
+    .step('final-review-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the fixed local coordinator for TypeScript, tests, and validation quality.
+
+Read the target files, fix-loop artifact, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm the implementation is ready for the final hard gates and that no new scope drift was introduced by fixes.
+
+Write .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
+      verification: {
+        type: 'file_exists',
+        value: '.workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-codex.md',
+      },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-claude', 'final-review-codex'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        'echo LOCAL_COORDINATOR_FINAL_REVIEW_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('final-hard-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-pass-gate'],
+      command: 'npx vitest run src/runtime/local-coordinator.test.ts',
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('build-typecheck-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-hard-gate'],
+      command: 'npx tsc --noEmit',
       captureOutput: true,
       failOnError: true,
     })
 
     .step('regression-gate', {
       type: 'deterministic',
-      dependsOn: ['final-hard-gate'],
+      dependsOn: ['build-typecheck-gate'],
       command: [
         'npx vitest run',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^(src/runtime/(types|local-coordinator|local-coordinator\\.test)\\.ts|src/runtime/index\\.ts)$"',

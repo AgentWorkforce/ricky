@@ -46,7 +46,7 @@ async function main() {
     .step('prepare-artifacts', {
       type: 'deterministic',
       command: [
-        'mkdir -p .workflow-artifacts/wave4-cli-onboarding',
+        'mkdir -p .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome',
         'mkdir -p src/cli',
         'echo RICKY_WAVE4_CLI_ONBOARDING_READY',
       ].join(' && '),
@@ -120,8 +120,8 @@ Verification:
 Commit/PR boundary:
 - Keep changes scoped to src/cli unless a tiny shared type is required.
 
-Write .workflow-artifacts/wave4-cli-onboarding/plan.md ending with CLI_ONBOARDING_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-cli-onboarding/plan.md' },
+Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/plan.md ending with CLI_ONBOARDING_PLAN_READY.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/plan.md' },
     })
 
     .step('implement-cli-onboarding', {
@@ -218,8 +218,8 @@ Focus:
 - Google connect command and GitHub dashboard/Nango guidance match the product spec.
 - User-visible proof is present in tests.
 
-Write .workflow-artifacts/wave4-cli-onboarding/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-cli-onboarding/review-claude.md' },
+Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/review-claude.md' },
     })
     .step('review-cli-codex', {
       agent: 'reviewer-codex',
@@ -232,14 +232,14 @@ Focus:
 - Export shape.
 - Avoiding unnecessary dependencies.
 
-Write .workflow-artifacts/wave4-cli-onboarding/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-cli-onboarding/review-codex.md' },
+Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/review-codex.md' },
     })
 
     .step('read-review-feedback', {
       type: 'deterministic',
       dependsOn: ['review-cli-claude', 'review-cli-codex'],
-      command: 'cat .workflow-artifacts/wave4-cli-onboarding/review-claude.md .workflow-artifacts/wave4-cli-onboarding/review-codex.md',
+      command: 'cat .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/review-claude.md .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/review-codex.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -256,7 +256,7 @@ Rules:
 - Preserve user-visible Google and GitHub guidance contracts.
 - Update tests for any behavior changes.
 - Keep the implementation deterministic and easy to test.`,
-      verification: { type: 'exit_code', value: 0 },
+      verification: { type: 'exit_code', value: '0' },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -276,21 +276,55 @@ Rules:
       captureOutput: true,
       failOnError: true,
     })
-    .step('post-fix-review-pass-gate', {
+    .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
+      command: 'npx tsc --noEmit && npx vitest run src/cli/',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    .step('final-review-cli-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the Ricky CLI onboarding experience after fixes and post-fix validation.
+
+Read src/cli/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm prior review findings are fixed or explicitly non-blocking. Re-check that local/BYOH and Cloud are co-equal, first-run output is clear, Google/GitHub guidance matches product spec, and user-visible proof is in tests.
+
+Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-review-claude.md' },
+    })
+    .step('final-review-cli-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the CLI onboarding code and tests after fixes.
+
+Read src/cli/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm deterministic rendering contracts, test coverage for user-visible strings and modes, export shape, and minimal dependencies are ready for final hard gates.
+
+Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-review-codex.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-cli-claude', 'final-review-cli-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave4-cli-onboarding/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave4-cli-onboarding/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
-        'echo REVIEW_VERDICTS_PASS',
+        'tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        'echo CLI_ONBOARDING_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })
-
     .step('final-hard-validation', {
       type: 'deterministic',
-      dependsOn: ['post-fix-verification-gate'],
+      dependsOn: ['final-review-pass-gate'],
       command: 'npx tsc --noEmit && npx vitest run src/cli/',
       captureOutput: true,
       failOnError: true,
@@ -302,7 +336,7 @@ Rules:
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
         'printf "%s\\n" "$changed" | grep -Eq "^src/cli/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cli/|src/shared/|\\.workflow-artifacts/)"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cli/|\\.workflow-artifacts/)"',
         'echo CLI_ONBOARDING_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -311,11 +345,11 @@ Rules:
     .step('final-signoff', {
       agent: 'validator-claude',
       dependsOn: ['regression-gate'],
-      task: `Write .workflow-artifacts/wave4-cli-onboarding/signoff.md.
+      task: `Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/signoff.md.
 
 Include files changed, user-visible contracts checked, validation commands, and remaining risks.
 End with CLI_ONBOARDING_WORKFLOW_COMPLETE.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-cli-onboarding/signoff.md' },
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/signoff.md' },
     })
 
     .run({ cwd: process.cwd() });

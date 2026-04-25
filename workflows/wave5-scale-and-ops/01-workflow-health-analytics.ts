@@ -46,7 +46,7 @@ async function main() {
     .step('prepare-artifacts', {
       type: 'deterministic',
       command: [
-        'mkdir -p .workflow-artifacts/wave5-health-analytics',
+        'mkdir -p .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics',
         'mkdir -p src/analytics',
         'echo RICKY_WAVE5_HEALTH_ANALYTICS_READY',
       ].join(' && '),
@@ -118,8 +118,8 @@ Verification:
 Commit/PR boundary:
 - Keep changes scoped to src/analytics and imports from runtime evidence/failure types if they already exist.
 
-Write .workflow-artifacts/wave5-health-analytics/plan.md ending with HEALTH_ANALYTICS_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-health-analytics/plan.md' },
+Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md ending with HEALTH_ANALYTICS_PLAN_READY.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md' },
     })
 
     .step('implement-health-analytics', {
@@ -211,8 +211,8 @@ Focus:
 - Empty and degraded histories produce honest output.
 - Analytics closes the generation/debugging feedback loop without over-automating fixes.
 
-Write .workflow-artifacts/wave5-health-analytics/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-health-analytics/review-claude.md' },
+Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-claude.md' },
     })
     .step('review-analytics-codex', {
       agent: 'reviewer-codex',
@@ -225,14 +225,14 @@ Focus:
 - Type quality and export shape.
 - No accidental live telemetry dependency.
 
-Write .workflow-artifacts/wave5-health-analytics/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-health-analytics/review-codex.md' },
+Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-codex.md' },
     })
 
     .step('read-review-feedback', {
       type: 'deterministic',
       dependsOn: ['review-analytics-claude', 'review-analytics-codex'],
-      command: 'cat .workflow-artifacts/wave5-health-analytics/review-claude.md .workflow-artifacts/wave5-health-analytics/review-codex.md',
+      command: 'cat .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-claude.md .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-codex.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -249,7 +249,7 @@ Rules:
 - Update tests when contracts change.
 - Do not add live telemetry dependencies.
 - Re-run deterministic gates after changes.`,
-      verification: { type: 'exit_code', value: 0 },
+      verification: { type: 'exit_code', value: '0' },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -268,21 +268,55 @@ Rules:
       captureOutput: true,
       failOnError: true,
     })
-    .step('post-fix-review-pass-gate', {
+    .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
+      command: 'npx tsc --noEmit && npx vitest run src/analytics/',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    .step('final-review-analytics-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the workflow health analytics module after fixes and post-fix validation.
+
+Read src/analytics/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm prior review findings are fixed or explicitly non-blocking. Re-check that recommendations are actionable, failure classes and rates are represented, empty/degraded histories produce honest output, and analytics closes the feedback loop without over-automating.
+
+Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-claude.md' },
+    })
+    .step('final-review-analytics-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review workflow health analytics code and tests after fixes.
+
+Read src/analytics/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm deterministic calculations, test edge case coverage, type quality, export shape, and no accidental live telemetry dependency are ready for final hard gates.
+
+Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-codex.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-analytics-claude', 'final-review-analytics-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave5-health-analytics/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave5-health-analytics/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
-        'echo REVIEW_VERDICTS_PASS',
+        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        'echo HEALTH_ANALYTICS_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })
-
     .step('final-hard-validation', {
       type: 'deterministic',
-      dependsOn: ['post-fix-verification-gate'],
+      dependsOn: ['final-review-pass-gate'],
       command: 'npx tsc --noEmit && npx vitest run src/analytics/',
       captureOutput: true,
       failOnError: true,
@@ -294,7 +328,7 @@ Rules:
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
         'printf "%s\\n" "$changed" | grep -Eq "^src/analytics/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/analytics/|src/runtime/|\\.workflow-artifacts/)"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/analytics/|\\.workflow-artifacts/)"',
         'echo HEALTH_ANALYTICS_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -303,11 +337,11 @@ Rules:
     .step('final-signoff', {
       agent: 'validator-claude',
       dependsOn: ['regression-gate'],
-      task: `Write .workflow-artifacts/wave5-health-analytics/signoff.md.
+      task: `Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/signoff.md.
 
 Include files changed, validation commands, analytics contract summary, and remaining risks.
 End with HEALTH_ANALYTICS_WORKFLOW_COMPLETE.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-health-analytics/signoff.md' },
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/signoff.md' },
     })
 
     .run({ cwd: process.cwd() });

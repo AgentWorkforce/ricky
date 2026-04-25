@@ -46,7 +46,7 @@ async function main() {
     .step('prepare-artifacts', {
       type: 'deterministic',
       command: [
-        'mkdir -p .workflow-artifacts/wave4-local-entrypoint',
+        'mkdir -p .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint',
         'mkdir -p src/local',
         'echo RICKY_WAVE4_LOCAL_ENTRYPOINT_READY',
       ].join(' && '),
@@ -117,8 +117,8 @@ Verification:
 Commit/PR boundary:
 - Keep changes scoped to src/local and tiny shared type imports if needed.
 
-Write .workflow-artifacts/wave4-local-entrypoint/plan.md ending with LOCAL_ENTRYPOINT_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-entrypoint/plan.md' },
+Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/plan.md ending with LOCAL_ENTRYPOINT_PLAN_READY.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/plan.md' },
     })
 
     .step('implement-local-entrypoint', {
@@ -210,8 +210,8 @@ Focus:
 - Local artifact, log, warning, and next-action outputs are useful to users.
 - Environment blockers are explicit.
 
-Write .workflow-artifacts/wave4-local-entrypoint/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-entrypoint/review-claude.md' },
+Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md' },
     })
     .step('review-local-codex', {
       agent: 'reviewer-codex',
@@ -224,14 +224,14 @@ Focus:
 - Exported type quality.
 - Practical fit with local agent-relay coordination.
 
-Write .workflow-artifacts/wave4-local-entrypoint/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-entrypoint/review-codex.md' },
+Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-codex.md' },
     })
 
     .step('read-review-feedback', {
       type: 'deterministic',
       dependsOn: ['review-local-claude', 'review-local-codex'],
-      command: 'cat .workflow-artifacts/wave4-local-entrypoint/review-claude.md .workflow-artifacts/wave4-local-entrypoint/review-codex.md',
+      command: 'cat .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-codex.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -248,7 +248,7 @@ Rules:
 - Update tests when contracts change.
 - Do not add live external dependencies.
 - Run deterministic gates after changes.`,
-      verification: { type: 'exit_code', value: 0 },
+      verification: { type: 'exit_code', value: '0' },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -266,21 +266,55 @@ Rules:
       captureOutput: true,
       failOnError: true,
     })
-    .step('post-fix-review-pass-gate', {
+    .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
+      command: 'npx tsc --noEmit && npx vitest run src/local/',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    .step('final-review-local-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the local/BYOH invocation implementation after fixes and post-fix validation.
+
+Read src/local/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm prior review findings are fixed or explicitly non-blocking. Re-check that local/BYOH is co-equal with Cloud, CLI/MCP spec handoff is represented, local outputs are useful, and environment blockers are explicit.
+
+Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md' },
+    })
+    .step('final-review-local-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the local entrypoint code and tests after fixes.
+
+Read src/local/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm deterministic gates, injectable process/filesystem boundaries, exported type quality, and fit with local agent-relay coordination are ready for final hard gates.
+
+Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-local-claude', 'final-review-local-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave4-local-entrypoint/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave4-local-entrypoint/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
-        'echo REVIEW_VERDICTS_PASS',
+        'tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        'echo LOCAL_ENTRYPOINT_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })
-
     .step('final-hard-validation', {
       type: 'deterministic',
-      dependsOn: ['post-fix-verification-gate'],
+      dependsOn: ['final-review-pass-gate'],
       command: 'npx tsc --noEmit && npx vitest run src/local/',
       captureOutput: true,
       failOnError: true,
@@ -292,7 +326,7 @@ Rules:
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
         'printf "%s\\n" "$changed" | grep -Eq "^src/local/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/local/|src/runtime/|src/product/spec-intake/|src/product/generation/|src/shared/|\\.workflow-artifacts/)"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/local/|\\.workflow-artifacts/)"',
         'echo LOCAL_ENTRYPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -301,11 +335,11 @@ Rules:
     .step('final-signoff', {
       agent: 'validator-claude',
       dependsOn: ['regression-gate'],
-      task: `Write .workflow-artifacts/wave4-local-entrypoint/signoff.md.
+      task: `Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md.
 
 Include files changed, local/BYOH contract summary, validation commands, and remaining risks.
 End with LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-entrypoint/signoff.md' },
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md' },
     })
 
     .run({ cwd: process.cwd() });

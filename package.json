@@ -6,9 +6,16 @@
   "scripts": {
     "bootstrap": "bash ./skills.sh",
     "bootstrap:skills": "bash ./skills.sh",
-    "bootstrap:deps": "prpm install @prpm/self-improving"
+    "bootstrap:deps": "prpm install @prpm/self-improving",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@agent-relay/sdk": "^5.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "@types/node": "^24.5.2"
   }
 }

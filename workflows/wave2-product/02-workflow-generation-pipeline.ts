@@ -216,17 +216,73 @@ Write .workflow-artifacts/wave2-product/workflow-generation-pipeline/fix-loop.md
       failOnError: true,
     })
 
-    .step('final-hard-gate', {
+    .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-file-gate'],
       command: 'npx tsc --noEmit && npx vitest run src/product/generation/',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    .step('final-review-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review workflow generation after the fix loop.
+
+Read src/product/generation/, the fix-loop artifact, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm prior findings are fixed or explicitly non-blocking, and that generated workflow artifacts preserve deterministic gates, review stages, execution routing, and the no-hand-authored-workflow product promise.
+
+Write .workflow-artifacts/wave2-product/workflow-generation-pipeline/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-generation-pipeline/final-review-claude.md' },
+    })
+
+    .step('final-review-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review workflow generation implementation and tests after fixes.
+
+Read src/product/generation/, the fix-loop artifact, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm renderer determinism, pattern selection, skill loading, validation planning, and tests are ready for final hard gates.
+
+Write .workflow-artifacts/wave2-product/workflow-generation-pipeline/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-generation-pipeline/final-review-codex.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-claude', 'final-review-codex'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave2-product/workflow-generation-pipeline/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave2-product/workflow-generation-pipeline/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        'echo GENERATION_PIPELINE_FINAL_REVIEW_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('final-hard-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-pass-gate'],
+      command: 'npx vitest run src/product/generation/',
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('build-typecheck-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-hard-gate'],
+      command: 'npx tsc --noEmit',
       captureOutput: true,
       failOnError: true,
     })
 
     .step('regression-gate', {
       type: 'deterministic',
-      dependsOn: ['final-hard-gate'],
+      dependsOn: ['build-typecheck-gate'],
       command: [
         'npx vitest run',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/generation/"',

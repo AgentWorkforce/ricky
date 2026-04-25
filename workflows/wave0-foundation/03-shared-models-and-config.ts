@@ -19,11 +19,6 @@ async function main() {
       role: 'Primary implementer for shared TypeScript model and config files.',
       retries: 2,
     })
-    .agent('impl-tests-codex', {
-      cli: 'codex',
-      role: 'Validation implementer who adds or adjusts lightweight compile-time checks only if the existing repo test setup supports them.',
-      retries: 1,
-    })
     .agent('reviewer-claude', {
       cli: 'claude',
       preset: 'reviewer',
@@ -210,37 +205,9 @@ Write files to disk and keep the implementation compact.`,
       failOnError: false,
     })
 
-    .step('fill-validation-gaps', {
-      agent: 'impl-tests-codex',
-      dependsOn: ['initial-soft-typecheck'],
-      task: `Review the initial typecheck output and add only minimal validation support if needed.
-
-Initial typecheck output:
-{{steps.initial-soft-typecheck.output}}
-
-Allowed file targets:
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
-- tsconfig.json only if no TypeScript config exists and npx tsc --noEmit cannot run for that reason
-
-Non-goals:
-- Do not add runtime tests unless a test framework already exists and the checks are trivial.
-- Do not edit unrelated source files to silence errors.
-- Do not add package dependencies.
-
-Verification commands:
-- npx tsc --noEmit
-- grep -q "export" src/shared/models/index.ts
-
-If the soft typecheck failed because the repository lacks TypeScript setup, document the blocker in .workflow-artifacts/wave0-foundation/shared-models/validation-notes.md and make the smallest repo-appropriate fix only if obvious.`,
-      verification: { type: 'exit_code', value: '0' },
-    })
-
     .step('review-shared-models-claude', {
       agent: 'reviewer-claude',
-      dependsOn: ['fill-validation-gaps'],
+      dependsOn: ['initial-soft-typecheck'],
       task: `Review the shared model semantics and product fit.
 
 Read:
@@ -249,6 +216,8 @@ Read:
 - src/shared/models/workflow-config.ts
 - src/shared/models/index.ts
 - src/shared/constants.ts
+- Initial soft typecheck output:
+{{steps.initial-soft-typecheck.output}}
 
 Review checklist:
 - Evidence types can represent step status, verification results, logs, artifacts, and retry history.
@@ -261,7 +230,7 @@ Write .workflow-artifacts/wave0-foundation/shared-models/review-claude.md and en
     })
     .step('review-shared-models-codex', {
       agent: 'reviewer-codex',
-      dependsOn: ['fill-validation-gaps'],
+      dependsOn: ['initial-soft-typecheck'],
       task: `Review the shared TypeScript implementation.
 
 Read:
@@ -271,6 +240,8 @@ Read:
 - src/shared/constants.ts
 - package.json
 - tsconfig.json if present
+- Initial soft typecheck output:
+{{steps.initial-soft-typecheck.output}}
 
 Review checklist:
 - Exports are explicit and compile-friendly.
@@ -297,6 +268,8 @@ Read:
 - src/shared/models/workflow-config.ts
 - src/shared/models/index.ts
 - src/shared/constants.ts
+- Initial soft typecheck output:
+{{steps.initial-soft-typecheck.output}}
 
 Only edit:
 - src/shared/models/workflow-evidence.ts
@@ -305,17 +278,78 @@ Only edit:
 - src/shared/constants.ts
 - tsconfig.json only if validation already introduced it for an explicit TypeScript setup blocker
 
-Do not broaden scope. Re-run mentally against the review checklist and exit only after targeted fixes are written.`,
+Do not broaden scope. Fix only concrete review findings and validation failures, then run npx tsc --noEmit before exiting. If the repository lacks TypeScript setup, document the blocker in .workflow-artifacts/wave0-foundation/shared-models/validation-notes.md and make the smallest repo-appropriate fix only if obvious.`,
       verification: { type: 'exit_code', value: '0' },
     })
 
-    .step('post-fix-review-pass-gate', {
+    .step('post-fix-typecheck', {
       type: 'deterministic',
-      dependsOn: ['post-fix-verification-gate'],
+      dependsOn: ['fix-review-feedback'],
+      command: 'npx tsc --noEmit',
+      captureOutput: true,
+      failOnError: true,
+    })
+    .step('post-fix-structure-gate', {
+      type: 'deterministic',
+      dependsOn: ['post-fix-typecheck'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
-        'echo REVIEW_VERDICTS_PASS',
+        'test -f src/shared/models/workflow-evidence.ts',
+        'test -f src/shared/models/workflow-config.ts',
+        'test -f src/shared/models/index.ts',
+        'test -f src/shared/constants.ts',
+        'grep -q "export" src/shared/models/index.ts',
+        'grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" src/shared/models/workflow-evidence.ts',
+        'grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" src/shared/models/workflow-config.ts',
+        'echo W0_SHARED_MODELS_POST_FIX_VALIDATION_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('final-review-shared-models-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-structure-gate'],
+      task: `Final semantic review for the Wave 0 shared models after fixes and post-fix validation.
+
+Read:
+- .workflow-artifacts/wave0-foundation/shared-models/review-claude.md
+- src/shared/models/workflow-evidence.ts
+- src/shared/models/workflow-config.ts
+- src/shared/models/index.ts
+- src/shared/constants.ts
+- Post-fix validation output:
+{{steps.post-fix-structure-gate.output}}
+
+Check the original semantic review checklist again and verify any earlier concrete failures were fixed. Write .workflow-artifacts/wave0-foundation/shared-models/final-review-claude.md and end with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/shared-models/final-review-claude.md' },
+    })
+    .step('final-review-shared-models-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-structure-gate'],
+      task: `Final TypeScript review for the Wave 0 shared models after fixes and post-fix validation.
+
+Read:
+- .workflow-artifacts/wave0-foundation/shared-models/review-codex.md
+- src/shared/models/workflow-evidence.ts
+- src/shared/models/workflow-config.ts
+- src/shared/models/index.ts
+- src/shared/constants.ts
+- package.json
+- tsconfig.json if present
+- Post-fix validation output:
+{{steps.post-fix-structure-gate.output}}
+
+Check the original TypeScript review checklist again and verify any earlier concrete failures were fixed. Write .workflow-artifacts/wave0-foundation/shared-models/final-review-codex.md and end with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/shared-models/final-review-codex.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-shared-models-claude', 'final-review-shared-models-codex'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/final-review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/final-review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        'echo W0_SHARED_MODELS_REVIEW_PASS_GATE',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -323,7 +357,7 @@ Do not broaden scope. Re-run mentally against the review checklist and exit only
 
     .step('final-hard-typecheck', {
       type: 'deterministic',
-      dependsOn: ['fix-review-feedback'],
+      dependsOn: ['final-review-pass-gate'],
       command: 'npx tsc --noEmit',
       captureOutput: true,
       failOnError: true,

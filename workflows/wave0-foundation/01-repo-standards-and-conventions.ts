@@ -210,7 +210,7 @@ Review checklist:
 - WORKFLOW_AUTHORING_RULES.md retains Must-do and Must-not sections.
 - The diff is scoped to AGENTS.md, CLAUDE.md, workflows/README.md, and workflows/shared/WORKFLOW_AUTHORING_RULES.md.
 
-If fixes are needed, list exact file-level changes. Write .workflow-artifacts/wave0-foundation/repo-standards/review.md and end with REVIEW_PASS or REVIEW_FAIL.`,
+If fixes are needed, list exact file-level changes. Write .workflow-artifacts/wave0-foundation/repo-standards/review.md and end with REVIEW_REPO_STANDARDS_PASS or REVIEW_REPO_STANDARDS_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/repo-standards/review.md' },
     })
 
@@ -218,6 +218,13 @@ If fixes are needed, list exact file-level changes. Write .workflow-artifacts/wa
       agent: 'author-codex',
       dependsOn: ['review-convention-files'],
       task: `Fix any concrete issues from .workflow-artifacts/wave0-foundation/repo-standards/review.md.
+
+Read before editing:
+- .workflow-artifacts/wave0-foundation/repo-standards/review.md
+- AGENTS.md
+- CLAUDE.md
+- workflows/README.md
+- workflows/shared/WORKFLOW_AUTHORING_RULES.md
 
 If the review passes, make no unrelated edits. If it fails, only patch the four target files:
 - AGENTS.md
@@ -233,9 +240,56 @@ Re-check these expectations before exiting:
       verification: { type: 'exit_code', value: '0' },
     })
 
-    .step('final-hard-gate', {
+    .step('post-fix-validation-gate', {
       type: 'deterministic',
       dependsOn: ['fix-review-feedback'],
+      command: [
+        'test -f AGENTS.md',
+        'test -f CLAUDE.md',
+        'test -f workflows/README.md',
+        'test -f workflows/shared/WORKFLOW_AUTHORING_RULES.md',
+        'grep -Eiq "workflow standards|deterministic gates|wave" AGENTS.md',
+        'grep -Eiq "workflow standards|deterministic gates|wave" CLAUDE.md',
+        'grep -Eiq "wf-ricky|deterministic|review" workflows/README.md',
+        'grep -Eq "Must-do|Must-not" workflows/shared/WORKFLOW_AUTHORING_RULES.md',
+        'echo W0_REPO_STANDARDS_POST_FIX_VALIDATION_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('final-review-repo-standards', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation-gate'],
+      task: `Final review for the Wave 0 repo convention updates after fixes and post-fix validation.
+
+Read:
+- .workflow-artifacts/wave0-foundation/repo-standards/review.md
+- AGENTS.md
+- CLAUDE.md
+- workflows/README.md
+- workflows/shared/WORKFLOW_AUTHORING_RULES.md
+- Post-fix validation output:
+{{steps.post-fix-validation-gate.output}}
+
+Check the same review checklist again and verify any earlier concrete failures were fixed. Write .workflow-artifacts/wave0-foundation/repo-standards/final-review.md and end with REVIEW_REPO_STANDARDS_PASS or REVIEW_REPO_STANDARDS_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/repo-standards/final-review.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-repo-standards'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave0-foundation/repo-standards/final-review.md | grep -Eq "^REVIEW_REPO_STANDARDS_PASS$"',
+        'echo W0_REPO_STANDARDS_REVIEW_PASS_GATE',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('final-hard-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-pass-gate'],
       command: [
         'test -f AGENTS.md',
         'test -f CLAUDE.md',

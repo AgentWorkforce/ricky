@@ -46,7 +46,7 @@ async function main() {
     .step('prepare-artifacts', {
       type: 'deterministic',
       command: [
-        'mkdir -p .workflow-artifacts/wave3-cloud-auth',
+        'mkdir -p .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth',
         'mkdir -p src/cloud/auth',
         'echo RICKY_WAVE3_CLOUD_AUTH_READY',
       ].join(' && '),
@@ -120,14 +120,14 @@ Verification:
 Commit/PR boundary:
 - Keep changes scoped to src/cloud/auth and tests for this module.
 
-Write .workflow-artifacts/wave3-cloud-auth/plan.md and end with CLOUD_AUTH_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-auth/plan.md' },
+Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/plan.md and end with CLOUD_AUTH_PLAN_READY.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/plan.md' },
     })
 
     .step('implement-auth-module', {
       agent: 'impl-primary-codex',
       dependsOn: ['lead-plan'],
-      task: `Implement the Cloud auth module according to .workflow-artifacts/wave3-cloud-auth/plan.md.
+      task: `Implement the Cloud auth module according to .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/plan.md.
 
 Deliverables:
 - request-validator.ts should validate API key presence, workspace/project context, request mode, and provider connection state needed by Ricky Cloud requests.
@@ -216,8 +216,8 @@ Focus:
 - Auth/workspace behavior must be understandable from the public types.
 - 80-to-100 loop readiness.
 
-Write .workflow-artifacts/wave3-cloud-auth/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-auth/review-claude.md' },
+Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-claude.md' },
     })
     .step('review-cloud-auth-codex', {
       agent: 'reviewer-codex',
@@ -230,14 +230,14 @@ Focus:
 - Workspace scoping correctness.
 - Test coverage for request validation and provider guidance.
 
-Write .workflow-artifacts/wave3-cloud-auth/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-auth/review-codex.md' },
+Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-codex.md' },
     })
 
     .step('read-review-feedback', {
       type: 'deterministic',
       dependsOn: ['review-cloud-auth-claude', 'review-cloud-auth-codex'],
-      command: 'cat .workflow-artifacts/wave3-cloud-auth/review-claude.md .workflow-artifacts/wave3-cloud-auth/review-codex.md',
+      command: 'cat .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-claude.md .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-codex.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -254,7 +254,7 @@ Rules:
 - If tests need updates, coordinate the edits in the same pass and keep them scoped to src/cloud/auth.
 - Re-check provider guidance contracts after any edit.
 - Do not claim success without deterministic gates.`,
-      verification: { type: 'exit_code', value: 0 },
+      verification: { type: 'exit_code', value: '0' },
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -273,21 +273,55 @@ Rules:
       captureOutput: true,
       failOnError: true,
     })
-    .step('post-fix-review-pass-gate', {
+    .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
+      command: 'npx tsc --noEmit && npx vitest run src/cloud/auth/',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    .step('final-review-cloud-auth-claude', {
+      agent: 'reviewer-claude',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the Cloud auth and provider connect implementation after fixes and post-fix validation.
+
+Read src/cloud/auth/ source and tests, the fix-loop output, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm prior review findings are fixed or explicitly non-blocking. Re-check product spec alignment for Cloud connect, Google command guidance, GitHub dashboard/Nango path, auth/workspace behavior, and 80-to-100 readiness.
+
+Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-claude.md' },
+    })
+    .step('final-review-cloud-auth-codex', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-validation'],
+      task: `Re-review the Cloud auth implementation and tests after fixes.
+
+Read src/cloud/auth/ source and tests, and post-fix validation output:
+{{steps.post-fix-validation.output}}
+
+Confirm deterministic validation coverage, TypeScript contracts, workspace scoping, and test coverage are ready for final hard gates.
+
+Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-cloud-auth-claude', 'final-review-cloud-auth-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave3-cloud-auth/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave3-cloud-auth/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
-        'echo REVIEW_VERDICTS_PASS',
+        'tail -n 1 .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        'echo CLOUD_AUTH_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
     })
-
     .step('final-hard-validation', {
       type: 'deterministic',
-      dependsOn: ['post-fix-verification-gate'],
+      dependsOn: ['final-review-pass-gate'],
       command: 'npx tsc --noEmit && npx vitest run src/cloud/auth/',
       captureOutput: true,
       failOnError: true,
@@ -299,7 +333,7 @@ Rules:
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
         'printf "%s\\n" "$changed" | grep -Eq "^src/cloud/auth/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/auth/|package\\.json|tsconfig\\.json|\\.workflow-artifacts/)"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/auth/|\\.workflow-artifacts/)"',
         'echo CLOUD_AUTH_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -308,7 +342,7 @@ Rules:
     .step('final-signoff', {
       agent: 'validator-claude',
       dependsOn: ['regression-gate'],
-      task: `Write .workflow-artifacts/wave3-cloud-auth/signoff.md.
+      task: `Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/signoff.md.
 
 Include:
 - Files changed.
@@ -317,7 +351,7 @@ Include:
 - Remaining risks, if any.
 
 End with CLOUD_AUTH_WORKFLOW_COMPLETE.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-auth/signoff.md' },
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/signoff.md' },
     })
 
     .run({ cwd: process.cwd() });

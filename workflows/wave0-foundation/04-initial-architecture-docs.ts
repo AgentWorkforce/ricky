@@ -221,7 +221,7 @@ Review checklist:
 - Each doc is more than 30 lines and has actionable sections for later implementers.
 - The diff is scoped to docs/architecture/ricky-runtime-architecture.md, docs/architecture/ricky-surfaces-and-ingress.md, and docs/architecture/ricky-specialist-boundaries.md.
 
-If fixes are needed, list exact doc-level changes. Write .workflow-artifacts/wave0-foundation/architecture-docs/review.md and end with REVIEW_PASS or REVIEW_FAIL.`,
+If fixes are needed, list exact doc-level changes. Write .workflow-artifacts/wave0-foundation/architecture-docs/review.md and end with REVIEW_ARCHITECTURE_PASS or REVIEW_ARCHITECTURE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/architecture-docs/review.md' },
     })
 
@@ -245,9 +245,56 @@ Do not add extra docs or source code. If the review passes, make no unrelated ed
       verification: { type: 'exit_code', value: '0' },
     })
 
-    .step('final-hard-structure-gate', {
+    .step('post-fix-structure-gate', {
       type: 'deterministic',
       dependsOn: ['fix-review-feedback'],
+      command: [
+        'test -f docs/architecture/ricky-runtime-architecture.md',
+        'test -f docs/architecture/ricky-surfaces-and-ingress.md',
+        'test -f docs/architecture/ricky-specialist-boundaries.md',
+        'grep -Eiq "Agent Assistant|runtime composition|workflow" docs/architecture/ricky-runtime-architecture.md',
+        'grep -Eiq "surfaces|ingress|local|cloud|Slack|CLI|MCP" docs/architecture/ricky-surfaces-and-ingress.md',
+        'grep -Eiq "specialist|author|debug|repair|validator|analytics" docs/architecture/ricky-specialist-boundaries.md',
+        'test "$(wc -l < docs/architecture/ricky-runtime-architecture.md | tr -d " ")" -gt 30',
+        'test "$(wc -l < docs/architecture/ricky-surfaces-and-ingress.md | tr -d " ")" -gt 30',
+        'test "$(wc -l < docs/architecture/ricky-specialist-boundaries.md | tr -d " ")" -gt 30',
+        'echo W0_ARCHITECTURE_DOCS_POST_FIX_VALIDATION_PASS',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('final-review-architecture-docs', {
+      agent: 'reviewer-codex',
+      dependsOn: ['post-fix-structure-gate'],
+      task: `Final review for the Wave 0 architecture docs after fixes and post-fix validation.
+
+Read:
+- .workflow-artifacts/wave0-foundation/architecture-docs/review.md
+- docs/architecture/ricky-runtime-architecture.md
+- docs/architecture/ricky-surfaces-and-ingress.md
+- docs/architecture/ricky-specialist-boundaries.md
+- Post-fix validation output:
+{{steps.post-fix-structure-gate.output}}
+
+Check the original review checklist again and verify any earlier concrete failures were fixed. Write .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md and end with REVIEW_ARCHITECTURE_PASS or REVIEW_ARCHITECTURE_FAIL.`,
+      verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/architecture-docs/final-review.md' },
+    })
+
+    .step('final-review-pass-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-architecture-docs'],
+      command: [
+        'tail -n 1 .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md | grep -Eq "^REVIEW_ARCHITECTURE_PASS$"',
+        'echo W0_ARCHITECTURE_DOCS_REVIEW_PASS_GATE',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step('final-hard-structure-gate', {
+      type: 'deterministic',
+      dependsOn: ['final-review-pass-gate'],
       command: [
         'test -f docs/architecture/ricky-runtime-architecture.md',
         'test -f docs/architecture/ricky-surfaces-and-ingress.md',
