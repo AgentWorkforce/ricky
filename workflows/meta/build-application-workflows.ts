@@ -129,7 +129,7 @@ Write .workflow-artifacts/ricky-meta/application-wave-plan.md.
 Requirements:
 1. Define a bounded first batch of generated workflows, roughly 12 to 18 workflows total.
 2. Distribute them across the wave folders, with priority on Wave 0, Wave 1, Wave 2, and the CLI/Cloud-connect flows implied by the spec.
-3. Include workflow filename, target wave folder, one-sentence purpose, why it belongs in the first batch, expected primary files it should touch, and the exact validation gates it should run.
+3. Include workflow filename, target wave folder, one-sentence purpose, why it belongs in the first batch, expected primary files it should touch, the exact validation gates it should run, and the recommended agent/team shape.
 4. Make sure the batch reflects Ricky's product truth:
    - users should not need to hand-write workflows
    - spec handoff from Claude/CLI/MCP is first-class
@@ -159,8 +159,10 @@ Constraints:
 4. The generated workflows should be narrow and reviewable.
 5. Prefer doc/spec/scaffold workflows in Wave 0.
 6. Every generated workflow must follow the relay 80-to-100 skill where applicable: implement -> verify edit -> run initial validation with failOnError false -> fix loop -> final hard gate -> regression/build gate before signoff.
-7. Include explicit file targets, non-goals, verification commands, and commit/PR boundary guidance inside the tasking.
-8. Do not print full workflow contents to stdout.
+7. Include explicit file targets, non-goals, verification commands, review checklist, and commit/PR boundary guidance inside the tasking.
+8. Prefer multiple narrow deterministic verify gates over one broad final grep.
+9. The generated workflows should be explicit enough that a human can inspect one file and understand exactly what success means.
+10. Do not print full workflow contents to stdout.
 
 End by ensuring the planned Wave 0 files exist on disk.`,
       verification: { type: 'exit_code' },
@@ -188,7 +190,9 @@ Constraints:
 4. Include deterministic gates and review stages.
 5. For testable/code-writing workflows, explicitly encode 80-to-100 validation loops with initial run, fix loop, final gate, build/typecheck gate, and regression gate.
 6. Prefer detailed tasking over vague prompts. The generated workflows should feel ready for first real use, not like sketches.
-7. Do not print full workflow contents to stdout.
+7. Require deterministic verification after every meaningful edit phase, not just at the very end.
+8. Keep each generated workflow narrow enough that failures are diagnosable quickly.
+9. Do not print full workflow contents to stdout.
 
 End by ensuring the planned Wave 1 and Wave 2 files exist on disk.`,
       verification: { type: 'exit_code' },
@@ -214,7 +218,8 @@ Constraints:
 4. Local/BYOH flows must remain first-class.
 5. For any implementation-oriented workflow, include 80-to-100 style validation and deterministic post-edit verification gates after every meaningful edit phase.
 6. Keep the generated workflows detailed enough that a first test run should need few iterations.
-7. Do not print full workflow contents to stdout.
+7. If a workflow covers onboarding or connection flows, require explicit user-visible proof or contract checks, not just internal code edits.
+8. Do not print full workflow contents to stdout.
 
 End by ensuring the planned files for these waves exist on disk.`,
       verification: { type: 'exit_code' },
@@ -245,6 +250,9 @@ for f in $(find workflows/wave0-foundation workflows/wave1-runtime workflows/wav
   grep -q ".run({ cwd: process.cwd() })" "$f" || { echo "MISSING_RUN_CWD:$f"; failed=1; }
   grep -q "type: 'deterministic'" "$f" || { echo "MISSING_DETERMINISTIC:$f"; failed=1; }
   grep -q "review" "$f" || { echo "MISSING_REVIEW:$f"; failed=1; }
+  grep -Eq "Deliverables|deliverables" "$f" || { echo "MISSING_DELIVERABLES_CONTEXT:$f"; failed=1; }
+  grep -Eq "Non-goals|non-goals" "$f" || { echo "MISSING_NON_GOALS:$f"; failed=1; }
+  grep -Eq "Verification|verification" "$f" || { echo "MISSING_VERIFICATION_SECTION:$f"; failed=1; }
   if grep -Eq "impl|build|generate|debug|runtime|connect|api" "$f"; then
     grep -q "failOnError: false" "$f" || { echo "MISSING_INITIAL_SOFT_GATE:$f"; failed=1; }
     grep -Eq "fix|validate" "$f" || { echo "MISSING_FIX_LOOP:$f"; failed=1; }
@@ -277,6 +285,7 @@ Assess:
 3. Are workflows narrow, staged, and reviewable?
 4. Do they appear structurally consistent with the template?
 5. Do implementation-oriented workflows follow the 80-to-100 bar closely enough that first real test runs should need few iterations?
+6. Are the task bodies detailed enough to avoid ambiguous agent behavior and shallow outputs?
 
 End the file with either REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/ricky-meta/review-claude.md' },
@@ -302,6 +311,7 @@ Assess:
 3. Is the generated batch implementation-friendly rather than just aspirational?
 4. Are there obvious structural inconsistencies across the generated files?
 5. Do the generated workflows include detailed enough validation commands, fix loops, and final hard gates to minimize iteration when first tested?
+6. Are the generated workflows explicit enough about deliverables, non-goals, and verification that agents are unlikely to wander?
 
 End the file with either REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/ricky-meta/review-codex.md' },
@@ -374,8 +384,9 @@ Inputs to consider:
 Requirements:
 1. State whether the generated Ricky application wave backlog is ready for human review.
 2. Mention whether dry-run passed fully or where it failed.
-3. Keep the verdict honest.
-4. End with either META_SIGNOFF_PASS or META_SIGNOFF_FAIL.
+3. Call out any workflows that still look under-specified or likely to require extra iteration.
+4. Keep the verdict honest.
+5. End with either META_SIGNOFF_PASS or META_SIGNOFF_FAIL.
 
 IMPORTANT: write the file to disk.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/ricky-meta/signoff.md' },
