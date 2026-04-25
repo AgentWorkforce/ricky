@@ -9,6 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
+    .agent('impl-claude', {
+      cli: 'claude',
+      preset: 'worker',
+      role: 'Implements the bounded Ricky Cloud generate slice files and tests.',
+      retries: 2,
+    })
     .agent('reviewer-claude', {
       cli: 'claude',
       preset: 'reviewer',
@@ -67,9 +73,30 @@ async function main() {
       failOnError: true,
     })
 
+    .step('implement-cloud-generate-slice', {
+      agent: 'impl-claude',
+      dependsOn: ['read-product-spec', 'read-backlog-plan', 'read-cloud-context', 'read-workflow-standards'],
+      task: `Implement the Ricky Cloud generate slice in only these files:
+- src/cloud/api/generate-endpoint.ts
+- src/cloud/api/request-types.ts
+- src/cloud/api/response-types.ts
+- src/cloud/api/generate-endpoint.test.ts
+- src/cloud/api/index.ts
+
+Requirements:
+- expose a bounded Cloud generate contract around POST /api/v1/ricky/workflows/generate
+- require explicit auth/workspace request shape
+- return artifact bundle, warnings/assumptions, and follow-up actions
+- keep local and Cloud paths distinct
+- keep tests deterministic and bounded
+- do not start a real server or depend on live Cloud runtime
+
+Write the files to disk, then exit cleanly.`,
+      verification: { type: 'file_exists', value: 'src/cloud/api/generate-endpoint.ts' },
+    })
     .step('implementation-file-gate', {
       type: 'deterministic',
-      dependsOn: ['read-product-spec', 'read-backlog-plan', 'read-cloud-context', 'read-workflow-standards'],
+      dependsOn: ['implement-cloud-generate-slice'],
       command: [
         'test -f src/cloud/api/generate-endpoint.ts',
         'test -f src/cloud/api/request-types.ts',
