@@ -3,20 +3,22 @@
   "private": true,
   "version": "0.0.0",
   "description": "Workflow reliability, coordination, and authoring product for AgentWorkforce",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "bootstrap": "npm run bootstrap:skills && npm run bootstrap:deps",
-    "bootstrap:skills": "bash ./skills.sh",
-    "bootstrap:deps": "npm install",
     "start": "npx ts-node src/commands/cli-main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "batch": "bash scripts/run-ricky-batch.sh",
+    "overnight": "bash scripts/run-ricky-overnight.sh"
   },
   "dependencies": {
     "@agent-relay/sdk": "^5.0.0"
   },
   "devDependencies": {
+    "@types/node": "^24.5.2",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
-    "@types/node": "^24.5.2"
+    "vitest": "^3.2.4"
   }
 }

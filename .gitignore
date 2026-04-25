@@ -1,8 +1,21 @@
+# npm
+node_modules/
+
+# build artifacts
+dist/
+*.tsbuildinfo
+
+# runtime / relay
 .agent-relay/
 .agent-relay.stale.*/
 .relay/
 .trajectories/
 .workflow-artifacts/
-node_modules/
 .factory/
 .mcp.json
+
+# scratch / temp
+tmp/
+
+# non-npm package-manager lockfiles
+prpm.lock

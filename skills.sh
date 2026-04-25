@@ -7,7 +7,4 @@ cd "$ROOT_DIR"
 echo "[ricky] Installing bootstrap skills..."
 npx skills add https://github.com/vercel-labs/skills --skill find-skills --yes
 
-echo "[ricky] Installing bootstrap prpm package..."
-prpm install @prpm/self-improving
-
 echo "[ricky] Bootstrap complete."

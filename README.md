@@ -75,21 +75,25 @@ The provided runner mark is used as the Ricky project logo and should be used as
 
 ## Bootstrap
 
-Ricky uses npm as its default package/script path.
+Ricky uses npm as its sole package manager.
 
-Current bootstrap commands:
-- `npm install`
-- `bash ./skills.sh`
+```sh
+npm install          # install dependencies
+bash ./skills.sh     # install Claude Code skills (optional, one-time)
+```
 
-Convenience scripts:
-- `npm run bootstrap`
-- `npm run bootstrap:skills`
-- `npm run bootstrap:deps`
+npm scripts:
+- `npm start` — launch the interactive CLI
+- `npm test` — run the test suite
+- `npm run typecheck` — TypeScript type check
+- `npm run batch` — run workflow batches via `scripts/run-ricky-batch.sh`
+- `npm run overnight` — run the overnight workflow queue via `scripts/run-ricky-overnight.sh`
 
-Current package shape:
-- Ricky is intentionally a single-package repo for now
-- CLI, local/BYOH, and Cloud surfaces live together while the product boundaries settle
-- package alignment should stay clean and npm-first until a later bounded workflow proves a multi-package split is actually warranted
+## Package shape
+
+Ricky is intentionally a single-package repo (`"private": true`).
+CLI, local/BYOH, and Cloud surfaces live together while the product boundaries settle.
+A multi-package split should only happen when a later bounded workflow proves it is warranted.
 
 ## Product direction
 
