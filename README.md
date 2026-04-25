@@ -39,6 +39,17 @@ The first artifact in this repo is the product spec:
 The provided runner mark is used as the Ricky project logo and should be used as the default Slack app / manifest image.
 - `assets/ricky-logo.svg`
 
+## Bootstrap
+
+Ricky should bootstrap required skills and repo-improvement tooling up front.
+
+Current bootstrap commands:
+- `npx skills add https://github.com/vercel-labs/skills --skill find-skills --yes`
+- `prpm install @prpm/self-improving`
+
+Convenience script:
+- `bash ./skills.sh`
+
 ## Initial repo shape
 
 This repo starts spec-first. No implementation should begin until the spec is reviewed and the first architecture slice is approved.
