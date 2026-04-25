@@ -5,7 +5,7 @@ async function main() {
     .description('Generate the first Ricky application wave backlog as reliable, reviewable workflow files with structural checks and dry-run validation.')
     .pattern('dag')
     .channel('wf-ricky-meta-build-application-workflows')
-    .maxConcurrency(4)
+    .maxConcurrency(3)
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
@@ -129,13 +129,14 @@ Write .workflow-artifacts/ricky-meta/application-wave-plan.md.
 Requirements:
 1. Define a bounded first batch of generated workflows, roughly 12 to 18 workflows total.
 2. Distribute them across the wave folders, with priority on Wave 0, Wave 1, Wave 2, and the CLI/Cloud-connect flows implied by the spec.
-3. Include workflow filename, target wave folder, one-sentence purpose, and why it belongs in the first batch.
+3. Include workflow filename, target wave folder, one-sentence purpose, why it belongs in the first batch, expected primary files it should touch, and the exact validation gates it should run.
 4. Make sure the batch reflects Ricky's product truth:
    - users should not need to hand-write workflows
    - spec handoff from Claude/CLI/MCP is first-class
    - CLI onboarding and Cloud connect are first-class
-5. Keep the batch reviewable, not huge.
-6. End the file with APPLICATION_WAVE_PLAN_READY.
+5. For each planned workflow, specify an 80-to-100 validation shape: implementation gates, initial run, fix loop, final hard gate, and regression gate.
+6. Keep the batch reviewable, not huge.
+7. End the file with APPLICATION_WAVE_PLAN_READY.
 
 IMPORTANT: write the file to disk and do not print the full plan to stdout.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/ricky-meta/application-wave-plan.md' },
@@ -157,7 +158,9 @@ Constraints:
 3. Each generated workflow must have a dedicated wf-ricky-* channel, deterministic context reads, deterministic verification gates, and a review phase.
 4. The generated workflows should be narrow and reviewable.
 5. Prefer doc/spec/scaffold workflows in Wave 0.
-6. Do not print full workflow contents to stdout.
+6. Every generated workflow must follow the relay 80-to-100 skill where applicable: implement -> verify edit -> run initial validation with failOnError false -> fix loop -> final hard gate -> regression/build gate before signoff.
+7. Include explicit file targets, non-goals, verification commands, and commit/PR boundary guidance inside the tasking.
+8. Do not print full workflow contents to stdout.
 
 End by ensuring the planned Wave 0 files exist on disk.`,
       verification: { type: 'exit_code' },
@@ -183,7 +186,9 @@ Constraints:
    - no hand-authored workflow requirement for users
    - workflow abstraction and execution routing
 4. Include deterministic gates and review stages.
-5. Do not print full workflow contents to stdout.
+5. For testable/code-writing workflows, explicitly encode 80-to-100 validation loops with initial run, fix loop, final gate, build/typecheck gate, and regression gate.
+6. Prefer detailed tasking over vague prompts. The generated workflows should feel ready for first real use, not like sketches.
+7. Do not print full workflow contents to stdout.
 
 End by ensuring the planned Wave 1 and Wave 2 files exist on disk.`,
       verification: { type: 'exit_code' },
@@ -207,7 +212,9 @@ Constraints:
 2. Write files to disk.
 3. Cloud onboarding/connect flows must align with the product spec.
 4. Local/BYOH flows must remain first-class.
-5. Do not print full workflow contents to stdout.
+5. For any implementation-oriented workflow, include 80-to-100 style validation and deterministic post-edit verification gates after every meaningful edit phase.
+6. Keep the generated workflows detailed enough that a first test run should need few iterations.
+7. Do not print full workflow contents to stdout.
 
 End by ensuring the planned files for these waves exist on disk.`,
       verification: { type: 'exit_code' },
@@ -238,6 +245,11 @@ for f in $(find workflows/wave0-foundation workflows/wave1-runtime workflows/wav
   grep -q ".run({ cwd: process.cwd() })" "$f" || { echo "MISSING_RUN_CWD:$f"; failed=1; }
   grep -q "type: 'deterministic'" "$f" || { echo "MISSING_DETERMINISTIC:$f"; failed=1; }
   grep -q "review" "$f" || { echo "MISSING_REVIEW:$f"; failed=1; }
+  if grep -Eq "impl|build|generate|debug|runtime|connect|api" "$f"; then
+    grep -q "failOnError: false" "$f" || { echo "MISSING_INITIAL_SOFT_GATE:$f"; failed=1; }
+    grep -Eq "fix|validate" "$f" || { echo "MISSING_FIX_LOOP:$f"; failed=1; }
+    grep -q "failOnError: true" "$f" || { echo "MISSING_FINAL_HARD_GATE:$f"; failed=1; }
+  fi
 done
 if [ "$failed" -ne 0 ]; then exit 1; fi
 echo "RICKY_GENERATED_SANITY_PASS"`,
@@ -264,6 +276,7 @@ Assess:
 2. Are CLI onboarding, Cloud connect, and spec handoff represented early enough?
 3. Are workflows narrow, staged, and reviewable?
 4. Do they appear structurally consistent with the template?
+5. Do implementation-oriented workflows follow the 80-to-100 bar closely enough that first real test runs should need few iterations?
 
 End the file with either REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/ricky-meta/review-claude.md' },
@@ -288,6 +301,7 @@ Assess:
 2. Are the workflow scopes practical?
 3. Is the generated batch implementation-friendly rather than just aspirational?
 4. Are there obvious structural inconsistencies across the generated files?
+5. Do the generated workflows include detailed enough validation commands, fix loops, and final hard gates to minimize iteration when first tested?
 
 End the file with either REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/ricky-meta/review-codex.md' },
