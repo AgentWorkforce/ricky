@@ -188,6 +188,30 @@ Ricky's differentiator is not only writing workflows. It is understanding why th
 - one implementation workflow
 - one proof workflow
 
+### Batch E: package-convention and npm package alignment
+
+#### Why it matters
+Ricky should follow the same npm/package conventions used across the other AgentWorkforce projects instead of drifting as a one-off repo shape.
+
+#### Suggested workflow(s)
+- align-ricky-package-conventions
+- prove-ricky-package-layout-and-script-parity
+
+#### Scope
+- decide whether Ricky should remain intentionally single-package or move to a small multi-package layout
+- align package scripts, dependency placement, and repo structure with the broader AgentWorkforce convention
+- keep the change bounded and avoid breaking the already-proven CLI/workflow lanes
+
+#### Required proof
+- the chosen package layout is explicit and documented
+- scripts and dependency placement match project conventions
+- typecheck/test entrypoints still work after alignment
+- Ricky package structure no longer feels like an unexplained exception
+
+#### Classification
+- one implementation/alignment workflow
+- one proof workflow
+
 ## 7. What should wait until after the next batch
 
 These are important, but should not outrun the core proof path:
@@ -243,6 +267,8 @@ These names are recommendations, not yet authored files:
 - `workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts`
 - `workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts`
 - `workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts`
+- `workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts`
+- `workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts`
 
 ## 11. Why this sequencing is recommended
 
