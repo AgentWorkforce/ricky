@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "description": "Workflow reliability, coordination, and authoring product for AgentWorkforce",
   "scripts": {
-    "bootstrap": "bash ./skills.sh",
+    "bootstrap": "npm run bootstrap:skills && npm run bootstrap:deps",
     "bootstrap:skills": "bash ./skills.sh",
-    "bootstrap:deps": "prpm install @prpm/self-improving",
+    "bootstrap:deps": "npm install",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

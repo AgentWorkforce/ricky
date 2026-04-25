@@ -75,14 +75,21 @@ The provided runner mark is used as the Ricky project logo and should be used as
 
 ## Bootstrap
 
-Ricky should bootstrap required skills and repo-improvement tooling up front.
+Ricky uses npm as its default package/script path.
 
 Current bootstrap commands:
-- `npx skills add https://github.com/vercel-labs/skills --skill find-skills --yes`
-- `prpm install @prpm/self-improving`
-
-Convenience script:
+- `npm install`
 - `bash ./skills.sh`
+
+Convenience scripts:
+- `npm run bootstrap`
+- `npm run bootstrap:skills`
+- `npm run bootstrap:deps`
+
+Current package shape:
+- Ricky is intentionally a single-package repo for now
+- CLI, local/BYOH, and Cloud surfaces live together while the product boundaries settle
+- package alignment should stay clean and npm-first until a later bounded workflow proves a multi-package split is actually warranted
 
 ## Product direction
 
