@@ -17,6 +17,7 @@ async function main() {
     })
     .agent('impl-proof-codex', {
       cli: 'codex',
+      preset: 'worker',
       role: 'Implements proof harnesses, fixtures, and deterministic validation helpers for CLI onboarding output.',
       retries: 2,
     })
@@ -71,22 +72,14 @@ async function main() {
       failOnError: true,
     })
 
-    .step('lead-plan', {
-      agent: 'lead-claude',
+    .step('implement-proof-harness', {
+      agent: 'impl-proof-codex',
       dependsOn: ['read-ux-spec', 'read-cli-implementation-context', 'read-workflow-standards'],
-      task: `Plan the proof workflow for Ricky CLI onboarding.
-
-Context inputs:
-- UX spec:
-{{steps.read-ux-spec.output}}
-- CLI implementation context:
-{{steps.read-cli-implementation-context.output}}
-- Workflow standards and rules:
-{{steps.read-workflow-standards.output}}
+      task: `Implement the deterministic proof harness for Ricky CLI onboarding using the already-read deterministic context.
 
 Deliverables:
-- src/cli/proof/onboarding-proof.ts
-- src/cli/proof/onboarding-proof.test.ts
+- src/cli/proof/onboarding-proof.ts should expose helpers or evaluators that render or inspect onboarding outputs against proof cases.
+- src/cli/proof/onboarding-proof.test.ts should assert first-run, returning-user, local/BYOH, Cloud, provider guidance, handoff, and recovery behavior.
 
 Proof cases must include:
 - first-run experience
@@ -99,41 +92,6 @@ Proof cases must include:
 - at least one blocked or recovery path
 
 Non-goals:
-- Do not rely on screenshots or manual inspection only.
-- Do not add network-dependent proof.
-- Do not claim proof if the implementation modules do not exist yet.
-
-Verification:
-- The proof harness must generate deterministic evidence or assertions.
-- The proof must compare behavior against the UX spec, not just test helper internals.
-- If implementation is missing, the workflow should fail honestly or surface the blocker clearly.
-
-Write .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md with concrete proof cases, expected evidence, and failure conditions. End with CLI_ONBOARDING_PROOF_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md' },
-    })
-
-    .step('plan-artifact-ready', {
-      type: 'deterministic',
-      dependsOn: ['lead-plan'],
-      command: [
-        'test -f .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md',
-        'tail -n 5 .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/plan.md | grep -q "READY"',
-        'echo PLAN_ARTIFACT_READY',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
-    .step('implement-proof-harness', {
-      agent: 'impl-proof-codex',
-      dependsOn: ['plan-artifact-ready'],
-      task: `Implement the deterministic proof harness for Ricky CLI onboarding.
-
-Deliverables:
-- onboarding-proof.ts should expose helpers or evaluators that render or inspect onboarding outputs against proof cases.
-- onboarding-proof.test.ts should assert first-run, returning-user, local/BYOH, Cloud, provider guidance, handoff, and recovery behavior.
-
-Non-goals:
 - Do not add flaky snapshots.
 - Do not hide missing implementation behind fake mocks that prove nothing.
 - Do not touch unrelated CLI files unless a tiny import fix is truly required.
@@ -141,7 +99,9 @@ Non-goals:
 Verification:
 - Tests must prove the user-visible contract.
 - If implementation files are missing, surface that honestly.
-- Keep evidence deterministic and bounded.`,
+- Use docs/product/ricky-cli-onboarding-ux-spec.md and src/cli/ as source context instead of waiting for a separate plan artifact.
+- Keep evidence deterministic and bounded.
+- Write only the requested proof files to disk, then exit cleanly.`,
       verification: { type: 'file_exists', value: 'src/cli/proof/onboarding-proof.test.ts' },
     })
     .step('post-proof-file-gate', {

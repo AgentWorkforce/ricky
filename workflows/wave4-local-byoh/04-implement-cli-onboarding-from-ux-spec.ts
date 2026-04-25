@@ -17,11 +17,13 @@ async function main() {
     })
     .agent('impl-primary-codex', {
       cli: 'codex',
+      preset: 'worker',
       role: 'Primary implementer for Ricky CLI onboarding modules and exports.',
       retries: 2,
     })
     .agent('impl-tests-codex', {
       cli: 'codex',
+      preset: 'worker',
       role: 'Test implementer for first-run, returning-user, local/BYOH, Cloud, handoff, and recovery-path contracts.',
       retries: 2,
     })
@@ -76,18 +78,10 @@ async function main() {
       failOnError: true,
     })
 
-    .step('lead-plan', {
-      agent: 'lead-claude',
+    .step('implement-cli-modules', {
+      agent: 'impl-primary-codex',
       dependsOn: ['read-ux-spec', 'read-product-spec', 'read-workflow-standards'],
-      task: `Plan the Ricky CLI onboarding implementation from the UX spec.
-
-Context inputs:
-- UX spec:
-{{steps.read-ux-spec.output}}
-- Product spec:
-{{steps.read-product-spec.output}}
-- Workflow standards and rules:
-{{steps.read-workflow-standards.output}}
+      task: `Implement the CLI onboarding modules from the UX spec using the already-read deterministic context.
 
 Deliverables:
 - src/cli/ascii-art.ts
@@ -95,39 +89,6 @@ Deliverables:
 - src/cli/mode-selector.ts
 - src/cli/onboarding.ts
 - src/cli/index.ts
-- src/cli/onboarding.test.ts
-
-Non-goals:
-- Do not implement a full CLI parser.
-- Do not add live provider auth or network calls.
-- Do not reduce local/BYOH to a secondary path.
-
-Verification:
-- Tests must prove first-run and returning-user behavior.
-- Tests must prove local/BYOH and Cloud are both first-class.
-- Tests must prove Google connect guidance and GitHub dashboard/Nango guidance.
-- Tests must cover at least one recovery path.
-
-Write .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md with concrete file-by-file guidance and test expectations. End with CLI_ONBOARDING_IMPL_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md' },
-    })
-
-    .step('plan-artifact-ready', {
-      type: 'deterministic',
-      dependsOn: ['lead-plan'],
-      command: [
-        'test -f .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md',
-        'tail -n 5 .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/plan.md | grep -q "READY"',
-        'echo PLAN_ARTIFACT_READY',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
-    .step('implement-cli-modules', {
-      agent: 'impl-primary-codex',
-      dependsOn: ['plan-artifact-ready'],
-      task: `Implement the CLI onboarding modules from the UX spec.
 
 Requirements:
 - ascii-art.ts must support a recognizable full banner and a compact fallback.
@@ -144,7 +105,8 @@ Non-goals:
 Verification:
 - Keep user-visible strings deterministic and easy to assert.
 - Keep the module boundaries aligned with the UX spec.
-- Stop after writing implementation files.`,
+- Use docs/product/ricky-cli-onboarding-ux-spec.md as the source of truth instead of waiting for a separate plan artifact.
+- Write only the requested files to disk, then exit cleanly.`,
       verification: { type: 'file_exists', value: 'src/cli/onboarding.ts' },
     })
     .step('post-implementation-file-gate', {
@@ -187,7 +149,8 @@ Non-goals:
 
 Verification:
 - tests should fail if local/BYOH disappears
-- tests should fail if Cloud guidance becomes fake or underspecified`,
+- tests should fail if Cloud guidance becomes fake or underspecified
+- Write only the requested test file to disk, then exit cleanly.`,
       verification: { type: 'file_exists', value: 'src/cli/onboarding.test.ts' },
     })
     .step('post-test-file-gate', {
