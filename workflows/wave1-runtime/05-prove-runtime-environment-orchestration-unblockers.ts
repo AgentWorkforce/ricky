@@ -9,6 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
+    .agent('impl-claude', {
+      cli: 'claude',
+      preset: 'worker',
+      role: 'Implements the bounded Ricky unblocker proof files.',
+      retries: 2,
+    })
     .agent('reviewer-claude', {
       cli: 'claude',
       preset: 'reviewer',
@@ -54,9 +60,28 @@ async function main() {
       failOnError: true,
     })
 
+    .step('implement-unblocker-proof', {
+      agent: 'impl-claude',
+      dependsOn: ['read-failure-taxonomy', 'read-diagnostics-context', 'read-workflow-standards'],
+      task: `Implement a bounded proof surface for Ricky runtime, environment, and orchestration unblockers.
+
+Allowed files to write:
+- src/runtime/diagnostics/proof/unblocker-proof.ts
+- src/runtime/diagnostics/proof/unblocker-proof.test.ts
+
+Requirements:
+- prove runtime, environment, and orchestration blocker cases are represented
+- prove unblocker guidance differs by blocker class
+- keep the proof deterministic and bounded
+- use the diagnosis engine as the source of truth, not made-up parallel logic
+- write only the requested files to disk, then exit cleanly
+- do not emit long report-style stdout
+`,
+      verification: { type: 'file_exists', value: 'src/runtime/diagnostics/proof/unblocker-proof.ts' },
+    })
     .step('proof-file-gate', {
       type: 'deterministic',
-      dependsOn: ['read-failure-taxonomy', 'read-diagnostics-context', 'read-workflow-standards'],
+      dependsOn: ['implement-unblocker-proof'],
       command: [
         'test -f src/runtime/diagnostics/proof/unblocker-proof.ts',
         'test -f src/runtime/diagnostics/proof/unblocker-proof.test.ts',

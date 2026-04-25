@@ -9,6 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
+    .agent('impl-claude', {
+      cli: 'claude',
+      preset: 'worker',
+      role: 'Implements the bounded Ricky failure diagnosis engine files.',
+      retries: 2,
+    })
     .agent('reviewer-claude', {
       cli: 'claude',
       preset: 'reviewer',
@@ -65,9 +71,29 @@ async function main() {
       failOnError: true,
     })
 
+    .step('implement-diagnosis-engine', {
+      agent: 'impl-claude',
+      dependsOn: ['read-product-spec', 'read-failure-taxonomy', 'read-runtime-context', 'read-workflow-standards'],
+      task: `Implement the Ricky failure diagnosis engine in a bounded way.
+
+Allowed files to write:
+- src/runtime/diagnostics/failure-diagnosis.ts
+- src/runtime/diagnostics/failure-diagnosis.test.ts
+- src/runtime/diagnostics/index.ts
+
+Requirements:
+- model distinct blocker classes such as runtime handoff stall, opaque progress, stale relay state, control-flow breakage, and repo validation mismatch
+- return class-specific unblocker guidance rather than one generic message
+- keep the implementation deterministic and small
+- tests should prove blocker differentiation and unblocker guidance shape
+- write only the requested files to disk, then exit cleanly
+- do not emit long report-style stdout
+`,
+      verification: { type: 'file_exists', value: 'src/runtime/diagnostics/failure-diagnosis.ts' },
+    })
     .step('implementation-file-gate', {
       type: 'deterministic',
-      dependsOn: ['read-product-spec', 'read-failure-taxonomy', 'read-runtime-context', 'read-workflow-standards'],
+      dependsOn: ['implement-diagnosis-engine'],
       command: [
         'test -f src/runtime/diagnostics/failure-diagnosis.ts',
         'test -f src/runtime/diagnostics/failure-diagnosis.test.ts',
