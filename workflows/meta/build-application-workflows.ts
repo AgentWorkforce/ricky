@@ -1,4 +1,4 @@
-const { workflow } = require('@agent-relay/sdk/workflows');
+import { workflow } from '@agent-relay/sdk/workflows';
 
 async function main() {
   const result = await workflow('ricky-build-application-workflows')
@@ -158,11 +158,15 @@ Constraints:
 3. Each generated workflow must have a dedicated wf-ricky-* channel, deterministic context reads, deterministic verification gates, and a review phase.
 4. The generated workflows should be narrow and reviewable.
 5. Prefer doc/spec/scaffold workflows in Wave 0.
-6. Every generated workflow must follow the relay 80-to-100 skill where applicable: implement -> verify edit -> run initial validation with failOnError false -> fix loop -> final hard gate -> regression/build gate before signoff.
-7. Include explicit file targets, non-goals, verification commands, review checklist, and commit/PR boundary guidance inside the tasking.
-8. Prefer multiple narrow deterministic verify gates over one broad final grep.
-9. The generated workflows should be explicit enough that a human can inspect one file and understand exactly what success means.
-10. Do not print full workflow contents to stdout.
+6. Every generated workflow must follow the relay 80-to-100 skill where applicable: implement -> verify edit -> run initial validation with failOnError false -> fix loop -> final hard gate -> regression/build gate -> final signoff.
+7. Change-detection and regression gates must work for both tracked edits and first-run untracked file creation. Never rely on git diff alone. Use a tracked-plus-untracked pattern such as combining git diff --name-only with git ls-files --others --exclude-standard.
+8. After every review step, add a deterministic verdict gate that reads the review artifact and fails if it ends in REVIEW_*_FAIL.
+9. Include explicit file targets, non-goals, verification commands, review checklist, and commit/PR boundary guidance inside the tasking.
+10. Prefer multiple narrow deterministic verify gates over one broad final grep.
+11. The generated workflows should be explicit enough that a human can inspect one file and understand exactly what success means.
+12. Use import syntax that matches the written standard instead of CommonJS require.
+13. Do not declare unused agents. If a validator agent exists, it must own either the fix loop, final signoff, or both.
+14. Do not print full workflow contents to stdout.
 
 End by ensuring the planned Wave 0 files exist on disk.`,
       verification: { type: 'exit_code' },
@@ -188,11 +192,13 @@ Constraints:
    - no hand-authored workflow requirement for users
    - workflow abstraction and execution routing
 4. Include deterministic gates and review stages.
-5. For testable/code-writing workflows, explicitly encode 80-to-100 validation loops with initial run, fix loop, final gate, build/typecheck gate, and regression gate.
-6. Prefer detailed tasking over vague prompts. The generated workflows should feel ready for first real use, not like sketches.
-7. Require deterministic verification after every meaningful edit phase, not just at the very end.
-8. Keep each generated workflow narrow enough that failures are diagnosable quickly.
-9. Do not print full workflow contents to stdout.
+5. For testable/code-writing workflows, explicitly encode 80-to-100 validation loops with initial run, fix loop, final gate, build/typecheck gate, regression gate, and final signoff artifact.
+6. Change-detection gates must handle newly created untracked files as well as tracked edits.
+7. Add deterministic review verdict gates after review artifacts are written.
+8. Prefer detailed tasking over vague prompts. The generated workflows should feel ready for first real use, not like sketches.
+9. Require deterministic verification after every meaningful edit phase, not just at the very end.
+10. Keep each generated workflow narrow enough that failures are diagnosable quickly.
+11. Do not print full workflow contents to stdout.
 
 End by ensuring the planned Wave 1 and Wave 2 files exist on disk.`,
       verification: { type: 'exit_code' },
@@ -217,9 +223,11 @@ Constraints:
 3. Cloud onboarding/connect flows must align with the product spec.
 4. Local/BYOH flows must remain first-class.
 5. For any implementation-oriented workflow, include 80-to-100 style validation and deterministic post-edit verification gates after every meaningful edit phase.
-6. Keep the generated workflows detailed enough that a first test run should need few iterations.
-7. If a workflow covers onboarding or connection flows, require explicit user-visible proof or contract checks, not just internal code edits.
-8. Do not print full workflow contents to stdout.
+6. Include final signoff artifacts for these serious workflows so completion evidence is consistent across the batch.
+7. Change-detection gates must handle newly created untracked files as well as tracked edits.
+8. If a workflow covers onboarding or connection flows, require explicit user-visible proof or contract checks, not just internal code edits.
+9. Add deterministic review verdict gates after review artifacts are written.
+10. Do not print full workflow contents to stdout.
 
 End by ensuring the planned files for these waves exist on disk.`,
       verification: { type: 'exit_code' },
@@ -286,6 +294,7 @@ Assess:
 4. Do they appear structurally consistent with the template?
 5. Do implementation-oriented workflows follow the 80-to-100 bar closely enough that first real test runs should need few iterations?
 6. Are the task bodies detailed enough to avoid ambiguous agent behavior and shallow outputs?
+7. Do all serious workflows end with consistent completion evidence, including final signoff artifacts?
 
 End the file with either REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/ricky-meta/review-claude.md' },
@@ -310,8 +319,9 @@ Assess:
 2. Are the workflow scopes practical?
 3. Is the generated batch implementation-friendly rather than just aspirational?
 4. Are there obvious structural inconsistencies across the generated files?
-5. Do the generated workflows include detailed enough validation commands, fix loops, and final hard gates to minimize iteration when first tested?
+5. Do the generated workflows include detailed enough validation commands, fix loops, final hard gates, and signoff artifacts to minimize iteration when first tested?
 6. Are the generated workflows explicit enough about deliverables, non-goals, and verification that agents are unlikely to wander?
+7. Do change-detection gates correctly account for untracked first-run files?
 
 End the file with either REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/ricky-meta/review-codex.md' },
@@ -324,10 +334,21 @@ End the file with either REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       captureOutput: true,
       failOnError: true,
     })
+    .step('verify-review-verdicts', {
+      type: 'deterministic',
+      dependsOn: ['read-generated-reviews'],
+      command: [
+        'grep -Eq "REVIEW_CLAUDE_PASS$|REVIEW_CLAUDE_FAIL$" .workflow-artifacts/ricky-meta/review-claude.md',
+        'grep -Eq "REVIEW_CODEX_PASS$|REVIEW_CODEX_FAIL$" .workflow-artifacts/ricky-meta/review-codex.md',
+        'echo RICKY_META_REVIEW_VERDICTS_RECORDED',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
 
     .step('fix-generated-workflows', {
       agent: 'meta-validator-claude',
-      dependsOn: ['read-generated-reviews'],
+      dependsOn: ['verify-review-verdicts'],
       task: `Read the review output below and fix the generated workflows if needed.
 
 {{steps.read-generated-reviews.output}}
