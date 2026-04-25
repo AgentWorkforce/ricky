@@ -9,6 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
+    .agent('impl-claude', {
+      cli: 'claude',
+      preset: 'worker',
+      role: 'Implements the local/BYOH proof helpers and tests in bounded proof files.',
+      retries: 2,
+    })
     .agent('reviewer-claude', {
       cli: 'claude',
       preset: 'reviewer',
@@ -54,9 +60,26 @@ async function main() {
       failOnError: true,
     })
 
+    .step('implement-local-proof', {
+      agent: 'impl-claude',
+      dependsOn: ['read-backlog-plan', 'read-local-implementation-context', 'read-workflow-standards'],
+      task: `Implement the Ricky local/BYOH proof surface in only these files:
+- src/local/proof/local-entrypoint-proof.ts
+- src/local/proof/local-entrypoint-proof.test.ts
+
+Requirements:
+- prove spec handoff from CLI, MCP, Claude-style structured handoff, and workflow artifact path
+- prove artifact, log, warning, and next-action response behavior
+- remain honest about the current local executor being a stubbed runtime seam
+- keep proof deterministic and bounded
+- tests should evaluate user-visible contract behavior, not implementation trivia
+
+Write the files to disk, then exit cleanly.`,
+      verification: { type: 'file_exists', value: 'src/local/proof/local-entrypoint-proof.ts' },
+    })
     .step('proof-file-gate', {
       type: 'deterministic',
-      dependsOn: ['read-backlog-plan', 'read-local-implementation-context', 'read-workflow-standards'],
+      dependsOn: ['implement-local-proof'],
       command: [
         'test -f src/local/proof/local-entrypoint-proof.ts',
         'test -f src/local/proof/local-entrypoint-proof.test.ts',
