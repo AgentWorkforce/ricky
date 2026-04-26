@@ -37,6 +37,7 @@ INITIAL_GIT_HEAD=""
 CURRENT_PASS=1
 CURRENT_INDEX=0
 WORKFLOWS_RUN=0
+RUN_RESULT=""
 STATUS_REASON=""
 
 write_queue() {
@@ -202,17 +203,20 @@ commit_if_clean_delta() {
 
 run_one() {
   local workflow_path="$1"
+  RUN_RESULT="ran"
   log ">>> running $workflow_path"
 
   if [[ ! -f "$workflow_path" ]]; then
     log "skipping missing workflow: $workflow_path"
     echo "$workflow_path" >> "$SKIPPED_FILE"
+    RUN_RESULT="skipped"
     return 0
   fi
 
   if workflow_has_stale_package_targets "$workflow_path"; then
     log "skipping stale pre-package-split workflow: $workflow_path"
     echo "$workflow_path" >> "$SKIPPED_FILE"
+    RUN_RESULT="skipped"
     return 0
   fi
 
@@ -309,7 +313,9 @@ for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
       exit 1
     fi
 
-    WORKFLOWS_RUN="$((WORKFLOWS_RUN + 1))"
+    if [[ "$RUN_RESULT" == "ran" ]]; then
+      WORKFLOWS_RUN="$((WORKFLOWS_RUN + 1))"
+    fi
     CURRENT_INDEX="$((idx + 1))"
     persist_checkpoint
     sleep "$POLL_SECONDS"

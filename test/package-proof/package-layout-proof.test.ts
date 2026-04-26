@@ -121,6 +121,8 @@ describe('Ricky workspace package layout and npm script parity proof', () => {
     expect(script).toContain('restore_checkpoint()');
     expect(script).toContain('persist_checkpoint()');
     expect(script).toContain('skipping missing workflow');
+    expect(script).toContain('RUN_RESULT="skipped"');
+    expect(script).toContain('if [[ "$RUN_RESULT" == "ran" ]]');
     expect(script).toContain('checkpointed');
   });
 
