@@ -293,6 +293,14 @@ workflow_hit_claude_rate_limit() {
   return 1
 }
 
+workflow_log_shows_failure() {
+  local output_file="$1"
+
+  [[ -f "$output_file" ]] || return 1
+
+  grep -Eq '^\[workflow\] FAILED:| ✗ .*— FAILED:|OWNER_DECISION: FAIL|FINAL_DECISION: FAIL' "$output_file"
+}
+
 run_one() {
   local workflow_path="$1"
   local runner_output=""
@@ -351,8 +359,12 @@ run_one() {
   RUN_PID="$$"
   persist_checkpoint
 
-  if [[ "$runner_exit" != "0" ]]; then
-    log "workflow exited non-zero: $workflow_path"
+  if [[ "$runner_exit" != "0" ]] || workflow_log_shows_failure "$runner_output"; then
+    if [[ "$runner_exit" != "0" ]]; then
+      log "workflow exited non-zero: $workflow_path"
+    else
+      log "workflow reported failure in logs despite zero exit: $workflow_path"
+    fi
     echo "$workflow_path" >> "$FAILED_FILE"
     inspect_repo_changes
 
@@ -463,6 +475,10 @@ for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
 
 done
 
-mark_status "complete" "queue finished"
+if [[ -s "$FAILED_FILE" ]]; then
+  mark_status "complete-with-failures" "queue finished with failed workflows"
+else
+  mark_status "complete" "queue finished"
+fi
 rm -f "$STATE_FILE"
 log "overnight queue finished"
