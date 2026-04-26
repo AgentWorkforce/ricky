@@ -5,6 +5,7 @@ import type {
   CommandInvocation,
   CommandRunner,
   CommandRunnerOptions,
+  LifecycleEvent,
 } from './types.js';
 
 class ManualInvocation implements CommandInvocation {
@@ -87,7 +88,18 @@ describe('LocalCoordinator', () => {
       timeoutMs: 5_000,
     });
 
-    expect(coordinator.getActiveRun('run-success')?.status).toBe('running');
+    expect(coordinator.getActiveRun('run-success')).toMatchObject({
+      runId: 'run-success',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'workflow.yaml'],
+        cwd: '/repo',
+      },
+      retry: { attempt: 1 },
+    });
     expect(coordinator.listActiveRuns()).toHaveLength(1);
 
     invocations[0].complete(0);
@@ -111,6 +123,11 @@ describe('LocalCoordinator', () => {
       kind: 'completed',
       status: 'passed',
       data: { exitCode: 0 },
+    });
+    expect(result.invocation).toMatchObject({
+      command: 'agent-relay',
+      args: ['run', 'workflow.yaml'],
+      cwd: '/repo',
     });
   });
 
@@ -171,6 +188,11 @@ describe('LocalCoordinator', () => {
       status: 'timed_out',
       data: { exitCode: null, timeoutMs: 25 },
     });
+    expect(coordinator.getActiveRun('run-timeout')).toBeUndefined();
+
+    invocations[0].complete(0);
+    await Promise.resolve();
+    expect(result.status).toBe('timed_out');
   });
 
   it('cancels active commands without hanging the test suite', async () => {
@@ -196,12 +218,17 @@ describe('LocalCoordinator', () => {
       status: 'failed',
       data: { exitCode: null, error: 'cancelled' },
     });
+    expect(coordinator.getActiveRun('run-cancelled')).toBeUndefined();
+
+    invocations[0].complete(0);
+    await Promise.resolve();
+    expect(result.error).toBe('cancelled');
   });
 
   it('captures stdout, stderr, lifecycle events, snippets, and metadata as evidence', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
-    const lifecycleEvents: unknown[] = [];
+    const lifecycleEvents: LifecycleEvent[] = [];
     coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
 
     const resultPromise = coordinator.launch({
@@ -221,7 +248,7 @@ describe('LocalCoordinator', () => {
     invocations[0].complete(0);
     const result = await resultPromise;
 
-    expect(lifecycleEvents).toHaveLength(result.events.length);
+    expect(lifecycleEvents).toEqual(result.events);
     expect(result.stdout).toEqual(['first out', 'second out']);
     expect(result.stderr).toEqual(['first err', 'second err']);
     expect(result.stdoutSnippet).toEqual({
@@ -242,6 +269,40 @@ describe('LocalCoordinator', () => {
       reason: 'transient failure',
     });
     expect(result.metadata).toEqual({ workflowId: 'wf-local' });
+    expect(result.events[0]).toMatchObject({
+      kind: 'started',
+      runId: 'run-evidence',
+      status: 'pending',
+      data: {
+        workflowFile: 'workflow.yaml',
+        cwd: '/repo',
+        invocation: {
+          command: 'agent-relay',
+          args: ['run', 'workflow.yaml'],
+          cwd: '/repo',
+        },
+        retry: {
+          attempt: 2,
+          maxAttempts: 3,
+          reason: 'transient failure',
+        },
+        metadata: { workflowId: 'wf-local' },
+      },
+    });
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stdout',
+        message: 'second out',
+        data: { stream: 'stdout' },
+      }),
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stderr',
+        message: 'second err',
+        data: { stream: 'stderr' },
+      }),
+    );
     expect(result.events.map((event) => event.kind)).toEqual([
       'started',
       'status_change',
@@ -428,6 +489,37 @@ describe('LocalCoordinator', () => {
     expect(result.events.at(-1)).toMatchObject({
       kind: 'error',
       status: 'failed',
+    });
+  });
+
+  it('routes the default agent-relay command through the injected runner', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-default-route',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'test' },
+    });
+
+    expect(invocations).toHaveLength(1);
+    expect(run).toHaveBeenCalledWith('agent-relay', ['run', 'workflow.yaml', '--json'], {
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'test' },
+    });
+
+    invocations[0].complete(0);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('passed');
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'workflow.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'test' },
     });
   });
 

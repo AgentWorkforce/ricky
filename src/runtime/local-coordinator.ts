@@ -95,6 +95,8 @@ export class LocalCoordinator {
       if (status === nextStatus) return;
       const previousStatus = status;
       status = nextStatus;
+      const activeState = this.activeRuns.get(runId);
+      if (activeState) activeState.status = nextStatus;
       emit('status_change', message, { previousStatus, status: nextStatus });
     };
 
@@ -256,13 +258,17 @@ export class LocalCoordinator {
     }
 
     const queue: LifecycleEvent[] = [];
+    const monitoredRunIds = runId ? new Set([runId]) : new Set(this.activeRuns.keys());
     let wake: (() => void) | undefined;
-    let complete = false;
+    let complete = monitoredRunIds.size === 0;
 
     const listener = (event: LifecycleEvent): void => {
-      if (runId && event.runId !== runId) return;
+      if (!monitoredRunIds.has(event.runId)) return;
       queue.push(event);
-      if (isTerminalEvent(event)) complete = true;
+      if (isTerminalEvent(event)) {
+        monitoredRunIds.delete(event.runId);
+        complete = monitoredRunIds.size === 0;
+      }
       wake?.();
       wake = undefined;
     };
