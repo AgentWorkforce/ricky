@@ -37,7 +37,7 @@ async function main() {
       command: [
         'rm -rf .workflow-artifacts/wave0-foundation/toolchain-validation-foundation',
         'mkdir -p .workflow-artifacts/wave0-foundation/toolchain-validation-foundation',
-        'mkdir -p src/test',
+        'mkdir -p test',
         'echo W0_TOOLCHAIN_FOUNDATION_READY',
       ].join(' && '),
       captureOutput: true,
@@ -91,7 +91,7 @@ Deliverables:
 - package.json updates for validation scripts and minimal devDependencies
 - tsconfig.json
 - vitest.config.ts
-- src/test/setup.ts
+- test/setup.ts
 
 Non-goals:
 - Do not scaffold app code.
@@ -101,11 +101,11 @@ Non-goals:
 Verification:
 - package.json must expose honest scripts for typecheck and test.
 - tsconfig.json must support the generated TypeScript workflow files without pretending the whole future app exists.
-- vitest.config.ts and src/test/setup.ts must make \`npx vitest run\` meaningful.
+- vitest.config.ts and test/setup.ts must make \`npx vitest run\` meaningful.
 - Post-edit gates must verify tracked and untracked changes only in the declared toolchain files.
 
 Commit/PR boundary:
-- Keep changes scoped to package.json, tsconfig.json, vitest.config.ts, and src/test/setup.ts.
+- Keep changes scoped to package.json, tsconfig.json, vitest.config.ts, and test/setup.ts.
 
 Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/plan.md and end with W0_TOOLCHAIN_PLAN_READY.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/toolchain-validation-foundation/plan.md' },
@@ -118,9 +118,9 @@ Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/plan.
 
 Deliverables:
 - package.json should add minimal scripts for typecheck and test plus minimal devDependencies for typescript, vitest, and any tiny companion package required for Vitest on Node.
-- tsconfig.json should target modern Node TypeScript execution and include src plus workflows as appropriate.
+- tsconfig.json should target modern Node TypeScript execution and include packages, workflows, and root test surfaces as appropriate.
 - vitest.config.ts should define a minimal Node test environment.
-- src/test/setup.ts should exist as the shared test setup entrypoint.
+- test/setup.ts should exist as the shared test setup entrypoint.
 
 Non-goals:
 - Do not add unrelated scripts.
@@ -141,11 +141,11 @@ Verification:
         'test -f package.json',
         'test -f tsconfig.json',
         'test -f vitest.config.ts',
-        'test -f src/test/setup.ts',
+        'test -f test/setup.ts',
         'grep -q "typecheck" package.json',
         'grep -q "vitest" package.json vitest.config.ts',
         'grep -q "typescript" package.json',
-        'changed="$(git diff --name-only -- package.json tsconfig.json vitest.config.ts src/test/setup.ts; git ls-files --others --exclude-standard -- package.json tsconfig.json vitest.config.ts src/test/setup.ts)" && { [ -z "$changed" ] || printf "%s\\n" "$changed" | grep -Eq "^(package.json|tsconfig.json|vitest.config.ts|src/test/setup.ts)$"; }',
+        'changed="$(git diff --name-only -- package.json tsconfig.json vitest.config.ts test/setup.ts; git ls-files --others --exclude-standard -- package.json tsconfig.json vitest.config.ts test/setup.ts)" && { [ -z "$changed" ] || printf "%s\\n" "$changed" | grep -Eq "^(package.json|tsconfig.json|vitest.config.ts|test/setup.ts)$"; }',
         'echo W0_TOOLCHAIN_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -188,7 +188,7 @@ Review feedback:
 {{steps.read-review-feedback.output}}
 
 Rules:
-- Keep scope limited to package.json, tsconfig.json, vitest.config.ts, and src/test/setup.ts.
+- Keep scope limited to package.json, tsconfig.json, vitest.config.ts, and test/setup.ts.
 - Do not add extra tooling categories.
 - Re-run install, typecheck, and tests after edits.`,
       verification: { type: 'exit_code', value: '0' },
@@ -200,7 +200,7 @@ Rules:
         'test -f package.json',
         'test -f tsconfig.json',
         'test -f vitest.config.ts',
-        'test -f src/test/setup.ts',
+        'test -f test/setup.ts',
         'grep -q "typecheck" package.json',
         'grep -q "vitest" package.json vitest.config.ts',
         'echo W0_TOOLCHAIN_POST_FIX_GATE_PASS',
@@ -221,7 +221,7 @@ Rules:
       dependsOn: ['post-fix-validation'],
       task: `Re-review the Ricky validation foundation after fixes.
 
-Read package.json, tsconfig.json, vitest.config.ts, src/test/setup.ts, and post-fix validation output:
+Read package.json, tsconfig.json, vitest.config.ts, test/setup.ts, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm prior findings are fixed or explicitly non-blocking. Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
@@ -249,8 +249,8 @@ Confirm prior findings are fixed or explicitly non-blocking. Write .workflow-art
       dependsOn: ['final-hard-validation'],
       command: [
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\\n" "$changed" | grep -Eq "^(package.json|package-lock.json|tsconfig.json|vitest.config.ts|src/test/setup.ts)$"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(package.json|package-lock.json|tsconfig.json|vitest.config.ts|src/test/setup.ts|\.workflow-artifacts/)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^(package.json|package-lock.json|tsconfig.json|vitest.config.ts|test/setup.ts)$"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(package.json|package-lock.json|tsconfig.json|vitest.config.ts|test/setup.ts|\.workflow-artifacts/)"',
         'echo W0_TOOLCHAIN_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
