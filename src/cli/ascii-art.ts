@@ -75,7 +75,8 @@ export function shouldShowBanner(options: ShouldShowBannerOptions = {}): boolean
     return false;
   }
 
-  const rickyBanner = options.rickyBanner ?? options.env?.RICKY_BANNER;
+  const rickyBanner =
+    options.rickyBanner ?? options.env?.RICKY_BANNER ?? (options.env ? undefined : process.env.RICKY_BANNER);
   if (rickyBanner === '0') {
     return false;
   }
