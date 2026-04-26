@@ -192,4 +192,67 @@ describe('runInteractiveCli', () => {
     expect(result.localResult?.ok).toBe(true);
     expect(result.cloudResult?.artifacts).toHaveLength(1);
   });
+
+  it('surfaces bounded recovery when cloud executor returns ok:false response', async () => {
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('cloud')),
+      cloudRequest: cloudRequest(),
+      cloudExecutor: {
+        generate: vi.fn().mockResolvedValue({
+          artifacts: [],
+          warnings: [{ severity: 'error', message: 'quota exceeded' }],
+          followUpActions: [{ action: 'upgrade', label: 'Upgrade', description: 'Upgrade plan' }],
+          validation: { ok: false, status: 'failed', issues: [{ code: 'quota', message: 'exceeded', path: 'body' }] },
+        }),
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.cloudResult).toBeDefined();
+    expect(result.cloudResult?.warnings).toHaveLength(1);
+    expect(result.guidance.join('\n')).toMatch(/Workflow generation failed/i);
+    expect(result.guidance.join('\n')).toMatch(/quota exceeded/i);
+  });
+
+  it('maps explore onboarding choice to local mode', async () => {
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('explore')),
+    });
+
+    expect(result.mode).toBe('local');
+    expect(result.ok).toBe(true);
+    expect(result.awaitingInput).toBe(true);
+  });
+
+  it('uses injected diagnoseFn when it returns a match', async () => {
+    const customDiagnosis = {
+      blockerClass: BlockerClass.StaleRelayState,
+      label: 'Stale relay state',
+      unblocker: {
+        action: 'Invalidate relay cache',
+        rationale: 'Relay is stale',
+        automatable: true,
+      },
+    };
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      handoff: { source: 'cli', spec: 'Stale workflow', mode: 'local' },
+      localExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          ok: false,
+          artifacts: [],
+          logs: ['relay stale detected'],
+          warnings: ['relay outdated'],
+          nextActions: ['Retry'],
+        }),
+      },
+      diagnoseFn: vi.fn().mockReturnValue(customDiagnosis),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.diagnoses).toContainEqual(customDiagnosis);
+    expect(result.guidance.join('\n')).toMatch(/Stale relay state/);
+    expect(result.guidance.join('\n')).toMatch(/Invalidate relay cache/);
+  });
 });
