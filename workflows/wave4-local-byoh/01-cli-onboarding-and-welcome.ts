@@ -47,7 +47,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome',
-        'mkdir -p src/cli',
+        'mkdir -p packages/cli/src/cli',
         'echo RICKY_WAVE4_CLI_ONBOARDING_READY',
       ].join(' && '),
       captureOutput: true,
@@ -98,12 +98,12 @@ Context inputs:
 {{steps.read-product-spec.output}}
 
 Deliverables:
-- src/cli/welcome.ts
-- src/cli/onboarding.ts
-- src/cli/mode-selector.ts
-- src/cli/ascii-art.ts
-- src/cli/onboarding.test.ts
-- src/cli/index.ts
+- packages/cli/src/cli/welcome.ts
+- packages/cli/src/cli/onboarding.ts
+- packages/cli/src/cli/mode-selector.ts
+- packages/cli/src/cli/ascii-art.ts
+- packages/cli/src/cli/onboarding.test.ts
+- packages/cli/src/cli/index.ts
 
 Non-goals:
 - Do not implement the full CLI command parser.
@@ -145,21 +145,21 @@ Verification:
 - Keep output deterministic for tests.
 - Make user-visible strings assertable.
 - Include direct CLI and MCP handoff wording where useful, but keep it concise.`,
-      verification: { type: 'file_exists', value: 'src/cli/onboarding.ts' },
+      verification: { type: 'file_exists', value: 'packages/cli/src/cli/onboarding.ts' },
     })
     .step('post-implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-cli-onboarding'],
       command: [
-        'test -f src/cli/welcome.ts',
-        'test -f src/cli/onboarding.ts',
-        'test -f src/cli/mode-selector.ts',
-        'test -f src/cli/ascii-art.ts',
-        'test -f src/cli/index.ts',
-        'grep -q "local\\|BYOH" src/cli/mode-selector.ts src/cli/onboarding.ts',
-        'grep -q "Cloud" src/cli/mode-selector.ts src/cli/onboarding.ts',
-        'grep -q "cloud connect google\\|agent-relay cloud connect" src/cli/onboarding.ts src/cli/mode-selector.ts',
-        'grep -q "ascii\\|Ricky\\|welcome" src/cli/ascii-art.ts src/cli/welcome.ts',
+        'test -f packages/cli/src/cli/welcome.ts',
+        'test -f packages/cli/src/cli/onboarding.ts',
+        'test -f packages/cli/src/cli/mode-selector.ts',
+        'test -f packages/cli/src/cli/ascii-art.ts',
+        'test -f packages/cli/src/cli/index.ts',
+        'grep -q "local\\|BYOH" packages/cli/src/cli/mode-selector.ts packages/cli/src/cli/onboarding.ts',
+        'grep -q "Cloud" packages/cli/src/cli/mode-selector.ts packages/cli/src/cli/onboarding.ts',
+        'grep -q "cloud connect google\\|agent-relay cloud connect" packages/cli/src/cli/onboarding.ts packages/cli/src/cli/mode-selector.ts',
+        'grep -q "ascii\\|Ricky\\|welcome" packages/cli/src/cli/ascii-art.ts packages/cli/src/cli/welcome.ts',
         'echo CLI_ONBOARDING_IMPLEMENTATION_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -172,7 +172,7 @@ Verification:
       task: `Add tests for Ricky CLI onboarding.
 
 Deliverables:
-- src/cli/onboarding.test.ts should assert the rendered welcome, local/BYOH mode, Cloud mode, Google connect command, GitHub dashboard/Nango guidance, and at least one next-action contract.
+- packages/cli/src/cli/onboarding.test.ts should assert the rendered welcome, local/BYOH mode, Cloud mode, Google connect command, GitHub dashboard/Nango guidance, and at least one next-action contract.
 
 Non-goals:
 - Do not test terminal colors or shell-specific behavior.
@@ -181,18 +181,18 @@ Non-goals:
 Verification:
 - Tests must prove user-visible onboarding text and mode options.
 - Tests must fail if local/BYOH disappears or is subordinated to Cloud.`,
-      verification: { type: 'file_exists', value: 'src/cli/onboarding.test.ts' },
+      verification: { type: 'file_exists', value: 'packages/cli/src/cli/onboarding.test.ts' },
     })
     .step('post-test-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-cli-tests'],
       command: [
-        'test -f src/cli/onboarding.test.ts',
-        'grep -q "local\\|BYOH" src/cli/onboarding.test.ts src/cli/mode-selector.ts',
-        'grep -q "Cloud" src/cli/onboarding.test.ts src/cli/mode-selector.ts',
-        'grep -q "cloud connect google\\|agent-relay cloud connect" src/cli/onboarding.test.ts src/cli/onboarding.ts',
-        'grep -q "GitHub\\|Nango\\|dashboard" src/cli/onboarding.test.ts src/cli/onboarding.ts',
-        'changed="$(git diff --name-only -- src/cli; git ls-files --others --exclude-standard -- src/cli)" && printf "%s\n" "$changed" | grep -Eq "^src/cli/"',
+        'test -f packages/cli/src/cli/onboarding.test.ts',
+        'grep -q "local\\|BYOH" packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/mode-selector.ts',
+        'grep -q "Cloud" packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/mode-selector.ts',
+        'grep -q "cloud connect google\\|agent-relay cloud connect" packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/onboarding.ts',
+        'grep -q "GitHub\\|Nango\\|dashboard" packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/onboarding.ts',
+        'changed="$(git diff --name-only -- src/cli; git ls-files --others --exclude-standard -- src/cli)" && printf "%s\n" "$changed" | grep -Eq "^packages/cli/src/cli/"',
         'echo CLI_ONBOARDING_TEST_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -202,7 +202,7 @@ Verification:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['post-test-file-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/cli/',
+      command: 'npm run typecheck --workspace @ricky/cli && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: false,
     })
@@ -262,15 +262,15 @@ Rules:
       type: 'deterministic',
       dependsOn: ['fix-cli-onboarding'],
       command: [
-        'test -f src/cli/welcome.ts',
-        'test -f src/cli/onboarding.ts',
-        'test -f src/cli/mode-selector.ts',
-        'test -f src/cli/ascii-art.ts',
-        'test -f src/cli/onboarding.test.ts',
-        'test -f src/cli/index.ts',
-        'grep -q "local\\|BYOH" src/cli/onboarding.ts src/cli/mode-selector.ts src/cli/onboarding.test.ts',
-        'grep -q "cloud connect google\\|agent-relay cloud connect" src/cli/onboarding.ts src/cli/onboarding.test.ts',
-        'grep -q "GitHub\\|Nango\\|dashboard" src/cli/onboarding.ts src/cli/onboarding.test.ts',
+        'test -f packages/cli/src/cli/welcome.ts',
+        'test -f packages/cli/src/cli/onboarding.ts',
+        'test -f packages/cli/src/cli/mode-selector.ts',
+        'test -f packages/cli/src/cli/ascii-art.ts',
+        'test -f packages/cli/src/cli/onboarding.test.ts',
+        'test -f packages/cli/src/cli/index.ts',
+        'grep -q "local\\|BYOH" packages/cli/src/cli/onboarding.ts packages/cli/src/cli/mode-selector.ts packages/cli/src/cli/onboarding.test.ts',
+        'grep -q "cloud connect google\\|agent-relay cloud connect" packages/cli/src/cli/onboarding.ts packages/cli/src/cli/onboarding.test.ts',
+        'grep -q "GitHub\\|Nango\\|dashboard" packages/cli/src/cli/onboarding.ts packages/cli/src/cli/onboarding.test.ts',
         'echo CLI_ONBOARDING_POST_FIX_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -279,7 +279,7 @@ Rules:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/cli/',
+      command: 'npm run typecheck --workspace @ricky/cli && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: false,
     })
@@ -289,7 +289,7 @@ Rules:
       dependsOn: ['post-fix-validation'],
       task: `Re-review the Ricky CLI onboarding experience after fixes and post-fix validation.
 
-Read src/cli/ source and tests, and post-fix validation output:
+Read packages/cli/src/cli/ source and tests, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm prior review findings are fixed or explicitly non-blocking. Re-check that local/BYOH and Cloud are co-equal, first-run output is clear, Google/GitHub guidance matches product spec, and user-visible proof is in tests.
@@ -302,7 +302,7 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-revi
       dependsOn: ['post-fix-validation'],
       task: `Re-review the CLI onboarding code and tests after fixes.
 
-Read src/cli/ source and tests, and post-fix validation output:
+Read packages/cli/src/cli/ source and tests, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm deterministic rendering contracts, test coverage for user-visible strings and modes, export shape, and minimal dependencies are ready for final hard gates.
@@ -325,7 +325,7 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-revi
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/cli/',
+      command: 'npm run typecheck --workspace @ricky/cli && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: true,
     })
@@ -335,8 +335,8 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-revi
       command: [
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\\n" "$changed" | grep -Eq "^src/cli/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cli/|\\.workflow-artifacts/)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^packages/cli/src/cli/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(packages/cli/src/cli/|\\.workflow-artifacts/)"',
         'echo CLI_ONBOARDING_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,

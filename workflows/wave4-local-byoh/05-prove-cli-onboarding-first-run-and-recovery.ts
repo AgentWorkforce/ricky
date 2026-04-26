@@ -32,7 +32,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery',
-        'mkdir -p src/cli/proof',
+        'mkdir -p packages/cli/packages/cli/src/cli/proof',
         'echo CLI_ONBOARDING_PROOF_READY',
       ].join(' && '),
       captureOutput: true,
@@ -63,7 +63,7 @@ async function main() {
     .step('write-proof-helper', {
       type: 'deterministic',
       dependsOn: ['read-ux-spec', 'read-cli-implementation-context', 'read-workflow-standards'],
-      command: 'test -f src/cli/proof/onboarding-proof.ts && echo CLI_ONBOARDING_PROOF_HELPER_SOURCE_READY',
+      command: 'test -f packages/cli/packages/cli/src/cli/proof/onboarding-proof.ts && echo CLI_ONBOARDING_PROOF_HELPER_SOURCE_READY',
       captureOutput: true,
       failOnError: true,
     })
@@ -71,8 +71,8 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['write-proof-helper'],
       command: [
-        'test -f src/cli/proof/onboarding-proof.ts',
-        "grep -q 'first-run\\|returning\\|Cloud\\|recovery' src/cli/proof/onboarding-proof.ts",
+        'test -f packages/cli/packages/cli/src/cli/proof/onboarding-proof.ts',
+        "grep -q 'first-run\\|returning\\|Cloud\\|recovery' packages/cli/packages/cli/src/cli/proof/onboarding-proof.ts",
         'echo CLI_ONBOARDING_PROOF_HELPER_READY',
       ].join(' && '),
       captureOutput: true,
@@ -82,7 +82,7 @@ async function main() {
     .step('write-proof-tests', {
       type: 'deterministic',
       dependsOn: ['verify-proof-helper'],
-      command: 'test -f src/cli/proof/onboarding-proof.test.ts && echo CLI_ONBOARDING_PROOF_TESTS_SOURCE_READY',
+      command: 'test -f packages/cli/packages/cli/src/cli/proof/onboarding-proof.test.ts && echo CLI_ONBOARDING_PROOF_TESTS_SOURCE_READY',
       captureOutput: true,
       failOnError: true,
     })
@@ -90,9 +90,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['write-proof-tests'],
       command: [
-        'test -f src/cli/proof/onboarding-proof.ts',
-        'test -f src/cli/proof/onboarding-proof.test.ts',
-        "grep -q 'first-run\\|returning\\|local\\|Cloud\\|recovery' src/cli/proof/onboarding-proof.test.ts",
+        'test -f packages/cli/packages/cli/src/cli/proof/onboarding-proof.ts',
+        'test -f packages/cli/packages/cli/src/cli/proof/onboarding-proof.test.ts',
+        "grep -q 'first-run\\|returning\\|local\\|Cloud\\|recovery' packages/cli/packages/cli/src/cli/proof/onboarding-proof.test.ts",
         'echo CLI_ONBOARDING_PROOF_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -102,7 +102,7 @@ async function main() {
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['post-proof-file-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/cli/proof/ src/cli/',
+      command: 'npx tsc --noEmit && npx vitest run packages/cli/packages/cli/src/cli/proof/ packages/cli/src/cli/',
       captureOutput: true,
       failOnError: false,
     })
@@ -170,9 +170,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['fix-proof-harness'],
       command: [
-        'test -f src/cli/proof/onboarding-proof.ts',
-        'test -f src/cli/proof/onboarding-proof.test.ts',
-        "grep -q 'first-run\\|returning\\|local\\|Cloud\\|recovery' src/cli/proof/onboarding-proof.test.ts",
+        'test -f packages/cli/packages/cli/src/cli/proof/onboarding-proof.ts',
+        'test -f packages/cli/packages/cli/src/cli/proof/onboarding-proof.test.ts',
+        "grep -q 'first-run\\|returning\\|local\\|Cloud\\|recovery' packages/cli/packages/cli/src/cli/proof/onboarding-proof.test.ts",
         'echo CLI_ONBOARDING_PROOF_POST_FIX_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -181,7 +181,7 @@ async function main() {
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/cli/proof/ src/cli/',
+      command: 'npx tsc --noEmit && npx vitest run packages/cli/packages/cli/src/cli/proof/ packages/cli/src/cli/',
       captureOutput: true,
       failOnError: false,
     })
@@ -231,7 +231,7 @@ async function main() {
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/cli/proof/ src/cli/',
+      command: 'npx tsc --noEmit && npx vitest run packages/cli/packages/cli/src/cli/proof/ packages/cli/src/cli/',
       captureOutput: true,
       failOnError: true,
     })
@@ -240,8 +240,8 @@ async function main() {
       dependsOn: ['final-hard-validation'],
       command: [
         'changed="$(git diff --name-only -- src/cli workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(src/cli/|workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery\.ts|\.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/)"',
-        '! printf "%s\n" "$changed" | grep -Ev "^(src/cli/|workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery\.ts|\.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/)"',
+        'printf "%s\n" "$changed" | grep -Eq "^(packages/cli/src/cli/|workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery\.ts|\.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/)"',
+        '! printf "%s\n" "$changed" | grep -Ev "^(packages/cli/src/cli/|workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery\.ts|\.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/)"',
         'echo CLI_ONBOARDING_PROOF_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -265,7 +265,7 @@ async function main() {
         '',
         'Validation commands run:',
         '- npx tsc --noEmit',
-        '- npx vitest run src/cli/proof/ src/cli/',
+        '- npx vitest run packages/cli/packages/cli/src/cli/proof/ packages/cli/src/cli/',
         '',
         'Missing implementation blockers: none observed in current repo state.',
         'Remaining risks: regression gate scope must stay aligned with intended workflow-owned files.',

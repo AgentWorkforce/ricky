@@ -47,7 +47,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint',
-        'mkdir -p src/local',
+        'mkdir -p packages/local/src',
         'echo RICKY_WAVE4_LOCAL_ENTRYPOINT_READY',
       ].join(' && '),
       captureOutput: true,
@@ -98,10 +98,10 @@ Context inputs:
 {{steps.read-product-spec.output}}
 
 Deliverables:
-- src/local/entrypoint.ts
-- src/local/request-normalizer.ts
-- src/local/entrypoint.test.ts
-- src/local/index.ts
+- packages/local/src/entrypoint.ts
+- packages/local/src/request-normalizer.ts
+- packages/local/src/entrypoint.test.ts
+- packages/local/src/index.ts
 
 Non-goals:
 - Do not implement Cloud execution.
@@ -141,18 +141,18 @@ Verification:
 - Keep command execution injectable or mockable.
 - Return artifacts, logs, warnings, and next actions in the local response.
 - Preserve the distinction between local workflow generation and Cloud workflow generation.`,
-      verification: { type: 'file_exists', value: 'src/local/entrypoint.ts' },
+      verification: { type: 'file_exists', value: 'packages/local/src/entrypoint.ts' },
     })
     .step('post-implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-local-entrypoint'],
       command: [
-        'test -f src/local/entrypoint.ts',
-        'test -f src/local/request-normalizer.ts',
-        'test -f src/local/index.ts',
-        'grep -q "normalize\\|spec\\|MCP\\|Claude" src/local/request-normalizer.ts',
-        'grep -q "local\\|BYOH\\|agent-relay" src/local/entrypoint.ts src/local/request-normalizer.ts',
-        'grep -q "export" src/local/index.ts',
+        'test -f packages/local/src/entrypoint.ts',
+        'test -f packages/local/src/request-normalizer.ts',
+        'test -f packages/local/src/index.ts',
+        'grep -q "normalize\\|spec\\|MCP\\|Claude" packages/local/src/request-normalizer.ts',
+        'grep -q "local\\|BYOH\\|agent-relay" packages/local/src/entrypoint.ts packages/local/src/request-normalizer.ts',
+        'grep -q "export" packages/local/src/index.ts',
         'echo LOCAL_ENTRYPOINT_IMPLEMENTATION_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -165,7 +165,7 @@ Verification:
       task: `Add tests for the local/BYOH entrypoint.
 
 Deliverables:
-- src/local/entrypoint.test.ts should cover request normalization, CLI/MCP/Claude spec handoff, workflow artifact input routing, local artifact/log response shape, and environment warning behavior.
+- packages/local/src/entrypoint.test.ts should cover request normalization, CLI/MCP/Claude spec handoff, workflow artifact input routing, local artifact/log response shape, and environment warning behavior.
 
 Non-goals:
 - Do not depend on the current developer machine layout.
@@ -174,17 +174,17 @@ Non-goals:
 Verification:
 - Use injected generation/runtime adapters where appropriate.
 - Tests must prove local/BYOH mode is explicit and not routed through Cloud by default.`,
-      verification: { type: 'file_exists', value: 'src/local/entrypoint.test.ts' },
+      verification: { type: 'file_exists', value: 'packages/local/src/entrypoint.test.ts' },
     })
     .step('post-test-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-local-tests'],
       command: [
-        'test -f src/local/entrypoint.test.ts',
-        'grep -q "normalize\\|spec\\|MCP\\|Claude" src/local/entrypoint.test.ts src/local/request-normalizer.ts',
-        'grep -q "local\\|BYOH\\|agent-relay" src/local/entrypoint.test.ts src/local/entrypoint.ts',
-        'grep -q "artifact\\|log\\|warning" src/local/entrypoint.test.ts src/local/entrypoint.ts',
-        'changed="$(git diff --name-only -- src/local; git ls-files --others --exclude-standard -- src/local)" && printf "%s\n" "$changed" | grep -Eq "^src/local/"',
+        'test -f packages/local/src/entrypoint.test.ts',
+        'grep -q "normalize\\|spec\\|MCP\\|Claude" packages/local/src/entrypoint.test.ts packages/local/src/request-normalizer.ts',
+        'grep -q "local\\|BYOH\\|agent-relay" packages/local/src/entrypoint.test.ts packages/local/src/entrypoint.ts',
+        'grep -q "artifact\\|log\\|warning" packages/local/src/entrypoint.test.ts packages/local/src/entrypoint.ts',
+        'changed="$(git diff --name-only -- src/local; git ls-files --others --exclude-standard -- src/local)" && printf "%s\n" "$changed" | grep -Eq "^packages/local/src/"',
         'echo LOCAL_ENTRYPOINT_TEST_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -194,7 +194,7 @@ Verification:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['post-test-file-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/local/',
+      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
       captureOutput: true,
       failOnError: false,
     })
@@ -254,13 +254,13 @@ Rules:
       type: 'deterministic',
       dependsOn: ['fix-local-entrypoint'],
       command: [
-        'test -f src/local/entrypoint.ts',
-        'test -f src/local/request-normalizer.ts',
-        'test -f src/local/entrypoint.test.ts',
-        'test -f src/local/index.ts',
-        'grep -q "normalize\\|spec\\|MCP\\|Claude" src/local/request-normalizer.ts',
-        'grep -q "local\\|BYOH\\|agent-relay" src/local/entrypoint.ts src/local/entrypoint.test.ts',
-        'grep -q "export" src/local/index.ts',
+        'test -f packages/local/src/entrypoint.ts',
+        'test -f packages/local/src/request-normalizer.ts',
+        'test -f packages/local/src/entrypoint.test.ts',
+        'test -f packages/local/src/index.ts',
+        'grep -q "normalize\\|spec\\|MCP\\|Claude" packages/local/src/request-normalizer.ts',
+        'grep -q "local\\|BYOH\\|agent-relay" packages/local/src/entrypoint.ts packages/local/src/entrypoint.test.ts',
+        'grep -q "export" packages/local/src/index.ts',
         'echo LOCAL_ENTRYPOINT_POST_FIX_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -269,7 +269,7 @@ Rules:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/local/',
+      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
       captureOutput: true,
       failOnError: false,
     })
@@ -279,7 +279,7 @@ Rules:
       dependsOn: ['post-fix-validation'],
       task: `Re-review the local/BYOH invocation implementation after fixes and post-fix validation.
 
-Read src/local/ source and tests, and post-fix validation output:
+Read packages/local/src/ source and tests, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm prior review findings are fixed or explicitly non-blocking. Re-check that local/BYOH is co-equal with Cloud, CLI/MCP spec handoff is represented, local outputs are useful, and environment blockers are explicit.
@@ -292,7 +292,7 @@ Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-rev
       dependsOn: ['post-fix-validation'],
       task: `Re-review the local entrypoint code and tests after fixes.
 
-Read src/local/ source and tests, and post-fix validation output:
+Read packages/local/src/ source and tests, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm deterministic gates, injectable process/filesystem boundaries, exported type quality, and fit with local agent-relay coordination are ready for final hard gates.
@@ -315,7 +315,7 @@ Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-rev
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/local/',
+      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
       captureOutput: true,
       failOnError: true,
     })
@@ -325,8 +325,8 @@ Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-rev
       command: [
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\\n" "$changed" | grep -Eq "^src/local/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/local/|\\.workflow-artifacts/)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^packages/local/src/"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(packages/local/src/|\\.workflow-artifacts/)"',
         'echo LOCAL_ENTRYPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
