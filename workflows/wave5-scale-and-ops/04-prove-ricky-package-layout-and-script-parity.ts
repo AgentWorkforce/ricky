@@ -164,8 +164,9 @@ Write the files to disk, then exit cleanly.`,
       dependsOn: ['post-fix-validation'],
       command: [
         'changed="$(git diff --name-only -- test/package-proof workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave5-scale-and-ops/prove-ricky-package-layout-and-script-parity)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(test/package-proof/|workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity\\.ts|\\.workflow-artifacts/wave5-scale-and-ops/prove-ricky-package-layout-and-script-parity/)"',
-        '! printf "%s\n" "$changed" | grep -Ev "^(test/package-proof/|workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity\\.ts|\\.workflow-artifacts/wave5-scale-and-ops/prove-ricky-package-layout-and-script-parity/)"',
+        'filtered="$(printf "%s\n" "$changed" | sed "/^$/d")"',
+        'test -z "$filtered" || printf "%s\n" "$filtered" | grep -Eq "^(test/package-proof/|workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity\\.ts|\\.workflow-artifacts/wave5-scale-and-ops/prove-ricky-package-layout-and-script-parity/)"',
+        '! printf "%s\n" "$filtered" | grep -Ev "^(test/package-proof/|workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity\\.ts|\\.workflow-artifacts/wave5-scale-and-ops/prove-ricky-package-layout-and-script-parity/)"',
         'echo RICKY_PACKAGE_PROOF_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -197,6 +198,9 @@ Write the files to disk, then exit cleanly.`,
     .run({ cwd: process.cwd() });
 
   console.log(result.status);
+  if (result.status !== 'completed') {
+    throw new Error(`Workflow finished with status ${result.status}`);
+  }
 }
 
 main().catch((error) => {
