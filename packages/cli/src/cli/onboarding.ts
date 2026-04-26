@@ -150,20 +150,20 @@ export function renderHandoffGuidance(): string {
     'Spec handoff:',
     '  Tip: You can hand specs from Claude directly to Ricky.',
     '  In a Claude session, ask Claude to write a workflow spec.',
-    '  Hand Ricky the spec directly.',
-    '  From the CLI:',
-    '  $ npx ricky generate --spec "describe your workflow"',
-    '  $ npx ricky generate --spec-file <path>',
-    '  $ cat spec.md | npx ricky generate --spec-stdin',
+    '  Ricky already has internal local/BYOH and Cloud handoff plumbing,',
+    '  but the user-facing generate/debug command layer is not exposed yet.',
     '',
-    '  Using MCP? Invoke ricky.generate with the same spec, mode, and source fields.',
+    '  For now, use the interactive CLI to choose mode, then rerun once',
+    '  you have a concrete workflow spec or artifact ready to wire into the next surface.',
+    '',
+    '  Using MCP later? Invoke ricky.generate with the same spec, mode, and source fields.',
   ].join('\n');
 }
 
 export function renderInterruptedSetupRecovery(): string {
   return [
     '  It looks like setup was interrupted.',
-    '  Run `npx ricky setup` to restart, or use --mode local to skip setup.',
+    '  Rerun `npm start`, or use `npm start -- --mode local` to skip mode selection.',
   ].join('\n');
 }
 
@@ -171,7 +171,7 @@ export function renderNonInteractiveSetupError(): string {
   return [
     '  Error: Ricky has not been configured yet.',
     '',
-    '  Run `npx ricky` interactively to complete first-run setup,',
+    '  Run `npm start` interactively to complete first-run setup,',
     '  or set RICKY_MODE=local to skip setup and use local mode.',
   ].join('\n');
 }
@@ -180,8 +180,8 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
   if (!blockedReason) {
     return [
       'Recovery:',
-      '  If setup is interrupted, run `npx ricky setup` to restart.',
-      '  If Cloud setup is blocked, continue in local mode: npx ricky --mode local',
+      '  If setup is interrupted, rerun `npm start`.',
+      '  If Cloud setup is blocked, continue in local mode: npm start -- --mode local',
       '  Ricky should say what is blocked and show the nearest useful next step.',
     ].join('\n');
   }
@@ -205,7 +205,7 @@ export function renderProviderConnectFailureRecovery(provider = 'google'): strin
     '  - Expired or revoked credentials',
     '',
     '  Try again: npx agent-relay cloud connect google',
-    '  Or continue in local mode: npx ricky --mode local',
+    '  Or continue in local mode: npm start -- --mode local',
   ].join('\n');
 }
 
@@ -213,24 +213,21 @@ export function renderWorkflowGenerationFailureRecovery(): string {
   return [
     '  Workflow generation failed.',
     '',
-    '  You can ask Ricky to debug the failed workflow:',
-    '  $ npx ricky debug --workflow <path>',
-    '',
-    '  Or rerun locally after editing the spec:',
-    '  $ npx ricky generate --spec-file spec.md --mode local',
+    "  Ricky's user-facing generate/debug commands are not exposed yet.",
+    '  For now, inspect the local proof/test surface and retry through the interactive CLI path.',
   ].join('\n');
 }
 
 export function renderSuggestedNextAction(mode: RickyMode): string {
   if (mode === 'cloud') {
-    return 'Next: run `npx ricky status` or connect Google with `npx agent-relay cloud connect google`.';
+    return 'Next: connect Google with `npx agent-relay cloud connect google` or review `npm start -- --help`.';
   }
 
   if (mode === 'both') {
-    return 'Next: generate locally with `npx ricky generate --spec "your spec here"` or check Cloud with `npx ricky status`.';
+    return 'Next: choose your mode again with `npm start`, or connect Cloud with `npx agent-relay cloud connect google`.';
   }
 
-  return 'Next: generate locally with `npx ricky generate --spec "your spec here"`.';
+  return 'Next: rerun Ricky when you have a concrete spec or workflow artifact ready to hand off.';
 }
 
 export function renderOnboarding(context: OnboardingContext = {}): string {

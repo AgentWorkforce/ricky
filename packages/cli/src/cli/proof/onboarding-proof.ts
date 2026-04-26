@@ -202,8 +202,9 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
               'validate workflows using local tools',
               'run workflows via local agent-relay',
               'No Cloud credentials required.',
-              'npx ricky generate --spec',
+              'currently implemented CLI surface',
             ]),
+            excludesAll(localResult, ['npx ricky generate --spec', 'npx ricky debug --workflow', 'npx ricky setup']),
           ],
           [compactEvidence('local selector', selector), compactEvidence('local result', localResult)],
         );
@@ -281,10 +282,10 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
               'Claude',
               'CLI',
               'MCP',
-              'Hand Ricky the spec directly.',
-              'npx ricky generate --spec-file',
+              'user-facing generate/debug command layer is not exposed yet',
               'ricky.generate',
             ]),
+            excludesAll(handoff, ['npx ricky generate --spec', 'npx ricky generate --spec-file', 'spec-stdin']),
           ],
           [compactEvidence('handoff', handoff)],
         );

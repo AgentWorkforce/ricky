@@ -126,10 +126,9 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '  Give Ricky a spec, a workflow artifact, or a Claude/MCP handoff and continue locally.',
         '',
         '  Next steps:',
-        '  - Submit a workflow spec:    npx ricky generate --spec "your spec here"',
-        '  - Submit a spec from file:   npx ricky generate --spec-file spec.md',
-        '  - Debug a failed workflow:   npx ricky debug --workflow <path>',
-        '  - See all commands:          npx ricky help',
+        '  - Start Ricky again when you have a concrete spec or workflow artifact to hand off',
+        '  - Use `npm start -- --help` to see the currently implemented CLI surface',
+        '  - Cloud guidance is available with: npx agent-relay cloud connect google',
         '',
         '  Ready to go!',
       ].join('\n');
@@ -171,9 +170,9 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '  - GitHub:  Cloud dashboard -> Integrations -> GitHub',
         '',
         '  Next steps:',
-        '  - Submit a workflow spec:    npx ricky generate --spec "your spec here"',
-        '  - Check Cloud status:        npx ricky status',
-        '  - See all commands:          npx ricky help',
+        '  - Start Ricky again when you have a concrete spec or workflow artifact to hand off',
+        '  - Cloud setup:               npx agent-relay cloud connect google',
+        '  - See the current CLI help:  npm start -- --help',
       ].join('\n');
     case 'explore':
       return [
@@ -181,13 +180,12 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '',
         "  Here's what Ricky can do:",
         '',
-        '  Generate workflows    npx ricky generate --spec "describe your workflow"',
-        '  Debug failures        npx ricky debug --workflow <path>',
-        '  Fix broken workflows  npx ricky fix --workflow <path>',
-        '  Analyze workflow runs npx ricky analyze',
-        '  Check status          npx ricky status',
+        '  Today\'s implemented surface is the interactive CLI onboarding and mode-selection path.',
+        '  Ricky also has proven local/BYOH and Cloud domain logic behind that surface,',
+        '  but the typed command layer is still intentionally thin.',
         '',
-        "  When you're ready to set up, run: npx ricky setup",
+        '  See the current CLI help: npm start -- --help',
+        '  For Cloud setup:       npx agent-relay cloud connect google',
       ].join('\n');
   }
 }

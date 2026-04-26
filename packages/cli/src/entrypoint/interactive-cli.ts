@@ -48,6 +48,8 @@ export interface InteractiveCliResult {
   diagnoses: Diagnosis[];
   /** Recovery guidance lines surfaced to the user. */
   guidance: string[];
+  /** True when Ricky only completed onboarding / mode selection and did not execute. */
+  awaitingInput?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,14 +100,24 @@ export interface InteractiveCliDeps {
 async function executeLocalPath(
   deps: InteractiveCliDeps,
   mode: RickyMode,
-): Promise<{ localResult: LocalResponse; diagnoses: Diagnosis[]; guidance: string[] }> {
-  const handoff: RawHandoff = deps.handoff ?? {
-    source: 'cli',
-    spec: '',
-    mode,
-  };
+): Promise<{ localResult?: LocalResponse; diagnoses: Diagnosis[]; guidance: string[]; awaitingInput: boolean }> {
+  if (!deps.handoff) {
+    return {
+      diagnoses: [],
+      guidance: [
+        'Ricky is ready for a real spec or workflow handoff.',
+        'What works today:',
+        '  - onboarding and mode selection',
+        '  - local/BYOH routing guidance',
+        '  - Cloud guidance via `npx agent-relay cloud connect google`',
+        'Current CLI command layer is still limited.',
+        'Next useful step: rerun Ricky once you have a concrete workflow spec or artifact to hand off.',
+      ],
+      awaitingInput: true,
+    };
+  }
 
-  const localResult = await runLocal(handoff, {
+  const localResult = await runLocal(deps.handoff, {
     executor: deps.localExecutor,
   });
 
@@ -138,7 +150,7 @@ async function executeLocalPath(
     }
   }
 
-  return { localResult, diagnoses, guidance };
+  return { localResult, diagnoses, guidance, awaitingInput: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -238,24 +250,25 @@ export async function runInteractiveCli(
   }
 
   if (mode === 'local' || mode === 'both') {
-    const { localResult, diagnoses, guidance } = await executeLocalPath(deps, mode);
+    const { localResult, diagnoses, guidance, awaitingInput } = await executeLocalPath(deps, mode);
 
     // For 'both' mode, also attempt Cloud if local succeeded
     let cloudResult: CloudGenerateResult | undefined;
-    if (mode === 'both' && localResult.ok && deps.cloudRequest) {
+    if (mode === 'both' && localResult?.ok && deps.cloudRequest) {
       const cloud = await executeCloudPath(deps);
       cloudResult = cloud.cloudResult;
       guidance.push(...cloud.guidance);
     }
 
     return {
-      ok: localResult.ok,
+      ok: awaitingInput ? true : (localResult?.ok ?? false),
       mode,
       onboarding,
       localResult,
       cloudResult,
       diagnoses,
       guidance,
+      awaitingInput,
     };
   }
 

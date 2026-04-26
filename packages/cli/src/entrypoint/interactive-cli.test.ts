@@ -56,6 +56,18 @@ describe('runInteractiveCli', () => {
     expect(result.guidance).toEqual([]);
   });
 
+  it('stops cleanly after onboarding when no handoff was provided', async () => {
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.awaitingInput).toBe(true);
+    expect(result.localResult).toBeUndefined();
+    expect(result.guidance.join('\n')).toMatch(/ready for a real spec or workflow handoff/i);
+    expect(result.guidance.join('\n')).toMatch(/command layer is still limited/i);
+  });
+
   it('surfaces runtime diagnosis guidance when local execution fails', async () => {
     const result = await runInteractiveCli({
       onboard: vi.fn().mockResolvedValue(onboarding('local')),

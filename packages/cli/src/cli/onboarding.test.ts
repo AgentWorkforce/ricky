@@ -58,7 +58,9 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('Claude');
     expect(output).toContain('MCP');
-    expect(output).toContain('Hand Ricky the spec directly.');
+    expect(output).toContain('user-facing generate/debug command layer is not exposed yet');
+    expect(output).toContain('ricky.generate');
+    expect(output).not.toContain('npx ricky generate --spec-file');
   });
 
   it('includes a recovery path when the local runtime is blocked', () => {
@@ -83,8 +85,10 @@ describe('Ricky CLI onboarding', () => {
     expect(renderWelcome({ isFirstRun: false })).toContain('Ricky is ready.');
   });
 
-  it('keeps local next action local-first and Cloud next action provider-aware', () => {
-    expect(renderSuggestedNextAction('local')).toBe('Next: generate locally with `npx ricky generate --spec "your spec here"`.');
+  it('keeps local next action honest and Cloud next action provider-aware', () => {
+    expect(renderSuggestedNextAction('local')).toBe(
+      'Next: rerun Ricky when you have a concrete spec or workflow artifact ready to hand off.',
+    );
     expect(renderSuggestedNextAction('cloud')).toContain('connect Google with `npx agent-relay cloud connect google`');
   });
 
