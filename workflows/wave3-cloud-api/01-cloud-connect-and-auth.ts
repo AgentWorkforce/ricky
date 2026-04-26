@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Cloud API lead who keeps auth, workspace scoping, and provider connect behavior aligned with Ricky product requirements.',
       retries: 1,
     })

@@ -26,6 +26,7 @@ interface TeamMemberSpec {
   name: string;
   cli: 'claude' | 'codex';
   role: string;
+  interactive?: boolean;
   preset?: 'reviewer' | 'worker';
   retries: number;
 }
@@ -148,7 +149,7 @@ function renderSource(input: {
 function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSpec[] {
   if (!isCodeWorkflow) {
     return [
-      { name: 'lead-claude', cli: 'claude', role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
+      { name: 'lead-claude', cli: 'claude', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
       { name: 'author-codex', cli: 'codex', role: 'Writes the requested bounded artifact and keeps scope to declared files.', retries: 2 },
       { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'Reviews artifact quality, scope, and evidence.', retries: 1 },
       { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews implementation practicality and deterministic checks.', retries: 1 },
@@ -162,7 +163,7 @@ function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSp
       : 'Primary implementer for the generated code-writing workflow.';
 
   return [
-    { name: 'lead-claude', cli: 'claude', role: 'Plans task shape, ownership, non-goals, and verification gates.', retries: 1 },
+    { name: 'lead-claude', cli: 'claude', interactive: false, role: 'Plans task shape, ownership, non-goals, and verification gates.', retries: 1 },
     { name: 'impl-primary-codex', cli: 'codex', role: implementationRole, retries: 2 },
     { name: 'impl-tests-codex', cli: 'codex', role: 'Adds or updates tests and validation coverage for the changed surface.', retries: 2 },
     { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'Reviews product fit, scope control, and workflow evidence quality.', retries: 1 },

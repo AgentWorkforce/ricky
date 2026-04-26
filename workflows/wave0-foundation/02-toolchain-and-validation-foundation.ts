@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Foundation lead who keeps the Ricky toolchain minimal, explicit, and sufficient for later validation gates.',
       retries: 1,
     })

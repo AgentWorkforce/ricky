@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Analytics lead who keeps run-history analysis tied to actionable Ricky workflow quality improvements.',
       retries: 1,
     })

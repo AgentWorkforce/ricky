@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Cloud endpoint lead who keeps the API route aligned with Ricky spec intake, generation, validation, and artifact-return contracts.',
       retries: 1,
     })

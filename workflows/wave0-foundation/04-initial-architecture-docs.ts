@@ -11,11 +11,13 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Architecture lead who defines the document outlines and keeps assumptions aligned across Ricky waves.',
       retries: 1,
     })
     .agent('author-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Architecture author who writes focused docs for Ricky runtime, ingress surfaces, and specialist boundaries.',
       retries: 2,
     })

@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Foundation lead who plans repo convention updates and keeps the scope limited to standards and workflow authoring rules.',
       retries: 1,
     })

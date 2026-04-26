@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Runtime lead responsible for scope control, product alignment, and final implementation signoff.',
       retries: 1,
     })

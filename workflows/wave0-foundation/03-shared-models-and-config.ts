@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Implementation lead who defines the shared model boundary and prevents runtime-specific behavior from leaking into Wave 0.',
       retries: 1,
     })

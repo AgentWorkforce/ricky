@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Roadmap lead who turns Ricky’s remaining product gaps into an explicit next-wave backlog and proof plan.',
       retries: 1,
     })

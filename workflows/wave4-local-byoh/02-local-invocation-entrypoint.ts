@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Local/BYOH lead who keeps local invocation first-class and distinct from Cloud execution assumptions.',
       retries: 1,
     })

@@ -11,6 +11,7 @@ async function main() {
 
     .agent('meta-lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'Meta lead who plans the generated workflow backlog, keeps it bounded, and signs off only when all generated workflows pass review and dry-run gates.',
       retries: 1,
     })

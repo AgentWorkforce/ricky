@@ -11,6 +11,7 @@ async function main() {
 
     .agent('lead-claude', {
       cli: 'claude',
+      interactive: false,
       role: 'CLI onboarding lead who keeps the first-run experience aligned with Ricky local/BYOH and Cloud product requirements.',
       retries: 1,
     })
