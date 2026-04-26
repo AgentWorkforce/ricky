@@ -294,8 +294,7 @@ export function getPackageProofCases(): PackageProofCase[] {
           'packages/cli/src/entrypoint/interactive-cli.ts',
         ];
         const missing = requiredFiles.filter((file) => !fileExists(file));
-        const allowedRootSrcFiles = new Set(['src/test/setup.ts']);
-        const oldSrcFiles = listFiles('src').filter((file) => !allowedRootSrcFiles.has(file));
+        const oldSrcFiles = listFiles('src');
         const oldSrcRemoved = oldSrcFiles.length === 0;
 
         return result(
