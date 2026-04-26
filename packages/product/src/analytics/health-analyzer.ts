@@ -46,8 +46,9 @@ export function analyzeHealth(input: HealthAnalysisInput | WorkflowRunRecord[]):
   const records = normalized.runs.filter((record) => isInsideWindow(record.evidence, normalized));
   const classifiedRuns = records.map(classifyRun).sort(compareClassifiedRuns);
   const buckets = groupByWorkflow(classifiedRuns);
-  const findings = buckets.flatMap((bucket) => analyzeWorkflow(bucket));
   const summaries = buckets.map((bucket) => summarizeWorkflow(bucket)).sort(compareWorkflowSummary);
+  const summaryByWorkflow = new Map(summaries.map((s) => [s.workflowName, s]));
+  const findings = buckets.flatMap((bucket) => analyzeWorkflow(bucket, summaryByWorkflow.get(bucket.workflowName)!));
   const timeRange = getTimeRange(records.map((record) => record.evidence));
 
   findings.sort(compareFindings);
@@ -76,9 +77,8 @@ function classifyRun(record: WorkflowRunRecord): ClassifiedRun {
   };
 }
 
-function analyzeWorkflow(bucket: WorkflowBucket): HealthFinding[] {
+function analyzeWorkflow(bucket: WorkflowBucket, summary: WorkflowHealthSummary): HealthFinding[] {
   const findings: HealthFinding[] = [];
-  const summary = summarizeWorkflow(bucket);
 
   findings.push(...failureDistributionFindings(bucket, summary));
   findings.push(...verificationFindings(bucket));
@@ -101,7 +101,7 @@ function summarizeWorkflow(bucket: WorkflowBucket): WorkflowHealthSummary {
     .filter((duration): duration is number => duration !== null)
     .sort((a, b) => a - b);
   const failureClassCounts = countFailureClasses(bucket.runs);
-  const pattern = firstPattern(bucket.runs);
+  const pattern = latestPattern(bucket.runs);
 
   return {
     workflowName: bucket.workflowName,
@@ -550,8 +550,13 @@ function countFailureClasses(runs: ClassifiedRun[]): Partial<Record<FailureClass
   return sortRecord(counts);
 }
 
-function firstPattern(runs: ClassifiedRun[]): SwarmPattern | undefined {
-  return runs.find((run) => run.record.config?.pattern)?.record.config?.pattern;
+function latestPattern(runs: ClassifiedRun[]): SwarmPattern | undefined {
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (runs[i].record.config?.pattern) {
+      return runs[i].record.config!.pattern;
+    }
+  }
+  return undefined;
 }
 
 function flakinessScore(runs: ClassifiedRun[]): number {

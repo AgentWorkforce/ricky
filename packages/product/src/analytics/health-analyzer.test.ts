@@ -35,8 +35,15 @@ describe('workflow health analytics', () => {
       healthScore: 100,
       findings: [],
       recommendations: [],
+      report: expect.objectContaining({
+        totalRuns: 0,
+        totalWorkflows: 0,
+        timeRange: null,
+      }),
     });
-    expect(digest.topLineSummary).toContain('no workflow health findings across 0 analyzed runs');
+    expect(digest.topLineSummary).toBe(
+      'Health score 100: no workflow health findings across 0 analyzed runs.',
+    );
   });
 
   it('summarizes healthy passing history without findings', () => {
@@ -509,6 +516,7 @@ describe('workflow health analytics', () => {
     expect(digest.generatedAt).toBe(report.analyzedAt);
     expect(digest.topLineStatus).toBe('unhealthy');
     expect(digest.topLineSummary).toContain('Signal:');
+    expect(digest.report).toBe(report);
 
     const weakVerification = digest.findings.find((finding) => finding.category === 'weak_verification');
     expect(weakVerification).toMatchObject({
@@ -531,6 +539,69 @@ describe('workflow health analytics', () => {
       workflowNames: ['release-health'],
       suggestedAction: weakVerification!.recommendedAction,
     });
+    expect(recommendation!.relatedFindings).toEqual([weakVerification!.id]);
+    expect(recommendation!.description).toBe(weakVerification!.summary);
+    expect(recommendation!.suggestedAction).toContain(weakVerification!.evidence[0].message);
+  });
+
+  it('ties every digest recommendation to concrete finding evidence', () => {
+    const report = analyzeHealth({
+      runs: [
+        record(
+          run({
+            runId: 'weak-1',
+            status: 'failed',
+            startedAt: '2026-04-26T00:00:01.000Z',
+            steps: [
+              step({ stepId: 'build', verifications: [] }),
+              step({ stepId: 'check', verifications: [] }),
+            ],
+          }),
+        ),
+        record(
+          run({
+            runId: 'oversized-1',
+            status: 'failed',
+            startedAt: '2026-04-26T00:00:02.000Z',
+            stepStatus: 'failed',
+            retries: 12,
+            verifications: Array.from({ length: 12 }, (_, index) =>
+              verification({ expected: `check ${index}`, actual: `failed ${index}`, passed: false }),
+            ),
+          }),
+        ),
+        record(run({ runId: 'timeout-1', status: 'timed_out', stepStatus: 'timed_out' })),
+        record(run({ runId: 'timeout-2', status: 'timed_out', stepStatus: 'timed_out' })),
+        record(run({ runId: 'timeout-3', status: 'timed_out', stepStatus: 'timed_out' })),
+      ],
+    });
+
+    const digest = generateDigest(report);
+
+    expect(digest.findings.map((finding) => finding.category)).toEqual([
+      'failure_distribution',
+      'timeout_rate',
+      'missing_hard_gate',
+      'oversized_step',
+      'retry_rate',
+      'weak_verification',
+    ]);
+    expect(digest.recommendations).toHaveLength(digest.findings.length);
+
+    for (const finding of digest.findings) {
+      const recommendation = digest.recommendations.find((item) =>
+        item.relatedFindings.includes(finding.id),
+      );
+
+      expect(recommendation).toBeDefined();
+      expect(recommendation).toMatchObject({
+        workflowNames: [finding.workflowName],
+        suggestedAction: finding.recommendedAction,
+      });
+      expect(recommendation!.description).toBe(finding.summary);
+      expect(recommendation!.suggestedAction).toContain(finding.evidence[0].message);
+      expect(recommendation!.suggestedAction).toContain(finding.workflowName);
+    }
   });
 });
 
