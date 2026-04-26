@@ -237,19 +237,21 @@ Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-c
       failOnError: true,
     })
     .step('fix-health-analytics', {
-      agent: 'validator-claude',
+      type: 'deterministic',
       dependsOn: ['read-review-feedback'],
-      task: `Fix workflow health analytics issues from review feedback.
-
-Review feedback:
-{{steps.read-review-feedback.output}}
-
-Rules:
-- Keep analytics deterministic and evidence-backed.
-- Update tests when contracts change.
-- Do not add live telemetry dependencies.
-- Re-run deterministic gates after changes.`,
-      verification: { type: 'exit_code', value: '0' },
+      command: [
+        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
+        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        "cat <<'EOF' > .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/fix-health-analytics.md",
+        '# Workflow health analytics fix pass',
+        '',
+        'Review feedback consumed. Both reviewers passed, so no additional code changes are required in the fix step.',
+        '',
+        'FIX_HEALTH_ANALYTICS_PASS',
+        'EOF',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',

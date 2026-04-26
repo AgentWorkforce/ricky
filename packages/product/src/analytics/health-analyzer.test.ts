@@ -345,6 +345,17 @@ describe('workflow health analytics', () => {
     expect(aboveRetryThreshold.findings.map((f) => f.category)).toContain('oversized_step');
   });
 
+  it('respects exact retry rate threshold boundary (2 retries per run)', () => {
+    const atThreshold = analyzeHealth({
+      runs: [
+        record(run({ runId: 'retry-1', status: 'failed', retries: 2 })),
+        record(run({ runId: 'retry-2', status: 'failed', retries: 2 })),
+      ],
+    });
+    expect(atThreshold.perWorkflowSummary[0].retryRate).toBe(2);
+    expect(atThreshold.findings.map((f) => f.category)).not.toContain('retry_rate');
+  });
+
   it('respects exact timeout rate threshold boundary (0.2)', () => {
     // Exactly at threshold: 1/5 = 0.2 — NOT above threshold
     const atThreshold = analyzeHealth({
@@ -493,6 +504,63 @@ describe('workflow health analytics', () => {
     // Each recommendation references exactly one finding
     expect(weakRec[0].relatedFindings.length).toBe(1);
     expect(gateRec[0].relatedFindings.length).toBe(1);
+  });
+
+  it('merges digest recommendations when multiple findings share the same workflow and category', () => {
+    // DAG with a linear chain shape AND repeated deadlocks → two pattern_choice findings
+    const deadlockRun = (runId: string) =>
+      run({
+        runId,
+        status: 'failed',
+        steps: [
+          step({ stepId: 'agent-a', status: 'pending' }),
+          step({ stepId: 'agent-b', status: 'pending' }),
+          step({ stepId: 'agent-c', status: 'pending' }),
+        ],
+      });
+
+    const report = analyzeHealth({
+      runs: [
+        record(deadlockRun('dl-1'), {
+          config: { pattern: 'dag' },
+          workflowShape: {
+            steps: [
+              { id: 'agent-a' },
+              { id: 'agent-b', dependsOn: ['agent-a'] },
+              { id: 'agent-c', dependsOn: ['agent-b'] },
+            ],
+          },
+        }),
+        record(deadlockRun('dl-2'), {
+          config: { pattern: 'dag' },
+          workflowShape: {
+            steps: [
+              { id: 'agent-a' },
+              { id: 'agent-b', dependsOn: ['agent-a'] },
+              { id: 'agent-c', dependsOn: ['agent-b'] },
+            ],
+          },
+        }),
+      ],
+    });
+
+    // Both DAG linear chain and deadlock findings should be pattern_choice
+    const patternFindings = report.findings.filter((f) => f.category === 'pattern_choice');
+    expect(patternFindings.length).toBe(2);
+
+    const digest = generateDigest(report);
+    // Two same-category same-workflow findings should merge into one recommendation
+    const patternRecs = digest.recommendations.filter((r) => r.title.includes('pattern'));
+    expect(patternRecs.length).toBe(1);
+    // Merged recommendation references both findings
+    expect(patternRecs[0].relatedFindings.length).toBe(2);
+    expect(patternRecs[0].relatedFindings).toContain(patternFindings[0].id);
+    expect(patternRecs[0].relatedFindings).toContain(patternFindings[1].id);
+    // Merged description combines both summaries
+    expect(patternRecs[0].description).toContain('linear dependency chain');
+    expect(patternRecs[0].description).toContain('deadlock');
+    // Priority should be immediate (highest severity among the merged findings is high from deadlock)
+    expect(patternRecs[0].priority).toBe('immediate');
   });
 
   it('generates structured digest findings with evidence and recommended actions', () => {
