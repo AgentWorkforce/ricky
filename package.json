@@ -7,8 +7,9 @@
   "engines": {
     "node": ">=20"
   },
+  "type": "module",
   "scripts": {
-    "start": "npx ts-node src/commands/cli-main.ts",
+    "start": "tsx src/commands/cli-main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "batch": "bash scripts/run-ricky-batch.sh",
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

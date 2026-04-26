@@ -50,7 +50,7 @@ describe('Ricky package layout and npm script parity proof', () => {
 
   it.each([
     ['npm-scripts-are-the-default-path', ['scripts present: start, typecheck, test', 'no Makefile: true']],
-    ['start-script-invokes-cli-entrypoint', ['src/commands/cli-main.ts', 'npx ts-node']],
+    ['start-script-invokes-cli-entrypoint', ['src/commands/cli-main.ts', 'uses tsx: true']],
     ['typecheck-script-is-tsc-no-emit', ['tsc --noEmit', 'is exactly tsc --noEmit: true']],
     ['test-script-is-vitest-run', ['vitest run', 'is exactly vitest run: true']],
   ] satisfies Array<[ProofCaseName, string[]]>)(

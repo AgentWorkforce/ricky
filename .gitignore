@@ -17,6 +17,11 @@ dist/
 # scratch / temp
 tmp/
 
-# non-npm package-manager lockfiles
+# non-npm package-manager artifacts
 prpm.lock
 skills-lock.json
+
+# editor / IDE
+.idea/
+.vscode/
+*.swp

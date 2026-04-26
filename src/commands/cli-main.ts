@@ -99,9 +99,9 @@ export function renderHelp(): string[] {
     '  --version, -v   Show version',
     '',
     'Examples:',
-    '  npx ts-node src/commands/cli-main.ts',
-    '  npx ts-node src/commands/cli-main.ts --mode local',
-    '  npx ts-node src/commands/cli-main.ts help',
+    '  npm start',
+    '  npm start -- --mode local',
+    '  npm start -- help',
   ];
 }
 

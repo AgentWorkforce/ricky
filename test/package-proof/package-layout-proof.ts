@@ -137,19 +137,19 @@ export function getPackageProofCases(): PackageProofCase[] {
     {
       name: 'start-script-invokes-cli-entrypoint',
       description:
-        'npm start runs the CLI entrypoint via ts-node — the user path is `npm start`, not a raw ts-node invocation.',
+        'npm start runs the CLI entrypoint via tsx — the user path is `npm start`, not a raw tsx invocation.',
       evaluate: () => {
         const startScript = scripts.start ?? '';
         const pointsToCliMain = startScript.includes('src/commands/cli-main.ts');
-        const usesNpxTsNode = startScript.includes('npx ts-node');
+        const usesTsx = startScript.includes('tsx');
 
         return result(
           'start-script-invokes-cli-entrypoint',
-          [pointsToCliMain, usesNpxTsNode],
+          [pointsToCliMain, usesTsx],
           [
             `start script: ${startScript}`,
             `targets cli-main.ts: ${pointsToCliMain}`,
-            `uses npx ts-node: ${usesNpxTsNode}`,
+            `uses tsx: ${usesTsx}`,
           ],
         );
       },
