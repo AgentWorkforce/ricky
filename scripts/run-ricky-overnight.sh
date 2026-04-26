@@ -41,6 +41,26 @@ RUN_RESULT=""
 STATUS_REASON=""
 CURRENT_WORKFLOW=""
 RUN_PID="$$"
+STATUS_MARKED="false"
+
+on_exit() {
+  local exit_code="$?"
+
+  if [[ "$STATUS_MARKED" == "true" ]]; then
+    return "$exit_code"
+  fi
+
+  if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
+    STATUS_REASON="process exited unexpectedly"
+    echo "stale" > "$STATUS_FILE"
+    persist_checkpoint
+    write_summary "stale"
+  fi
+
+  return "$exit_code"
+}
+
+trap on_exit EXIT
 
 write_queue() {
   case "$QUEUE_MODE" in
@@ -187,6 +207,7 @@ mark_status() {
   local status="$1"
   STATUS_REASON="${2:-}"
   echo "$status" > "$STATUS_FILE"
+  STATUS_MARKED="true"
   persist_checkpoint
   write_summary "$status"
 }
