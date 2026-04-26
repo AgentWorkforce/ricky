@@ -747,6 +747,11 @@ FINAL_SIGNOFF_BLOCKER_TRUTH: PASS`,
 
     .run({ cwd: process.cwd() });
 
+  if (typeof result.status === 'undefined') {
+    console.log('dry-run');
+    return;
+  }
+
   console.log(result.status);
   if (result.status !== 'completed') {
     throw new Error(`Workflow finished with status ${result.status}`);
