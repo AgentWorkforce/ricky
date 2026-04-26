@@ -3,14 +3,17 @@ import { describe, expect, it } from 'vitest';
 import type {
   CliHandoff,
   ClaudeHandoff,
+  LocalExecutorOptions,
   LocalExecutor,
   LocalInvocationRequest,
   LocalResponse,
   McpHandoff,
   RawHandoff,
+  StructuredSpecHandoff,
   WorkflowArtifactHandoff,
 } from './index';
-import { normalizeRequest, runLocal } from './index';
+import { DEFAULT_LOCAL_ROUTE, normalizeRequest, runLocal } from './index';
+import type { CommandInvocation, CommandRunner, CommandRunnerOptions } from '../runtime/types';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -54,6 +57,65 @@ function failingArtifactReader(message = 'file not found') {
   };
 }
 
+interface RecordedInvocation {
+  command: string;
+  args: string[];
+  cwd: string;
+}
+
+function immediateCommandRunner(
+  options: { exitCode?: number; stdout?: string[]; stderr?: string[] } = {},
+): CommandRunner & { invocations: RecordedInvocation[] } {
+  const invocations: RecordedInvocation[] = [];
+  return {
+    invocations,
+    run(command: string, args: string[], runOptions: CommandRunnerOptions): CommandInvocation {
+      invocations.push({ command, args: [...args], cwd: runOptions.cwd });
+      const stdoutHandlers: Array<(line: string) => void> = [];
+      const stderrHandlers: Array<(line: string) => void> = [];
+      return {
+        exitPromise: Promise.resolve().then(() => {
+          for (const line of options.stdout ?? ['relay ok']) {
+            stdoutHandlers.forEach((handler) => handler(line));
+          }
+          for (const line of options.stderr ?? []) {
+            stderrHandlers.forEach((handler) => handler(line));
+          }
+          return options.exitCode ?? 0;
+        }),
+        onStdout(cb: (line: string) => void): void {
+          stdoutHandlers.push(cb);
+        },
+        onStderr(cb: (line: string) => void): void {
+          stderrHandlers.push(cb);
+        },
+        kill(): void {},
+      };
+    },
+  };
+}
+
+function memoryLocalExecutorOptions(
+  runnerOptions?: { exitCode?: number; stdout?: string[]; stderr?: string[] },
+): LocalExecutorOptions & {
+  writes: Array<{ path: string; content: string; cwd: string }>;
+  runner: CommandRunner & { invocations: RecordedInvocation[] };
+} {
+  const writes: Array<{ path: string; content: string; cwd: string }> = [];
+  const runner = immediateCommandRunner(runnerOptions);
+  return {
+    cwd: '/repo',
+    commandRunner: runner,
+    runner,
+    writes,
+    artifactWriter: {
+      async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+        writes.push({ path, content, cwd });
+      },
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // normalizeRequest
 // ---------------------------------------------------------------------------
@@ -92,6 +154,34 @@ describe('normalizeRequest', () => {
     expect(result.spec).toBe('deploy service');
     expect(result.mode).toBe('local');
     expect(result.metadata).toEqual({ toolCallId: 'abc-123' });
+  });
+
+  it('normalizes a free-form spec handoff', async () => {
+    const result = await normalizeRequest({
+      source: 'free-form',
+      spec: 'generate a workflow',
+      metadata: { caller: 'test' },
+    });
+
+    expect(result.source).toBe('free-form');
+    expect(result.spec).toBe('generate a workflow');
+    expect(result.metadata).toEqual({ caller: 'test' });
+  });
+
+  it('normalizes a structured spec handoff without losing the object payload', async () => {
+    const raw: StructuredSpecHandoff = {
+      source: 'structured',
+      spec: {
+        intent: 'generate',
+        description: 'generate a workflow for local runtime',
+        targetFiles: ['src/local/entrypoint.ts'],
+      },
+    };
+    const result = await normalizeRequest(raw);
+
+    expect(result.source).toBe('structured');
+    expect(result.spec).toBe('generate a workflow for local runtime');
+    expect(result.structuredSpec).toEqual(raw.spec);
   });
 
   it('normalizes a Claude handoff with conversation context', async () => {
@@ -263,12 +353,49 @@ describe('runLocal', () => {
     expect(result.nextActions).toEqual(['run the workflow']);
   });
 
-  it('works with the default executor (no options)', async () => {
-    const result = await runLocal({ source: 'cli', spec: 'hello' });
+  it('runs intake, generation, artifact writing, and local runtime with injectable adapters', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    const result = await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { localExecutor },
+    );
 
     expect(result.ok).toBe(true);
     expect(result.logs.some((l) => l.includes('[local] received spec from cli'))).toBe(true);
-    expect(result.logs.some((l) => l.includes('[local] mode: local'))).toBe(true);
+    expect(result.logs.some((l) => l.includes('[local] spec intake route: generate'))).toBe(true);
+    expect(result.logs.some((l) => l.includes('[local] workflow generation: passed'))).toBe(true);
+    expect(result.logs.some((l) => l.includes('[local] runtime status: passed'))).toBe(true);
+    expect(localExecutor.writes).toHaveLength(1);
+    expect(result.artifacts[0].content).toContain('workflow(');
+  });
+
+  it('coordinates an existing local workflow artifact without generating a replacement', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    const result = await runLocal(
+      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts' },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(localExecutor.writes).toHaveLength(0);
+    expect(result.artifacts).toEqual([
+      { path: 'workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts', type: 'text/typescript' },
+    ]);
+    expect(result.logs.some((l) => l.includes('[local] spec intake route: execute'))).toBe(true);
+    expect(result.logs.some((l) => l.includes('[local] runtime status: passed'))).toBe(true);
+  });
+
+  it('coordinates a workflow artifact handoff as a ready local workflow', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    const result = await runLocal(
+      { source: 'workflow-artifact', artifactPath: 'workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts' },
+      { localExecutor, artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";') },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(localExecutor.writes).toHaveLength(0);
+    expect(result.artifacts[0].path).toBe('workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts');
+    expect(result.logs.some((l) => l.includes('[local] spec intake route: execute'))).toBe(true);
   });
 
   it('default executor warns on cloud mode', async () => {
@@ -279,9 +406,80 @@ describe('runLocal', () => {
   });
 
   it('default executor suggests promotion for both mode', async () => {
-    const result = await runLocal({ source: 'cli', spec: 'hello', mode: 'both' });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: 'generate a local workflow for src/local/entrypoint.ts with tests',
+        mode: 'both',
+      },
+      { localExecutor: memoryLocalExecutorOptions() },
+    );
 
     expect(result.ok).toBe(true);
     expect(result.nextActions.some((a) => a.includes('promote to Cloud'))).toBe(true);
+  });
+
+  it('passes configured cwd to artifact writer so artifacts are placed in execution directory', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { localExecutor },
+    );
+
+    expect(localExecutor.writes).toHaveLength(1);
+    expect(localExecutor.writes[0].cwd).toBe('/repo');
+  });
+
+  it('uses DEFAULT_LOCAL_ROUTE with npx --no-install by default', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { localExecutor },
+    );
+
+    const invocation = localExecutor.runner.invocations[0];
+    expect(invocation).toBeDefined();
+    expect(invocation.command).toBe('npx');
+    expect(invocation.args[0]).toBe('--no-install');
+    expect(invocation.args[1]).toBe('agent-relay');
+    expect(invocation.args[2]).toBe('run');
+    expect(invocation.cwd).toBe('/repo');
+  });
+
+  it('accepts a custom route override via LocalExecutorOptions', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    localExecutor.route = { command: 'custom-relay', baseArgs: ['execute'] };
+    await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { localExecutor },
+    );
+
+    const invocation = localExecutor.runner.invocations[0];
+    expect(invocation.command).toBe('custom-relay');
+    expect(invocation.args[0]).toBe('execute');
+  });
+
+  it('exports DEFAULT_LOCAL_ROUTE with deterministic shape', () => {
+    expect(DEFAULT_LOCAL_ROUTE).toEqual({
+      command: 'npx',
+      baseArgs: ['--no-install', 'agent-relay', 'run'],
+    });
+  });
+
+  it('returns runtime blockers instead of hiding local execution failures', async () => {
+    const result = await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      {
+        localExecutor: memoryLocalExecutorOptions({
+          exitCode: 127,
+          stderr: ['agent-relay: command not found'],
+        }),
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.logs.some((l) => l.includes('[stderr] agent-relay: command not found'))).toBe(true);
+    expect(result.warnings.some((w) => w.includes('exited with code 127'))).toBe(true);
+    expect(result.nextActions.some((a) => a.includes('environment blocker'))).toBe(true);
   });
 });

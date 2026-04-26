@@ -28,7 +28,7 @@ describe('Ricky local/BYOH entrypoint proof', () => {
       'log-response-behavior',
       'warning-response-behavior',
       'next-action-response-behavior',
-      'stubbed-executor-honesty',
+      'local-runtime-coordination',
       'error-path-normalization-failure',
       'cloud-mode-rejection',
     ]);
@@ -91,14 +91,14 @@ describe('Ricky local/BYOH entrypoint proof', () => {
   // Honesty and error path proof
   // -------------------------------------------------------------------------
 
-  it('proves the stubbed executor is honest about being a stub', async () => {
-    const result = await evaluateLocalProofCase('stubbed-executor-honesty');
+  it('proves local runtime coordination is wired through injectable adapters', async () => {
+    const result = await evaluateLocalProofCase('local-runtime-coordination');
     const evidence = result.evidence.join('\n');
 
     expect(result.passed).toBe(true);
     expect(evidence).toContain('ok: true');
-    expect(evidence).toMatch(/stub|wire agent-relay/);
-    expect(evidence).toContain('Wire the agent-relay');
+    expect(evidence).toContain('artifact writes: 1');
+    expect(evidence).toContain('runtime status: passed');
   });
 
   it('proves normalization failure returns actionable error response', async () => {

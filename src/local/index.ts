@@ -5,17 +5,24 @@ export type {
   ArtifactReader,
   CliHandoff,
   ClaudeHandoff,
+  FreeFormSpecHandoff,
   HandoffSource,
+  LocalExecutionMode,
   LocalInvocationRequest,
   McpHandoff,
   RawHandoff,
+  SpecInput,
+  StructuredSpec,
+  StructuredSpecHandoff,
   WorkflowArtifactHandoff,
 } from './request-normalizer';
 
-export { defaultExecutor, runLocal } from './entrypoint';
+export { createLocalExecutor, createProcessCommandRunner, DEFAULT_LOCAL_ROUTE, defaultExecutor, runLocal } from './entrypoint';
 export type {
+  ArtifactWriter,
   LocalEntrypointOptions,
   LocalExecutor,
+  LocalExecutorOptions,
   LocalResponse,
   LocalResponseArtifact,
 } from './entrypoint';

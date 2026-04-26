@@ -8,6 +8,22 @@
 
 import type { ArtifactReader, LocalInvocationRequest, RawHandoff } from './request-normalizer';
 import { normalizeRequest } from './request-normalizer';
+import { spawn } from 'node:child_process';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
+
+import { generate } from '../product/generation/index';
+import type { GenerationResult, RenderedArtifact } from '../product/generation/index';
+import { intake } from '../product/spec-intake/index';
+import type { ExecutionPreference, InputSurface, RawSpecPayload, RouteTarget } from '../product/spec-intake/index';
+import { LocalCoordinator } from '../runtime/local-coordinator';
+import type {
+  CommandInvocation,
+  CommandRunner,
+  CommandRunnerOptions,
+  CoordinatorResult,
+  ExecutionRoute,
+} from '../runtime/types';
 
 // ---------------------------------------------------------------------------
 // Local response contract
@@ -52,45 +68,216 @@ export interface LocalExecutor {
 }
 
 // ---------------------------------------------------------------------------
-// Default executor stub — keeps the entrypoint functional before the full
-// agent-relay runtime adapter is wired.
+// Local execution dependencies
 // ---------------------------------------------------------------------------
 
-export const defaultExecutor: LocalExecutor = {
-  async execute(request: LocalInvocationRequest): Promise<LocalResponse> {
-    const artifacts: LocalResponseArtifact[] = [];
-    const logs: string[] = [];
-    const warnings: string[] = [];
-    const nextActions: string[] = [];
+export interface ArtifactWriter {
+  writeArtifact(path: string, content: string, cwd: string): Promise<void>;
+}
 
-    logs.push(`[local] received spec from ${request.source}`);
-    logs.push(`[local] mode: ${request.mode}`);
+export interface LocalExecutorOptions {
+  cwd?: string;
+  timeoutMs?: number;
+  commandRunner?: CommandRunner;
+  coordinator?: LocalCoordinator;
+  artifactWriter?: ArtifactWriter;
+  /** Override the default execution route for the local runtime. */
+  route?: ExecutionRoute;
+}
 
-    if (request.specPath) {
-      logs.push(`[local] spec path: ${request.specPath}`);
-    }
+/**
+ * Default execution route for local runtime coordination.
+ * Uses `npx --no-install` to ensure the CLI is resolved from the project
+ * dependency tree rather than silently fetched from the registry.
+ */
+export const DEFAULT_LOCAL_ROUTE: ExecutionRoute = {
+  command: 'npx',
+  baseArgs: ['--no-install', 'agent-relay', 'run'],
+};
 
-    if (request.mode === 'cloud') {
-      warnings.push(
-        'Cloud mode was requested but this is the local/BYOH entrypoint. ' +
-          'Use the Cloud API surface for hosted execution.',
-      );
-      nextActions.push('Switch to Cloud API or re-invoke with mode=local.');
-      return { ok: false, artifacts, logs, warnings, nextActions };
-    }
-
-    // Stub: in production this calls the agent-relay local runtime
-    logs.push('[local] spec intake complete');
-    logs.push('[local] workflow generation: stub (wire agent-relay runtime)');
-
-    nextActions.push('Wire the agent-relay local runtime adapter to execute generated workflows.');
-    if (request.mode === 'both') {
-      nextActions.push('After local validation, optionally promote to Cloud execution.');
-    }
-
-    return { ok: true, artifacts, logs, warnings, nextActions };
+const defaultArtifactWriter: ArtifactWriter = {
+  async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const resolved = isAbsolute(path) ? path : resolve(cwd, path);
+    await mkdir(dirname(resolved), { recursive: true });
+    await writeFile(resolved, content, 'utf8');
   },
 };
+
+export function createProcessCommandRunner(): CommandRunner {
+  return {
+    run(command: string, args: string[], options: CommandRunnerOptions): CommandInvocation {
+      const stdoutHandlers: Array<(line: string) => void> = [];
+      const stderrHandlers: Array<(line: string) => void> = [];
+      const child = spawn(command, args, {
+        cwd: options.cwd,
+        env: { ...process.env, ...(options.env ?? {}) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      if (child.stdout) {
+        createInterface({ input: child.stdout }).on('line', (line) => {
+          stdoutHandlers.forEach((handler) => handler(line));
+        });
+      }
+
+      if (child.stderr) {
+        createInterface({ input: child.stderr }).on('line', (line) => {
+          stderrHandlers.forEach((handler) => handler(line));
+        });
+      }
+
+      return {
+        exitPromise: new Promise<number>((resolve, reject) => {
+          child.once('error', reject);
+          child.once('exit', (code, signal) => {
+            if (code !== null) {
+              resolve(code);
+              return;
+            }
+            reject(new Error(`process exited from signal ${signal ?? 'unknown'}`));
+          });
+        }),
+        onStdout(cb: (line: string) => void): void {
+          stdoutHandlers.push(cb);
+        },
+        onStderr(cb: (line: string) => void): void {
+          stderrHandlers.push(cb);
+        },
+        kill(): void {
+          child.kill();
+        },
+      };
+    },
+  };
+}
+
+export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalExecutor {
+  return {
+    async execute(request: LocalInvocationRequest): Promise<LocalResponse> {
+      const artifacts: LocalResponseArtifact[] = [];
+      const logs: string[] = [];
+      const warnings: string[] = [];
+      const nextActions: string[] = [];
+      const cwd = options.cwd ?? process.cwd();
+      const artifactWriter = options.artifactWriter ?? defaultArtifactWriter;
+      const coordinator =
+        options.coordinator ?? new LocalCoordinator(options.commandRunner ?? createProcessCommandRunner());
+
+      logs.push(`[local] received spec from ${request.source}`);
+      logs.push(`[local] mode: ${request.mode}`);
+
+      if (request.specPath) {
+        logs.push(`[local] spec path: ${request.specPath}`);
+      }
+
+      if (request.mode === 'cloud') {
+        warnings.push(
+          'Cloud mode was requested but this is the local/BYOH entrypoint. ' +
+            'Use the Cloud API surface for hosted execution.',
+        );
+        nextActions.push('Switch to Cloud API or re-invoke with mode=local.');
+        return { ok: false, artifacts, logs, warnings, nextActions };
+      }
+
+      const intakeResult = intake(toRawSpecPayload(request));
+      logs.push(`[local] spec intake route: ${intakeResult.routing?.target ?? 'none'}`);
+
+      warnings.push(...intakeResult.parseWarnings);
+      warnings.push(...intakeResult.validationIssues.map((issue) => `${issue.field}: ${issue.message}`));
+
+      if (!intakeResult.routing || intakeResult.routing.target === 'clarify' || !intakeResult.success) {
+        if (intakeResult.routing?.suggestedFollowUp) nextActions.push(intakeResult.routing.suggestedFollowUp);
+        nextActions.push('Clarify the local workflow request and retry.');
+        return { ok: false, artifacts, logs, warnings, nextActions };
+      }
+
+      const workflowFile = workflowFileForRoute(
+        request,
+        intakeResult.routing.target,
+        intakeResult.routing.normalizedSpec.desiredAction.workflowFileHint,
+      );
+      let artifact: RenderedArtifact | null = null;
+      let generationResult: GenerationResult | null = null;
+
+      if (intakeResult.routing.target === 'generate' || !workflowFile) {
+        const executionPreference: ExecutionPreference = request.mode === 'both' ? 'auto' : 'local';
+        const normalizedSpec = {
+          ...intakeResult.routing.normalizedSpec,
+          executionPreference,
+        };
+        generationResult = generate({
+          spec: normalizedSpec,
+          dryRunEnabled: true,
+        });
+        artifact = generationResult.artifact;
+
+        logs.push(`[local] workflow generation: ${generationResult.success ? 'passed' : 'failed'}`);
+        logs.push(`[local] selected pattern: ${generationResult.patternDecision.pattern}`);
+        warnings.push(...generationResult.validation.warnings);
+
+        if (artifact) {
+          artifacts.push({
+            path: artifact.artifactPath,
+            type: 'text/typescript',
+            content: artifact.content,
+          });
+        }
+
+        if (!generationResult.success || !artifact) {
+          warnings.push(...generationResult.validation.errors);
+          nextActions.push('Fix the generated workflow validation errors before local execution.');
+          return { ok: false, artifacts, logs, warnings, nextActions };
+        }
+
+        await artifactWriter.writeArtifact(artifact.artifactPath, artifact.content, cwd);
+        logs.push(`[local] wrote workflow artifact: ${artifact.artifactPath}`);
+      }
+
+      const runTarget = artifact?.artifactPath ?? workflowFile;
+      if (!runTarget) {
+        warnings.push('No executable local workflow artifact was available.');
+        nextActions.push('Provide a workflows/**/*.ts artifact or a generation spec that can produce one.');
+        return { ok: false, artifacts, logs, warnings, nextActions };
+      }
+
+      const runResult = await coordinator.launch({
+        workflowFile: runTarget,
+        cwd,
+        timeoutMs: options.timeoutMs,
+        route: options.route ?? DEFAULT_LOCAL_ROUTE,
+        metadata: {
+          requestId: intakeResult.requestId,
+          source: request.source,
+          route: intakeResult.routing.target,
+          generatedWorkflowId: artifact?.workflowId,
+        },
+      });
+
+      logs.push(...mapCoordinatorLogs(runResult));
+      artifacts.push({
+        path: runTarget,
+        type: 'text/typescript',
+        ...(artifact ? { content: artifact.content } : {}),
+      });
+
+      if (runResult.status !== 'passed') {
+        warnings.push(runResult.error ?? `Local workflow finished with status ${runResult.status}.`);
+        nextActions.push('Inspect the local runtime logs and rerun after resolving the environment blocker.');
+        return { ok: false, artifacts: dedupeArtifacts(artifacts), logs, warnings, nextActions };
+      }
+
+      nextActions.push('Inspect generated artifacts and local run evidence.');
+      if (request.mode === 'both') {
+        nextActions.push('After local validation, optionally promote to Cloud execution.');
+      }
+
+      return { ok: true, artifacts: dedupeArtifacts(artifacts), logs, warnings, nextActions };
+    },
+  };
+}
+
+export const defaultExecutor: LocalExecutor = createLocalExecutor();
 
 // ---------------------------------------------------------------------------
 // Entrypoint options
@@ -99,6 +286,7 @@ export const defaultExecutor: LocalExecutor = {
 export interface LocalEntrypointOptions {
   executor?: LocalExecutor;
   artifactReader?: ArtifactReader;
+  localExecutor?: LocalExecutorOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +305,7 @@ export async function runLocal(
   handoff: RawHandoff,
   options: LocalEntrypointOptions = {},
 ): Promise<LocalResponse> {
-  const { executor = defaultExecutor, artifactReader } = options;
+  const { executor = options.localExecutor ? createLocalExecutor(options.localExecutor) : defaultExecutor, artifactReader } = options;
 
   // Normalize
   let request: LocalInvocationRequest;
@@ -151,4 +339,94 @@ export async function runLocal(
   }
 
   return response;
+}
+
+function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
+  const receivedAt = new Date().toISOString();
+  const base = {
+    surface: sourceToSurface(request.source),
+    receivedAt,
+    requestId: request.requestId,
+    metadata: {
+      ...request.metadata,
+      mode: request.mode,
+      specPath: request.specPath,
+    },
+  };
+
+  if (request.source === 'mcp') {
+    return {
+      ...base,
+      kind: 'mcp',
+      toolName: typeof request.metadata.toolName === 'string' ? request.metadata.toolName : 'ricky.generate',
+      arguments: request.structuredSpec ?? { spec: request.spec },
+    };
+  }
+
+  if (request.structuredSpec) {
+    return {
+      ...base,
+      kind: 'structured_json',
+      data: request.structuredSpec,
+    };
+  }
+
+  if (request.source === 'workflow-artifact' && request.specPath && isExecutableWorkflowPath(request.specPath)) {
+    return {
+      ...base,
+      kind: 'structured_json',
+      data: {
+        intent: 'execute',
+        workflowFile: request.specPath,
+        description: `execute ready artifact ${request.specPath}`,
+      },
+    };
+  }
+
+  return {
+    ...base,
+    kind: 'natural_language',
+    text: request.spec,
+  };
+}
+
+function sourceToSurface(source: LocalInvocationRequest['source']): InputSurface {
+  if (source === 'mcp') return 'mcp';
+  if (source === 'claude') return 'claude_handoff';
+  if (source === 'cli') return 'cli';
+  return 'cli';
+}
+
+function workflowFileForRoute(
+  request: LocalInvocationRequest,
+  route: RouteTarget,
+  workflowFileHint?: string,
+): string | null {
+  if (request.specPath && isExecutableWorkflowPath(request.specPath)) return request.specPath;
+  if (route !== 'execute') return null;
+
+  const candidate = request.structuredSpec?.workflowFile ?? request.structuredSpec?.workflowPath;
+  if (typeof candidate === 'string' && isExecutableWorkflowPath(candidate)) return candidate;
+  return workflowFileHint && isExecutableWorkflowPath(workflowFileHint) ? workflowFileHint : null;
+}
+
+function isExecutableWorkflowPath(path: string): boolean {
+  return /(?:^|\/)workflows\/.+\.(?:ts|js)$|\.workflow\.(?:ts|js|yaml|yml)$/i.test(path);
+}
+
+function mapCoordinatorLogs(result: CoordinatorResult): string[] {
+  return [
+    `[local] runtime status: ${result.status}`,
+    `[local] runtime command: ${result.invocation.command} ${result.invocation.args.join(' ')}`,
+    ...result.stdout.map((line) => `[stdout] ${line}`),
+    ...result.stderr.map((line) => `[stderr] ${line}`),
+  ];
+}
+
+function dedupeArtifacts(artifacts: LocalResponseArtifact[]): LocalResponseArtifact[] {
+  const byPath = new Map<string, LocalResponseArtifact>();
+  for (const artifact of artifacts) {
+    byPath.set(artifact.path, { ...byPath.get(artifact.path), ...artifact });
+  }
+  return [...byPath.values()];
 }

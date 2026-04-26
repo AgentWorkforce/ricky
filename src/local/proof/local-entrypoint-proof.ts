@@ -4,7 +4,7 @@
  * Proves the user-visible contract of the local entrypoint:
  * - Spec handoff from CLI, MCP, Claude-style structured handoff, and workflow artifact path
  * - Artifact, log, warning, and next-action response behavior
- * - Honest acknowledgment that the local executor is a stubbed runtime seam
+ * - Local runtime coordination through injectable command execution
  *
  * Each proof case is deterministic and bounded — no network, no filesystem,
  * no non-determinism. Evidence is user-visible text, not implementation trivia.
@@ -14,6 +14,7 @@ import type {
   CliHandoff,
   ClaudeHandoff,
   LocalExecutor,
+  LocalExecutorOptions,
   LocalInvocationRequest,
   LocalResponse,
   LocalResponseArtifact,
@@ -21,6 +22,7 @@ import type {
   WorkflowArtifactHandoff,
 } from '../index';
 import { normalizeRequest, runLocal } from '../index';
+import type { CommandInvocation, CommandRunner, CommandRunnerOptions } from '../../runtime/types';
 
 // ---------------------------------------------------------------------------
 // Proof types
@@ -35,7 +37,7 @@ export type ProofCaseName =
   | 'log-response-behavior'
   | 'warning-response-behavior'
   | 'next-action-response-behavior'
-  | 'stubbed-executor-honesty'
+  | 'local-runtime-coordination'
   | 'error-path-normalization-failure'
   | 'cloud-mode-rejection';
 
@@ -94,6 +96,49 @@ function failingArtifactReader(message = 'file not found') {
   return {
     async readArtifact(_path: string): Promise<string> {
       throw new Error(message);
+    },
+  };
+}
+
+function immediateCommandRunner(options: { exitCode?: number; stdout?: string[]; stderr?: string[] } = {}): CommandRunner {
+  return {
+    run(_command: string, _args: string[], _options: CommandRunnerOptions): CommandInvocation {
+      const stdoutHandlers: Array<(line: string) => void> = [];
+      const stderrHandlers: Array<(line: string) => void> = [];
+      return {
+        exitPromise: Promise.resolve().then(() => {
+          for (const line of options.stdout ?? ['relay ok']) {
+            stdoutHandlers.forEach((handler) => handler(line));
+          }
+          for (const line of options.stderr ?? []) {
+            stderrHandlers.forEach((handler) => handler(line));
+          }
+          return options.exitCode ?? 0;
+        }),
+        onStdout(cb: (line: string) => void): void {
+          stdoutHandlers.push(cb);
+        },
+        onStderr(cb: (line: string) => void): void {
+          stderrHandlers.push(cb);
+        },
+        kill(): void {},
+      };
+    },
+  };
+}
+
+function memoryLocalExecutorOptions(
+  runnerOptions?: { exitCode?: number; stdout?: string[]; stderr?: string[] },
+): LocalExecutorOptions & { writes: Array<{ path: string; content: string; cwd: string }> } {
+  const writes: Array<{ path: string; content: string; cwd: string }> = [];
+  return {
+    cwd: '/repo',
+    commandRunner: immediateCommandRunner(runnerOptions),
+    writes,
+    artifactWriter: {
+      async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+        writes.push({ path, content, cwd });
+      },
     },
   };
 }
@@ -340,28 +385,36 @@ export function getLocalProofCases(): LocalProofCase[] {
       },
     },
     {
-      name: 'stubbed-executor-honesty',
+      name: 'local-runtime-coordination',
       description:
-        'The default executor is honest about being a stub — logs acknowledge the stub, ' +
-        'next-actions tell the user to wire the real runtime.',
+        'The default local executor performs intake, generation, artifact writing, and local runtime coordination.',
       async evaluate() {
-        const response = await runLocal({ source: 'cli', spec: 'hello' });
+        const localExecutor = memoryLocalExecutorOptions();
+        const response = await runLocal(
+          { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+          { localExecutor },
+        );
 
         const logsText = response.logs.join('\n');
-        const actionsText = response.nextActions.join('\n');
+        const artifact = response.artifacts[0];
         const checks = [
           response.ok === true,
-          containsAll(logsText, ['[local] received spec from cli', '[local] mode: local']),
-          logsText.includes('stub') || logsText.includes('wire agent-relay'),
-          actionsText.includes('Wire the agent-relay local runtime adapter'),
+          containsAll(logsText, [
+            '[local] received spec from cli',
+            '[local] spec intake route: generate',
+            '[local] workflow generation: passed',
+            '[local] runtime status: passed',
+          ]),
+          localExecutor.writes.length === 1,
+          artifact?.content?.includes('workflow(') === true,
         ];
 
-        return result('stubbed-executor-honesty', checks, [
+        return result('local-runtime-coordination', checks, [
           `ok: ${response.ok}`,
-          `logs mention stub/wire: ${logsText.includes('stub') || logsText.includes('wire agent-relay')}`,
-          `next-actions mention wiring: ${actionsText.includes('Wire the agent-relay')}`,
+          `artifact writes: ${localExecutor.writes.length}`,
+          `artifact path: ${artifact?.path}`,
+          `artifact content has workflow(): ${artifact?.content?.includes('workflow(') === true}`,
           `logs: ${response.logs.join(' | ')}`,
-          `next-actions: ${response.nextActions.join(' | ')}`,
         ]);
       },
     },
