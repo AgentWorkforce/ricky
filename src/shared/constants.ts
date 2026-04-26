@@ -31,8 +31,16 @@ export const DEFAULT_VALIDATION_POLICY = {
   allowUntrackedFiles: false,
 } as const satisfies WorkflowValidationPolicy;
 
-export const TERMINAL_STEP_STATUSES = ['passed', 'failed', 'skipped', 'timed_out'] as const;
+export const TERMINAL_STEP_STATUSES = ['passed', 'failed', 'skipped', 'cancelled', 'timed_out'] as const;
 
-export const TERMINAL_RUN_STATUSES = ['passed', 'failed', 'timed_out'] as const;
+export const TERMINAL_RUN_STATUSES = ['passed', 'failed', 'cancelled', 'timed_out'] as const;
 
-export const VERIFICATION_TYPES = ['exit_code', 'file_exists', 'output_contains', 'custom'] as const;
+export const VERIFICATION_TYPES = [
+  'exit_code',
+  'file_exists',
+  'output_contains',
+  'artifact_exists',
+  'deterministic_gate',
+  'routing_assertion',
+  'custom',
+] as const;
