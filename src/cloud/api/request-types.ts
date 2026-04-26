@@ -31,13 +31,31 @@ export interface CloudWorkspaceContext {
 // Generate request body
 // ---------------------------------------------------------------------------
 
+export type CloudGenerateMode = 'cloud' | 'both';
+
+export interface CloudNaturalLanguageSpecPayload {
+  kind: 'natural-language';
+  text: string;
+}
+
+export interface CloudStructuredSpecPayload {
+  kind: 'structured';
+  document: Record<string, unknown>;
+  format?: 'json' | 'yaml' | 'ricky-workflow';
+}
+
+export type CloudWorkflowSpecPayload =
+  | string
+  | CloudNaturalLanguageSpecPayload
+  | CloudStructuredSpecPayload;
+
 export interface CloudGenerateRequestBody {
-  /** The workflow spec to generate from. */
-  spec: string;
+  /** The natural-language prompt or structured workflow spec to generate from. */
+  spec: CloudWorkflowSpecPayload;
   /** Optional file path hint for the spec origin. */
   specPath?: string;
   /** Execution mode — Cloud-only or both (local + Cloud). */
-  mode?: 'cloud' | 'both';
+  mode?: CloudGenerateMode;
   /** Opaque metadata from the originating surface. */
   metadata?: Record<string, unknown>;
 }

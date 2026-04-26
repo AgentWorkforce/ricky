@@ -12,9 +12,12 @@
 
 import type { CloudGenerateRequest } from './request-types';
 import type {
+  CloudAssumption,
   CloudArtifact,
   CloudFollowUpAction,
   CloudGenerateResponse,
+  CloudRunReceipt,
+  CloudValidationStatus,
   CloudWarning,
 } from './response-types';
 
@@ -23,6 +26,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export const CLOUD_GENERATE_ROUTE = '/api/v1/ricky/workflows/generate' as const;
+export const CLOUD_GENERATE_METHOD = 'POST' as const;
 
 // ---------------------------------------------------------------------------
 // Cloud executor — injectable seam for actual generation work
@@ -31,6 +35,9 @@ export const CLOUD_GENERATE_ROUTE = '/api/v1/ricky/workflows/generate' as const;
 export interface CloudGenerateResult {
   artifacts: CloudArtifact[];
   warnings: CloudWarning[];
+  assumptions?: CloudAssumption[];
+  validation?: CloudValidationStatus;
+  runReceipt?: Omit<CloudRunReceipt, 'requestId'>;
   followUpActions: CloudFollowUpAction[];
 }
 
@@ -50,11 +57,18 @@ export interface CloudExecutor {
 export const defaultCloudExecutor: CloudExecutor = {
   async generate(request: CloudGenerateRequest): Promise<CloudGenerateResult> {
     const warnings: CloudWarning[] = [];
+    const assumptions: CloudAssumption[] = [];
     const followUpActions: CloudFollowUpAction[] = [];
+    const specLength = describeSpec(request.body.spec).length;
 
     warnings.push({
       severity: 'info',
-      message: `Cloud generate stub: received spec (${request.body.spec.length} chars) for workspace ${request.workspace.workspaceId}.`,
+      message: `Cloud generate stub: received spec (${specLength} chars) for workspace ${request.workspace.workspaceId}.`,
+    });
+
+    assumptions.push({
+      key: 'runtime-not-wired',
+      message: 'The Cloud generation runtime is not wired yet, so no workflow artifacts were produced.',
     });
 
     followUpActions.push({
@@ -71,7 +85,7 @@ export const defaultCloudExecutor: CloudExecutor = {
       });
     }
 
-    return { artifacts: [], warnings, followUpActions };
+    return { artifacts: [], warnings, assumptions, followUpActions };
   },
 };
 
@@ -94,52 +108,113 @@ function generateRequestId(): string {
   return `ricky-cloud-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function passedValidation(): CloudValidationStatus {
+  return { ok: true, status: 'passed', issues: [] };
+}
+
+function failedValidation(code: string, message: string, path: string): CloudValidationStatus {
+  return { ok: false, status: 'failed', issues: [{ code, message, path }] };
+}
+
+function notRequestedRunReceipt(requestId: string): CloudRunReceipt {
+  return {
+    executionRequested: false,
+    requestId,
+    status: 'not_requested',
+  };
+}
+
+function errorResponse(
+  requestId: string,
+  status: number,
+  message: string,
+  validation: CloudValidationStatus,
+): CloudGenerateResponse {
+  return {
+    ok: false,
+    status,
+    artifacts: [],
+    warnings: [{ severity: 'error', message }],
+    assumptions: [],
+    validation,
+    runReceipt: notRequestedRunReceipt(requestId),
+    followUpActions: [],
+    requestId,
+  };
+}
+
+function describeSpec(spec: CloudGenerateRequest['body']['spec']): string {
+  if (typeof spec === 'string') {
+    return spec;
+  }
+
+  if (spec.kind === 'natural-language') {
+    return spec.text;
+  }
+
+  return JSON.stringify(spec.document);
+}
+
+function hasSpecPayload(spec: CloudGenerateRequest['body']['spec'] | undefined): boolean {
+  if (typeof spec === 'string') {
+    return spec.trim().length > 0;
+  }
+
+  if (!spec) {
+    return false;
+  }
+
+  if (spec.kind === 'natural-language') {
+    return spec.text.trim().length > 0;
+  }
+
+  if (spec.kind === 'structured') {
+    return Object.keys(spec.document).length > 0;
+  }
+
+  return false;
+}
+
 function validateRequest(
   request: CloudGenerateRequest,
   requestId: string,
 ): ValidationResult {
   // Auth is required and must have a non-empty token
-  if (!request.auth?.token) {
+  if (!request.auth?.token?.trim()) {
     return {
       ok: false,
-      response: {
-        ok: false,
-        status: 401,
-        artifacts: [],
-        warnings: [{ severity: 'error', message: 'Missing or empty auth token.' }],
-        followUpActions: [],
+      response: errorResponse(
         requestId,
-      },
+        401,
+        'Missing or empty auth token.',
+        failedValidation('missing-auth-token', 'Missing or empty auth token.', 'auth.token'),
+      ),
     };
   }
 
   // Workspace is required
-  if (!request.workspace?.workspaceId) {
+  if (!request.workspace?.workspaceId?.trim()) {
     return {
       ok: false,
-      response: {
-        ok: false,
-        status: 400,
-        artifacts: [],
-        warnings: [{ severity: 'error', message: 'Missing or empty workspace ID.' }],
-        followUpActions: [],
+      response: errorResponse(
         requestId,
-      },
+        400,
+        'Missing or empty workspace ID.',
+        failedValidation('missing-workspace-id', 'Missing or empty workspace ID.', 'workspace.workspaceId'),
+      ),
     };
   }
 
   // Body spec is required
-  if (!request.body?.spec) {
+  if (!hasSpecPayload(request.body?.spec)) {
     return {
       ok: false,
-      response: {
-        ok: false,
-        status: 400,
-        artifacts: [],
-        warnings: [{ severity: 'error', message: 'Missing or empty spec in request body.' }],
-        followUpActions: [],
+      response: errorResponse(
         requestId,
-      },
+        400,
+        'Missing or empty spec in request body.',
+        failedValidation('missing-spec', 'Missing or empty spec in request body.', 'body.spec'),
+      ),
     };
   }
 
@@ -185,11 +260,20 @@ export async function handleCloudGenerate(
   // Execute
   try {
     const result = await executor.generate(request);
+    const resultValidation = result.validation ?? passedValidation();
+    const validationPassed = resultValidation.ok !== false;
     return {
-      ok: true,
-      status: 200,
+      ok: validationPassed,
+      status: validationPassed ? 200 : 422,
       artifacts: result.artifacts,
       warnings: result.warnings,
+      assumptions: result.assumptions ?? [],
+      validation: resultValidation,
+      runReceipt: {
+        ...notRequestedRunReceipt(requestId),
+        ...result.runReceipt,
+        requestId,
+      },
       followUpActions: result.followUpActions,
       requestId,
     };
@@ -200,6 +284,9 @@ export async function handleCloudGenerate(
       status: 500,
       artifacts: [],
       warnings: [{ severity: 'error', message: `Cloud generation failed: ${message}` }],
+      assumptions: [],
+      validation: passedValidation(),
+      runReceipt: notRequestedRunReceipt(requestId),
       followUpActions: [
         { action: 'retry', label: 'Retry', description: 'Retry the Cloud generate request.' },
       ],

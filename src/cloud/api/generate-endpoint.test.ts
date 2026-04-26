@@ -6,7 +6,7 @@ import type {
   CloudGenerateResponse,
   CloudGenerateResult,
 } from './index';
-import { CLOUD_GENERATE_ROUTE, handleCloudGenerate } from './index';
+import { CLOUD_GENERATE_METHOD, CLOUD_GENERATE_ROUTE, handleCloudGenerate } from './index';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -44,6 +44,9 @@ function mockExecutor(
       return {
         artifacts: result?.artifacts ?? [],
         warnings: result?.warnings ?? [],
+        assumptions: result?.assumptions,
+        validation: result?.validation,
+        runReceipt: result?.runReceipt,
         followUpActions: result?.followUpActions ?? [],
       };
     },
@@ -67,6 +70,10 @@ describe('CLOUD_GENERATE_ROUTE', () => {
   it('exposes the correct route path', () => {
     expect(CLOUD_GENERATE_ROUTE).toBe('/api/v1/ricky/workflows/generate');
   });
+
+  it('exposes the POST method for transport mounting', () => {
+    expect(CLOUD_GENERATE_METHOD).toBe('POST');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -81,6 +88,17 @@ describe('handleCloudGenerate — validation', () => {
     expect(response.ok).toBe(false);
     expect(response.status).toBe(401);
     expect(response.warnings[0].message).toContain('auth token');
+    expect(response.validation).toEqual({
+      ok: false,
+      status: 'failed',
+      issues: [
+        {
+          code: 'missing-auth-token',
+          message: 'Missing or empty auth token.',
+          path: 'auth.token',
+        },
+      ],
+    });
     expect(response.requestId).toBe(TEST_REQUEST_ID);
   });
 
@@ -91,6 +109,7 @@ describe('handleCloudGenerate — validation', () => {
     expect(response.ok).toBe(false);
     expect(response.status).toBe(400);
     expect(response.warnings[0].message).toContain('workspace ID');
+    expect(response.validation.issues[0].code).toBe('missing-workspace-id');
   });
 
   it('rejects requests with missing spec', async () => {
@@ -100,6 +119,16 @@ describe('handleCloudGenerate — validation', () => {
     expect(response.ok).toBe(false);
     expect(response.status).toBe(400);
     expect(response.warnings[0].message).toContain('spec');
+    expect(response.validation.issues[0].code).toBe('missing-spec');
+  });
+
+  it('rejects requests with empty structured spec payloads', async () => {
+    const request = validRequest({ body: { spec: { kind: 'structured', document: {} } } });
+    const response = await handleCloudGenerate(request, testOptions());
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].path).toBe('body.spec');
   });
 });
 
@@ -112,6 +141,7 @@ describe('handleCloudGenerate — success path', () => {
     const executor = mockExecutor({
       artifacts: [{ path: 'out/workflow.ts', type: 'text/typescript', content: '// generated' }],
       warnings: [{ severity: 'info', message: 'Assumed default region.' }],
+      assumptions: [{ key: 'default-region', message: 'Used the workspace default region.' }],
       followUpActions: [{ action: 'deploy', label: 'Deploy' }],
     });
 
@@ -124,6 +154,15 @@ describe('handleCloudGenerate — success path', () => {
       { path: 'out/workflow.ts', type: 'text/typescript', content: '// generated' },
     ]);
     expect(response.warnings).toEqual([{ severity: 'info', message: 'Assumed default region.' }]);
+    expect(response.assumptions).toEqual([
+      { key: 'default-region', message: 'Used the workspace default region.' },
+    ]);
+    expect(response.validation).toEqual({ ok: true, status: 'passed', issues: [] });
+    expect(response.runReceipt).toEqual({
+      executionRequested: false,
+      requestId: TEST_REQUEST_ID,
+      status: 'not_requested',
+    });
     expect(response.followUpActions).toEqual([{ action: 'deploy', label: 'Deploy' }]);
     expect(response.requestId).toBe(TEST_REQUEST_ID);
   });
@@ -163,6 +202,134 @@ describe('handleCloudGenerate — success path', () => {
     expect(executor.calls[0].body.metadata).toEqual({ origin: 'dashboard' });
   });
 
+  it('passes structured spec payloads through to the executor', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      body: {
+        spec: {
+          kind: 'structured',
+          format: 'ricky-workflow',
+          document: { name: 'deploy-service', steps: [{ name: 'build' }] },
+        },
+        mode: 'cloud',
+      },
+    });
+
+    await handleCloudGenerate(request, testOptions(executor));
+
+    expect(executor.calls[0].body.spec).toEqual({
+      kind: 'structured',
+      format: 'ricky-workflow',
+      document: { name: 'deploy-service', steps: [{ name: 'build' }] },
+    });
+    expect(executor.calls[0].body.mode).toBe('cloud');
+  });
+
+  it('returns executor-provided run receipt fields without running locally', async () => {
+    const executor = mockExecutor({
+      runReceipt: {
+        executionRequested: true,
+        runId: 'run-001',
+        status: 'queued',
+        receiptUrl: '/runs/run-001',
+      },
+    });
+    const response = await handleCloudGenerate(validRequest(), testOptions(executor));
+
+    expect(response.runReceipt).toEqual({
+      executionRequested: true,
+      requestId: TEST_REQUEST_ID,
+      runId: 'run-001',
+      status: 'queued',
+      receiptUrl: '/runs/run-001',
+    });
+  });
+
+  it('returns the artifact bundle response contract with warnings, assumptions, and follow-ups', async () => {
+    const executor = mockExecutor({
+      artifacts: [
+        {
+          path: 'workflows/generated-workflow.ts',
+          type: 'text/typescript',
+          content: 'export const workflow = {};',
+        },
+        {
+          path: 'workflows/generated-workflow.metadata.json',
+          type: 'application/json',
+          content: '{"source":"cloud-generate"}',
+        },
+      ],
+      warnings: [{ severity: 'warning', message: 'Spec did not include an owner.' }],
+      assumptions: [{ key: 'owner', message: 'Used the requesting workspace as owner.' }],
+      followUpActions: [
+        {
+          action: 'review-artifacts',
+          label: 'Review Artifacts',
+          description: 'Review generated workflow files before deployment.',
+        },
+      ],
+    });
+
+    const response = await handleCloudGenerate(validRequest(), testOptions(executor));
+
+    expect(response.artifacts).toHaveLength(2);
+    expect(response.artifacts[0]).toMatchObject({
+      path: 'workflows/generated-workflow.ts',
+      type: 'text/typescript',
+      content: expect.stringContaining('workflow'),
+    });
+    expect(response.artifacts[1].path).toBe('workflows/generated-workflow.metadata.json');
+    expect(response.warnings[0]).toEqual({
+      severity: 'warning',
+      message: 'Spec did not include an owner.',
+    });
+    expect(response.assumptions[0]).toEqual({
+      key: 'owner',
+      message: 'Used the requesting workspace as owner.',
+    });
+    expect(response.followUpActions[0]).toMatchObject({
+      action: 'review-artifacts',
+      label: 'Review Artifacts',
+    });
+  });
+
+  it('represents executor validation failures as top-level failure with 422 status', async () => {
+    const executor = mockExecutor({
+      warnings: [{ severity: 'error', message: 'Generated workflow did not pass validation.' }],
+      validation: {
+        ok: false,
+        status: 'failed',
+        issues: [
+          {
+            code: 'invalid-workflow',
+            message: 'Generated workflow is missing a deterministic gate.',
+            path: 'steps[3]',
+          },
+        ],
+      },
+      followUpActions: [{ action: 'revise-spec', label: 'Revise Spec' }],
+    });
+
+    const response = await handleCloudGenerate(validRequest(), testOptions(executor));
+
+    // Top-level response must reflect the validation failure
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(422);
+    expect(response.validation).toEqual({
+      ok: false,
+      status: 'failed',
+      issues: [
+        {
+          code: 'invalid-workflow',
+          message: 'Generated workflow is missing a deterministic gate.',
+          path: 'steps[3]',
+        },
+      ],
+    });
+    expect(response.warnings[0].severity).toBe('error');
+    expect(response.followUpActions[0]).toEqual({ action: 'revise-spec', label: 'Revise Spec' });
+  });
+
   it('returns empty artifacts and warnings when executor produces none', async () => {
     const executor = mockExecutor();
     const response = await handleCloudGenerate(validRequest(), testOptions(executor));
@@ -170,6 +337,7 @@ describe('handleCloudGenerate — success path', () => {
     expect(response.ok).toBe(true);
     expect(response.artifacts).toEqual([]);
     expect(response.warnings).toEqual([]);
+    expect(response.assumptions).toEqual([]);
     expect(response.followUpActions).toEqual([]);
   });
 });
@@ -217,6 +385,7 @@ describe('handleCloudGenerate — default executor', () => {
     expect(response.ok).toBe(true);
     expect(response.status).toBe(200);
     expect(response.warnings.some((w) => w.message.includes('stub'))).toBe(true);
+    expect(response.assumptions.some((a) => a.key === 'runtime-not-wired')).toBe(true);
     expect(response.followUpActions.some((a) => a.action === 'wire-runtime')).toBe(true);
   });
 
@@ -246,6 +415,8 @@ describe('Cloud vs local path distinction', () => {
     // The response shape is CloudGenerateResponse, not LocalResponse
     expect('status' in response).toBe(true);
     expect('requestId' in response).toBe(true);
+    expect('validation' in response).toBe(true);
+    expect('runReceipt' in response).toBe(true);
     // LocalResponse has 'logs' and 'nextActions' — Cloud has 'followUpActions' and no 'logs'
     expect('logs' in response).toBe(false);
     expect('nextActions' in response).toBe(false);
