@@ -285,6 +285,8 @@ function verificationFromFailedChecks(
   const commands = [
     ...failedVerifications(evidence).map((verification) => verification.command),
     ...failedGates(evidence).map((gate) => gate.command),
+    ...failedRetryVerifications(evidence).map((verification) => verification.command),
+    ...failedRetryCommands(evidence),
   ].filter((command): command is string => Boolean(command));
 
   return {
@@ -336,6 +338,23 @@ function resolvePolicy(policy?: Partial<RepairPolicy>): RepairPolicy {
 
 function failedVerifications(evidence: WorkflowRunEvidence): VerificationResult[] {
   return evidence.steps.flatMap((step) => step.verifications.filter((verification) => !verification.passed));
+}
+
+function failedRetryVerifications(evidence: WorkflowRunEvidence): VerificationResult[] {
+  return evidence.steps.flatMap((step) =>
+    step.retries.flatMap((retry) =>
+      (retry.verifications ?? []).filter((verification) => !verification.passed),
+    ),
+  );
+}
+
+function failedRetryCommands(evidence: WorkflowRunEvidence): string[] {
+  return evidence.steps.flatMap((step) =>
+    step.retries
+      .filter((retry) => retry.status === 'failed' || retry.status === 'timed_out')
+      .map((retry) => retry.command)
+      .filter((command): command is string => Boolean(command)),
+  );
 }
 
 function failedGates(evidence: WorkflowRunEvidence): DeterministicGateResult[] {

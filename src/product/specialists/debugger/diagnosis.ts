@@ -123,6 +123,12 @@ function affectedStepsFor(
     if (category === 'oversized_agent_step' && step.retries.length >= RETRY_OVERFLOW_THRESHOLD) {
       ids.add(step.stepId);
     }
+    if (
+      (category === 'workflow_structure' || category === 'wrong_pattern_choice') &&
+      (step.status === 'pending' || step.status === 'running')
+    ) {
+      ids.add(step.stepId);
+    }
     if (category === 'agent_drift' && step.status === 'failed' && step.verifications.some((v) => !v.passed)) {
       ids.add(step.stepId);
     }
@@ -142,15 +148,15 @@ function supportingSignalsFor(
     if (category === 'missing_file_materialization' && isMissingFileVerification(verification)) {
       signals.push(signal(`Missing file or artifact: ${verification.expected}`, `step:${step.stepId}`, Confidence.High));
     }
-    if (category === 'brittle_grep_gate' && textOfVerification(verification).includes('grep')) {
-      signals.push(signal('A grep-based gate failed; the check may be too brittle for the intended artifact.', `step:${step.stepId}`, Confidence.Medium));
+    if (category === 'brittle_grep_gate' && isTextSearchCheck(rawTextOfVerification(verification))) {
+      signals.push(signal('A text-search gate failed; the check may be too brittle for the intended artifact.', `step:${step.stepId}`, Confidence.Medium));
     }
   }
 
   for (const { step, gate } of failedGates(evidence)) {
     const source = step ? `step:${step.stepId}/gate:${gate.gateName}` : `gate:${gate.gateName}`;
-    if (category === 'brittle_grep_gate' && textOfGate(gate).includes('grep')) {
-      signals.push(signal(`Grep gate "${gate.gateName}" failed.`, source, Confidence.Medium));
+    if (category === 'brittle_grep_gate' && isTextSearchCheck(rawTextOfGate(gate))) {
+      signals.push(signal(`Text-search gate "${gate.gateName}" failed.`, source, Confidence.Medium));
     }
     if (category === 'missing_deterministic_gate' && /deterministic|gate/i.test(gate.gateName)) {
       signals.push(signal(`Deterministic gate "${gate.gateName}" failed.`, source, Confidence.High));
@@ -233,6 +239,18 @@ function likelyFilesFor(category: WorkflowCauseCategory, evidence: WorkflowRunEv
     }
   }
 
+  for (const { verification } of failedRetryVerifications(evidence)) {
+    if (
+      category === 'missing_file_materialization' ||
+      category === 'brittle_grep_gate' ||
+      category === 'step_contract_violation' ||
+      category === 'agent_drift' ||
+      category === 'oversized_agent_step'
+    ) {
+      extractPaths(rawTextOfVerification(verification)).forEach((path) => files.add(path));
+    }
+  }
+
   for (const { gate } of failedGates(evidence)) {
     if (
       category === 'missing_deterministic_gate' ||
@@ -247,7 +265,14 @@ function likelyFilesFor(category: WorkflowCauseCategory, evidence: WorkflowRunEv
     if (artifact.path) files.add(artifact.path);
   }
 
-  for (const route of evidence.routing) {
+  for (const artifact of evidence.steps.flatMap((step) => step.retries.flatMap((retry) => retry.artifacts ?? []))) {
+    if (artifact.path) files.add(artifact.path);
+  }
+
+  for (const route of [
+    ...evidence.routing,
+    ...evidence.steps.flatMap((step) => step.routing ? [step.routing] : []),
+  ]) {
     if (route.abstractionPath && (category === 'wrong_pattern_choice' || category === 'workflow_structure')) {
       files.add(route.abstractionPath);
     }
@@ -271,8 +296,9 @@ function hasMissingFileEvidence(evidence: WorkflowRunEvidence): boolean {
 }
 
 function hasBrittleGrepEvidence(evidence: WorkflowRunEvidence): boolean {
-  return failedVerifications(evidence).some(({ verification }) => textOfVerification(verification).includes('grep')) ||
-    failedGates(evidence).some(({ gate }) => textOfGate(gate).includes('grep'));
+  return failedVerifications(evidence).some(({ verification }) => isTextSearchCheck(rawTextOfVerification(verification))) ||
+    failedRetryVerifications(evidence).some(({ verification }) => isTextSearchCheck(rawTextOfVerification(verification))) ||
+    failedGates(evidence).some(({ gate }) => isTextSearchCheck(rawTextOfGate(gate)));
 }
 
 function hasMissingGateEvidence(
@@ -295,6 +321,11 @@ function hasPatternChoiceEvidence(
     classification.summary,
     ...classification.signals.map((s) => `${s.observation} ${s.source}`),
     ...evidence.routing.map((r) => `${r.abstractionName ?? ''} ${r.requestedRoute ?? ''} ${r.resolvedRoute ?? ''} ${r.reason ?? ''}`),
+    ...evidence.steps.map((step) =>
+      step.routing
+        ? `${step.routing.abstractionName ?? ''} ${step.routing.requestedRoute ?? ''} ${step.routing.resolvedRoute ?? ''} ${step.routing.reason ?? ''}`
+        : '',
+    ),
     ...evidence.logs.map((l) => l.excerpt ?? ''),
   ].join('\n').toLowerCase();
 
@@ -309,7 +340,9 @@ function hasEnvironmentEvidence(
     classification.summary,
     ...classification.signals.map((s) => s.observation),
     ...evidence.steps.map((step) => step.error ?? ''),
+    ...evidence.steps.flatMap((step) => step.retries.map((retry) => retry.error ?? '')),
     ...evidence.logs.map((log) => log.excerpt ?? ''),
+    ...evidence.steps.flatMap((step) => step.logs.map((log) => log.excerpt ?? '')),
   ].join('\n');
 
   return /ENOENT|EACCES|EPERM|command not found|permission denied|no such file or directory|ECONNREFUSED|ENOTFOUND/i.test(text);
@@ -320,8 +353,13 @@ function retriesAreConcentrated(evidence: WorkflowRunEvidence): boolean {
 }
 
 function stepHasBrittleGrep(step: WorkflowStepEvidence): boolean {
-  return step.verifications.some((v) => !v.passed && textOfVerification(v).includes('grep')) ||
-    step.deterministicGates.some((g) => !g.passed && textOfGate(g).includes('grep'));
+  return step.verifications.some((v) => !v.passed && isTextSearchCheck(rawTextOfVerification(v))) ||
+    step.deterministicGates.some((g) => !g.passed && isTextSearchCheck(rawTextOfGate(g))) ||
+    step.retries.some((retry) =>
+      (retry.verifications ?? []).some((verification) =>
+        !verification.passed && isTextSearchCheck(rawTextOfVerification(verification)),
+      ),
+    );
 }
 
 function isMissingFileVerification(verification: VerificationResult): boolean {
@@ -336,6 +374,18 @@ function failedVerifications(
 ): Array<{ step: WorkflowStepEvidence; verification: VerificationResult }> {
   return evidence.steps.flatMap((step) =>
     step.verifications.filter((verification) => !verification.passed).map((verification) => ({ step, verification })),
+  );
+}
+
+function failedRetryVerifications(
+  evidence: WorkflowRunEvidence,
+): Array<{ step: WorkflowStepEvidence; verification: VerificationResult }> {
+  return evidence.steps.flatMap((step) =>
+    step.retries.flatMap((retry) =>
+      (retry.verifications ?? [])
+        .filter((verification) => !verification.passed)
+        .map((verification) => ({ step, verification })),
+    ),
   );
 }
 
@@ -384,6 +434,10 @@ function rawTextOfGate(gate: DeterministicGateResult): string {
     gate.outputExcerpt,
     ...gate.verifications.map(rawTextOfVerification),
   ].filter(Boolean).join('\n');
+}
+
+function isTextSearchCheck(text: string): boolean {
+  return /(?:^|\s)(?:grep|rg|ripgrep|ag)(?:\s|$)|grep-based|text-search/i.test(text);
 }
 
 function parseStepId(source: string): string | null {
