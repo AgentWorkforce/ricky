@@ -15,7 +15,7 @@ This document exists so Ricky does not drift from:
 
 ### 2.1 Workflow inventory
 
-The first wave program expanded from the original 16-workflow plan to 28 authored workflow files across five waves:
+The first wave program expanded from the original 16-workflow plan to 34 authored workflow files across five waves plus a meta workflow:
 
 | Wave | Workflows | Status |
 |---|---|---|
@@ -24,24 +24,23 @@ The first wave program expanded from the original 16-workflow plan to 28 authore
 | Wave 2 — Product Core | 4 workflows | Implemented: spec intake, generation pipeline, debugger specialist, validator specialist |
 | Wave 3 — Cloud API | 4 workflows | Implemented: cloud auth, generate endpoint, cloud generate slice, cloud connect proof |
 | Wave 4 — Local/BYOH | 9 workflows | Implemented: CLI onboarding, local invocation, CLI UX spec, onboarding implementation, onboarding proof, local BYOH entrypoint, local spec handoff proof, interactive CLI, CLI command surface |
-| Wave 5 — Scale and Ops | 4 workflows | Implemented: workflow health analytics, next-wave backlog, package conventions alignment, package layout proof |
+| Wave 5 — Scale and Ops | 5 workflows | Implemented: workflow health analytics, next-wave backlog, package conventions alignment, package layout proof, workspace package split |
+| Meta | 1 workflow | build-application-workflows orchestrator |
 
 ### 2.2 Implementation coverage
 
-The `src/` tree now contains real implementation across all major product areas:
+The repo is now structured as an npm workspace with `@ricky/*` packages under `packages/`:
 
-- **Shared foundation** — models, config, constants
-- **Runtime** — local coordinator, evidence capture, failure classifier, diagnostics engine with unblocker proof
-- **Product core** — spec intake (parser, normalizer, router), generation pipeline (pattern selector, skill loader, template renderer), debugger specialist (diagnosis, fix recommender), validator specialist (structural checks, proof loop)
-- **CLI** — welcome, ASCII art, mode selector, onboarding with proof tests
-- **Interactive entrypoint** — CLI main command surface with `npm start`
-- **Local/BYOH** — entrypoint, request normalizer, local entrypoint proof
-- **Cloud** — auth (request validator, workspace scoping, provider connect), API (generate endpoint, cloud generate proof)
-- **Analytics** — health analyzer, digest generator
+- **`@ricky/shared`** — models, config, constants
+- **`@ricky/runtime`** — local coordinator, evidence capture, failure classifier, diagnostics engine with unblocker proof
+- **`@ricky/product`** — spec intake (parser, normalizer, router), generation pipeline (pattern selector, skill loader, template renderer), debugger specialist (diagnosis, fix recommender), validator specialist (structural checks, proof loop), analytics (health analyzer, digest generator)
+- **`@ricky/cli`** — welcome, ASCII art, mode selector, onboarding with proof tests, interactive entrypoint, CLI main command surface with `npm start`
+- **`@ricky/local`** — entrypoint, request normalizer, local entrypoint proof
+- **`@ricky/cloud`** — auth (request validator, workspace scoping, provider connect), API (generate endpoint, cloud generate proof)
 
 ### 2.3 Test coverage
 
-21 test files with 389 passing tests. Proof tests exist for:
+21 test files (19 in workspace packages + 2 root proof tests) with 404 passing tests. Proof tests exist for:
 - CLI onboarding first-run and recovery paths
 - Local entrypoint spec handoff and artifact return
 - Cloud generate happy path
@@ -57,6 +56,8 @@ The first waves prove that Ricky has:
 - failure classification and diagnosis that distinguishes blocker categories
 - a generation pipeline that selects patterns and loads skills
 - deterministic proof tests that exercise user-visible behavior, not just internal plumbing
+- a clean npm workspace layout with `@ricky/*` packages and cross-package dependency contracts
+- overnight batch and resume infrastructure for continuous workflow execution
 
 ### 2.5 CLI/banner UX deliverable boundary
 
@@ -272,7 +273,7 @@ Waves 0-5 built Ricky's internals: runtime, product core, CLI, local/BYOH, Cloud
 - **Scope:** Prove that the first Agent Assistant integration works correctly and that Ricky's existing tests continue to pass after the composition change.
 - **Required proof:**
   - Agent Assistant package is imported and used in a real code path
-  - Existing 389 tests still pass
+  - Existing 404 tests still pass
   - The integration seam is documented with clear boundary rules
   - No Ricky-owned domain logic leaks into Agent Assistant packages
 
@@ -317,7 +318,7 @@ Must show at least one full user journey from spec to execution outcome for both
 Must show at least one Agent Assistant package used in a real Ricky code path with all existing tests passing.
 
 ### Regression proof
-All proof workflows must verify that existing test suites (currently 389 tests across 21 files) continue to pass after each implementation change.
+All proof workflows must verify that existing test suites (currently 404 tests across 21 files) continue to pass after each implementation change.
 
 ## 7. Dependency and sequencing notes
 
@@ -354,10 +355,11 @@ Recommended execution order:
 | 08-prove-restart-safety-and-execution | Proof | wave6-runtime |
 | 09-prove-local-spec-to-execution-loop | Proof | wave6-proof |
 | 10-prove-cloud-spec-to-artifact-return | Proof | wave6-proof |
-| 11-implement-agent-assistant-composition | Implementation/spec | wave6-integration |
-| 12-prove-agent-assistant-integration-seam | Proof | wave6-integration |
+| 11-prove-cli-surface-honesty-and-empty-handoff-recovery | Proof | wave6-proof |
+| 12-implement-agent-assistant-composition | Implementation/spec | wave6-integration |
+| 13-prove-agent-assistant-integration-seam | Proof | wave6-integration |
 
-**Total: 12 workflows** — 5 implementation, 7 proof
+**Total: 13 workflows** — 5 implementation, 8 proof
 
 The proof-heavy ratio is deliberate. Ricky's internals exist. What needs proving is that they connect to real surfaces and real execution.
 
@@ -384,7 +386,7 @@ If Wave 6 completes honestly:
 
 ## 11. Decision
 
-The recommended next Ricky wave is a bounded 12-workflow batch (Wave 6) centered on:
+The recommended next Ricky wave is a bounded 13-workflow batch (Wave 6) centered on:
 - Slack surface implementation and proof
 - MCP/assistant handoff implementation and proof
 - Proactive failure notification implementation and proof
