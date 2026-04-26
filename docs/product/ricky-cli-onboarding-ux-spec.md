@@ -57,8 +57,10 @@ The ASCII art must convey:
 
 ### 6.2 Reference ASCII art
 
+Canonical implementation (as shipped in `ascii-art.ts`):
+
 ```text
-        __
+        __             RRRR
    ____/  \__        RICKY
   <__  _    _>
      \_\>--'
@@ -68,7 +70,7 @@ The ASCII art must convey:
 workflow reliability for AgentWorkforce
 ```
 
-The left silhouette represents the roadrunner: tail, head/beak, wing, and running legs. The canonical implementation adds `RRRR` on the first line adjacent to the silhouette as a secondary Ricky mark. The exact rendering may be refined, but the contract is:
+The left silhouette represents the roadrunner: tail, head/beak, wing, and running legs. `RRRR` appears on line 1 as a secondary Ricky mark. The exact rendering may be refined, but the contract is:
 - the silhouette must be recognizable as a bird/roadrunner, not abstract ASCII decoration or a text-only wordmark
 - "RICKY" must appear in the banner, not only below it
 - the tagline must appear on the last line
@@ -125,9 +127,13 @@ The compact header is one line, no ASCII art.
 ### 6.7 Export contract
 
 `src/cli/ascii-art.ts` must export:
-- `RICKY_BANNER: string` — the plain-text banner (no ANSI codes)
-- `renderBanner(options?: { color?: boolean }): string` — returns the banner with or without ANSI color codes
-- `shouldShowBanner(options: { quiet?: boolean; noBanner?: boolean; isTTY?: boolean }): boolean` — pure function encapsulating display logic
+- `RICKY_BANNER: string` — the plain-text full banner (no ANSI codes)
+- `RICKY_COMPACT_BANNER: string` — the one-line compact banner for narrow terminals
+- `type BannerVariant = 'full' | 'compact'`
+- `renderBanner(options?: RenderBannerOptions | BannerVariant): string` — returns the banner with or without ANSI color codes
+- `shouldShowBanner(options: ShouldShowBannerOptions): boolean` — pure function encapsulating display logic; supports `quiet`, `noBanner`, `isTTY`, `isFirstRun`, `forceOnboarding`, `env.RICKY_BANNER`, and direct `rickyBanner` option
+- `chooseBannerVariant(columns?: number): BannerVariant` — returns `'compact'` when columns < 60, `'full'` otherwise
+- `shouldUseColor(options?: { color?: boolean; isTTY?: boolean; noColor?: boolean }): boolean` — respects explicit `color` flag, TTY detection, and `NO_COLOR` env var
 
 ---
 
@@ -175,20 +181,20 @@ workflow reliability for AgentWorkforce
 
 ### 7.3 Non-interactive behavior
 
-When stdin is not a TTY (piped, CI, scripted):
+When stdin is not a TTY (piped, CI, scripted) and no mode override is set:
 
 ```text
 $ echo '{"spec": "..."}' | npx ricky generate
 
-Error: Ricky has not been configured yet.
+  Error: Ricky has not been configured yet.
 
-Run `npx ricky` interactively to complete first-run setup,
-or set RICKY_MODE=local to skip setup and use local mode.
+  Run `npm start` interactively to complete first-run setup,
+  or set RICKY_MODE=local to skip setup and use local mode.
 ```
 
-In this case, `runOnboarding` returns `mode: 'explore'` as the default. The `explore` mode signals that no real mode was committed and the caller should surface the error rather than proceed with generation.
+In this case, `runOnboarding` returns `mode: 'explore'` as the default. The `explore` mode is a sentinel: it signals that no real mode was committed and the caller should surface the error rather than proceed with generation. Callers should treat `explore` as "setup not completed."
 
-Environment variable `RICKY_MODE` can be set to `local` or `cloud` to bypass interactive setup in CI/scripting contexts. When `RICKY_MODE` is set, non-TTY invocations skip the error and proceed directly with the specified mode.
+Environment variable `RICKY_MODE` can be set to `local` or `cloud` to bypass interactive setup in CI/scripting contexts. When `RICKY_MODE` is set, non-TTY invocations skip the error and proceed directly with the specified mode. Config is NOT persisted for `RICKY_MODE` overrides — they are ephemeral per-invocation context.
 
 ---
 
@@ -199,6 +205,8 @@ Environment variable `RICKY_MODE` can be set to `local` or `cloud` to bypass int
 Local/BYOH and Cloud are co-equal modes. Neither is presented as the "real" mode with the other as a fallback. Local appears first in the list because it requires no external setup.
 
 ### 8.2 Option 1: Local / BYOH
+
+**Target copy** (when generate/debug commands ship):
 
 ```text
   Local / BYOH mode selected.
@@ -216,6 +224,29 @@ Local/BYOH and Cloud are co-equal modes. Neither is presented as the "real" mode
   - Submit a spec from file:   npx ricky generate --spec-file spec.md
   - Debug a failed workflow:   npx ricky debug --workflow <path>
   - See all commands:          npx ricky help
+
+  Ready to go!
+```
+
+**As currently implemented** (`renderModeResult('local')`):
+
+```text
+  Local / BYOH mode selected.
+
+  In this mode, Ricky will:
+  - generate workflows into your local repo
+  - validate workflows using local tools (tsc, vitest, agent-relay)
+  - run workflows via local agent-relay
+  - return artifacts and logs locally
+
+  No Cloud credentials required.
+
+  Give Ricky a spec, a workflow artifact, or a Claude/MCP handoff and continue locally.
+
+  Next steps:
+  - Start Ricky again when you have a concrete spec or workflow artifact to hand off
+  - Use `npm start -- --help` to see the currently implemented CLI surface
+  - Cloud guidance is available with: npx agent-relay cloud connect google
 
   Ready to go!
 ```
@@ -265,6 +296,8 @@ Local/BYOH and Cloud are co-equal modes. Neither is presented as the "real" mode
 
 ### 8.5 Option 4: Just explore
 
+**Target copy** (when generate/debug/fix/analyze/status commands ship):
+
 ```text
   Explore mode — no setup needed.
 
@@ -279,6 +312,21 @@ Local/BYOH and Cloud are co-equal modes. Neither is presented as the "real" mode
   When you're ready to set up, run: npx ricky setup
 ```
 
+**As currently implemented** (`renderModeResult('explore')`):
+
+```text
+  Explore mode - no setup needed.
+
+  Here's what Ricky can do:
+
+  Today's implemented surface is the interactive CLI onboarding and mode-selection path.
+  Ricky also has proven local/BYOH and Cloud domain logic behind that surface,
+  but the typed command layer is still intentionally thin.
+
+  See the current CLI help: npm start -- --help
+  For Cloud setup:       npx agent-relay cloud connect google
+```
+
 ### 8.6 Mode persistence
 
 - Selected mode is stored in `.ricky/config.json` (project-local) or `~/.config/ricky/config.json` (global fallback)
@@ -287,10 +335,11 @@ Local/BYOH and Cloud are co-equal modes. Neither is presented as the "real" mode
 - Precedence: `--mode` flag > `RICKY_MODE` env var > project config > global config
 - `npx ricky setup` re-runs mode selection at any time
 
-Config persistence rules:
+Config persistence rules (implemented):
 - Config is persisted only for interactive mode selections (user chose 1/2/3 via the prompt)
-- Config is NOT persisted when the mode comes from `--mode` flag or `RICKY_MODE` env var (these are ephemeral per-invocation overrides)
+- Config is NOT persisted when the mode comes from `--mode` flag or `RICKY_MODE` env var (these are ephemeral per-invocation overrides, not permanent mode commitments)
 - Config is NOT persisted for the `explore` choice (explore is a deferral, not a mode commitment)
+- Config stores `mode`, `firstRunComplete`, and `providers` (google/github connected booleans)
 
 ---
 
@@ -397,6 +446,23 @@ The CLI and MCP paths must produce the same domain behavior. MCP is a transport,
 
 ### 11.4 Handoff onboarding copy
 
+**As currently implemented** (`renderHandoffGuidance()`):
+
+```text
+  Spec handoff:
+  Tip: You can hand specs from Claude directly to Ricky.
+  In a Claude session, ask Claude to write a workflow spec.
+  Ricky already has internal local/BYOH and Cloud handoff plumbing,
+  but the user-facing generate/debug command layer is not exposed yet.
+
+  For now, use the interactive CLI to choose mode, then rerun once
+  you have a concrete workflow spec or artifact ready to wire into the next surface.
+
+  Using MCP later? Invoke ricky.generate with the same spec, mode, and source fields.
+```
+
+**Target handoff copy** (when generate command ships):
+
 ```text
   Tip: You can hand specs from Claude directly to Ricky.
   In a Claude session, ask Claude to write a workflow spec,
@@ -445,6 +511,30 @@ Suggested cross-surface phrasing:
 
 ### 13.1 Help text
 
+**As currently implemented** (`renderHelp()` in `cli-main.ts`):
+
+```text
+ricky — workflow reliability, coordination, and authoring
+
+Usage:
+  ricky                    Start interactive session (default)
+  ricky --mode <mode>      Start with mode preset: local | cloud | both
+  ricky help               Show this help text
+  ricky version            Show version
+
+Options:
+  --mode <mode>   Override execution mode (local, cloud, both)
+  --help, -h      Show help
+  --version, -v   Show version
+
+Examples:
+  npm start
+  npm start -- --mode local
+  npm start -- help
+```
+
+**Target help text** (when generate/debug/fix/analyze/status/setup commands ship):
+
 ```text
 $ npx ricky help
 
@@ -471,6 +561,17 @@ $ npx ricky help
     npx ricky debug --workflow workflows/wave2/10-test-runner.ts
     npx ricky status
 ```
+
+### 13.1.1 Current command surface (implemented)
+
+The CLI currently supports three commands via `parseArgs` in `cli-main.ts`:
+- `run` (default) — launches the interactive CLI session via `runInteractiveCli`
+- `help` — prints usage text
+- `version` — prints version string
+
+One flag: `--mode <local|cloud|both>` — overrides mode for the session.
+
+The commands `generate`, `debug`, `fix`, `analyze`, `status`, and `setup` are planned but not yet in `parseArgs`. The flags `--spec`, `--spec-file`, `--spec-stdin`, `--quiet`, and `--no-banner` are also planned.
 
 ### 13.2 Error: missing agent-relay (local mode)
 
@@ -634,18 +735,22 @@ Avoid:
 
 ### 17.1 File targets
 
-| File | Purpose |
-|---|---|
-| `src/cli/ascii-art.ts` | ASCII banner constant and render function |
-| `src/cli/welcome.ts` | First-run welcome text and product framing |
-| `src/cli/mode-selector.ts` | Mode selection prompt, descriptions, and persistence |
-| `src/cli/onboarding.ts` | Orchestrates welcome + mode + provider + next-action |
-| `src/cli/index.ts` | Public exports for the CLI onboarding module |
-| `src/cli/onboarding.test.ts` | Tests for user-visible onboarding contracts |
+| File | Purpose | Status |
+|---|---|---|
+| `src/cli/ascii-art.ts` | ASCII banner constant and render function | Implemented |
+| `src/cli/welcome.ts` | First-run welcome text and product framing | Implemented |
+| `src/cli/mode-selector.ts` | Mode selection prompt, descriptions, and persistence | Implemented |
+| `src/cli/onboarding.ts` | Orchestrates welcome + mode + provider + next-action | Implemented |
+| `src/cli/index.ts` | Public exports for the CLI onboarding module | Implemented |
+| `src/cli/onboarding.test.ts` | Tests for user-visible onboarding contracts | Implemented |
+| `src/commands/cli-main.ts` | CLI argument parsing and command dispatch | Implemented |
+| `src/entrypoint/interactive-cli.ts` | Interactive session composition (onboarding + local/cloud routing + diagnosis) | Implemented |
+| `src/entrypoint/interactive-cli.test.ts` | Tests for interactive CLI composition contracts | Implemented |
+| `src/commands/cli-main.test.ts` | Tests for CLI argument parsing and dispatch | Implemented |
 
-### 17.2 Export contract
+### 17.2 Export contract (matches current implementation)
 
-`src/cli/index.ts` must export the full public API:
+`src/cli/index.ts` exports the full public API. This contract is verified by the existing test suite.
 
 ```typescript
 // From ascii-art.ts
@@ -698,6 +803,27 @@ export function renderSuggestedNextAction(mode: RickyMode): string;
 export function runOnboarding(options?: OnboardingOptions): Promise<OnboardingResult>;
 ```
 
+### 17.2.1 Interactive CLI and command layer exports
+
+`src/entrypoint/interactive-cli.ts` exports:
+
+```typescript
+export interface InteractiveCliResult { ok: boolean; mode: RickyMode; onboarding: OnboardingResult; localResult?: LocalResponse; cloudResult?: CloudGenerateResult; diagnoses: Diagnosis[]; guidance: string[]; awaitingInput?: boolean }
+export interface InteractiveCliDeps { onboard?: ...; localExecutor?: LocalExecutor; cloudExecutor?: CloudExecutor; diagnoseFn?: ...; handoff?: RawHandoff; cloudRequest?: CloudGenerateRequest; configStore?: RickyConfigStore; mode?: RickyMode; input?: ...; output?: ...; isTTY?: boolean }
+export function runInteractiveCli(deps?: InteractiveCliDeps): Promise<InteractiveCliResult>;
+```
+
+`src/commands/cli-main.ts` exports:
+
+```typescript
+export interface ParsedArgs { command: 'run' | 'help' | 'version'; mode?: RickyMode }
+export interface CliMainResult { exitCode: number; output: string[]; interactiveResult?: InteractiveCliResult }
+export interface CliMainDeps extends InteractiveCliDeps { argv?: string[]; runInteractive?: ...; version?: string }
+export function parseArgs(argv: string[]): ParsedArgs;
+export function renderHelp(): string[];
+export function cliMain(deps?: CliMainDeps): Promise<CliMainResult>;
+```
+
 ### 17.3 Config file shape
 
 Location: `.ricky/config.json` (project-local, takes precedence) or `~/.config/ricky/config.json` (global fallback).
@@ -723,7 +849,27 @@ Override precedence: `--mode` flag > `RICKY_MODE` env var > project config > glo
 - Banner display logic (`shouldShowBanner`) must be a pure function of its options
 - File I/O for config must be injectable for testing
 
-### 17.5 Dependency rule
+### 17.5 Interactive CLI composition pattern (implemented)
+
+The interactive CLI session (`interactive-cli.ts`) composes the onboarding surface with execution:
+
+1. **Onboarding** — runs `runOnboarding` to display banner, welcome, mode selection, and persist config
+2. **Mode routing** — based on the resolved mode:
+   - `local` or `both`: executes the local path
+   - `cloud`: executes the cloud path
+3. **Local path behavior**:
+   - If no handoff (spec/artifact) is provided, returns `awaitingInput: true` with guidance about what the CLI can do today
+   - If a handoff is provided, calls `runLocal` from `@ricky/local`
+   - On failure, runs runtime diagnosis via `@ricky/runtime/diagnostics` and surfaces structured unblocker guidance
+4. **Cloud path behavior**:
+   - If no cloud request context, surfaces bounded recovery guidance
+   - If request is present, calls `handleCloudGenerate` from `@ricky/cloud`
+   - On failure, surfaces workflow generation failure recovery guidance
+5. **Both mode**: runs local first, then cloud if local succeeded and cloud request exists
+
+All dependencies are injectable via `InteractiveCliDeps` for deterministic testing.
+
+### 17.6 Dependency rule
 
 The onboarding module must not add external dependencies for:
 - Terminal colors (use raw ANSI codes or a minimal internal helper)
@@ -734,17 +880,21 @@ The onboarding module must not add external dependencies for:
 
 ## 18. Test and acceptance contract
 
-Implementation should pass when:
-- the banner renders a recognizable roadrunner silhouette
+Implementation should pass when (all currently verified by the test suite):
+- the banner renders a recognizable roadrunner silhouette with `RRRR` mark
 - the banner behavior is deterministic and testable via `shouldShowBanner()`
 - local/BYOH and Cloud are both visible as first-class modes in mode selection output
 - Google Cloud connect guidance uses the literal text `npx agent-relay cloud connect google`
 - GitHub guidance references the Cloud dashboard / Nango-backed flow, not an invented URL
-- CLI/MCP/Claude handoff language is present in onboarding output
+- CLI/MCP/Claude handoff language is present in onboarding output (and honest about current limitations)
 - at least one recovery path is represented in tests
 - returning-user compact header is distinct from first-run banner
 - `--quiet` and `--no-banner` suppress the banner
 - non-TTY invocations do not render the banner
+- config is persisted for interactive selections but NOT for overrides or explore
+- `RICKY_BANNER=0` env var and `rickyBanner` option suppress the banner
+- re-prompt behavior works on invalid input
+- mode override precedence: `options.mode` > `RICKY_MODE` env > project config > global config
 
 ---
 
