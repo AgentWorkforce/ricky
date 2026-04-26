@@ -42,6 +42,7 @@ workflows/wave4-local-byoh/09-implement-cli-command-surface.ts
 workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
 workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts
 workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts
+workflows/wave6-proof/11-prove-cli-surface-honesty-and-empty-handoff-recovery.ts
 workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts
 workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts

@@ -219,6 +219,7 @@ Waves 0-5 built Ricky's internals: runtime, product core, CLI, local/BYOH, Cloud
 **Why it matters:** Individual subsystems are tested, but no proof exists that a full user journey works from spec to execution to outcome.
 
 **Connection to SPEC:** Sections 7.1, 7.2, 7.4, 14
+**Connection to workflow standards:** These proofs should absorb real-life CLI and onboarding regressions before a human wastes cycles manually testing them.
 
 #### Workflow: `wave6-proof/09-prove-local-spec-to-execution-loop.ts`
 - **Type:** Proof
@@ -241,13 +242,23 @@ Waves 0-5 built Ricky's internals: runtime, product core, CLI, local/BYOH, Cloud
   - Response includes artifact bundle, warnings, and follow-up suggestions
   - Missing provider state is surfaced explicitly, not silently ignored
 
+#### Workflow: `wave6-proof/11-prove-cli-surface-honesty-and-empty-handoff-recovery.ts`
+- **Type:** Proof
+- **Scope:** Prove Ricky's interactive CLI does not advertise non-existent commands, does not fall through into empty local execution, and exits honestly when no real spec or workflow handoff was provided.
+- **Required proof:**
+  - onboarding/help/recovery copy only references commands or flows that actually exist in the repo
+  - selecting Local / BYOH without a spec or artifact does not invoke the local runtime with an empty description
+  - the CLI returns a bounded "awaiting input" result instead of a failure when no handoff exists yet
+  - proof fixtures compare Ricky against the intended Sage-style local/BYOH behavior where local CLI resolution is real but empty user intent is not executed
+  - failures in these user-visible flows break the workflow proof suite automatically
+
 ### 4.6 Batch F: Agent Assistant composition proof
 
 **Why it matters:** SPEC Section 2 and 8.1 state that Ricky should be built on Agent Assistant, not as a standalone stack. Currently Ricky is standalone. This batch begins the composition.
 
 **Connection to SPEC:** Sections 2, 3.2, 8.1
 
-#### Workflow: `wave6-integration/11-implement-agent-assistant-composition.ts`
+#### Workflow: `wave6-integration/12-implement-agent-assistant-composition.ts`
 - **Type:** Implementation / spec
 - **Scope:**
   - Evaluate which `@agent-assistant/*` packages Ricky should compose today versus later
@@ -256,7 +267,7 @@ Waves 0-5 built Ricky's internals: runtime, product core, CLI, local/BYOH, Cloud
 - **Primary files:** `src/assistant/composition.ts`, `src/assistant/types.ts`, `docs/architecture/ricky-agent-assistant-composition.md`
 - **Proof expectations:** At least one Agent Assistant package is imported and used for a real product behavior, not just a type re-export.
 
-#### Workflow: `wave6-integration/12-prove-agent-assistant-integration-seam.ts`
+#### Workflow: `wave6-integration/13-prove-agent-assistant-integration-seam.ts`
 - **Type:** Proof
 - **Scope:** Prove that the first Agent Assistant integration works correctly and that Ricky's existing tests continue to pass after the composition change.
 - **Required proof:**
