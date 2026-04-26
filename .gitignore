@@ -17,10 +17,11 @@ dist/
 # scratch / temp
 tmp/
 
-# non-npm package-manager artifacts (prpm, skills CLI)
+# non-npm package-manager artifacts
 prpm.lock
 skills-lock.json
 skills.sh
+.agents/
 
 # editor / IDE
 .idea/

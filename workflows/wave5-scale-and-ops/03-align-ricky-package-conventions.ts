@@ -188,7 +188,7 @@ Write files to disk, then exit cleanly.`,
       dependsOn: ['post-fix-validation'],
       command: [
         'changed="$(git diff --name-only -- package.json package-lock.json README.md tsconfig.json vitest.config.ts .gitignore workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave5-scale-and-ops/align-ricky-package-conventions)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(package\\.json|package-lock\\.json|README\\.md|tsconfig\\.json|vitest\\.config\\.ts|\\.gitignore|workflows/wave5-scale-and-ops/03-align-ricky-package-conventions\\.ts|\\.workflow-artifacts/wave5-scale-and-ops/align-ricky-package-conventions/)"',
+        'test -z "$changed" || printf "%s\n" "$changed" | grep -Eq "^(package\\.json|package-lock\\.json|README\\.md|tsconfig\\.json|vitest\\.config\\.ts|\\.gitignore|workflows/wave5-scale-and-ops/03-align-ricky-package-conventions\\.ts|\\.workflow-artifacts/wave5-scale-and-ops/align-ricky-package-conventions/)"',
         '! printf "%s\n" "$changed" | grep -Ev "^(package\\.json|package-lock\\.json|README\\.md|tsconfig\\.json|vitest\\.config\\.ts|\\.gitignore|workflows/wave5-scale-and-ops/03-align-ricky-package-conventions\\.ts|\\.workflow-artifacts/wave5-scale-and-ops/align-ricky-package-conventions/)"',
         'echo RICKY_PACKAGE_ALIGNMENT_REGRESSION_GATE_PASS',
       ].join(' && '),
