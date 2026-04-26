@@ -2,6 +2,7 @@
   "name": "ricky",
   "private": true,
   "version": "0.0.0",
+  "license": "UNLICENSED",
   "description": "Workflow reliability, coordination, and authoring product for AgentWorkforce",
   "engines": {
     "node": ">=20"

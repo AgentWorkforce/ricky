@@ -19,3 +19,4 @@ tmp/
 
 # non-npm package-manager lockfiles
 prpm.lock
+skills-lock.json
