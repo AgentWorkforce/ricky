@@ -7,7 +7,7 @@
  * - typecheck/test/start entrypoints cover the workspace without relying on old src/*
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export type ProofCaseName =
@@ -62,6 +62,18 @@ function readText(relPath: string): string {
 
 function fileExists(relPath: string): boolean {
   return existsSync(join(repoRoot(), relPath));
+}
+
+function listFiles(relPath: string): string[] {
+  const root = join(repoRoot(), relPath);
+
+  if (!existsSync(root)) {
+    return [];
+  }
+
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name).slice(repoRoot().length + 1));
 }
 
 function result(
@@ -282,7 +294,8 @@ export function getPackageProofCases(): PackageProofCase[] {
           'packages/cli/src/entrypoint/interactive-cli.ts',
         ];
         const missing = requiredFiles.filter((file) => !fileExists(file));
-        const oldSrcRemoved = !fileExists('src');
+        const oldSrcFiles = listFiles('src');
+        const oldSrcRemoved = oldSrcFiles.length === 0;
 
         return result(
           'workspace-package-boundaries-match-spec',
@@ -293,7 +306,10 @@ export function getPackageProofCases(): PackageProofCase[] {
             `old src removed: ${oldSrcRemoved}`,
           ],
           [],
-          missing.map((file) => `Missing moved source file: ${file}`),
+          [
+            ...missing.map((file) => `Missing moved source file: ${file}`),
+            ...oldSrcFiles.map((file) => `Unexpected old root source file: ${file}`),
+          ],
         );
       },
     },
@@ -354,7 +370,7 @@ export function getPackageProofCases(): PackageProofCase[] {
     },
     {
       name: 'vitest-config-covers-test-surface',
-      description: 'Vitest config keeps node globals and points setup at the moved root test setup.',
+      description: 'Vitest config keeps node globals and points setup at the tracked root test setup.',
       evaluate: () => {
         const configText = readText('vitest.config.ts');
         const setupExists = fileExists('test/setup.ts');
