@@ -40,7 +40,7 @@ async function main() {
 
     .step('prepare-artifacts', {
       type: 'deterministic',
-      command: 'mkdir -p .workflow-artifacts/wave0-foundation/shared-models src/shared/models && echo W0_SHARED_MODELS_ARTIFACTS_READY',
+      command: 'mkdir -p .workflow-artifacts/wave0-foundation/shared-models packages/shared/src/models && echo W0_SHARED_MODELS_ARTIFACTS_READY',
       captureOutput: true,
       failOnError: true,
     })
@@ -76,7 +76,7 @@ async function main() {
     .step('read-package-context', {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
-      command: 'cat package.json && if [ -f tsconfig.json ]; then cat tsconfig.json; else echo "NO_TSCONFIG_PRESENT"; fi',
+      command: 'cat package.json && cat packages/shared/package.json && if [ -f tsconfig.json ]; then cat tsconfig.json; else echo "NO_TSCONFIG_PRESENT"; fi && if [ -f packages/shared/tsconfig.json ]; then cat packages/shared/tsconfig.json; else echo "NO_SHARED_TSCONFIG_PRESENT"; fi',
       captureOutput: true,
       failOnError: true,
     })
@@ -103,10 +103,10 @@ Deliverables:
 - The model set must be small, stable, and importable by future runtime/product workflows.
 
 File targets:
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
+- packages/shared/src/models/workflow-evidence.ts
+- packages/shared/src/models/workflow-config.ts
+- packages/shared/src/models/index.ts
+- packages/shared/src/constants.ts
 
 Non-goals:
 - Do not implement the local run coordinator.
@@ -115,25 +115,26 @@ Non-goals:
 - Do not add broad tests unless a test framework is already present and useful for these pure types.
 
 Verification commands:
-- test -f src/shared/models/workflow-evidence.ts
-- test -f src/shared/models/workflow-config.ts
-- test -f src/shared/models/index.ts
-- test -f src/shared/constants.ts
-- grep -q "export" src/shared/models/index.ts
-- grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" src/shared/models/workflow-evidence.ts
-- grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" src/shared/models/workflow-config.ts
+- test -f packages/shared/src/models/workflow-evidence.ts
+- test -f packages/shared/src/models/workflow-config.ts
+- test -f packages/shared/src/models/index.ts
+- test -f packages/shared/src/constants.ts
+- grep -q "export" packages/shared/src/models/index.ts
+- grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" packages/shared/src/models/workflow-evidence.ts
+- grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" packages/shared/src/models/workflow-config.ts
 - npx tsc --noEmit
-- changed="$(git diff --name-only -- src/shared/models/workflow-evidence.ts src/shared/models/workflow-config.ts src/shared/models/index.ts src/shared/constants.ts; git ls-files --others --exclude-standard -- src/shared/models/workflow-evidence.ts src/shared/models/workflow-config.ts src/shared/models/index.ts src/shared/constants.ts)" && printf "%s\n" "$changed" | grep -Eq "^(src/shared/models/workflow-evidence.ts|src/shared/models/workflow-config.ts|src/shared/models/index.ts|src/shared/constants.ts)$" && echo CHANGES_PRESENT
+- changed="$(git diff --name-only -- packages/shared/src/models/workflow-evidence.ts packages/shared/src/models/workflow-config.ts packages/shared/src/models/index.ts packages/shared/src/constants.ts; git ls-files --others --exclude-standard -- packages/shared/src/models/workflow-evidence.ts packages/shared/src/models/workflow-config.ts packages/shared/src/models/index.ts packages/shared/src/constants.ts)" && printf "%s\n" "$changed" | grep -Eq "^(packages/shared/src/models/workflow-evidence.ts|packages/shared/src/models/workflow-config.ts|packages/shared/src/models/index.ts|packages/shared/src/constants.ts)$" && echo CHANGES_PRESENT
 
 Review checklist:
 - Types are product-specific but not overfit to one future workflow.
 - Exports are explicit and easy to import.
 - Constants are narrow and do not create runtime policy prematurely.
 - Typecheck errors are fixed or honestly documented if the repo lacks TypeScript config.
-- Commit boundary is limited to src/shared/models/* and src/shared/constants.ts.
+- Commit boundary is limited to packages/shared/src/models/* and packages/shared/src/constants.ts.
 
 Commit/PR boundary:
 - One implementation commit or PR should include only the four shared files above, plus a minimal tsconfig only if typecheck cannot run without one and reviewers approve it.
+- Do not recreate legacy root src/ files now that Ricky is package-split.
 
 Write .workflow-artifacts/wave0-foundation/shared-models/plan.md and end it with W0_SHARED_MODELS_PLAN_READY.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/shared-models/plan.md' },
@@ -152,16 +153,16 @@ Read:
 - tsconfig.json if present
 
 Deliverables:
-- src/shared/models/workflow-evidence.ts exports workflow evidence, step evidence, verification result, retry/history, and artifact/log reference types.
-- src/shared/models/workflow-config.ts exports a Ricky workflow config type or schema shape covering local/cloud mode, validation policy, channel, timeout, and retry settings.
-- src/shared/models/index.ts re-exports all shared model files.
-- src/shared/constants.ts exports narrow Ricky constants such as default channel prefix, wave folder names, and validation policy defaults.
+- packages/shared/src/models/workflow-evidence.ts exports workflow evidence, step evidence, verification result, retry/history, and artifact/log reference types.
+- packages/shared/src/models/workflow-config.ts exports a Ricky workflow config type or schema shape covering local/cloud mode, validation policy, channel, timeout, and retry settings.
+- packages/shared/src/models/index.ts re-exports all shared model files.
+- packages/shared/src/constants.ts exports narrow Ricky constants such as default channel prefix, wave folder names, and validation policy defaults.
 
 File targets:
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
+- packages/shared/src/models/workflow-evidence.ts
+- packages/shared/src/models/workflow-config.ts
+- packages/shared/src/models/index.ts
+- packages/shared/src/constants.ts
 
 Non-goals:
 - Do not create runtime coordinator behavior.
@@ -170,7 +171,7 @@ Non-goals:
 - Do not introduce environmental assumptions beyond current repo tooling.
 
 Verification commands to keep green:
-- grep -q "export" src/shared/models/index.ts
+- grep -q "export" packages/shared/src/models/index.ts
 - npx tsc --noEmit
 
 Write files to disk and keep the implementation compact.`,
@@ -180,7 +181,7 @@ Write files to disk and keep the implementation compact.`,
     .step('verify-materialized-files', {
       type: 'deterministic',
       dependsOn: ['implement-shared-models'],
-      command: 'test -f src/shared/models/workflow-evidence.ts && test -f src/shared/models/workflow-config.ts && test -f src/shared/models/index.ts && test -f src/shared/constants.ts && echo W0_SHARED_MODELS_FILES_PRESENT',
+      command: 'test -f packages/shared/src/models/workflow-evidence.ts && test -f packages/shared/src/models/workflow-config.ts && test -f packages/shared/src/models/index.ts && test -f packages/shared/src/constants.ts && echo W0_SHARED_MODELS_FILES_PRESENT',
       captureOutput: true,
       failOnError: true,
     })
@@ -188,10 +189,10 @@ Write files to disk and keep the implementation compact.`,
       type: 'deterministic',
       dependsOn: ['verify-materialized-files'],
       command: [
-        'grep -q "export" src/shared/models/index.ts',
-        'grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" src/shared/models/workflow-evidence.ts',
-        'grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" src/shared/models/workflow-config.ts',
-        'grep -Eq "RICKY|WAVE|CHANNEL" src/shared/constants.ts',
+        'grep -q "export" packages/shared/src/models/index.ts',
+        'grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" packages/shared/src/models/workflow-evidence.ts',
+        'grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" packages/shared/src/models/workflow-config.ts',
+        'grep -Eq "RICKY|WAVE|CHANNEL" packages/shared/src/constants.ts',
         'echo W0_SHARED_MODELS_EXPORTS_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -212,10 +213,10 @@ Write files to disk and keep the implementation compact.`,
 
 Read:
 - .workflow-artifacts/wave0-foundation/shared-models/plan.md
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
+- packages/shared/src/models/workflow-evidence.ts
+- packages/shared/src/models/workflow-config.ts
+- packages/shared/src/models/index.ts
+- packages/shared/src/constants.ts
 - Initial soft typecheck output:
 {{steps.initial-soft-typecheck.output}}
 
@@ -234,10 +235,10 @@ Write .workflow-artifacts/wave0-foundation/shared-models/review-claude.md and en
       task: `Review the shared TypeScript implementation.
 
 Read:
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
+- packages/shared/src/models/workflow-evidence.ts
+- packages/shared/src/models/workflow-config.ts
+- packages/shared/src/models/index.ts
+- packages/shared/src/constants.ts
 - package.json
 - tsconfig.json if present
 - Initial soft typecheck output:
@@ -250,7 +251,7 @@ Review checklist:
 - No dependency or unrelated file churn was introduced.
 - The intended verification commands are practical:
   - npx tsc --noEmit
-  - grep -q "export" src/shared/models/index.ts
+  - grep -q "export" packages/shared/src/models/index.ts
 
 Write .workflow-artifacts/wave0-foundation/shared-models/review-codex.md and end with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/shared-models/review-codex.md' },
@@ -264,18 +265,18 @@ Write .workflow-artifacts/wave0-foundation/shared-models/review-codex.md and end
 Read:
 - .workflow-artifacts/wave0-foundation/shared-models/review-claude.md
 - .workflow-artifacts/wave0-foundation/shared-models/review-codex.md
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
+- packages/shared/src/models/workflow-evidence.ts
+- packages/shared/src/models/workflow-config.ts
+- packages/shared/src/models/index.ts
+- packages/shared/src/constants.ts
 - Initial soft typecheck output:
 {{steps.initial-soft-typecheck.output}}
 
 Only edit:
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
+- packages/shared/src/models/workflow-evidence.ts
+- packages/shared/src/models/workflow-config.ts
+- packages/shared/src/models/index.ts
+- packages/shared/src/constants.ts
 - tsconfig.json only if validation already introduced it for an explicit TypeScript setup blocker
 
 Do not broaden scope. Fix only concrete review findings and validation failures, then run npx tsc --noEmit before exiting. If the repository lacks TypeScript setup, document the blocker in .workflow-artifacts/wave0-foundation/shared-models/validation-notes.md and make the smallest repo-appropriate fix only if obvious.`,
@@ -293,13 +294,13 @@ Do not broaden scope. Fix only concrete review findings and validation failures,
       type: 'deterministic',
       dependsOn: ['post-fix-typecheck'],
       command: [
-        'test -f src/shared/models/workflow-evidence.ts',
-        'test -f src/shared/models/workflow-config.ts',
-        'test -f src/shared/models/index.ts',
-        'test -f src/shared/constants.ts',
-        'grep -q "export" src/shared/models/index.ts',
-        'grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" src/shared/models/workflow-evidence.ts',
-        'grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" src/shared/models/workflow-config.ts',
+        'test -f packages/shared/src/models/workflow-evidence.ts',
+        'test -f packages/shared/src/models/workflow-config.ts',
+        'test -f packages/shared/src/models/index.ts',
+        'test -f packages/shared/src/constants.ts',
+        'grep -q "export" packages/shared/src/models/index.ts',
+        'grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" packages/shared/src/models/workflow-evidence.ts',
+        'grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" packages/shared/src/models/workflow-config.ts',
         'echo W0_SHARED_MODELS_POST_FIX_VALIDATION_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -313,10 +314,10 @@ Do not broaden scope. Fix only concrete review findings and validation failures,
 
 Read:
 - .workflow-artifacts/wave0-foundation/shared-models/review-claude.md
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
+- packages/shared/src/models/workflow-evidence.ts
+- packages/shared/src/models/workflow-config.ts
+- packages/shared/src/models/index.ts
+- packages/shared/src/constants.ts
 - Post-fix validation output:
 {{steps.post-fix-structure-gate.output}}
 
@@ -330,10 +331,10 @@ Check the original semantic review checklist again and verify any earlier concre
 
 Read:
 - .workflow-artifacts/wave0-foundation/shared-models/review-codex.md
-- src/shared/models/workflow-evidence.ts
-- src/shared/models/workflow-config.ts
-- src/shared/models/index.ts
-- src/shared/constants.ts
+- packages/shared/src/models/workflow-evidence.ts
+- packages/shared/src/models/workflow-config.ts
+- packages/shared/src/models/index.ts
+- packages/shared/src/constants.ts
 - package.json
 - tsconfig.json if present
 - Post-fix validation output:
@@ -366,13 +367,13 @@ Check the original TypeScript review checklist again and verify any earlier conc
       type: 'deterministic',
       dependsOn: ['final-hard-typecheck'],
       command: [
-        'test -f src/shared/models/workflow-evidence.ts',
-        'test -f src/shared/models/workflow-config.ts',
-        'test -f src/shared/models/index.ts',
-        'test -f src/shared/constants.ts',
-        'grep -q "export" src/shared/models/index.ts',
-        'grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" src/shared/models/workflow-evidence.ts',
-        'grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" src/shared/models/workflow-config.ts',
+        'test -f packages/shared/src/models/workflow-evidence.ts',
+        'test -f packages/shared/src/models/workflow-config.ts',
+        'test -f packages/shared/src/models/index.ts',
+        'test -f packages/shared/src/constants.ts',
+        'grep -q "export" packages/shared/src/models/index.ts',
+        'grep -Eq "WorkflowEvidence|WorkflowStepEvidence|Verification" packages/shared/src/models/workflow-evidence.ts',
+        'grep -Eq "WorkflowConfig|RickyWorkflowConfig|Config" packages/shared/src/models/workflow-config.ts',
         'echo W0_SHARED_MODELS_FINAL_STRUCTURE_PASS',
       ].join(' && '),
       captureOutput: true,

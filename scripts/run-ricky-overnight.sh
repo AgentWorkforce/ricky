@@ -93,6 +93,12 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+workflow_has_stale_package_targets() {
+  local workflow_path="$1"
+
+  grep -Eq "packages/cli/packages/cli/|(^|[^[:alnum:]_])src/(shared|runtime|product|cloud|local|cli)/" "$workflow_path"
+}
+
 persist_checkpoint() {
   cat > "$CHECKPOINT_FILE" <<EOF
 queue_mode=$QUEUE_MODE
@@ -200,6 +206,12 @@ run_one() {
 
   if [[ ! -f "$workflow_path" ]]; then
     log "skipping missing workflow: $workflow_path"
+    echo "$workflow_path" >> "$SKIPPED_FILE"
+    return 0
+  fi
+
+  if workflow_has_stale_package_targets "$workflow_path"; then
+    log "skipping stale pre-package-split workflow: $workflow_path"
     echo "$workflow_path" >> "$SKIPPED_FILE"
     return 0
   fi
