@@ -145,7 +145,7 @@ Verification:
         'grep -q "typecheck" package.json',
         'grep -q "vitest" package.json vitest.config.ts',
         'grep -q "typescript" package.json',
-        'changed="$(git diff --name-only -- package.json tsconfig.json vitest.config.ts src/test/setup.ts; git ls-files --others --exclude-standard -- package.json tsconfig.json vitest.config.ts src/test/setup.ts)" && printf "%s\\n" "$changed" | grep -Eq "^(package.json|tsconfig.json|vitest.config.ts|src/test/setup.ts)$"',
+        'changed="$(git diff --name-only -- package.json tsconfig.json vitest.config.ts src/test/setup.ts; git ls-files --others --exclude-standard -- package.json tsconfig.json vitest.config.ts src/test/setup.ts)" && { [ -z "$changed" ] || printf "%s\\n" "$changed" | grep -Eq "^(package.json|tsconfig.json|vitest.config.ts|src/test/setup.ts)$"; }',
         'echo W0_TOOLCHAIN_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
