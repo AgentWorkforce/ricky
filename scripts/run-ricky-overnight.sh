@@ -6,7 +6,7 @@ RUNNER="${AGENT_RELAY_BIN:-$HOME/.local/bin/agent-relay}"
 DURATION_HOURS="${RICKY_OVERNIGHT_HOURS:-7}"
 POLL_SECONDS="${RICKY_OVERNIGHT_POLL_SECONDS:-15}"
 PASSES="${RICKY_OVERNIGHT_PASSES:-3}"
-QUEUE_MODE="${RICKY_OVERNIGHT_QUEUE_MODE:-expanded}"
+QUEUE_MODE="${RICKY_OVERNIGHT_QUEUE_MODE:-flight-safe}"
 MAX_WORKFLOWS_PER_INVOCATION="${RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION:-4}"
 STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
 RESUME_FLAG="${1:-}"
@@ -76,6 +76,32 @@ workflows/wave4-local-byoh/09-implement-cli-command-surface.ts
 workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
 workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
+EOF
+      ;;
+    flight-safe)
+      cat > "$QUEUE_FILE" <<'EOF'
+workflows/wave0-foundation/02-toolchain-and-validation-foundation.ts
+workflows/wave0-foundation/03-shared-models-and-config.ts
+workflows/wave1-runtime/01-local-run-coordinator.ts
+workflows/wave1-runtime/02-workflow-evidence-model.ts
+workflows/wave1-runtime/03-workflow-failure-classification.ts
+workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
+workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
+workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts
+workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts
+workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts
+workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts
+workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts
+workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts
+workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts
+workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts
+workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts
+workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
+workflows/wave4-local-byoh/09-implement-cli-command-surface.ts
+workflows/wave5-scale-and-ops/01-workflow-health-analytics.ts
+workflows/wave5-scale-and-ops/02-next-wave-backlog-and-proof-plan.ts
+workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts
+workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts
 EOF
       ;;
     expanded|*)

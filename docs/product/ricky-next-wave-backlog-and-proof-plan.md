@@ -272,6 +272,68 @@ Recovery proof must use the existing failure taxonomy. It must prove Ricky can s
 
 Analytics must consume real proof and recovery evidence, not only synthetic summaries. The proof loop should show how Ricky turns observed failures into concrete recommendations for the next workflow, recovery action, or documentation update.
 
+## Overnight Queue Reliability Review
+
+The overnight queue is healthier after the workspace migration and checkpoint/resume hardening, but it should no longer be treated as one undifferentiated expanded batch. Ricky now has enough evidence to classify workflows by unattended safety.
+
+### Flight-safe now
+
+These workflows are suitable for the default unattended overnight queue because they have already survived post-package-split validation and recent overnight harvests, or their failure modes are now bounded and well understood:
+
+- `workflows/wave0-foundation/02-toolchain-and-validation-foundation.ts`
+- `workflows/wave0-foundation/03-shared-models-and-config.ts`
+- `workflows/wave1-runtime/01-local-run-coordinator.ts`
+- `workflows/wave1-runtime/02-workflow-evidence-model.ts`
+- `workflows/wave1-runtime/03-workflow-failure-classification.ts`
+- `workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts`
+- `workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts`
+- `workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts`
+- `workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts`
+- `workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts`
+- `workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts`
+- `workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts`
+- `workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts`
+- `workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts`
+- `workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts`
+- `workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts`
+- `workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts`
+- `workflows/wave4-local-byoh/09-implement-cli-command-surface.ts`
+- `workflows/wave5-scale-and-ops/01-workflow-health-analytics.ts`
+- `workflows/wave5-scale-and-ops/02-next-wave-backlog-and-proof-plan.ts`
+- `workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts`
+- `workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts`
+
+### Supervised only
+
+These are now viable, but still more likely to produce review-heavy or repo-wide deltas. They should remain in a broader queue only when the inspect -> validate -> capture watcher is active:
+
+- `workflows/wave0-foundation/04-initial-architecture-docs.ts`
+- `workflows/wave2-product/01-workflow-spec-intake.ts`
+- `workflows/wave2-product/02-workflow-generation-pipeline.ts`
+- `workflows/wave2-product/03-workflow-debugger-specialist.ts`
+- `workflows/wave2-product/04-workflow-validator-specialist.ts`
+- `workflows/wave3-cloud-api/01-cloud-connect-and-auth.ts`
+- `workflows/wave3-cloud-api/02-generate-endpoint.ts`
+- `workflows/wave5-scale-and-ops/05-split-ricky-into-workspace-packages.ts`
+
+### Quarantine from unattended queue
+
+These should not be part of the normal overnight rotation:
+
+- `workflows/wave0-foundation/99-debug-codex-worker-runtime.ts`
+- `workflows/wave0-foundation/100-debug-codex-source-edit-runtime.ts`
+
+They are intentional runtime canaries and debugging tools, not steady-state product-progress workflows.
+
+### Operating recommendation
+
+Ricky should now treat overnight execution as two distinct modes:
+
+1. **Default unattended mode** uses only the flight-safe set above.
+2. **Expanded supervised mode** may include the supervised workflows, but only when the proactive watcher is enabled to harvest coherent deltas and repair brittle gates.
+
+This keeps unattended throughput honest while preserving the ability to use larger batches when an operator wants breadth.
+
 ## Sequencing
 
 Recommended order:

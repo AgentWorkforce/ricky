@@ -87,7 +87,9 @@ npm scripts:
 - `npm run typecheck` — run workspace package typechecks, then root workflow/proof typecheck
 - `npm run batch` — run workflow batches via `scripts/run-ricky-batch.sh`
 - `npm run overnight` — run the overnight workflow queue via `scripts/run-ricky-overnight.sh`
-  - default behavior now checkpoints after a small bounded chunk (`RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION`, default `4`) and can resume with `bash scripts/run-ricky-overnight.sh --resume`
+  - default queue mode is now `flight-safe`, which only runs the workflows currently classified as unattended-safe
+  - use `RICKY_OVERNIGHT_QUEUE_MODE=expanded` when you explicitly want the broader supervised queue
+  - default behavior checkpoints after a small bounded chunk (`RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION`, default `4`) and can resume with `bash scripts/run-ricky-overnight.sh --resume`
   - checkpoint state lives under `.workflow-artifacts/overnight-state/<queue-mode>/checkpoint.env`
 
 ## Package shape
