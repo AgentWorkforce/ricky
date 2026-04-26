@@ -42,6 +42,12 @@ STATUS_REASON=""
 CURRENT_WORKFLOW=""
 RUN_PID="$$"
 STATUS_MARKED="false"
+CLAUDE_RATE_LIMIT_PATTERNS=(
+  "You've hit your limit"
+  "/rate-limit-options"
+  "What do you want to do?"
+  "Stop and wait for limit to reset"
+)
 
 on_exit() {
   local exit_code="$?"
@@ -246,8 +252,26 @@ commit_if_clean_delta() {
   inspect_repo_changes
 }
 
+workflow_hit_claude_rate_limit() {
+  local output_file="$1"
+  local pattern
+
+  [[ -f "$output_file" ]] || return 1
+
+  for pattern in "${CLAUDE_RATE_LIMIT_PATTERNS[@]}"; do
+    if grep -Fq "$pattern" "$output_file"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 run_one() {
   local workflow_path="$1"
+  local runner_output=""
+  local runner_pid=""
+  local runner_exit="0"
   RUN_RESULT="ran"
   CURRENT_WORKFLOW="$workflow_path"
   persist_checkpoint
@@ -271,7 +295,37 @@ run_one() {
     return 0
   fi
 
-  if ! "$RUNNER" run "$workflow_path"; then
+  runner_output="$ARTIFACT_DIR/runner-$(basename "$workflow_path" .ts).log"
+  : > "$runner_output"
+
+  "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+  runner_pid=$!
+  RUN_PID="$runner_pid"
+  persist_checkpoint
+
+  while is_pid_running "$runner_pid"; do
+    if workflow_hit_claude_rate_limit "$runner_output"; then
+      log "workflow blocked by Claude rate limit prompt: $workflow_path"
+      kill "$runner_pid" 2>/dev/null || true
+      wait "$runner_pid" 2>/dev/null || true
+      echo "$workflow_path" >> "$FAILED_FILE"
+      inspect_repo_changes
+      mark_status "blocked" "claude rate limit prompt: $workflow_path"
+      CURRENT_WORKFLOW=""
+      persist_checkpoint
+      return 1
+    fi
+
+    sleep "$POLL_SECONDS"
+  done
+
+  if ! wait "$runner_pid"; then
+    runner_exit=$?
+  fi
+  RUN_PID="$$"
+  persist_checkpoint
+
+  if [[ "$runner_exit" != "0" ]]; then
     log "workflow exited non-zero: $workflow_path"
     echo "$workflow_path" >> "$FAILED_FILE"
     inspect_repo_changes
