@@ -315,7 +315,7 @@ Check the original review checklist again and verify any earlier concrete failur
       dependsOn: ['final-hard-structure-gate'],
       command: [
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\\n" "$changed" | grep -Eq "^docs/architecture/ricky-"',
+        '{ [ -z "$changed" ] || printf "%s\\n" "$changed" | grep -Eq "^docs/architecture/ricky-"; }',
         '! printf "%s\\n" "$changed" | grep -Ev "^(docs/architecture/ricky-|\\.workflow-artifacts/)"',
         'echo W0_ARCHITECTURE_DOCS_REGRESSION_SCOPE_PASS',
       ].join(' && '),
