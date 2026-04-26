@@ -266,7 +266,10 @@ if [[ -z "$INITIAL_GIT_HEAD" ]]; then
 fi
 persist_checkpoint
 
-mapfile -t QUEUE_ITEMS < "$QUEUE_FILE"
+QUEUE_ITEMS=()
+while IFS= read -r workflow_line; do
+  QUEUE_ITEMS+=("$workflow_line")
+done < "$QUEUE_FILE"
 QUEUE_TOTAL="${#QUEUE_ITEMS[@]}"
 
 for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
