@@ -160,6 +160,7 @@ Requirements:
 - Include a concrete banner section with example ASCII treatment and rules for when it appears.
 - Define first-run versus returning-user behavior.
 - Define local/BYOH versus Cloud selection copy and next steps.
+- Include an explicit "Web and Slack relationship" section that says those surfaces are adjacent entry points, not the owner of CLI onboarding.
 - Include Google connect guidance using the real pattern npx agent-relay cloud connect google.
 - For GitHub/integration setup, reference Cloud dashboard / Nango-backed guidance rather than invented URLs.
 - Include CLI-based and MCP-based spec handoff examples.
@@ -258,6 +259,7 @@ Rules:
         'grep -qi "local\|BYOH" docs/product/ricky-cli-onboarding-ux-spec.md',
         'grep -qi "Cloud" docs/product/ricky-cli-onboarding-ux-spec.md',
         'grep -qi "acceptance criteria\|acceptance" docs/product/ricky-cli-onboarding-ux-spec.md',
+        'grep -qiE "Slack|web" docs/product/ricky-cli-onboarding-ux-spec.md',
         'grep -qi "recovery\|failure\|unblock" docs/product/ricky-cli-onboarding-ux-spec.md',
         'echo CLI_UX_SPEC_POST_FIX_GATE_PASS',
       ].join(' && '),
