@@ -16,22 +16,60 @@ export type {
   AgentNarrativeEvidence,
   EvidenceSummary,
   DeterministicGateResult,
+  TerminalStepStatus,
+  TerminalRunStatus,
+  EvidenceFailureKind,
+  EvidenceCommandReference,
+  EvidenceArtifactPath,
+  EvidenceOutputSnippet,
+  DeterministicGateAudit,
+  RoutingAuditRecord,
+  NarrativeAuditRecord,
+  FixLoopAttemptEvidence,
+  EvidenceOutcome,
+  VerificationCaptureParams,
+  SimpleRetryEvent,
+  FullRetryEvent,
+  EvidenceBearingStep,
   StepEvent,
+} from './types.js';
+
+export {
+  STEP_STATUSES,
+  RUN_STATUSES,
+  TERMINAL_STEP_STATUSES,
+  TERMINAL_RUN_STATUSES,
 } from './types.js';
 
 export {
   createRunEvidence,
   createStepEvidence,
+  createVerificationResult,
   appendStepEvent,
   recordDeterministicGate,
   createDeterministicGate,
   attachArtifact,
+  attachRunArtifact,
   attachRunLog,
   recordRoutingDecision,
   appendRunNarrative,
   completeStep,
   completeRun,
   summarizeEvidence,
+  buildEvidenceOutcome,
+  collectEvidenceCommands,
+  collectArtifactPaths,
+  collectFixLoopAttempts,
+  auditDeterministicGates,
+  auditRoutingEvidence,
+  auditNarrativeEvidence,
+  collectOutputSnippets,
 } from './capture.js';
 
-export type { CreateRunParams, CreateStepParams, GateParams, RetryParams } from './capture.js';
+export type {
+  CreateRunParams,
+  CreateStepParams,
+  GateParams,
+  RetryParams,
+  CompleteRunParams,
+} from './capture.js';
