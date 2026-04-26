@@ -4,14 +4,23 @@
   "version": "0.0.0",
   "license": "UNLICENSED",
   "description": "Workflow reliability, coordination, and authoring product for AgentWorkforce",
+  "packageManager": "npm@11.11.0",
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    "packages/shared",
+    "packages/runtime",
+    "packages/product",
+    "packages/cloud",
+    "packages/local",
+    "packages/cli"
+  ],
   "type": "module",
   "scripts": {
-    "start": "tsx src/commands/cli-main.ts",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "start": "npm run start --workspace @ricky/cli --",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit",
+    "test": "npm run test --workspaces --if-present && vitest run test/package-proof/package-layout-proof.test.ts test/smoke.test.ts",
     "batch": "bash scripts/run-ricky-batch.sh",
     "overnight": "bash scripts/run-ricky-overnight.sh"
   },

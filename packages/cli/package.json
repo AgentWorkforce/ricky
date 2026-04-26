@@ -1,0 +1,22 @@
+{
+  "name": "@ricky/cli",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./*.js": "./src/*.ts"
+  },
+  "scripts": {
+    "start": "tsx src/commands/cli-main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --root ../.. packages/cli/src"
+  },
+  "dependencies": {
+    "@ricky/cloud": "file:../cloud",
+    "@ricky/local": "file:../local",
+    "@ricky/product": "file:../product",
+    "@ricky/runtime": "file:../runtime"
+  }
+}

@@ -75,25 +75,33 @@ The provided runner mark is used as the Ricky project logo and should be used as
 
 ## Bootstrap
 
-Ricky uses npm as its sole package manager.
+Ricky uses npm workspaces as its workspace package manager. The root package is private and orchestrates the internal `@ricky/*` packages under `packages/`.
 
 ```sh
-npm install          # install dependencies
+npm install          # install root and workspace dependencies
 bash ./skills.sh     # install Claude Code skills (optional, one-time)
 ```
 
 npm scripts:
-- `npm start` — launch the interactive CLI
-- `npm test` — run the test suite
-- `npm run typecheck` — TypeScript type check
+- `npm start` — launch the interactive CLI through the `@ricky/cli` workspace
+- `npm test` — run workspace package tests, then root proof tests
+- `npm run typecheck` — run workspace package typechecks, then root workflow/proof typecheck
 - `npm run batch` — run workflow batches via `scripts/run-ricky-batch.sh`
 - `npm run overnight` — run the overnight workflow queue via `scripts/run-ricky-overnight.sh`
 
 ## Package shape
 
-Ricky is intentionally a single-package repo (`"private": true`).
-CLI, local/BYOH, and Cloud surfaces live together while the product boundaries settle.
-A multi-package split should only happen when a later bounded workflow proves it is warranted.
+Ricky is a private npm workspace repo.
+
+Workspace packages:
+- `@ricky/shared` — shared constants, workflow config models, and workflow evidence models
+- `@ricky/runtime` — local coordination, runtime evidence, failure classification, and diagnostics
+- `@ricky/product` — spec intake, workflow generation, specialists, and analytics
+- `@ricky/cloud` — Cloud auth, workspace scoping, provider guidance, and generate API surfaces
+- `@ricky/local` — local/BYOH request normalization and execution composition
+- `@ricky/cli` — onboarding, command surface, and interactive CLI entrypoints
+
+The root keeps workflow program assets, bootstrap scripts, shared validation config, and repo-level proof tests.
 
 ## Product direction
 

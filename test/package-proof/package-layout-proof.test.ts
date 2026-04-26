@@ -8,26 +8,28 @@ import {
   type ProofCaseName,
 } from './package-layout-proof';
 
-describe('Ricky package layout and npm script parity proof', () => {
-  it('proves all required package layout cases', () => {
+describe('Ricky workspace package layout and npm script parity proof', () => {
+  it('proves all required workspace package layout cases', () => {
     const summary = summarizePackageProof();
 
     expect(summary.passed).toBe(true);
     expect(summary.failures).toEqual([]);
   });
 
-  it('covers every proof case required by the package contract', () => {
+  it('covers every proof case required by the workspace package contract', () => {
     const names = getPackageProofCases().map((proofCase) => proofCase.name);
 
     expect(names).toEqual([
-      'npm-scripts-are-the-default-path',
-      'start-script-invokes-cli-entrypoint',
-      'typecheck-script-is-tsc-no-emit',
-      'test-script-is-vitest-run',
-      'package-is-private-and-unpublished',
-      'engines-require-modern-node',
-      'package-fields-are-explicit',
-      'tsconfig-covers-product-surfaces',
+      'npm-workspaces-are-the-default-path',
+      'root-start-delegates-to-cli-workspace',
+      'workspace-typecheck-runs-packages-and-root',
+      'workspace-test-runs-packages-and-root',
+      'root-package-is-private-orchestrator',
+      'engines-and-package-manager-are-explicit',
+      'workspace-package-manifests-exist',
+      'workspace-package-boundaries-match-spec',
+      'package-dependency-directions-are-sane',
+      'tsconfig-covers-workspace-surfaces',
       'vitest-config-covers-test-surface',
       'product-entrypoints-exist',
       'proof-surfaces-exist',
@@ -44,17 +46,13 @@ describe('Ricky package layout and npm script parity proof', () => {
     }
   });
 
-  // ---------------------------------------------------------------------------
-  // npm is the default path — scripts and docs prove it
-  // ---------------------------------------------------------------------------
-
   it.each([
-    ['npm-scripts-are-the-default-path', ['scripts present: start, typecheck, test', 'no Makefile: true']],
-    ['start-script-invokes-cli-entrypoint', ['src/commands/cli-main.ts', 'uses tsx: true']],
-    ['typecheck-script-is-tsc-no-emit', ['tsc --noEmit', 'is exactly tsc --noEmit: true']],
-    ['test-script-is-vitest-run', ['vitest run', 'is exactly vitest run: true']],
+    ['npm-workspaces-are-the-default-path', ['packages/shared', 'package-lock.json exists: true']],
+    ['root-start-delegates-to-cli-workspace', ['--workspace @ricky/cli', 'cli-main exists: true']],
+    ['workspace-typecheck-runs-packages-and-root', ['runs workspaces: true', 'all packages have typecheck: true']],
+    ['workspace-test-runs-packages-and-root', ['runs workspaces: true', 'all packages have test scripts: true']],
   ] satisfies Array<[ProofCaseName, string[]]>)(
-    '%s proves npm is the clear default developer path',
+    '%s proves npm workspace developer commands',
     (name, expectedEvidence) => {
       const result = evaluatePackageProofCase(name);
       const evidence = result.evidence.join('\n');
@@ -66,16 +64,14 @@ describe('Ricky package layout and npm script parity proof', () => {
     },
   );
 
-  // ---------------------------------------------------------------------------
-  // Package shape is explicit and intentional
-  // ---------------------------------------------------------------------------
-
   it.each([
-    ['package-is-private-and-unpublished', ['private: true', 'no publishConfig: true']],
-    ['engines-require-modern-node', ['engines.node: >=20', 'requires >=20: true']],
-    ['package-fields-are-explicit', ['name: ricky', 'AgentWorkforce', 'typescript', 'vitest']],
+    ['root-package-is-private-orchestrator', ['private: true', 'root has @agent-relay/sdk: true']],
+    ['engines-and-package-manager-are-explicit', ['requires >=20: true', 'uses npm: true']],
+    ['workspace-package-manifests-exist', ['all package manifests present: true']],
+    ['workspace-package-boundaries-match-spec', ['old src removed: true']],
+    ['package-dependency-directions-are-sane', ['shared deps: (none)', 'cli depends on local/cloud: true']],
   ] satisfies Array<[ProofCaseName, string[]]>)(
-    '%s proves package shape is explicit and not an unexplained one-off',
+    '%s proves package shape and dependency direction',
     (name, expectedEvidence) => {
       const result = evaluatePackageProofCase(name);
       const evidence = result.evidence.join('\n');
@@ -87,17 +83,13 @@ describe('Ricky package layout and npm script parity proof', () => {
     },
   );
 
-  // ---------------------------------------------------------------------------
-  // Typecheck and test entrypoints cover landed surfaces
-  // ---------------------------------------------------------------------------
-
   it.each([
-    ['tsconfig-covers-product-surfaces', ['covers src/: true', 'covers workflows/: true', 'strict mode: true']],
-    ['vitest-config-covers-test-surface', ['environment: node: true', 'globals: true', 'setup file referenced: true']],
+    ['tsconfig-covers-workspace-surfaces', ['covers packages/: true', 'covers workflows/: true', 'strict mode: true']],
+    ['vitest-config-covers-test-surface', ['environment: node: true', 'setup file referenced: true']],
     ['product-entrypoints-exist', ['all present: true']],
-    ['proof-surfaces-exist', ['all present: true', 'proof pattern:']],
+    ['proof-surfaces-exist', ['all present: true', 'proof pattern: packages/<package>/src']],
   ] satisfies Array<[ProofCaseName, string[]]>)(
-    '%s proves typecheck/test entrypoints cover landed product surfaces',
+    '%s proves validation reaches migrated surfaces',
     (name, expectedEvidence) => {
       const result = evaluatePackageProofCase(name);
       const evidence = result.evidence.join('\n');
@@ -109,11 +101,7 @@ describe('Ricky package layout and npm script parity proof', () => {
     },
   );
 
-  // ---------------------------------------------------------------------------
-  // Orchestration scripts
-  // ---------------------------------------------------------------------------
-
-  it('proves batch and overnight scripts delegate through npm to bash', () => {
+  it('proves batch and overnight scripts remain root workflow assets', () => {
     const result = evaluatePackageProofCase('batch-and-overnight-scripts-use-bash');
     const evidence = result.evidence.join('\n');
 
@@ -122,10 +110,6 @@ describe('Ricky package layout and npm script parity proof', () => {
     expect(evidence).toContain('batch .sh exists: true');
     expect(evidence).toContain('overnight .sh exists: true');
   });
-
-  // ---------------------------------------------------------------------------
-  // Determinism and boundedness
-  // ---------------------------------------------------------------------------
 
   it('is fully deterministic — repeated evaluation yields identical results', () => {
     const first = evaluatePackageProof();
@@ -139,7 +123,6 @@ describe('Ricky package layout and npm script parity proof', () => {
     evaluatePackageProof();
     const elapsed = performance.now() - start;
 
-    // All proof cases are filesystem reads — should complete in well under 1 second
     expect(elapsed).toBeLessThan(1000);
   });
 });

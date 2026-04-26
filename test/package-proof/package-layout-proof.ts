@@ -1,31 +1,26 @@
 /**
- * Ricky package layout and npm script parity proof surface.
+ * Ricky workspace package layout and npm script parity proof surface.
  *
- * Proves the user-visible contract of the package shape:
- * - npm is the clear default path via package scripts and docs
- * - The current package shape is explicit and not an unexplained one-off
- * - typecheck/test entrypoints still cover the landed product surfaces
- *
- * Each proof case is deterministic and bounded — no network, no publish,
- * no non-determinism. Evidence is structural facts about the package layout.
+ * Proves the user-visible package contract after the workspace split:
+ * - npm workspaces are the clear bootstrap path
+ * - package manifests and dependency direction match the migration spec
+ * - typecheck/test/start entrypoints cover the workspace without relying on old src/*
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve, join } from 'node:path';
-
-// ---------------------------------------------------------------------------
-// Proof types
-// ---------------------------------------------------------------------------
+import { join, resolve } from 'node:path';
 
 export type ProofCaseName =
-  | 'npm-scripts-are-the-default-path'
-  | 'start-script-invokes-cli-entrypoint'
-  | 'typecheck-script-is-tsc-no-emit'
-  | 'test-script-is-vitest-run'
-  | 'package-is-private-and-unpublished'
-  | 'engines-require-modern-node'
-  | 'package-fields-are-explicit'
-  | 'tsconfig-covers-product-surfaces'
+  | 'npm-workspaces-are-the-default-path'
+  | 'root-start-delegates-to-cli-workspace'
+  | 'workspace-typecheck-runs-packages-and-root'
+  | 'workspace-test-runs-packages-and-root'
+  | 'root-package-is-private-orchestrator'
+  | 'engines-and-package-manager-are-explicit'
+  | 'workspace-package-manifests-exist'
+  | 'workspace-package-boundaries-match-spec'
+  | 'package-dependency-directions-are-sane'
+  | 'tsconfig-covers-workspace-surfaces'
   | 'vitest-config-covers-test-surface'
   | 'product-entrypoints-exist'
   | 'proof-surfaces-exist'
@@ -51,17 +46,18 @@ export interface PackageProofSummary {
   gaps: string[];
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const WORKSPACE_PACKAGES = ['shared', 'runtime', 'product', 'cloud', 'local', 'cli'] as const;
 
 function repoRoot(): string {
   return resolve(__dirname, '../..');
 }
 
-function readJson(relPath: string): Record<string, unknown> {
-  const abs = join(repoRoot(), relPath);
-  return JSON.parse(readFileSync(abs, 'utf-8')) as Record<string, unknown>;
+function readJson<T extends Record<string, unknown>>(relPath: string): T {
+  return JSON.parse(readFileSync(join(repoRoot(), relPath), 'utf-8')) as T;
+}
+
+function readText(relPath: string): string {
+  return readFileSync(join(repoRoot(), relPath), 'utf-8');
 }
 
 function fileExists(relPath: string): boolean {
@@ -84,227 +80,292 @@ function result(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Proof cases
-// ---------------------------------------------------------------------------
+function packageJson(packageName: string): {
+  name?: string;
+  private?: boolean;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  exports?: unknown;
+} {
+  return readJson(`packages/${packageName}/package.json`);
+}
 
 export function getPackageProofCases(): PackageProofCase[] {
-  const pkg = readJson('package.json') as {
+  const pkg = readJson<{
     name?: string;
     private?: boolean;
-    version?: string;
-    description?: string;
+    packageManager?: string;
     engines?: Record<string, string>;
     scripts?: Record<string, string>;
+    workspaces?: string[];
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
-    bin?: unknown;
-    main?: unknown;
-    module?: unknown;
-    types?: unknown;
-    exports?: unknown;
-    files?: unknown;
-    publishConfig?: unknown;
-  };
-
+  }>('package.json');
   const scripts = pkg.scripts ?? {};
+  const workspaces = pkg.workspaces ?? [];
 
   return [
     {
-      name: 'npm-scripts-are-the-default-path',
-      description:
-        'npm run start/typecheck/test are the primary developer commands — ' +
-        'no Makefile, no custom runner binary, no undocumented shell alias required.',
+      name: 'npm-workspaces-are-the-default-path',
+      description: 'Root package.json declares npm workspaces and README documents npm install.',
       evaluate: () => {
-        const requiredScripts = ['start', 'typecheck', 'test'];
-        const missing = requiredScripts.filter((s) => !(s in scripts));
-        const noMakefile = !fileExists('Makefile');
-        const noBinField = pkg.bin === undefined;
+        const expected = WORKSPACE_PACKAGES.map((name) => `packages/${name}`);
+        const missing = expected.filter((workspace) => !workspaces.includes(workspace));
+        const hasLockfile = fileExists('package-lock.json');
+        const readme = readText('README.md');
+        const readmeMentionsNpmInstall = readme.includes('npm install');
+        const readmeMentionsWorkspaces = readme.includes('npm workspaces');
 
         return result(
-          'npm-scripts-are-the-default-path',
-          [missing.length === 0, noMakefile, noBinField],
+          'npm-workspaces-are-the-default-path',
+          [missing.length === 0, hasLockfile, readmeMentionsNpmInstall, readmeMentionsWorkspaces],
           [
-            `scripts present: ${requiredScripts.join(', ')}`,
-            `no Makefile: ${noMakefile}`,
-            `no bin field (private pkg): ${noBinField}`,
+            `workspaces: ${workspaces.join(', ')}`,
+            `package-lock.json exists: ${hasLockfile}`,
+            `README mentions npm install: ${readmeMentionsNpmInstall}`,
+            `README mentions npm workspaces: ${readmeMentionsWorkspaces}`,
           ],
           [],
-          missing.map((s) => `Missing required npm script: ${s}`),
+          missing.map((workspace) => `Missing workspace: ${workspace}`),
         );
       },
     },
     {
-      name: 'start-script-invokes-cli-entrypoint',
-      description:
-        'npm start runs the CLI entrypoint via tsx — the user path is `npm start`, not a raw tsx invocation.',
+      name: 'root-start-delegates-to-cli-workspace',
+      description: 'npm start remains the root user command and delegates to @ricky/cli.',
       evaluate: () => {
         const startScript = scripts.start ?? '';
-        const pointsToCliMain = startScript.includes('src/commands/cli-main.ts');
-        const usesTsx = startScript.includes('tsx');
+        const delegatesToCli = startScript.includes('--workspace @ricky/cli');
+        const cliStart = packageJson('cli').scripts?.start ?? '';
+        const cliMainExists = fileExists('packages/cli/src/commands/cli-main.ts');
 
         return result(
-          'start-script-invokes-cli-entrypoint',
-          [pointsToCliMain, usesTsx],
+          'root-start-delegates-to-cli-workspace',
+          [delegatesToCli, cliStart.includes('src/commands/cli-main.ts'), cliMainExists],
           [
-            `start script: ${startScript}`,
-            `targets cli-main.ts: ${pointsToCliMain}`,
-            `uses tsx: ${usesTsx}`,
+            `root start script: ${startScript}`,
+            `delegates to @ricky/cli: ${delegatesToCli}`,
+            `cli start script: ${cliStart}`,
+            `cli-main exists: ${cliMainExists}`,
           ],
         );
       },
     },
     {
-      name: 'typecheck-script-is-tsc-no-emit',
-      description:
-        'npm run typecheck runs tsc --noEmit — no build step, no emit, just type verification.',
+      name: 'workspace-typecheck-runs-packages-and-root',
+      description: 'Root typecheck runs workspace package typechecks and root workflow/proof typechecking.',
       evaluate: () => {
         const typecheckScript = scripts.typecheck ?? '';
-        const isTscNoEmit = typecheckScript === 'tsc --noEmit';
+        const runsWorkspaces = typecheckScript.includes('--workspaces');
+        const runsRootTsc = typecheckScript.includes('tsc --noEmit');
+        const packageScripts = WORKSPACE_PACKAGES.map((name) => packageJson(name).scripts?.typecheck ?? '');
+        const allPackagesHaveTypecheck = packageScripts.every((script) => script.includes('tsc -p tsconfig.json'));
 
         return result(
-          'typecheck-script-is-tsc-no-emit',
-          [isTscNoEmit],
-          [`typecheck script: ${typecheckScript}`, `is exactly tsc --noEmit: ${isTscNoEmit}`],
+          'workspace-typecheck-runs-packages-and-root',
+          [runsWorkspaces, runsRootTsc, allPackagesHaveTypecheck],
+          [
+            `typecheck script: ${typecheckScript}`,
+            `runs workspaces: ${runsWorkspaces}`,
+            `runs root tsc: ${runsRootTsc}`,
+            `all packages have typecheck: ${allPackagesHaveTypecheck}`,
+          ],
         );
       },
     },
     {
-      name: 'test-script-is-vitest-run',
-      description:
-        'npm test runs vitest run — single-pass, deterministic, no watch mode by default.',
+      name: 'workspace-test-runs-packages-and-root',
+      description: 'Root test runs workspace package tests and root proof tests.',
       evaluate: () => {
         const testScript = scripts.test ?? '';
-        const isVitestRun = testScript === 'vitest run';
+        const runsWorkspaces = testScript.includes('--workspaces');
+        const runsRootTests = testScript.includes('vitest run test');
+        const packageScripts = WORKSPACE_PACKAGES.map((name) => packageJson(name).scripts?.test ?? '');
+        const allPackagesHaveTests = packageScripts.every((script) => script.includes('vitest run'));
 
         return result(
-          'test-script-is-vitest-run',
-          [isVitestRun],
-          [`test script: ${testScript}`, `is exactly vitest run: ${isVitestRun}`],
+          'workspace-test-runs-packages-and-root',
+          [runsWorkspaces, runsRootTests, allPackagesHaveTests],
+          [
+            `test script: ${testScript}`,
+            `runs workspaces: ${runsWorkspaces}`,
+            `runs root tests: ${runsRootTests}`,
+            `all packages have test scripts: ${allPackagesHaveTests}`,
+          ],
         );
       },
     },
     {
-      name: 'package-is-private-and-unpublished',
-      description:
-        'Package is private:true with no publish-related fields — this is a product, not a library.',
+      name: 'root-package-is-private-orchestrator',
+      description: 'Root package remains private and keeps product orchestration dependencies at the root.',
       evaluate: () => {
         const isPrivate = pkg.private === true;
-        const noPublishConfig = pkg.publishConfig === undefined;
-        const noFiles = pkg.files === undefined;
-        const noMain = pkg.main === undefined;
-        const noModule = pkg.module === undefined;
-        const noTypes = pkg.types === undefined;
-        const noExports = pkg.exports === undefined;
+        const rootHasAgentRelay = !!pkg.dependencies?.['@agent-relay/sdk'];
+        const rootHasTypescript = !!pkg.devDependencies?.typescript;
+        const rootHasVitest = !!pkg.devDependencies?.vitest;
 
         return result(
-          'package-is-private-and-unpublished',
-          [isPrivate, noPublishConfig, noFiles, noMain, noModule, noTypes, noExports],
+          'root-package-is-private-orchestrator',
+          [isPrivate, rootHasAgentRelay, rootHasTypescript, rootHasVitest],
           [
             `private: ${isPrivate}`,
-            `no publishConfig: ${noPublishConfig}`,
-            `no files field: ${noFiles}`,
-            `no main: ${noMain}`,
-            `no module: ${noModule}`,
-            `no types: ${noTypes}`,
-            `no exports: ${noExports}`,
+            `root has @agent-relay/sdk: ${rootHasAgentRelay}`,
+            `root has typescript: ${rootHasTypescript}`,
+            `root has vitest: ${rootHasVitest}`,
           ],
         );
       },
     },
     {
-      name: 'engines-require-modern-node',
-      description:
-        'engines.node constrains to >=20 — the package declares its Node requirement explicitly.',
+      name: 'engines-and-package-manager-are-explicit',
+      description: 'Root package declares the Node engine and npm package manager used for the workspace.',
       evaluate: () => {
         const nodeEngine = pkg.engines?.node ?? '';
-        const requiresModern = nodeEngine === '>=20';
+        const packageManager = pkg.packageManager ?? '';
+        const requiresModernNode = nodeEngine === '>=20';
+        const usesNpm = packageManager.startsWith('npm@');
 
         return result(
-          'engines-require-modern-node',
-          [requiresModern],
-          [`engines.node: ${nodeEngine}`, `requires >=20: ${requiresModern}`],
-        );
-      },
-    },
-    {
-      name: 'package-fields-are-explicit',
-      description:
-        'name, version, and description are set — the package shape is intentional, not a leftover npm init.',
-      evaluate: () => {
-        const hasName = pkg.name === 'ricky';
-        const hasVersion = typeof pkg.version === 'string' && pkg.version.length > 0;
-        const hasDescription =
-          typeof pkg.description === 'string' && pkg.description.includes('AgentWorkforce');
-        const hasDeps = typeof pkg.dependencies === 'object' && pkg.dependencies !== null;
-        const hasDevDeps = typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null;
-        const devDepsIncludeTypeScript = !!pkg.devDependencies?.typescript;
-        const devDepsIncludeVitest = !!pkg.devDependencies?.vitest;
-
-        return result(
-          'package-fields-are-explicit',
-          [hasName, hasVersion, hasDescription, hasDeps, hasDevDeps, devDepsIncludeTypeScript, devDepsIncludeVitest],
+          'engines-and-package-manager-are-explicit',
+          [requiresModernNode, usesNpm],
           [
-            `name: ${pkg.name}`,
-            `version: ${pkg.version}`,
-            `description mentions AgentWorkforce: ${hasDescription}`,
-            `has dependencies: ${hasDeps}`,
-            `devDependencies include typescript: ${devDepsIncludeTypeScript}`,
-            `devDependencies include vitest: ${devDepsIncludeVitest}`,
+            `engines.node: ${nodeEngine}`,
+            `requires >=20: ${requiresModernNode}`,
+            `packageManager: ${packageManager}`,
+            `uses npm: ${usesNpm}`,
           ],
         );
       },
     },
     {
-      name: 'tsconfig-covers-product-surfaces',
-      description:
-        'tsconfig.json include patterns cover src/ and workflows/ — typecheck reaches all product code.',
+      name: 'workspace-package-manifests-exist',
+      description: 'Every target package has a package.json and tsconfig.json.',
       evaluate: () => {
-        const tsconfig = readJson('tsconfig.json') as {
-          include?: string[];
-          compilerOptions?: Record<string, unknown>;
-        };
-        const include = tsconfig.include ?? [];
-        const coversSrc = include.some((p) => p.startsWith('src/'));
-        const coversWorkflows = include.some((p) => p.startsWith('workflows/'));
-        const coversVitestConfig = include.includes('vitest.config.ts');
-        const strict = tsconfig.compilerOptions?.strict === true;
+        const missing = WORKSPACE_PACKAGES.flatMap((name) =>
+          [`packages/${name}/package.json`, `packages/${name}/tsconfig.json`].filter((file) => !fileExists(file)),
+        );
 
         return result(
-          'tsconfig-covers-product-surfaces',
-          [coversSrc, coversWorkflows, coversVitestConfig, strict],
+          'workspace-package-manifests-exist',
+          [missing.length === 0],
+          [
+            `packages checked: ${WORKSPACE_PACKAGES.join(', ')}`,
+            `all package manifests present: ${missing.length === 0}`,
+          ],
+          [],
+          missing.map((file) => `Missing package file: ${file}`),
+        );
+      },
+    },
+    {
+      name: 'workspace-package-boundaries-match-spec',
+      description: 'Moved source directories match the six package responsibilities from the migration spec.',
+      evaluate: () => {
+        const requiredFiles = [
+          'packages/shared/src/constants.ts',
+          'packages/shared/src/models/workflow-config.ts',
+          'packages/runtime/src/local-coordinator.ts',
+          'packages/runtime/src/evidence/capture.ts',
+          'packages/runtime/src/failure/classifier.ts',
+          'packages/runtime/src/diagnostics/failure-diagnosis.ts',
+          'packages/product/src/spec-intake/index.ts',
+          'packages/product/src/generation/pipeline.ts',
+          'packages/product/src/specialists/debugger/debugger.ts',
+          'packages/product/src/specialists/validator/validator.ts',
+          'packages/product/src/analytics/health-analyzer.ts',
+          'packages/cloud/src/auth/request-validator.ts',
+          'packages/cloud/src/api/generate-endpoint.ts',
+          'packages/local/src/entrypoint.ts',
+          'packages/local/src/request-normalizer.ts',
+          'packages/cli/src/cli/onboarding.ts',
+          'packages/cli/src/commands/cli-main.ts',
+          'packages/cli/src/entrypoint/interactive-cli.ts',
+        ];
+        const missing = requiredFiles.filter((file) => !fileExists(file));
+        const oldSrcRemoved = !fileExists('src');
+
+        return result(
+          'workspace-package-boundaries-match-spec',
+          [missing.length === 0, oldSrcRemoved],
+          [
+            `required moved files checked: ${requiredFiles.length}`,
+            `all moved files present: ${missing.length === 0}`,
+            `old src removed: ${oldSrcRemoved}`,
+          ],
+          [],
+          missing.map((file) => `Missing moved source file: ${file}`),
+        );
+      },
+    },
+    {
+      name: 'package-dependency-directions-are-sane',
+      description: 'Package dependencies point upward from shared/runtime/product into composition packages only.',
+      evaluate: () => {
+        const deps = Object.fromEntries(
+          WORKSPACE_PACKAGES.map((name) => [name, Object.keys(packageJson(name).dependencies ?? {})]),
+        ) as Record<(typeof WORKSPACE_PACKAGES)[number], string[]>;
+
+        const sharedHasNoDeps = deps.shared.length === 0;
+        const runtimeOnlyShared = JSON.stringify(deps.runtime) === JSON.stringify(['@ricky/shared']);
+        const productDeps = deps.product.sort().join(',');
+        const productOnlyLower = productDeps === '@ricky/runtime,@ricky/shared';
+        const cliDependsOnComposition = deps.cli.includes('@ricky/local') && deps.cli.includes('@ricky/cloud');
+
+        return result(
+          'package-dependency-directions-are-sane',
+          [sharedHasNoDeps, runtimeOnlyShared, productOnlyLower, cliDependsOnComposition],
+          [
+            `shared deps: ${deps.shared.join(', ') || '(none)'}`,
+            `runtime deps: ${deps.runtime.join(', ')}`,
+            `product deps: ${productDeps}`,
+            `cli depends on local/cloud: ${cliDependsOnComposition}`,
+          ],
+        );
+      },
+    },
+    {
+      name: 'tsconfig-covers-workspace-surfaces',
+      description: 'Root tsconfig covers packages, workflows, root tests, and Vitest config.',
+      evaluate: () => {
+        const tsconfig = readJson<{ include?: string[]; extends?: string }>('tsconfig.json');
+        const base = readJson<{ compilerOptions?: Record<string, unknown> }>('tsconfig.base.json');
+        const include = tsconfig.include ?? [];
+        const coversPackages = include.some((pattern) => pattern.startsWith('packages/'));
+        const coversWorkflows = include.some((pattern) => pattern.startsWith('workflows/'));
+        const coversTests = include.some((pattern) => pattern.startsWith('test/'));
+        const coversVitestConfig = include.includes('vitest.config.ts');
+        const strict = base.compilerOptions?.strict === true;
+        const hasRickyPaths = JSON.stringify(base.compilerOptions?.paths ?? {}).includes('@ricky/runtime');
+
+        return result(
+          'tsconfig-covers-workspace-surfaces',
+          [coversPackages, coversWorkflows, coversTests, coversVitestConfig, strict, hasRickyPaths],
           [
             `include: ${JSON.stringify(include)}`,
-            `covers src/: ${coversSrc}`,
+            `covers packages/: ${coversPackages}`,
             `covers workflows/: ${coversWorkflows}`,
+            `covers test/: ${coversTests}`,
             `covers vitest.config.ts: ${coversVitestConfig}`,
             `strict mode: ${strict}`,
+            `has @ricky paths: ${hasRickyPaths}`,
           ],
         );
       },
     },
     {
       name: 'vitest-config-covers-test-surface',
-      description:
-        'vitest.config.ts configures node environment, globals, and setup — test runner is deterministic.',
+      description: 'Vitest config keeps node globals and points setup at the moved root test setup.',
       evaluate: () => {
-        const vitestConfigExists = fileExists('vitest.config.ts');
-        const setupExists = fileExists('src/test/setup.ts');
-
-        // Read vitest config as text to verify key settings
-        let configText = '';
-        if (vitestConfigExists) {
-          configText = readFileSync(join(repoRoot(), 'vitest.config.ts'), 'utf-8');
-        }
+        const configText = readText('vitest.config.ts');
+        const setupExists = fileExists('test/setup.ts');
         const hasNodeEnv = configText.includes("environment: 'node'");
         const hasGlobals = configText.includes('globals: true');
-        const hasSetup = configText.includes('src/test/setup.ts');
+        const hasSetup = configText.includes('test/setup.ts');
 
         return result(
           'vitest-config-covers-test-surface',
-          [vitestConfigExists, setupExists, hasNodeEnv, hasGlobals, hasSetup],
+          [setupExists, hasNodeEnv, hasGlobals, hasSetup],
           [
-            `vitest.config.ts exists: ${vitestConfigExists}`,
             `setup file exists: ${setupExists}`,
             `environment: node: ${hasNodeEnv}`,
             `globals: true: ${hasGlobals}`,
@@ -315,54 +376,46 @@ export function getPackageProofCases(): PackageProofCase[] {
     },
     {
       name: 'product-entrypoints-exist',
-      description:
-        'All landed product entrypoints exist on disk — typecheck and test actually reach real code.',
+      description: 'All landed package entrypoints exist on disk.',
       evaluate: () => {
         const entrypoints = [
-          'src/commands/cli-main.ts',
-          'src/entrypoint/interactive-cli.ts',
-          'src/cli/index.ts',
-          'src/cli/onboarding.ts',
-          'src/cli/ascii-art.ts',
-          'src/cli/welcome.ts',
-          'src/cli/mode-selector.ts',
-          'src/local/entrypoint.ts',
-          'src/local/request-normalizer.ts',
-          'src/cloud/api/generate-endpoint.ts',
-          'src/runtime/diagnostics/failure-diagnosis.ts',
+          'packages/shared/src/index.ts',
+          'packages/runtime/src/index.ts',
+          'packages/product/src/index.ts',
+          'packages/cloud/src/index.ts',
+          'packages/local/src/index.ts',
+          'packages/cli/src/index.ts',
+          'packages/cli/src/commands/cli-main.ts',
+          'packages/cli/src/entrypoint/interactive-cli.ts',
+          'packages/local/src/entrypoint.ts',
+          'packages/cloud/src/api/generate-endpoint.ts',
+          'packages/runtime/src/diagnostics/failure-diagnosis.ts',
         ];
-
-        const missing = entrypoints.filter((f) => !fileExists(f));
+        const missing = entrypoints.filter((file) => !fileExists(file));
 
         return result(
           'product-entrypoints-exist',
           [missing.length === 0],
-          [
-            `entrypoints checked: ${entrypoints.length}`,
-            `all present: ${missing.length === 0}`,
-          ],
+          [`entrypoints checked: ${entrypoints.length}`, `all present: ${missing.length === 0}`],
           [],
-          missing.map((f) => `Missing product entrypoint: ${f}`),
+          missing.map((file) => `Missing product entrypoint: ${file}`),
         );
       },
     },
     {
       name: 'proof-surfaces-exist',
-      description:
-        'Each landed product surface has a co-located proof — the proof pattern is consistent, not ad-hoc.',
+      description: 'Moved product proof files remain co-located with their owning package surfaces.',
       evaluate: () => {
         const proofPairs = [
-          ['src/cli/proof/onboarding-proof.ts', 'src/cli/proof/onboarding-proof.test.ts'],
-          ['src/local/proof/local-entrypoint-proof.ts', 'src/local/proof/local-entrypoint-proof.test.ts'],
-          ['src/cloud/api/proof/cloud-generate-proof.ts', 'src/cloud/api/proof/cloud-generate-proof.test.ts'],
-          ['src/runtime/diagnostics/proof/unblocker-proof.ts', 'src/runtime/diagnostics/proof/unblocker-proof.test.ts'],
+          ['packages/cli/src/cli/proof/onboarding-proof.ts', 'packages/cli/src/cli/proof/onboarding-proof.test.ts'],
+          ['packages/local/src/proof/local-entrypoint-proof.ts', 'packages/local/src/proof/local-entrypoint-proof.test.ts'],
+          ['packages/cloud/src/api/proof/cloud-generate-proof.ts', 'packages/cloud/src/api/proof/cloud-generate-proof.test.ts'],
+          [
+            'packages/runtime/src/diagnostics/proof/unblocker-proof.ts',
+            'packages/runtime/src/diagnostics/proof/unblocker-proof.test.ts',
+          ],
         ];
-
-        const missing: string[] = [];
-        for (const [proof, test] of proofPairs) {
-          if (!fileExists(proof)) missing.push(proof);
-          if (!fileExists(test)) missing.push(test);
-        }
+        const missing = proofPairs.flatMap(([proof, test]) => [proof, test].filter((file) => !fileExists(file)));
 
         return result(
           'proof-surfaces-exist',
@@ -370,17 +423,16 @@ export function getPackageProofCases(): PackageProofCase[] {
           [
             `proof pairs checked: ${proofPairs.length}`,
             `all present: ${missing.length === 0}`,
-            `proof pattern: src/<surface>/proof/<name>-proof.ts + .test.ts`,
+            `proof pattern: packages/<package>/src/**/proof/<name>-proof.ts + .test.ts`,
           ],
           [],
-          missing.map((f) => `Missing proof file: ${f}`),
+          missing.map((file) => `Missing proof file: ${file}`),
         );
       },
     },
     {
       name: 'batch-and-overnight-scripts-use-bash',
-      description:
-        'batch and overnight scripts delegate to bash — npm is the entry, bash is the orchestrator.',
+      description: 'batch and overnight scripts remain root-owned workflow program assets.',
       evaluate: () => {
         const batchScript = scripts.batch ?? '';
         const overnightScript = scripts.overnight ?? '';
@@ -404,10 +456,6 @@ export function getPackageProofCases(): PackageProofCase[] {
   ];
 }
 
-// ---------------------------------------------------------------------------
-// Evaluation API
-// ---------------------------------------------------------------------------
-
 export function evaluatePackageProof(): PackageProofResult[] {
   return getPackageProofCases().map((proofCase) => proofCase.evaluate());
 }
@@ -422,10 +470,10 @@ export function evaluatePackageProofCase(name: ProofCaseName): PackageProofResul
 
 export function summarizePackageProof(): PackageProofSummary {
   const results = evaluatePackageProof();
-  const failures = results.flatMap((r) =>
-    r.passed ? [] : [`${r.name}: ${r.failures.join('; ') || 'contract assertion failed'}`],
+  const failures = results.flatMap((proofResult) =>
+    proofResult.passed ? [] : [`${proofResult.name}: ${proofResult.failures.join('; ') || 'contract assertion failed'}`],
   );
-  const gaps = results.flatMap((r) => r.gaps.map((gap) => `${r.name}: ${gap}`));
+  const gaps = results.flatMap((proofResult) => proofResult.gaps.map((gap) => `${proofResult.name}: ${gap}`));
 
   return {
     passed: failures.length === 0,

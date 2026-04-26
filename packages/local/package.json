@@ -1,0 +1,20 @@
+{
+  "name": "@ricky/local",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./*.js": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --root ../.. packages/local/src"
+  },
+  "dependencies": {
+    "@ricky/product": "file:../product",
+    "@ricky/runtime": "file:../runtime",
+    "@ricky/shared": "file:../shared"
+  }
+}

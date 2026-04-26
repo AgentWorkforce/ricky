@@ -1,15 +1,4 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "allowSyntheticDefaultImports": true,
-    "types": ["node", "vitest/globals"]
-  },
-  "include": ["src/**/*.ts", "workflows/**/*.ts", "vitest.config.ts", "test/**/*.ts"]
+  "extends": "./tsconfig.base.json",
+  "include": ["packages/**/*.ts", "workflows/**/*.ts", "vitest.config.ts", "test/**/*.ts"]
 }
