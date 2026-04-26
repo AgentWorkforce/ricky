@@ -25,12 +25,6 @@ async function main() {
       role: 'Reviews whether the toolchain honestly supports Ricky onboarding, runtime, and workflow validation needs.',
       retries: 1,
     })
-    .agent('reviewer-codex', {
-      cli: 'codex',
-      preset: 'reviewer',
-      role: 'Reviews TypeScript and Vitest practicality, script contracts, and scope discipline.',
-      retries: 1,
-    })
     .agent('validator-claude', {
       cli: 'claude',
       preset: 'worker',
@@ -41,6 +35,7 @@ async function main() {
     .step('prepare-artifacts', {
       type: 'deterministic',
       command: [
+        'rm -rf .workflow-artifacts/wave0-foundation/toolchain-validation-foundation',
         'mkdir -p .workflow-artifacts/wave0-foundation/toolchain-validation-foundation',
         'mkdir -p src/test',
         'echo W0_TOOLCHAIN_FOUNDATION_READY',
@@ -177,25 +172,10 @@ Focus:
 Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-claude.md' },
     })
-    .step('review-toolchain-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['initial-soft-validation'],
-      task: `Review the TypeScript and Vitest setup.
-
-Focus:
-- Minimal practical scripts and dependencies.
-- tsconfig correctness for the current repo shape.
-- Vitest configuration quality.
-- No unrelated toolchain sprawl.
-
-Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-codex.md' },
-    })
-
     .step('read-review-feedback', {
       type: 'deterministic',
-      dependsOn: ['review-toolchain-claude', 'review-toolchain-codex'],
-      command: 'cat .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-claude.md .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-codex.md',
+      dependsOn: ['review-toolchain-claude'],
+      command: 'cat .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-claude.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -247,24 +227,11 @@ Read package.json, tsconfig.json, vitest.config.ts, src/test/setup.ts, and post-
 Confirm prior findings are fixed or explicitly non-blocking. Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-claude.md' },
     })
-    .step('final-review-toolchain-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['post-fix-validation'],
-      task: `Re-review the TypeScript and Vitest setup after fixes.
-
-Read package.json, tsconfig.json, vitest.config.ts, src/test/setup.ts, and post-fix validation output:
-{{steps.post-fix-validation.output}}
-
-Confirm minimal practical scripts and dependencies, config correctness, and no unrelated sprawl. Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-codex.md' },
-    })
-
     .step('final-review-pass-gate', {
       type: 'deterministic',
-      dependsOn: ['final-review-toolchain-claude', 'final-review-toolchain-codex'],
+      dependsOn: ['final-review-toolchain-claude'],
       command: [
         'tail -n 1 .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
         'echo W0_TOOLCHAIN_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -295,6 +262,7 @@ Confirm minimal practical scripts and dependencies, config correctness, and no u
       task: `Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/signoff.md.
 
 Include files changed, install/typecheck/test commands run, review verdicts, and remaining risks.
+Note that this workflow intentionally uses a single Claude review path because the current non-interactive Codex reviewer runtime has been observed to hang in this foundation slice.
 End with W0_TOOLCHAIN_FOUNDATION_COMPLETE.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/toolchain-validation-foundation/signoff.md' },
     })
