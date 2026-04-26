@@ -79,7 +79,6 @@ Ricky uses npm workspaces as its workspace package manager. The root package is 
 
 ```sh
 npm install          # install root and workspace dependencies
-bash ./skills.sh     # install Claude Code skills (optional, one-time)
 ```
 
 npm scripts:
