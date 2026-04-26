@@ -299,9 +299,10 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
   }
 
   const sections: string[] = [];
+  const resolvedEnv = options.env ?? process.env;
   const bannerShown =
     (firstRun || options.showBanner === true) &&
-    shouldShowBanner({ isTTY, quiet: options.quiet, noBanner: options.noBanner, env: options.env });
+    shouldShowBanner({ isTTY, quiet: options.quiet, noBanner: options.noBanner, env: resolvedEnv });
 
   if (bannerShown) {
     sections.push(

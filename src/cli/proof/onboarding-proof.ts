@@ -121,7 +121,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
       description: 'First run renders the banner, welcome framing, mode choice, handoff, and recovery sections.',
       specSection: '7. First-run flow',
       evaluate: () => {
-        const output = renderOnboarding({ isFirstRun: true, isTTY: true, choice: 'local' });
+        const output = renderOnboarding({ isFirstRun: true, isTTY: true, choice: 'local', env: {} });
         const bannerLines = RICKY_BANNER.split('\n');
 
         return result(
@@ -323,7 +323,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             shouldShowBanner({ isFirstRun: true, isTTY: true, quiet: true }) === false,
             shouldShowBanner({ isFirstRun: true, isTTY: true, noBanner: true }) === false,
             shouldShowBanner({ isFirstRun: true, isTTY: false }) === false,
-            shouldShowBanner({ isFirstRun: true, isTTY: true }) === true,
+            shouldShowBanner({ isFirstRun: true, isTTY: true, env: {} }) === true,
             envSuppressed,
           ],
           [

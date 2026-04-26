@@ -6,8 +6,10 @@ import {
   renderBanner,
   renderCloudGuidance,
   renderHandoffGuidance,
+  renderModeResult,
   renderOnboarding,
   renderRecoveryGuidance,
+  renderSuggestedNextAction,
   renderWelcome,
   runOnboarding,
   shouldShowBanner,
@@ -17,9 +19,10 @@ import {
 
 describe('Ricky CLI onboarding', () => {
   it('renders first-run onboarding with the full banner by default', () => {
-    const output = renderOnboarding({ isFirstRun: true, isTTY: true });
+    const output = renderOnboarding({ isFirstRun: true, isTTY: true, env: {} });
 
     expect(output).toContain('RRRR');
+    expect(output).toContain("Welcome to Ricky! Let's get you set up.");
     expect(output).toContain('Ricky helps you generate, debug, recover, and run workflows.');
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
@@ -33,7 +36,7 @@ describe('Ricky CLI onboarding', () => {
   });
 
   it('keeps local/BYOH and Cloud as co-equal options', () => {
-    const output = renderOnboarding({ isFirstRun: true, isTTY: true });
+    const output = renderOnboarding({ isFirstRun: true, isTTY: true, env: {} });
 
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
@@ -42,10 +45,11 @@ describe('Ricky CLI onboarding', () => {
   });
 
   it('uses real Google Cloud guidance and honest GitHub dashboard guidance', () => {
-    const output = renderCloudGuidance();
+    const output = `${renderCloudGuidance()}\n${renderModeResult('cloud')}`;
 
     expect(output).toContain('npx agent-relay cloud connect google');
     expect(output).toContain('Cloud dashboard');
+    expect(output).toContain('Nango-backed connection flow');
     expect(output).not.toContain('github/connect/local');
   });
 
@@ -77,6 +81,11 @@ describe('Ricky CLI onboarding', () => {
 
   it('renders a stable compact welcome for returning users', () => {
     expect(renderWelcome({ isFirstRun: false })).toContain('Ricky is ready.');
+  });
+
+  it('keeps local next action local-first and Cloud next action provider-aware', () => {
+    expect(renderSuggestedNextAction('local')).toBe('Next: generate locally with `npx ricky generate --spec "your spec here"`.');
+    expect(renderSuggestedNextAction('cloud')).toContain('connect Google with `npx agent-relay cloud connect google`');
   });
 
   it('suppresses the banner via env option without reading process.env', () => {
