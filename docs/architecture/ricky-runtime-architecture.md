@@ -148,6 +148,8 @@ Defines the shape of workflow execution evidence:
 
 Product-wide constants including API routes, default timeouts, and configuration keys.
 
+Cloud execution produces evidence in whatever format the Cloud runtime uses, but the Cloud executor must normalize it back into `WorkflowRunEvidence` before returning it to the orchestrator. There is no separate cloud-specific evidence model at the product layer — `WorkflowEvidence` is the single canonical evidence shape across both local and cloud paths.
+
 ### Rule for implementers
 
 New types that are used across more than one layer (runtime, product, cloud, CLI) must be defined in `src/shared/models/` and re-exported through `src/shared/models/index.ts`. Layer-local types stay in their own directory.

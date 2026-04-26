@@ -233,7 +233,7 @@ Per SPEC.md, Ricky will have a browser-based onboarding and interaction surface.
 
 **Route:** `POST /api/v1/ricky/web/submit` (browser-initiated requests)
 
-The web handler should accept:
+The web handler should accept a `WebHandoff` (the fifth handoff variant in the request normalizer):
 
 ```typescript
 {
