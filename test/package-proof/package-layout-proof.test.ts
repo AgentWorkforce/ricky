@@ -120,6 +120,9 @@ describe('Ricky workspace package layout and npm script parity proof', () => {
     expect(script).toContain('RICKY_OVERNIGHT_STATE_DIR');
     expect(script).toContain('restore_checkpoint()');
     expect(script).toContain('persist_checkpoint()');
+    expect(script).toContain('run_pid=$RUN_PID');
+    expect(script).toContain("printf '%s\\n' 'stale' > \"$previous_status_file\"");
+    expect(script).toContain('CURRENT_WORKFLOW="$workflow_path"');
     expect(script).toContain('skipping missing workflow');
     expect(script).toContain('RUN_RESULT="skipped"');
     expect(script).toContain('if [[ "$RUN_RESULT" == "ran" ]]');

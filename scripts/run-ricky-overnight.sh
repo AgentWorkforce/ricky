@@ -39,6 +39,8 @@ CURRENT_INDEX=0
 WORKFLOWS_RUN=0
 RUN_RESULT=""
 STATUS_REASON=""
+CURRENT_WORKFLOW=""
+RUN_PID="$$"
 
 write_queue() {
   case "$QUEUE_MODE" in
@@ -100,6 +102,12 @@ workflow_has_stale_package_targets() {
   grep -Eq "packages/cli/packages/cli/|(^|[^[:alnum:]_])src/(shared|runtime|product|cloud|local|cli)/" "$workflow_path"
 }
 
+is_pid_running() {
+  local pid="$1"
+
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
 persist_checkpoint() {
   cat > "$CHECKPOINT_FILE" <<EOF
 queue_mode=$QUEUE_MODE
@@ -108,6 +116,8 @@ current_index=$CURRENT_INDEX
 workflows_run=$WORKFLOWS_RUN
 artifact_dir=$ARTIFACT_DIR
 initial_git_head=$INITIAL_GIT_HEAD
+current_workflow=$CURRENT_WORKFLOW
+run_pid=$RUN_PID
 updated_at=$(date '+%Y-%m-%dT%H:%M:%S%z')
 EOF
   cp "$CHECKPOINT_FILE" "$STATE_FILE"
@@ -125,6 +135,20 @@ restore_checkpoint() {
 
   log "restoring checkpoint from $STATE_FILE"
   source "$STATE_FILE"
+
+  local previous_artifact_dir="${artifact_dir:-}"
+  local previous_status_file=""
+  local previous_pid="${run_pid:-}"
+  if [[ -n "$previous_artifact_dir" ]]; then
+    previous_status_file="$previous_artifact_dir/status.txt"
+  fi
+  if [[ -n "$previous_status_file" && -f "$previous_status_file" ]] && grep -qx 'running' "$previous_status_file"; then
+    if ! is_pid_running "$previous_pid"; then
+      printf '%s\n' 'stale' > "$previous_status_file"
+      log "marked stale prior overnight artifact: $previous_artifact_dir"
+    fi
+  fi
+
   CURRENT_PASS="${current_pass:-1}"
   CURRENT_INDEX="${current_index:-0}"
   INITIAL_GIT_HEAD="${initial_git_head:-}"
@@ -204,12 +228,16 @@ commit_if_clean_delta() {
 run_one() {
   local workflow_path="$1"
   RUN_RESULT="ran"
+  CURRENT_WORKFLOW="$workflow_path"
+  persist_checkpoint
   log ">>> running $workflow_path"
 
   if [[ ! -f "$workflow_path" ]]; then
     log "skipping missing workflow: $workflow_path"
     echo "$workflow_path" >> "$SKIPPED_FILE"
     RUN_RESULT="skipped"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
     return 0
   fi
 
@@ -217,6 +245,8 @@ run_one() {
     log "skipping stale pre-package-split workflow: $workflow_path"
     echo "$workflow_path" >> "$SKIPPED_FILE"
     RUN_RESULT="skipped"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
     return 0
   fi
 
@@ -228,16 +258,22 @@ run_one() {
     if ! repo_has_meaningful_delta; then
       log "no useful repo changes after failure; stopping on uncertainty"
       mark_status "blocked" "failed without repo delta: $workflow_path"
+      CURRENT_WORKFLOW=""
+      persist_checkpoint
       return 1
     fi
 
     log "failure produced repo changes; validating before capture"
     commit_if_clean_delta "$workflow_path"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
     return 0
   fi
 
   log "workflow completed: $workflow_path"
   commit_if_clean_delta "$workflow_path"
+  CURRENT_WORKFLOW=""
+  persist_checkpoint
   return 0
 }
 
