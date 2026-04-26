@@ -29,6 +29,7 @@ describe('Ricky local/BYOH entrypoint proof', () => {
       'warning-response-behavior',
       'next-action-response-behavior',
       'local-runtime-coordination',
+      'stubbed-runtime-seam-honesty',
       'error-path-normalization-failure',
       'cloud-mode-rejection',
     ]);
@@ -99,6 +100,22 @@ describe('Ricky local/BYOH entrypoint proof', () => {
     expect(evidence).toContain('ok: true');
     expect(evidence).toContain('artifact writes: 1');
     expect(evidence).toContain('runtime status: passed');
+  });
+
+  it('proves the local executor is a stubbed runtime seam and documents honest gaps', async () => {
+    const result = await evaluateLocalProofCase('stubbed-runtime-seam-honesty');
+    const evidence = result.evidence.join('\n');
+
+    expect(result.passed).toBe(true);
+    // The proof passes but explicitly documents what is NOT exercised
+    expect(result.gaps.length).toBeGreaterThan(0);
+    expect(result.gaps.some((g) => g.includes('agent-relay subprocess'))).toBe(true);
+    expect(result.gaps.some((g) => g.includes('npx'))).toBe(true);
+    expect(result.gaps.some((g) => g.includes('Filesystem'))).toBe(true);
+    // Evidence includes the honest gap annotations
+    expect(evidence).toContain('HONEST GAP');
+    expect(evidence).toContain('injectable executor seam: true');
+    expect(evidence).toContain('artifact writes via adapter: 1');
   });
 
   it('proves normalization failure returns actionable error response', async () => {

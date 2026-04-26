@@ -38,6 +38,7 @@ export type ProofCaseName =
   | 'warning-response-behavior'
   | 'next-action-response-behavior'
   | 'local-runtime-coordination'
+  | 'stubbed-runtime-seam-honesty'
   | 'error-path-normalization-failure'
   | 'cloud-mode-rejection';
 
@@ -416,6 +417,56 @@ export function getLocalProofCases(): LocalProofCase[] {
           `artifact content has workflow(): ${artifact?.content?.includes('workflow(') === true}`,
           `logs: ${response.logs.join(' | ')}`,
         ]);
+      },
+    },
+    {
+      name: 'stubbed-runtime-seam-honesty',
+      description:
+        'The local executor is an injectable seam. The proof surface exercises the contract through ' +
+        'deterministic fakes — not a real agent-relay process. This case explicitly documents what ' +
+        'is proven (normalization, response shape, pipeline wiring) and what is not (real subprocess ' +
+        'lifecycle, actual npx resolution, network I/O).',
+      async evaluate() {
+        // The executor seam is the interface boundary — prove it is injectable and
+        // that the default executor uses the same injectable adapters.
+        const executor = mockExecutor({ logs: ['[seam] stubbed'] });
+        const response = await runLocal({ source: 'cli', spec: 'test seam' }, { executor });
+
+        // The real executor path goes through intake → generation → coordinator,
+        // but every external side-effect (artifact writes, command spawns) is
+        // behind an injectable adapter — prove that adapters are what get called.
+        const localExecutor = memoryLocalExecutorOptions();
+        const realPathResponse = await runLocal(
+          { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+          { localExecutor },
+        );
+
+        const gaps = [
+          'Real agent-relay subprocess lifecycle is not exercised — commandRunner is a deterministic fake.',
+          'npx --no-install resolution against a real node_modules tree is not proven.',
+          'Filesystem artifact writes use an in-memory writer, not real disk I/O.',
+        ];
+
+        const checks = [
+          // Injectable executor seam works
+          response.ok === true,
+          response.logs[0] === '[seam] stubbed',
+          executor.calls.length === 1,
+          // Real executor path uses injectable adapters, not real side-effects
+          realPathResponse.ok === true,
+          localExecutor.writes.length === 1,
+          // The contract is proven; the runtime is not
+        ];
+
+        return result('stubbed-runtime-seam-honesty', checks, [
+          `injectable executor seam: ${executor.calls.length === 1}`,
+          `stubbed executor log: ${response.logs[0]}`,
+          `real path through injectable adapters: ${realPathResponse.ok}`,
+          `artifact writes via adapter: ${localExecutor.writes.length}`,
+          `HONEST GAP: ${gaps[0]}`,
+          `HONEST GAP: ${gaps[1]}`,
+          `HONEST GAP: ${gaps[2]}`,
+        ], gaps);
       },
     },
     {
