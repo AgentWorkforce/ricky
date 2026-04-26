@@ -11,12 +11,6 @@ async function main() {
     .timeout(21_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', {
-      cli: 'claude',
-      preset: 'worker',
-      role: 'Writes the bounded implementation plan for the Ricky workspace package split.',
-      retries: 1,
-    })
     .agent('impl-primary-codex', {
       cli: 'codex',
       preset: 'worker',
@@ -84,45 +78,14 @@ async function main() {
       failOnError: true,
     })
 
-    .step('lead-plan', {
-      agent: 'lead-claude',
-      dependsOn: ['read-workflow-standards', 'read-package-split-spec', 'read-root-tooling'],
-      task: `You are planning a bounded Ricky repo migration.
-
-Write .workflow-artifacts/wave5-scale-and-ops/workspace-package-split/implementation-plan.md.
-
-Your plan must be explicit about:
-- target workspace manager / lockfile restoration
-- package boundaries for shared/runtime/product/cloud/local/cli
-- exact files/directories to create or move
-- required root script changes
-- tsconfig/test-config migration expectations
-- deterministic validation commands
-- explicit non-goals
-
-End the file with WORKSPACE_PACKAGE_SPLIT_PLAN_READY.
-Do not edit repo code in this step.`,
-      verification: {
-        type: 'file_exists',
-        value: '.workflow-artifacts/wave5-scale-and-ops/workspace-package-split/implementation-plan.md',
-      },
-    })
-    .step('plan-gate', {
-      type: 'deterministic',
-      dependsOn: ['lead-plan'],
-      command: [
-        'test -f .workflow-artifacts/wave5-scale-and-ops/workspace-package-split/implementation-plan.md',
-        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workspace-package-split/implementation-plan.md | grep -Eq '^WORKSPACE_PACKAGE_SPLIT_PLAN_READY$'",
-        'echo WORKSPACE_PACKAGE_SPLIT_PLAN_VERIFIED',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
-
     .step('implement-workspace-structure', {
       agent: 'impl-primary-codex',
-      dependsOn: ['plan-gate'],
-      task: `Implement the Ricky workspace package split described by docs/architecture/ricky-package-split-migration-spec.md and the implementation plan.
+      dependsOn: ['read-workflow-standards', 'read-package-split-spec', 'read-root-tooling'],
+      task: `Implement the Ricky workspace package split directly from the checked-in spec at docs/architecture/ricky-package-split-migration-spec.md.
+
+Before writing code, first write .workflow-artifacts/wave5-scale-and-ops/workspace-package-split/implementation-plan.md summarizing the concrete package moves and tooling changes you are about to make.
+End that plan artifact with WORKSPACE_PACKAGE_SPLIT_PLAN_READY.
+Then implement the migration.
 
 Deliverables:
 - add workspace config and restore truthful workspace-manager support
@@ -137,6 +100,7 @@ Required file targets include, at minimum:
 - packages/*/package.json
 - package source files under packages/*/src
 - any required tsconfig/vitest config updates
+- .workflow-artifacts/wave5-scale-and-ops/workspace-package-split/implementation-plan.md
 
 Non-goals:
 - do not add new product features unrelated to packaging
@@ -146,9 +110,20 @@ Non-goals:
 Write files to disk, run the minimum truthful workspace-manager/install step needed for regenerated lock/config state if required, then exit cleanly.`,
       verification: { type: 'exit_code', value: '0' },
     })
-    .step('verify-workspace-structure', {
+    .step('plan-gate', {
       type: 'deterministic',
       dependsOn: ['implement-workspace-structure'],
+      command: [
+        'test -f .workflow-artifacts/wave5-scale-and-ops/workspace-package-split/implementation-plan.md',
+        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workspace-package-split/implementation-plan.md | grep -Eq '^WORKSPACE_PACKAGE_SPLIT_PLAN_READY$'",
+        'echo WORKSPACE_PACKAGE_SPLIT_PLAN_VERIFIED',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
+    })
+    .step('verify-workspace-structure', {
+      type: 'deterministic',
+      dependsOn: ['implement-workspace-structure', 'plan-gate'],
       command: [
         'test -d packages/shared',
         'test -d packages/runtime',
