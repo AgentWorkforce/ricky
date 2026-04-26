@@ -68,7 +68,7 @@ The ASCII art must convey:
 workflow reliability for AgentWorkforce
 ```
 
-The left silhouette represents the roadrunner: tail, head/beak, wing, and running legs. The exact rendering may be refined during implementation, but the contract is:
+The left silhouette represents the roadrunner: tail, head/beak, wing, and running legs. The canonical implementation adds `RRRR` on the first line adjacent to the silhouette as a secondary Ricky mark. The exact rendering may be refined, but the contract is:
 - the silhouette must be recognizable as a bird/roadrunner, not abstract ASCII decoration or a text-only wordmark
 - "RICKY" must appear in the banner, not only below it
 - the tagline must appear on the last line
@@ -186,7 +186,9 @@ Run `npx ricky` interactively to complete first-run setup,
 or set RICKY_MODE=local to skip setup and use local mode.
 ```
 
-Environment variable `RICKY_MODE` can be set to `local` or `cloud` to bypass interactive setup in CI/scripting contexts.
+In this case, `runOnboarding` returns `mode: 'explore'` as the default. The `explore` mode signals that no real mode was committed and the caller should surface the error rather than proceed with generation.
+
+Environment variable `RICKY_MODE` can be set to `local` or `cloud` to bypass interactive setup in CI/scripting contexts. When `RICKY_MODE` is set, non-TTY invocations skip the error and proceed directly with the specified mode.
 
 ---
 
@@ -284,6 +286,11 @@ Local/BYOH and Cloud are co-equal modes. Neither is presented as the "real" mode
 - Mode can be overridden via `RICKY_MODE` env var
 - Precedence: `--mode` flag > `RICKY_MODE` env var > project config > global config
 - `npx ricky setup` re-runs mode selection at any time
+
+Config persistence rules:
+- Config is persisted only for interactive mode selections (user chose 1/2/3 via the prompt)
+- Config is NOT persisted when the mode comes from `--mode` flag or `RICKY_MODE` env var (these are ephemeral per-invocation overrides)
+- Config is NOT persisted for the `explore` choice (explore is a deferral, not a mode commitment)
 
 ---
 
@@ -638,27 +645,57 @@ Avoid:
 
 ### 17.2 Export contract
 
-`src/cli/index.ts` must export:
+`src/cli/index.ts` must export the full public API:
 
 ```typescript
 // From ascii-art.ts
 export const RICKY_BANNER: string;
-export function renderBanner(options?: { color?: boolean }): string;
-export function shouldShowBanner(options: {
-  quiet?: boolean;
-  noBanner?: boolean;
-  isTTY?: boolean;
-}): boolean;
+export const RICKY_COMPACT_BANNER: string;
+export type BannerVariant = 'full' | 'compact';
+export interface RenderBannerOptions { color?: boolean; variant?: BannerVariant }
+export interface ShouldShowBannerOptions { quiet?: boolean; noBanner?: boolean; isTTY?: boolean; isFirstRun?: boolean; forceOnboarding?: boolean; env?: { RICKY_BANNER?: string }; rickyBanner?: string }
+export function renderBanner(options?: RenderBannerOptions | BannerVariant): string;
+export function shouldShowBanner(options?: ShouldShowBannerOptions): boolean;
+export function chooseBannerVariant(columns?: number): BannerVariant;
+export function shouldUseColor(options?: { color?: boolean; isTTY?: boolean; noColor?: boolean }): boolean;
 
 // From welcome.ts
-export function renderWelcome(): string;
-
-// From onboarding.ts
-export function runOnboarding(options?: OnboardingOptions): Promise<OnboardingResult>;
+export interface WelcomeOptions { isFirstRun?: boolean }
+export const FIRST_RUN_WELCOME: string;
+export const RETURNING_USER_WELCOME: string;
+export function renderWelcome(options?: WelcomeOptions): string;
 
 // From mode-selector.ts
 export type RickyMode = 'local' | 'cloud' | 'both';
+export type OnboardingChoice = RickyMode | 'explore';
+export interface ProviderStatus { google: { connected: boolean }; github: { connected: boolean } }
+export interface RickyConfig { mode: RickyMode; firstRunComplete: boolean; providers: ProviderStatus }
+export interface ModeOption { choice: '1' | '2' | '3' | '4'; value: OnboardingChoice; title: string; description: string }
+export const DEFAULT_PROVIDER_STATUS: ProviderStatus;
+export const MODE_OPTIONS: ModeOption[];
+export function parseModeChoice(input: string): OnboardingChoice | null;
+export function isRickyMode(value: string | undefined): value is RickyMode;
+export function toRickyMode(choice: OnboardingChoice): RickyMode;
 export function renderModeSelection(): string;
+export function renderModeSelector(): string;
+export function renderModeResult(choice: OnboardingChoice): string;
+export function renderCompactHeader(mode: RickyMode, providerStatus?: ProviderStatus): string;
+
+// From onboarding.ts
+export interface OnboardingContext { isFirstRun?: boolean; isTTY?: boolean; quiet?: boolean; noBanner?: boolean; forceOnboarding?: boolean; columns?: number; blockedReason?: string | null; mode?: RickyMode; choice?: OnboardingChoice; providerStatus?: ProviderStatus; env?: { RICKY_BANNER?: string } }
+export interface RickyConfigStore { readProjectConfig(): Promise<RickyConfig | null>; readGlobalConfig(): Promise<RickyConfig | null>; writeProjectConfig(config: RickyConfig): Promise<void> }
+export interface OnboardingOptions { input?: NodeJS.ReadableStream; output?: NodeJS.WritableStream; isTTY?: boolean; quiet?: boolean; noBanner?: boolean; mode?: RickyMode; showBanner?: boolean; columns?: number; env?: NodeJS.ProcessEnv; configStore?: RickyConfigStore; firstRun?: boolean }
+export interface OnboardingResult { mode: OnboardingChoice; firstRun: boolean; bannerShown: boolean; output: string }
+export function renderOnboarding(context?: OnboardingContext): string;
+export function renderCloudGuidance(): string;
+export function renderHandoffGuidance(): string;
+export function renderInterruptedSetupRecovery(): string;
+export function renderNonInteractiveSetupError(): string;
+export function renderRecoveryGuidance(blockedReason?: string | null): string;
+export function renderProviderConnectFailureRecovery(provider?: string): string;
+export function renderWorkflowGenerationFailureRecovery(): string;
+export function renderSuggestedNextAction(mode: RickyMode): string;
+export function runOnboarding(options?: OnboardingOptions): Promise<OnboardingResult>;
 ```
 
 ### 17.3 Config file shape
