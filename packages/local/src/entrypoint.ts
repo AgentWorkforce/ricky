@@ -30,7 +30,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export interface LocalResponseArtifact {
-  /** Relative path to the generated or consumed artifact. */
+  /** Path to the generated or consumed artifact (may be relative or absolute). */
   path: string;
   /** MIME type hint (e.g. 'text/typescript', 'application/json'). */
   type?: string;
@@ -277,6 +277,11 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
   };
 }
 
+/**
+ * Module-level default executor — created at import time with
+ * `createProcessCommandRunner()`. Only used when callers omit
+ * `options.executor` and `options.localExecutor` from `runLocal()`.
+ */
 export const defaultExecutor: LocalExecutor = createLocalExecutor();
 
 // ---------------------------------------------------------------------------
@@ -390,10 +395,16 @@ function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
   };
 }
 
+/**
+ * Map handoff source to spec-intake surface.
+ * `free-form`, `structured`, and `workflow-artifact` intentionally fall through
+ * to `'cli'` — they share intake routing behavior with CLI handoffs today.
+ */
 function sourceToSurface(source: LocalInvocationRequest['source']): InputSurface {
   if (source === 'mcp') return 'mcp';
   if (source === 'claude') return 'claude_handoff';
   if (source === 'cli') return 'cli';
+  // free-form, structured, workflow-artifact → cli surface
   return 'cli';
 }
 

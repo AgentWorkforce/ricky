@@ -142,6 +142,26 @@ describe('normalizeRequest', () => {
     expect(result.specPath).toBe('/tmp/spec.md');
   });
 
+  it('normalizes a CLI structured handoff with request metadata and explicit local mode', async () => {
+    const raw: CliHandoff = {
+      source: 'cli',
+      spec: {
+        goal: 'generate a local workflow',
+        workflowFile: 'workflows/local-entrypoint.workflow.ts',
+      },
+      cliMetadata: { argv: ['ricky', 'run'] },
+      requestId: 'req-cli-1',
+    };
+    const result = await normalizeRequest(raw);
+
+    expect(result.source).toBe('cli');
+    expect(result.spec).toBe('generate a local workflow');
+    expect(result.structuredSpec).toEqual(raw.spec);
+    expect(result.mode).toBe('local');
+    expect(result.metadata).toEqual({ argv: ['ricky', 'run'] });
+    expect(result.requestId).toBe('req-cli-1');
+  });
+
   it('normalizes an MCP handoff with metadata', async () => {
     const raw: McpHandoff = {
       source: 'mcp',
@@ -225,6 +245,25 @@ describe('normalizeRequest', () => {
     expect(result.metadata).toEqual({});
   });
 
+  it('normalizes a Claude structured spec handoff for downstream generation', async () => {
+    const raw: ClaudeHandoff = {
+      source: 'claude',
+      spec: {
+        description: 'generate a local proof workflow',
+        targetFiles: ['packages/local/src/entrypoint.ts'],
+      },
+      conversationId: 'conv-2',
+      turnId: 'turn-9',
+    };
+    const result = await normalizeRequest(raw);
+
+    expect(result.source).toBe('claude');
+    expect(result.spec).toBe('generate a local proof workflow');
+    expect(result.structuredSpec).toEqual(raw.spec);
+    expect(result.mode).toBe('local');
+    expect(result.metadata).toEqual({ conversationId: 'conv-2', turnId: 'turn-9' });
+  });
+
   it('normalizes a workflow artifact handoff by reading the artifact', async () => {
     const raw: WorkflowArtifactHandoff = {
       source: 'workflow-artifact',
@@ -304,6 +343,90 @@ describe('runLocal', () => {
     expect(result.ok).toBe(true);
     expect(executor.calls[0].source).toBe('claude');
     expect(executor.calls[0].metadata).toEqual({ conversationId: 'c1' });
+  });
+
+  it('hands CLI, MCP, and Claude specs to the injected executor in explicit local mode', async () => {
+    const cases: Array<{
+      name: string;
+      handoff: RawHandoff;
+      expectedSource: LocalInvocationRequest['source'];
+      expectedSpec: string;
+      expectedStructuredSpec?: Record<string, unknown>;
+      expectedMetadata?: Record<string, unknown>;
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            goal: 'generate a local workflow',
+            workflowFile: 'workflows/cli.workflow.ts',
+          },
+          cliMetadata: { flag: '--local' },
+        },
+        expectedSource: 'cli',
+        expectedSpec: 'generate a local workflow',
+        expectedStructuredSpec: {
+          goal: 'generate a local workflow',
+          workflowFile: 'workflows/cli.workflow.ts',
+        },
+        expectedMetadata: { flag: '--local' },
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            goal: 'generate a local workflow',
+            workflowFile: 'workflows/mcp.workflow.ts',
+          },
+          mcpMetadata: { toolCallId: 'tool-2' },
+        },
+        expectedSource: 'mcp',
+        expectedSpec: 'generate a local workflow',
+        expectedStructuredSpec: {
+          goal: 'generate a local workflow',
+          workflowFile: 'workflows/mcp.workflow.ts',
+        },
+        expectedMetadata: { toolCallId: 'tool-2', toolName: 'ricky.generate' },
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            description: 'generate a local workflow',
+            workflowFile: 'workflows/claude.workflow.ts',
+          },
+          conversationId: 'conv-3',
+          turnId: 'turn-10',
+        },
+        expectedSource: 'claude',
+        expectedSpec: 'generate a local workflow',
+        expectedStructuredSpec: {
+          description: 'generate a local workflow',
+          workflowFile: 'workflows/claude.workflow.ts',
+        },
+        expectedMetadata: { conversationId: 'conv-3', turnId: 'turn-10' },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const executor = mockExecutor();
+      const result = await runLocal(testCase.handoff, { executor });
+
+      expect(result.ok, testCase.name).toBe(true);
+      expect(result.warnings.some((w) => w.includes('Cloud API surface')), testCase.name).toBe(false);
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]).toMatchObject({
+        source: testCase.expectedSource,
+        spec: testCase.expectedSpec,
+        mode: 'local',
+        metadata: testCase.expectedMetadata,
+      });
+      expect(executor.calls[0].structuredSpec).toEqual(testCase.expectedStructuredSpec);
+    }
   });
 
   it('normalizes and executes a workflow artifact handoff', async () => {
@@ -404,6 +527,39 @@ describe('runLocal', () => {
     ]);
     expect(result.logs.some((l) => l.includes('[local] spec intake route: execute'))).toBe(true);
     expect(result.logs.some((l) => l.includes('[local] runtime status: passed'))).toBe(true);
+  });
+
+  it('returns local artifact and runtime log shape for an injected runtime adapter', async () => {
+    const localExecutor = memoryLocalExecutorOptions({
+      stdout: ['local workflow completed'],
+      stderr: ['local warning from runtime'],
+    });
+    const result = await runLocal(
+      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts' },
+      { localExecutor },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      artifacts: [
+        {
+          path: 'workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
+          type: 'text/typescript',
+        },
+      ],
+      nextActions: ['Inspect generated artifacts and local run evidence.'],
+    });
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: execute',
+        '[local] runtime status: passed',
+        '[stdout] local workflow completed',
+        '[stderr] local warning from runtime',
+      ]),
+    );
+    expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
   });
 
   it('coordinates a workflow artifact handoff as a ready local workflow', async () => {
