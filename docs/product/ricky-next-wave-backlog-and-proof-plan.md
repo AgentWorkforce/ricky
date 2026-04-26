@@ -2,301 +2,388 @@
 
 ## 1. Purpose
 
-Turn the work that remains after Ricky's first bounded workflow wave into an explicit, quality-first next batch.
+Turn the work that remains after Ricky's first five waves into an explicit, bounded, proof-oriented next batch.
 
 This document exists so Ricky does not drift from:
-- a bounded workflow program
-- truthful proof expectations
-- local/BYOH and Cloud parity
-- real unblocker knowledge instead of compile-only optimism
+- a bounded workflow program with clear proof gates
+- truthful end-to-end execution expectations
+- co-equal surface coverage across CLI, Slack, MCP, local/BYOH, and Cloud
+- productized unblocker knowledge from the failure taxonomy
+- real 80-to-100 proof rather than compile-only optimism
 
-## 2. Current first-wave status
+## 2. What the first wave program already covers
 
-Ricky's first major bounded workflow wave is now in place.
+### 2.1 Workflow inventory
 
-Current wave coverage includes:
-- Wave 0 foundation
-  - repo standards and conventions
-  - toolchain and validation foundation
-  - shared models and config
-  - initial architecture docs
-- Wave 1 runtime
-  - local run coordinator
-  - workflow evidence model
-  - workflow failure classification
-- Wave 2 product
-  - workflow spec intake
-  - workflow generation pipeline
-  - workflow debugger specialist
-  - workflow validator specialist
-- Wave 3 Cloud API
-  - Cloud connect and auth
-  - generate endpoint
-- Wave 4 local/BYOH
-  - CLI onboarding and welcome
-  - local invocation entrypoint
-  - CLI onboarding UX spec workflow
-- Wave 5 scale and ops
-  - workflow health analytics
-  - next-wave backlog and proof plan workflow
+The first wave program expanded from the original 16-workflow plan to 28 authored workflow files across five waves:
 
-The first wave is no longer just an idea. It now has:
-- a hardened source-of-truth generator/template
-- a truthful TypeScript and Vitest foundation
-- a 16-workflow batch expanded to 18 with two planning/spec workflows added afterward
-- dry-run validation coverage across the authored workflow set
-- a dedicated CLI onboarding UX spec document
+| Wave | Workflows | Status |
+|---|---|---|
+| Wave 0 — Foundation | 4 workflows + 2 debug workflows | Implemented: repo standards, toolchain, shared models, architecture docs |
+| Wave 1 — Runtime | 5 workflows | Implemented: local coordinator, evidence model, failure classification, diagnosis engine, unblocker proof |
+| Wave 2 — Product Core | 4 workflows | Implemented: spec intake, generation pipeline, debugger specialist, validator specialist |
+| Wave 3 — Cloud API | 4 workflows | Implemented: cloud auth, generate endpoint, cloud generate slice, cloud connect proof |
+| Wave 4 — Local/BYOH | 9 workflows | Implemented: CLI onboarding, local invocation, CLI UX spec, onboarding implementation, onboarding proof, local BYOH entrypoint, local spec handoff proof, interactive CLI, CLI command surface |
+| Wave 5 — Scale and Ops | 4 workflows | Implemented: workflow health analytics, next-wave backlog, package conventions alignment, package layout proof |
 
-## 3. What the first wave still does not prove
+### 2.2 Implementation coverage
 
-The first wave gives Ricky a much better execution scaffold, but it does not yet prove the whole product end-to-end.
+The `src/` tree now contains real implementation across all major product areas:
 
-The biggest remaining gaps are:
-- actual implementation of the CLI onboarding modules described by the new UX spec
-- actual implementation of the local/BYOH runtime path behind the planning workflows
-- actual implementation of the Cloud-facing Ricky pieces behind the planning workflows
-- end-to-end proof that a user can hand Ricky a spec and receive the right workflow generation/debug/recovery behavior
-- proof that Ricky can classify and unblock environment/runtime/orchestration failures in a user-visible way
-- proof that onboarding works in practice instead of only in docs/specs/workflows
+- **Shared foundation** — models, config, constants
+- **Runtime** — local coordinator, evidence capture, failure classifier, diagnostics engine with unblocker proof
+- **Product core** — spec intake (parser, normalizer, router), generation pipeline (pattern selector, skill loader, template renderer), debugger specialist (diagnosis, fix recommender), validator specialist (structural checks, proof loop)
+- **CLI** — welcome, ASCII art, mode selector, onboarding with proof tests
+- **Interactive entrypoint** — CLI main command surface with `npm start`
+- **Local/BYOH** — entrypoint, request normalizer, local entrypoint proof
+- **Cloud** — auth (request validator, workspace scoping, provider connect), API (generate endpoint, cloud generate proof)
+- **Analytics** — health analyzer, digest generator
 
-## 4. Planning principles for the next wave
+### 2.3 Test coverage
 
-The next Ricky wave should preserve these rules:
+21 test files with 389 passing tests. Proof tests exist for:
+- CLI onboarding first-run and recovery paths
+- Local entrypoint spec handoff and artifact return
+- Cloud generate happy path
+- Runtime unblocker paths across failure taxonomy categories
+- Package layout and script parity
 
-1. Quality over speed.
-2. Proof over compile-only comfort.
-3. Template/systemic fixes over file-by-file heroics.
-4. Local/BYOH, Cloud, and interactive surfaces remain co-equal.
-5. Workflow recovery and unblocker knowledge must keep becoming product behavior.
-6. The next wave must stay bounded enough to finish and evaluate honestly.
+### 2.4 What the first waves prove
 
-## 5. Recommended immediate sequence
+The first waves prove that Ricky has:
+- a real TypeScript and Vitest foundation with truthful validation
+- a working CLI onboarding experience with ASCII welcome, mode selection, and provider guidance
+- local/BYOH and Cloud execution paths that can normalize specs and return artifacts
+- failure classification and diagnosis that distinguishes blocker categories
+- a generation pipeline that selects patterns and loads skills
+- deterministic proof tests that exercise user-visible behavior, not just internal plumbing
 
-Recommended order after the new CLI onboarding UX spec:
+### 2.5 CLI/banner UX deliverable boundary
 
-1. implement the CLI onboarding experience from the spec
-2. prove that onboarding works through deterministic user-visible tests
-3. implement the local/BYOH invocation path behind the current local workflow designs
-4. prove spec handoff from CLI and MCP into Ricky's intake and local routing
-5. implement the first Cloud-backed Ricky execution slice behind the current Cloud workflows
-6. prove end-to-end generation/debug/recovery behavior with at least one real spec and one real failure/unblock loop
-7. harden the failure taxonomy into executable Ricky diagnosis behavior
+The CLI/banner UX spec is its own near-term deliverable, not something to bury inside the next backlog batch. It is already represented by `workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts` and `docs/product/ricky-cli-onboarding-ux-spec.md`, and it defines the banner, ASCII-art, first-run, returning-user, local/BYOH, Cloud, and recovery copy contracts.
 
-## 6. Recommended bounded next batch
+The follow-on implementation and onboarding proof work from Wave 4 used that spec as the source of truth. Wave 6 should therefore treat the CLI/banner spec as a completed prerequisite and regression contract, not reopen it unless later product feedback shows the banner or onboarding contract is wrong.
 
-The next batch should be a bounded follow-on program, not an unbounded wishlist.
+## 3. What the first waves do NOT yet prove
 
-### Batch A: CLI onboarding implementation and proof
+Despite significant implementation progress, Ricky still has concrete product gaps against the SPEC:
 
-#### Why it matters
-Ricky now has a concrete onboarding UX spec. The next step is turning that into real user-facing behavior.
+### 3.1 Missing surfaces
 
-#### Suggested workflow(s)
-- implement-cli-onboarding-from-ux-spec
-- prove-cli-onboarding-first-run-and-recovery
+| Surface | SPEC status | Implementation status |
+|---|---|---|
+| CLI | Co-equal surface | Implemented and proven |
+| Local/BYOH | Co-equal surface | Implemented and proven |
+| Cloud API | Co-equal surface | Implemented and proven |
+| **Slack** | Co-equal surface | **Not started — no `src/slack/`** |
+| **Web** | Co-equal surface | **Not started — no `src/web/`** |
+| **MCP/assistant handoff** | First-class journey (SPEC 5.1, 7.3) | **Not started — no `src/mcp/`** |
 
-#### Scope
-- build the modules described in `docs/product/ricky-cli-onboarding-ux-spec.md`
-- implement deterministic tests for first-run, returning-user, local/BYOH, Cloud guidance, and recovery-path output
-- prove banner behavior and copy contracts
+### 3.2 Missing product capabilities
 
-#### Required proof
-- user-visible deterministic tests pass
-- local/BYOH and Cloud both appear as first-class options
-- Google connect guidance uses `npx agent-relay cloud connect google`
-- GitHub guidance does not invent fake URLs
-- at least one recovery path is tested
+| Capability | SPEC reference | Status |
+|---|---|---|
+| **Proactive failure notification** | SPEC 5.2, 7.6 | Not started — no `src/proactive/` |
+| **Workflow restart/rerun specialist** | SPEC 8.2.C | Not started — runtime restart specialist missing |
+| **Real agent-relay execution** | SPEC 5.4, 7.4 | Typed but not wired to real Relay SDK runs |
+| **Agent Assistant integration** | SPEC 2, 8.1 | Currently standalone — no `@agent-assistant/*` composition |
+| **Cloud deployment** | SPEC 9 | No worker, infra, or deployment artifacts |
+| **Cataloging/scheduled analytics** | SPEC 8.2.F | Health analyzer exists but no scheduled job or real run data |
 
-#### Classification
-- one implementation workflow
-- one proof workflow
+### 3.3 Missing end-to-end proof
 
-### Batch B: local/BYOH execution implementation and proof
+The first waves prove individual subsystems. What remains unproven:
+- A user hands Ricky a spec via Slack and receives a generated workflow artifact back
+- A user hands a spec from Claude via MCP and Ricky normalizes, generates, and returns results
+- Ricky proactively detects a workflow failure in Cloud and notifies the user with a diagnosis
+- Ricky coordinates a real `agent-relay` run locally, monitors it, and returns outcome artifacts
+- Ricky restarts a failed workflow safely after classifying the failure
 
-#### Why it matters
-Ricky's local/BYOH identity is central. It should not remain a spec-only promise.
+## 4. Candidate follow-on workflows: Wave 6
 
-#### Suggested workflow(s)
-- implement-local-byoh-entrypoint
-- prove-local-spec-handoff-and-artifact-return
+### Wave 6 theme: Surfaces, Integration, and End-to-End Proof
 
-#### Scope
-- build the local entrypoint, normalizer, and response model
-- connect spec intake to local execution orchestration with injected/mockable runtime seams first
-- prove artifact/log/warning outputs
+The next wave should make Ricky reachable from its declared co-equal surfaces and prove end-to-end contracts work against real execution, not just mocked seams.
 
-#### Required proof
-- a CLI or structured spec can be normalized into a local execution contract
-- local mode does not silently route through Cloud
-- local blockers are surfaced explicitly
-- one end-to-end local happy path is proven with deterministic artifacts
+### Sequencing rationale
 
-#### Classification
-- one implementation workflow
-- one proof workflow
+Waves 0-5 built Ricky's internals: runtime, product core, CLI, local/BYOH, Cloud API, and analytics. Wave 6 must connect those internals to the surfaces users actually interact through (Slack, MCP) and prove the full loop works. Slack is prioritized over web because it is the highest-leverage interactive surface in the AgentWorkforce ecosystem today.
 
-### Batch C: first Cloud-backed Ricky slice
+### 4.1 Batch A: Slack surface — implementation and proof
 
-#### Why it matters
-Ricky must support Cloud API usage and provider-backed flows without becoming Cloud-only.
+**Why it matters:** Slack is declared as a co-equal surface in SPEC 5.1. It is the primary interactive surface for workflow debugging, generation, coordination, and proactive notifications. Without Slack, Ricky is CLI-only.
 
-#### Suggested workflow(s)
-- implement-ricky-cloud-generate-slice
-- prove-cloud-connect-and-generate-happy-path
+**Connection to SPEC:** Sections 5.1, 7.1, 7.2, 7.6, 8.2.A
 
-#### Scope
-- implement the first honest Cloud-backed Ricky API slice behind the existing Cloud workflows
-- keep the interface focused on spec intake, generation request handling, and artifact return
-- use real connection patterns where already source-backed
+#### Workflow: `wave6-surfaces/01-implement-slack-ingress.ts`
+- **Type:** Implementation
+- **Scope:**
+  - Slack webhook handler with signature verification, dedup, and thread handling
+  - Slack outbound delivery for responses, artifacts, and notifications
+  - Health route for monitoring
+  - Router integration to connect Slack messages to Ricky's spec intake / domain core
+- **Primary files:** `src/slack/webhook-handler.ts`, `src/slack/outbound.ts`, `src/slack/router.ts`, `src/slack/types.ts`, `src/slack/webhook-handler.test.ts`, `src/slack/index.ts`
+- **Proof expectations:** Deterministic tests for signature verification, dedup, thread routing, and outbound message formatting. Must follow proven Sage/NightCTO Slack patterns per SPEC 3.3.
 
-#### Required proof
-- one honest Cloud-backed generation path works
-- Cloud setup and missing-provider states are explicit
-- generated artifacts can be returned or surfaced coherently
-- Cloud proof does not invalidate local/BYOH parity
+#### Workflow: `wave6-surfaces/02-prove-slack-spec-to-artifact.ts`
+- **Type:** Proof
+- **Scope:** Prove that a Slack message containing a workflow spec reaches Ricky's intake, triggers generation, and returns a formatted artifact response in the same thread.
+- **Required proof:**
+  - Spec normalization from Slack message format
+  - Generation pipeline produces an artifact
+  - Outbound delivery formats the artifact for Slack
+  - Thread context is preserved
+  - Error states produce user-friendly Slack messages, not raw stack traces
 
-#### Classification
-- one implementation workflow
-- one proof workflow
+### 4.2 Batch B: MCP/assistant handoff — implementation and proof
 
-### Batch D: failure diagnosis and unblocker behavior
+**Why it matters:** SPEC 7.3 declares that users should be able to draft a spec in Claude and hand it directly to Ricky. This is a first-class journey, not a nice-to-have.
 
-#### Why it matters
-Ricky's differentiator is not only writing workflows. It is understanding why they fail and how to unblock them.
+**Connection to SPEC:** Sections 5.1, 7.3, 8.2.A
 
-#### Suggested workflow(s)
-- implement-failure-diagnosis-engine
-- prove-runtime-environment-orchestration-unblocker-paths
+#### Workflow: `wave6-surfaces/03-implement-mcp-handoff-surface.ts`
+- **Type:** Implementation
+- **Scope:**
+  - MCP tool definitions for Ricky capabilities (generate, debug, coordinate, status)
+  - Request normalization from MCP tool call format to Ricky's internal spec model
+  - Response formatting for MCP tool results
+  - Routing into the same domain core used by CLI and Slack
+- **Primary files:** `src/mcp/tools.ts`, `src/mcp/request-normalizer.ts`, `src/mcp/response-formatter.ts`, `src/mcp/types.ts`, `src/mcp/tools.test.ts`, `src/mcp/index.ts`
+- **Proof expectations:** Deterministic tests proving MCP tool calls normalize correctly and route through the same intake pipeline as CLI.
 
-#### Scope
-- turn the taxonomy in `docs/architecture/ricky-failure-taxonomy-and-unblockers.md` into executable Ricky behavior
-- classify at least:
-  - runtime handoff stall
-  - opaque progress
-  - stale relay state contamination
-  - control-flow invalid workflow structure
-  - weak scope gate
-  - repo validation mismatch
-- return a diagnosis plus recommended unblock action
+#### Workflow: `wave6-surfaces/04-prove-mcp-spec-handoff-and-return.ts`
+- **Type:** Proof
+- **Scope:** Prove that a spec handed from an MCP-connected assistant normalizes, generates, and returns a workflow artifact through the MCP response path.
+- **Required proof:**
+  - MCP tool call with a natural-language spec produces a normalized internal request
+  - The request routes through spec intake and generation pipeline identically to CLI
+  - The response includes the generated artifact, warnings, and follow-up suggestions
+  - Error states are surfaced as structured MCP tool errors, not opaque failures
 
-#### Required proof
-- representative fixtures map to the correct classification
-- unblock advice differs by blocker class rather than always retrying
-- at least one environment blocker and one orchestration blocker are handled distinctly
+### 4.3 Batch C: Proactive failure notification — implementation and proof
 
-#### Classification
-- one implementation workflow
-- one proof workflow
+**Why it matters:** SPEC 5.2 and 7.6 define proactive workflow operations as a core Ricky responsibility. Without proactive notifications, Ricky only reacts when asked.
 
-### Batch E: package-convention and npm package alignment
+**Connection to SPEC:** Sections 5.2, 7.6, 8.2.F
+**Connection to failure taxonomy:** All categories — proactive detection should use the same classifier
 
-#### Why it matters
-Ricky should follow the same npm/package conventions used across the other AgentWorkforce projects instead of drifting as a one-off repo shape.
+#### Workflow: `wave6-surfaces/05-implement-proactive-failure-detection.ts`
+- **Type:** Implementation
+- **Scope:**
+  - Failure signal ingestion from Cloud workflow run state
+  - Urgency and recurrence classification using the existing failure taxonomy
+  - Notification assembly with diagnosis summary and recommended next actions
+  - Delivery routing to appropriate surfaces (Slack initially)
+- **Primary files:** `src/proactive/signal-ingester.ts`, `src/proactive/urgency-classifier.ts`, `src/proactive/notification-builder.ts`, `src/proactive/types.ts`, `src/proactive/signal-ingester.test.ts`, `src/proactive/index.ts`
+- **Proof expectations:** Deterministic tests proving that failure signals produce correctly classified notifications with taxonomy-specific diagnosis and unblocker recommendations.
 
-#### Suggested workflow(s)
-- align-ricky-package-conventions
-- prove-ricky-package-layout-and-script-parity
+#### Workflow: `wave6-surfaces/06-prove-proactive-notification-loop.ts`
+- **Type:** Proof
+- **Scope:** Prove that a simulated workflow failure signal flows through ingestion, classification, notification assembly, and produces a user-visible notification with actionable content.
+- **Required proof:**
+  - Different failure taxonomy categories produce different notification content
+  - Urgency classification affects notification priority
+  - Notifications include diagnosis summary, not just "workflow failed"
+  - Recurrence detection flags repeated failures of the same workflow
+  - Notification content matches what a user would need to decide on next action
 
-#### Scope
-- decide whether Ricky should remain intentionally single-package or move to a small multi-package layout
-- align package scripts, dependency placement, and repo structure with the broader AgentWorkforce convention
-- keep the change bounded and avoid breaking the already-proven CLI/workflow lanes
+### 4.4 Batch D: Workflow restart specialist — implementation and proof
 
-#### Required proof
-- the chosen package layout is explicit and documented
-- scripts and dependency placement match project conventions
-- typecheck/test entrypoints still work after alignment
-- Ricky package structure no longer feels like an unexplained exception
+**Why it matters:** SPEC 8.2.C lists the runtime-restart specialist as a core specialist. Ricky should not just diagnose failures — it should evaluate whether rerun/restart is safe and execute it.
 
-#### Classification
-- one implementation/alignment workflow
-- one proof workflow
+**Connection to SPEC:** Sections 7.1, 8.2.C
+**Connection to failure taxonomy:** `agent_runtime.handoff_stalled`, `environment.relay_state_contaminated`, `workflow_structure.control_flow_invalid`
 
-## 7. What should wait until after the next batch
+#### Workflow: `wave6-runtime/07-implement-restart-specialist.ts`
+- **Type:** Implementation
+- **Scope:**
+  - Safety evaluation for restart/rerun based on failure classification
+  - Mode selection (full restart, partial rerun from failed step, restart with narrower scope)
+  - Preflight environment checks before restart (stale relay state, contamination)
+  - Restart execution coordination through the local coordinator
+- **Primary files:** `src/product/specialists/restart/safety-evaluator.ts`, `src/product/specialists/restart/mode-selector.ts`, `src/product/specialists/restart/restart-coordinator.ts`, `src/product/specialists/restart/types.ts`, `src/product/specialists/restart/restart.test.ts`, `src/product/specialists/restart/index.ts`
+- **Proof expectations:** Deterministic tests proving that different failure categories produce different restart decisions, and that unsafe restarts are blocked with explanation.
 
-These are important, but should not outrun the core proof path:
-- broader multi-surface polish across Slack and web onboarding
-- deeper analytics and proactive alerting beyond the first useful health slice
-- full autonomous repair loops without operator review
-- large-scale backlog expansion into many more workflow files
-- broad Cloud productionization before the local/BYOH and first Cloud proof slices are honest
+#### Workflow: `wave6-runtime/08-prove-restart-safety-and-execution.ts`
+- **Type:** Proof
+- **Scope:** Prove that the restart specialist correctly evaluates safety, selects the right restart mode, and coordinates restart through the local coordinator.
+- **Required proof:**
+  - `agent_runtime.handoff_stalled` failure → restart with narrower prompt, not blind retry
+  - `environment.relay_state_contaminated` → quarantine state then restart clean
+  - `workflow_structure.control_flow_invalid` → block restart, recommend fix first
+  - Preflight checks detect and quarantine stale `.agent-relay/` state
+  - Restart execution produces evidence artifacts
 
-## 8. Proof expectations by area
+### 4.5 Batch E: End-to-end execution proof
 
-### CLI/onboarding proof
-Must show user-visible behavior, not just internal module existence.
+**Why it matters:** Individual subsystems are tested, but no proof exists that a full user journey works from spec to execution to outcome.
 
-### Local/BYOH proof
-Must show a spec can become a real local Ricky action with artifacts, logs, or warnings.
+**Connection to SPEC:** Sections 7.1, 7.2, 7.4, 14
 
-### Cloud proof
-Must show at least one real Cloud-backed path with honest connection and artifact behavior.
+#### Workflow: `wave6-proof/09-prove-local-spec-to-execution-loop.ts`
+- **Type:** Proof
+- **Scope:** Prove the full local/BYOH path: user provides a spec via CLI, Ricky normalizes it, generates a workflow, validates it, and coordinates a local execution attempt.
+- **Required proof:**
+  - Spec intake from CLI produces a normalized request
+  - Generation pipeline produces a valid Relay workflow artifact
+  - Validator specialist applies structural checks and the 80-to-100 proof loop
+  - Local coordinator can accept and attempt execution of the generated workflow
+  - Outcome artifacts (success or failure diagnosis) are returned to the user
+  - The path works without Cloud dependency
 
-### Diagnosis/unblocker proof
-Must show Ricky distinguishes blocker classes and recommends different unblockers.
+#### Workflow: `wave6-proof/10-prove-cloud-spec-to-artifact-return.ts`
+- **Type:** Proof
+- **Scope:** Prove the full Cloud API path: authenticated request with a spec produces a generated workflow artifact returned through the API response.
+- **Required proof:**
+  - Auth validation and workspace scoping work
+  - Spec normalization from API request format
+  - Generation pipeline produces artifacts
+  - Response includes artifact bundle, warnings, and follow-up suggestions
+  - Missing provider state is surfaced explicitly, not silently ignored
+
+### 4.6 Batch F: Agent Assistant composition proof
+
+**Why it matters:** SPEC Section 2 and 8.1 state that Ricky should be built on Agent Assistant, not as a standalone stack. Currently Ricky is standalone. This batch begins the composition.
+
+**Connection to SPEC:** Sections 2, 3.2, 8.1
+
+#### Workflow: `wave6-integration/11-implement-agent-assistant-composition.ts`
+- **Type:** Implementation / spec
+- **Scope:**
+  - Evaluate which `@agent-assistant/*` packages Ricky should compose today versus later
+  - Implement the first integration point — likely `turn-context` for request shaping or `surfaces` for Slack ingress
+  - Document the composition boundary between Ricky-owned domain logic and Agent Assistant shared packages
+- **Primary files:** `src/assistant/composition.ts`, `src/assistant/types.ts`, `docs/architecture/ricky-agent-assistant-composition.md`
+- **Proof expectations:** At least one Agent Assistant package is imported and used for a real product behavior, not just a type re-export.
+
+#### Workflow: `wave6-integration/12-prove-agent-assistant-integration-seam.ts`
+- **Type:** Proof
+- **Scope:** Prove that the first Agent Assistant integration works correctly and that Ricky's existing tests continue to pass after the composition change.
+- **Required proof:**
+  - Agent Assistant package is imported and used in a real code path
+  - Existing 389 tests still pass
+  - The integration seam is documented with clear boundary rules
+  - No Ricky-owned domain logic leaks into Agent Assistant packages
+
+## 5. What should wait until after Wave 6
+
+These are important but should not outrun the surface and integration work:
+
+| Area | Why it waits |
+|---|---|
+| **Web surface** | Slack and MCP are higher leverage; web can reuse patterns from both |
+| **Full autonomous repair** | Restart specialist is the first step; autonomous repair at scale needs proven safety policy |
+| **Cataloging/scheduled analytics jobs** | Health analyzer exists; scheduled jobs need Cloud deployment infrastructure first |
+| **Cloud deployment (worker/infra)** | Requires the Slack and proactive paths to exist before deployment is meaningful |
+| **Multi-provider workflow generation** | Core Relay-native generation must be proven first |
+| **RelayFile-backed evidence substrate** | Current evidence model works; RelayFile integration is an optimization |
+| **Broad Slack app polish** | Get the basic Slack path working and proven before polishing interactive features |
+
+## 6. Proof expectations by area
+
+### Workflow proof
+Every proposed Wave 6 workflow must produce evidence that its user-facing contract works. Implementation workflows need deterministic unit or integration tests for the behavior they add; proof workflows need end-to-end or slice-level evidence that the behavior reaches the intended surface, artifact, diagnosis, or execution outcome.
+
+### CLI/banner and onboarding proof
+The CLI/banner UX spec and onboarding behavior remain a regression gate for the next batch. Future surface work must not break the proven onboarding contract: recognizable Ricky banner, truthful local/BYOH and Cloud guidance, first-run and recovery paths, non-TTY behavior, and user-visible setup errors.
+
+### Slack proof
+Must show a Slack message reaches Ricky's domain core, triggers a real product action, and returns a formatted response in the same thread. Not just webhook parsing.
+
+### MCP proof
+Must show a spec from an MCP-connected assistant normalizes identically to CLI input and returns structured results through MCP tool responses.
+
+### Proactive proof
+Must show different failure taxonomy categories produce different notification content with actionable next steps. Not just "workflow failed" alerts.
+
+### Restart proof
+Must show the restart specialist blocks unsafe restarts, selects the right restart mode per failure class, and coordinates through the local coordinator with evidence.
+
+### End-to-end proof
+Must show at least one full user journey from spec to execution outcome for both local and Cloud paths. Not just subsystem unit tests.
+
+### Agent Assistant proof
+Must show at least one Agent Assistant package used in a real Ricky code path with all existing tests passing.
 
 ### Regression proof
-Must continue to use exact or bounded change-scope gates, post-fix validation, final re-review, and final signoff.
+All proof workflows must verify that existing test suites (currently 389 tests across 21 files) continue to pass after each implementation change.
 
-## 9. Recommended authoring pattern for the next batch
+## 7. Dependency and sequencing notes
 
-For each next-wave implementation area, prefer this pair:
-- implementation workflow
-- proof workflow
+```
+Batch A (Slack) ──────────────────────┐
+                                      ├── Batch E (end-to-end proof)
+Batch B (MCP handoff) ────────────────┤
+                                      │
+Batch C (proactive) ──── needs Slack ─┘
+                          for delivery
+Batch D (restart) ──── independent of surfaces
 
-Why:
-- implementation and proof often diverge in failure mode
-- a compile-clean implementation can still fail the actual product contract
-- proof workflows keep Ricky honest about 80-to-100 behavior
+Batch F (Agent Assistant) ──── independent, can run in parallel
+```
 
-Where possible, proof workflows should run after implementation workflows and use:
-- clean or isolated setup when relevant
-- deterministic artifact checks
-- before/after evidence where a bug or blocker is involved
-- explicit residual-risk recording
+Recommended execution order:
+1. **Batch A + B in parallel** — Slack ingress and MCP handoff are independent implementations
+2. **Batch C** — Proactive notifications need a delivery surface (Slack from Batch A)
+3. **Batch D** — Restart specialist can start in parallel with Batch C
+4. **Batch E** — End-to-end proof should run after surfaces exist
+5. **Batch F** — Agent Assistant composition can start anytime but should prove integration after surfaces stabilize
 
-## 10. Suggested next concrete workflow names
+## 8. Workflow type classification
 
-These names are recommendations, not yet authored files:
+| Workflow | Type | Wave |
+|---|---|---|
+| 01-implement-slack-ingress | Implementation | wave6-surfaces |
+| 02-prove-slack-spec-to-artifact | Proof | wave6-surfaces |
+| 03-implement-mcp-handoff-surface | Implementation | wave6-surfaces |
+| 04-prove-mcp-spec-handoff-and-return | Proof | wave6-surfaces |
+| 05-implement-proactive-failure-detection | Implementation | wave6-surfaces |
+| 06-prove-proactive-notification-loop | Proof | wave6-surfaces |
+| 07-implement-restart-specialist | Implementation | wave6-runtime |
+| 08-prove-restart-safety-and-execution | Proof | wave6-runtime |
+| 09-prove-local-spec-to-execution-loop | Proof | wave6-proof |
+| 10-prove-cloud-spec-to-artifact-return | Proof | wave6-proof |
+| 11-implement-agent-assistant-composition | Implementation/spec | wave6-integration |
+| 12-prove-agent-assistant-integration-seam | Proof | wave6-integration |
 
-- `workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts`
-- `workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts`
-- `workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts`
-- `workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts`
-- `workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts`
-- `workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts`
-- `workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts`
-- `workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts`
-- `workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts`
-- `workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts`
+**Total: 12 workflows** — 5 implementation, 7 proof
 
-## 11. Why this sequencing is recommended
+The proof-heavy ratio is deliberate. Ricky's internals exist. What needs proving is that they connect to real surfaces and real execution.
 
-This order keeps Ricky honest:
-- the onboarding UX spec turns into real behavior first
-- the local path becomes real next, preserving Ricky's local/BYOH promise
-- Cloud follows as a real slice rather than documentation theater
-- diagnosis/unblocker behavior then becomes a proven differentiator instead of a research note only
+## 9. Connection to failure taxonomy
 
-It also keeps the batch bounded and understandable.
+The next wave should exercise these taxonomy categories in real product paths:
 
-## 12. Risks if we skip this plan
+| Taxonomy category | Where it appears in Wave 6 |
+|---|---|
+| `agent_runtime.handoff_stalled` | Restart specialist safety evaluation, proactive notification content |
+| `agent_runtime.progress_opaque` | Proactive notification urgency classification |
+| `environment.relay_state_contaminated` | Restart specialist preflight checks, end-to-end execution proof |
+| `workflow_structure.control_flow_invalid` | Restart specialist blocks restart and recommends fix |
+| `workflow_structure.scope_gate_weak` | Validator specialist in end-to-end proof path |
+| `validation_strategy.repo_mismatch` | End-to-end proof must use truthful validation, not aspirational commands |
 
-If Ricky skips this next-wave structure, likely failure modes are:
-- too many new workflows without enough proof
-- over-investment in spec scaffolding with not enough implementation truth
-- Cloud-only drift that weakens local/BYOH credibility
-- continued runtime/environment blocker rediscovery rather than productized unblockers
-- false confidence from compile/test-only progress
+## 10. What should be built immediately after Wave 6
 
-## 13. Decision
+If Wave 6 completes honestly:
+1. **Web surface** — using patterns proven by Slack and MCP
+2. **Cloud deployment** — worker/infra now that Slack and proactive paths exist
+3. **Scheduled analytics jobs** — cataloging with real Cloud run data
+4. **Broader Slack interactivity** — buttons, modals, approval flows for restart decisions
 
-The recommended next Ricky wave is a bounded proof-oriented batch centered on:
-- CLI onboarding implementation and proof
-- local/BYOH implementation and proof
-- first Cloud-backed Ricky slice and proof
-- failure diagnosis/unblocker implementation and proof
+## 11. Decision
 
-The immediate next thing to build after the new CLI onboarding UX spec is:
-- the actual CLI onboarding implementation workflow
-- followed immediately by a proof workflow for first-run and recovery behavior
+The recommended next Ricky wave is a bounded 12-workflow batch (Wave 6) centered on:
+- Slack surface implementation and proof
+- MCP/assistant handoff implementation and proof
+- Proactive failure notification implementation and proof
+- Restart specialist implementation and proof
+- End-to-end execution proof for local and Cloud paths
+- Agent Assistant composition proof
+
+This wave turns Ricky from a CLI-and-test product into a multi-surface, proactive, real-execution product.
+
+The immediate next thing to build is:
+- Slack ingress implementation (Batch A)
+- MCP handoff implementation (Batch B)
+- These can run in parallel because they share no implementation dependencies
