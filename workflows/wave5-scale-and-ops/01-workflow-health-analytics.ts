@@ -47,7 +47,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics',
-        'mkdir -p src/analytics',
+        'mkdir -p packages/product/src/analytics',
         'echo RICKY_WAVE5_HEALTH_ANALYTICS_READY',
       ].join(' && '),
       captureOutput: true,
@@ -98,11 +98,11 @@ Context inputs:
 {{steps.read-product-spec.output}}
 
 Deliverables:
-- src/analytics/health-analyzer.ts
-- src/analytics/digest-generator.ts
-- src/analytics/types.ts
-- src/analytics/health-analyzer.test.ts
-- src/analytics/index.ts
+- packages/product/src/analytics/health-analyzer.ts
+- packages/product/src/analytics/digest-generator.ts
+- packages/product/src/analytics/types.ts
+- packages/product/src/analytics/health-analyzer.test.ts
+- packages/product/src/analytics/index.ts
 
 Non-goals:
 - Do not build dashboards.
@@ -116,7 +116,7 @@ Verification:
 - Post-edit gates must run after implementation and tests.
 
 Commit/PR boundary:
-- Keep changes scoped to src/analytics and imports from runtime evidence/failure types if they already exist.
+- Keep changes scoped to packages/product/src/analytics and imports from runtime evidence/failure types if they already exist.
 
 Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md ending with HEALTH_ANALYTICS_PLAN_READY.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md' },
@@ -141,19 +141,19 @@ Verification:
 - Keep analysis deterministic.
 - Prefer typed inputs that can be fed by local or Cloud evidence stores later.
 - Recommendations must reference concrete signals from the analyzed history.`,
-      verification: { type: 'file_exists', value: 'src/analytics/health-analyzer.ts' },
+      verification: { type: 'file_exists', value: 'packages/product/src/analytics/health-analyzer.ts' },
     })
     .step('post-implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-health-analytics'],
       command: [
-        'test -f src/analytics/health-analyzer.ts',
-        'test -f src/analytics/digest-generator.ts',
-        'test -f src/analytics/types.ts',
-        'test -f src/analytics/index.ts',
-        'grep -q "failure\\|timeout\\|retry\\|verification" src/analytics/health-analyzer.ts src/analytics/types.ts',
-        'grep -q "recommend\\|digest\\|finding" src/analytics/digest-generator.ts src/analytics/types.ts',
-        'grep -q "export" src/analytics/index.ts',
+        'test -f packages/product/src/analytics/health-analyzer.ts',
+        'test -f packages/product/src/analytics/digest-generator.ts',
+        'test -f packages/product/src/analytics/types.ts',
+        'test -f packages/product/src/analytics/index.ts',
+        'grep -q "failure\\|timeout\\|retry\\|verification" packages/product/src/analytics/health-analyzer.ts packages/product/src/analytics/types.ts',
+        'grep -q "recommend\\|digest\\|finding" packages/product/src/analytics/digest-generator.ts packages/product/src/analytics/types.ts',
+        'grep -q "export" packages/product/src/analytics/index.ts',
         'echo HEALTH_ANALYTICS_IMPLEMENTATION_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -166,7 +166,7 @@ Verification:
       task: `Add tests for workflow health analytics.
 
 Deliverables:
-- src/analytics/health-analyzer.test.ts should cover failure class aggregation, retry/timeout rate calculation, weak verification detection, oversized step detection, pattern-choice warnings, digest generation, and empty-history behavior.
+- packages/product/src/analytics/health-analyzer.test.ts should cover failure class aggregation, retry/timeout rate calculation, weak verification detection, oversized step detection, pattern-choice warnings, digest generation, and empty-history behavior.
 
 Non-goals:
 - Do not depend on real run logs.
@@ -175,16 +175,16 @@ Non-goals:
 Verification:
 - Tests must prove recommendations are concrete and tied to evidence.
 - Tests must prove empty history returns a useful no-data digest instead of crashing.`,
-      verification: { type: 'file_exists', value: 'src/analytics/health-analyzer.test.ts' },
+      verification: { type: 'file_exists', value: 'packages/product/src/analytics/health-analyzer.test.ts' },
     })
     .step('post-test-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-health-tests'],
       command: [
-        'test -f src/analytics/health-analyzer.test.ts',
-        'grep -q "failure\\|timeout\\|retry" src/analytics/health-analyzer.test.ts src/analytics/health-analyzer.ts',
-        'grep -q "verification\\|hard gate\\|weak" src/analytics/health-analyzer.test.ts src/analytics/health-analyzer.ts',
-        'grep -q "recommend\\|digest" src/analytics/health-analyzer.test.ts src/analytics/digest-generator.ts',
+        'test -f packages/product/src/analytics/health-analyzer.test.ts',
+        'grep -q "failure\\|timeout\\|retry" packages/product/src/analytics/health-analyzer.test.ts packages/product/src/analytics/health-analyzer.ts',
+        'grep -q "verification\\|hard gate\\|weak" packages/product/src/analytics/health-analyzer.test.ts packages/product/src/analytics/health-analyzer.ts',
+        'grep -q "recommend\\|digest" packages/product/src/analytics/health-analyzer.test.ts packages/product/src/analytics/digest-generator.ts',
         'changed="$(git diff --name-only -- packages/product/src/analytics; git ls-files --others --exclude-standard -- packages/product/src/analytics)" && printf "%s\n" "$changed" | grep -Eq "^packages/product/src/analytics/"',
         'echo HEALTH_ANALYTICS_TEST_FILES_PRESENT',
       ].join(' && '),
@@ -195,7 +195,7 @@ Verification:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['post-test-file-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/analytics/',
+      command: 'npm run typecheck && npx vitest run packages/product/src/analytics/health-analyzer.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -255,14 +255,14 @@ Rules:
       type: 'deterministic',
       dependsOn: ['fix-health-analytics'],
       command: [
-        'test -f src/analytics/health-analyzer.ts',
-        'test -f src/analytics/digest-generator.ts',
-        'test -f src/analytics/types.ts',
-        'test -f src/analytics/health-analyzer.test.ts',
-        'test -f src/analytics/index.ts',
-        'grep -q "failure\\|timeout\\|retry\\|verification" src/analytics/health-analyzer.ts src/analytics/health-analyzer.test.ts',
-        'grep -q "recommend\\|digest" src/analytics/digest-generator.ts src/analytics/health-analyzer.test.ts',
-        'grep -q "export" src/analytics/index.ts',
+        'test -f packages/product/src/analytics/health-analyzer.ts',
+        'test -f packages/product/src/analytics/digest-generator.ts',
+        'test -f packages/product/src/analytics/types.ts',
+        'test -f packages/product/src/analytics/health-analyzer.test.ts',
+        'test -f packages/product/src/analytics/index.ts',
+        'grep -q "failure\\|timeout\\|retry\\|verification" packages/product/src/analytics/health-analyzer.ts packages/product/src/analytics/health-analyzer.test.ts',
+        'grep -q "recommend\\|digest" packages/product/src/analytics/digest-generator.ts packages/product/src/analytics/health-analyzer.test.ts',
+        'grep -q "export" packages/product/src/analytics/index.ts',
         'echo HEALTH_ANALYTICS_POST_FIX_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -271,7 +271,7 @@ Rules:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/analytics/',
+      command: 'npm run typecheck && npx vitest run packages/product/src/analytics/health-analyzer.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -281,7 +281,7 @@ Rules:
       dependsOn: ['post-fix-validation'],
       task: `Re-review the workflow health analytics module after fixes and post-fix validation.
 
-Read src/analytics/ source and tests, and post-fix validation output:
+Read packages/product/src/analytics/ source and tests, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm prior review findings are fixed or explicitly non-blocking. Re-check that recommendations are actionable, failure classes and rates are represented, empty/degraded histories produce honest output, and analytics closes the feedback loop without over-automating.
@@ -294,7 +294,7 @@ Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-re
       dependsOn: ['post-fix-validation'],
       task: `Re-review workflow health analytics code and tests after fixes.
 
-Read src/analytics/ source and tests, and post-fix validation output:
+Read packages/product/src/analytics/ source and tests, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm deterministic calculations, test edge case coverage, type quality, export shape, and no accidental live telemetry dependency are ready for final hard gates.
@@ -317,7 +317,7 @@ Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-re
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/analytics/',
+      command: 'npm run typecheck && npx vitest run packages/product/src/analytics/health-analyzer.test.ts',
       captureOutput: true,
       failOnError: true,
     })
