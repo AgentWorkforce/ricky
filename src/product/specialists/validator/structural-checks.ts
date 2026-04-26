@@ -31,14 +31,14 @@ const CHECKS: Check[] = [
   checkRegressionAllowlistScope,
 ];
 
-export function runStructuralChecks(workflowText: string): StructuralFinding[] {
+export function runStructuralChecks(workflowText: string, workflowPath?: string): StructuralFinding[] {
   const context: StructuralContext = {
     lines: workflowText.split(/\r?\n/),
     declaredTargets: extractDeclaredTargets(workflowText),
     regressionBlock: extractNamedBlock(workflowText, 'regression'),
   };
 
-  return CHECKS.map((check) => check(workflowText, context));
+  return CHECKS.map((check) => withWorkflowPath(check(workflowText, context), workflowPath));
 }
 
 function checkRelayShape(text: string, context: StructuralContext): StructuralFinding {
@@ -126,14 +126,14 @@ function checkTimeout(text: string, context: StructuralContext): StructuralFindi
 }
 
 function checkDeterministicSteps(text: string, context: StructuralContext): StructuralFinding {
-  const passed = /type\s*:\s*['"`]deterministic['"`]/.test(text) || /\.step\s*\(\s*['"`][^'"`]*(gate|verify|validation|typecheck|test|regression)[^'"`]*['"`]/i.test(text);
+  const passed = /type\s*:\s*['"`]deterministic['"`]/.test(text);
   return finding({
     check: 'deterministic_steps',
     passed,
     severity: 'error',
     message: passed
       ? 'Workflow includes deterministic verification steps.'
-      : 'Workflow must include deterministic steps for gates and validation, not only agent tasks.',
+      : 'Workflow must include type: deterministic steps for gates and validation, not only agent tasks or named gates.',
     location: firstLocation(context.lines, /type\s*:\s*['"`]deterministic['"`]|gate|verify|validation|typecheck|test|regression/i),
     fixHint: "Add deterministic .step(...) gates with commands and failOnError settings.",
   });
@@ -220,14 +220,19 @@ function checkInitialSoftGate(text: string, context: StructuralContext): Structu
 }
 
 function checkFinalHardGate(text: string, context: StructuralContext): StructuralFinding {
-  const passed = /failOnError\s*:\s*true/.test(text) && /final-hard|hard-gate|final validation|final validate|final-gate/i.test(text);
+  const finalGateLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`][^'"`]*(final-hard|hard-gate|final[- ]validation|final[- ]validate|final-gate)[^'"`]*['"`]/i);
+  const finalPassLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]final-review-pass-gate['"`]|FINAL_REVIEW_[A-Z_]+_PASS/i);
+  const hardFailLine = indexOfLineAfter(context.lines, Math.max(finalGateLine, finalPassLine), /failOnError\s*:\s*true/);
+  const hasFinalHardName = finalGateLine >= 0;
+  const hasHardFailureSemantics = hardFailLine >= 0 || (finalGateLine >= 0 && context.lines.slice(finalGateLine, finalGateLine + 12).some((line) => /failOnError\s*:\s*true/.test(line)));
+  const passed = hasFinalHardName && hasHardFailureSemantics && (finalPassLine < 0 || finalGateLine > finalPassLine);
   return finding({
     check: 'final_hard_gate',
     passed,
     severity: 'error',
     message: passed
-      ? 'Workflow has a final hard gate.'
-      : 'Workflow must include a final failOnError: true hard gate.',
+      ? 'Workflow has a final hard gate after final review signoff.'
+      : 'Workflow must include a final failOnError: true hard gate after the final-review-pass-gate.',
     location: firstLocation(context.lines, /final-hard|hard-gate|failOnError\s*:\s*true/i),
     fixHint: 'Add a final deterministic validation step with failOnError: true after final review-pass-gate.',
   });
@@ -305,19 +310,25 @@ function checkRunCwd(text: string, context: StructuralContext): StructuralFindin
 
 function checkStalePrefixReviewGate(text: string, context: StructuralContext): StructuralFinding {
   const fixLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]fix-loop['"`]/i);
+  const postFixLine = indexOfLineAfter(context.lines, fixLine, /\.step\s*\(\s*['"`][^'"`]*post-fix[^'"`]*(validation|gate)[^'"`]*['"`]/i);
   const finalReviewLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]final-review[^'"`]*['"`]/i);
   const finalPassLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]final-review-pass-gate['"`]|FINAL_REVIEW_[A-Z_]+_PASS/i);
-  const tailAfterFix = fixLine >= 0 ? context.lines.slice(fixLine).join('\n') : '';
-  const checksInitialReviewAfterFix = /REVIEW_(CLAUDE|CODEX)_PASS|review-(claude|codex)\.md/.test(tailAfterFix) && !/FINAL_REVIEW_(CLAUDE|CODEX)_PASS|final-review-(claude|codex)\.md/.test(tailAfterFix);
-  const passed = fixLine < 0 || (finalReviewLine > fixLine && finalPassLine > finalReviewLine && !checksInitialReviewAfterFix);
+  const tailAfterFixValidation = postFixLine >= 0 ? context.lines.slice(postFixLine).join('\n') : '';
+  const checksInitialReviewAfterFix = hasInitialReviewEvidence(tailAfterFixValidation);
+  const orderedFinalReview =
+    fixLine >= 0 &&
+    postFixLine > fixLine &&
+    finalReviewLine > postFixLine &&
+    finalPassLine > finalReviewLine;
+  const passed = fixLine < 0 || (orderedFinalReview && !checksInitialReviewAfterFix);
   return finding({
     check: 'stale_prefix_review_gate',
     passed,
     severity: 'error',
     message: passed
       ? 'Workflow gates final signoff on post-fix final re-review.'
-      : 'Workflow appears to reuse pre-fix review verdicts after the fix loop instead of running final re-review.',
-    location: lineLocation(context.lines, checksInitialReviewAfterFix ? fixLine : finalPassLine),
+      : 'Workflow must use fix -> post-fix validation -> final-review -> final-review-pass-gate and must not reuse pre-fix review verdicts after the fix loop.',
+    location: lineLocation(context.lines, checksInitialReviewAfterFix ? fixLine : Math.max(fixLine, postFixLine, finalReviewLine, finalPassLine)),
     fixHint: 'Use fix-loop -> post-fix validation -> final-review -> final-review-pass-gate, and check FINAL_REVIEW_*_PASS markers after fixes.',
   });
 }
@@ -392,6 +403,20 @@ function finding(input: {
   };
 }
 
+function withWorkflowPath(finding: StructuralFinding, workflowPath: string | undefined): StructuralFinding {
+  if (!workflowPath) return finding;
+  return {
+    ...finding,
+    path: finding.path ?? workflowPath,
+    location: finding.location
+      ? {
+          ...finding.location,
+          path: finding.location.path ?? workflowPath,
+        }
+      : undefined,
+  };
+}
+
 function firstLocation(lines: string[], pattern: RegExp): FindingLocation | undefined {
   const lineIndex = indexOfLine(lines, pattern);
   return lineLocation(lines, lineIndex);
@@ -401,6 +426,13 @@ function indexOfLine(lines: string[], pattern: RegExp): number {
   return lines.findIndex((line) => pattern.test(line));
 }
 
+function indexOfLineAfter(lines: string[], lineIndex: number, pattern: RegExp): number {
+  if (lineIndex < 0) return -1;
+  const offset = lineIndex + 1;
+  const relativeIndex = lines.slice(offset).findIndex((line) => pattern.test(line));
+  return relativeIndex < 0 ? -1 : offset + relativeIndex;
+}
+
 function lineLocation(lines: string[], lineIndex: number): FindingLocation | undefined {
   if (lineIndex < 0) return undefined;
   return {
@@ -408,6 +440,17 @@ function lineLocation(lines: string[], lineIndex: number): FindingLocation | und
     column: 1,
     snippet: lines[lineIndex]?.trim(),
   };
+}
+
+function hasInitialReviewEvidence(text: string): boolean {
+  return text
+    .split(/\r?\n/)
+    .some((line) => {
+      const withoutFinalReviewMarkers = line
+        .replace(/FINAL_REVIEW_(?:CLAUDE|CODEX)_PASS/g, '')
+        .replace(/final-review-(?:claude|codex)\.md/g, '');
+      return /REVIEW_(?:CLAUDE|CODEX)_PASS|review-(?:claude|codex)\.md/.test(withoutFinalReviewMarkers);
+    });
 }
 
 function extractNamedBlock(text: string, name: string): string {
@@ -441,7 +484,7 @@ function extractDeclaredTargets(text: string): string[] {
 }
 
 function extractPaths(text: string): string[] {
-  const matches = text.match(/(?:[A-Za-z0-9_.-]+\/)+(?:[A-Za-z0-9_.-]+|\*)/g) ?? [];
+  const matches = text.match(/(?:\.?[A-Za-z0-9_.-]+\/)+(?:[A-Za-z0-9_.-]+|\*)/g) ?? [];
   return matches
     .map((path) => path.replace(/^['"`-]+|['"`,]+$/g, ''))
     .filter((path) => !path.startsWith('http') && !path.includes('{{') && !path.includes('dry-run') && !path.includes('typecheck'));
@@ -450,24 +493,32 @@ function extractPaths(text: string): string[] {
 function extractAllowedPathPrefixes(regressionBlock: string): string[] {
   const regexBodies = [...regressionBlock.matchAll(/grep\s+-E[vq]?\s+["']([^"']+)["']/g)].map((match) => match[1] ?? '');
   const source = regexBodies.length > 0 ? regexBodies.join('|') : regressionBlock;
-  const paths = extractPaths(source.replace(/\\\./g, '.'));
+  const paths = extractPaths(source.replace(/\\\./g, '.').replace(/\\\//g, '/'));
   return [...new Set(paths.map(normalizePath))];
 }
 
 function normalizePath(path: string): string {
   return path
+    .trim()
     .replace(/\\\./g, '.')
+    .replace(/\\\//g, '/')
     .replace(/^\^/, '')
     .replace(/\$$/, '')
     .replace(/\/\.\*$/, '/')
     .replace(/\/\.$/, '')
+    .replace(/\.\*$/, '')
     .replace(/\(\?:?/g, '')
     .replace(/[()|]+$/g, '')
-    .replace(/\/$/, (value, offset, full) => (full.endsWith('.workflow-artifacts/') ? value : value));
+    .replace(/^['"`]+|['"`]+$/g, '');
 }
 
 function isAllowedRegressionPath(path: string, declaredTargets: string[]): boolean {
   if (path === '.workflow-artifacts' || path.startsWith('.workflow-artifacts/')) return true;
   if (declaredTargets.length === 0) return false;
-  return declaredTargets.some((target) => path === target || path.startsWith(`${target}/`) || target.startsWith(`${path}/`));
+  return declaredTargets.some((target) => {
+    if (target.endsWith('/')) {
+      return path === target || path.startsWith(target);
+    }
+    return path === target;
+  });
 }

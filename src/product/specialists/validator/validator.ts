@@ -3,7 +3,7 @@ import { runStructuralChecks } from './structural-checks.js';
 import { DEFAULT_PROOF_LOOP_CONFIG, type SignoffVerdict, type ValidatorInput, type ValidatorResult } from './types.js';
 
 export function validateWorkflow(input: ValidatorInput): ValidatorResult {
-  const structuralFindings = runStructuralChecks(input.workflowText);
+  const structuralFindings = runStructuralChecks(input.workflowText, input.workflowPath);
   const proofLoopConfig = { ...DEFAULT_PROOF_LOOP_CONFIG, ...input.proofLoopConfig };
   const proofLoopSteps = evaluateProofLoop({
     dryRunResult: input.dryRunResult,
