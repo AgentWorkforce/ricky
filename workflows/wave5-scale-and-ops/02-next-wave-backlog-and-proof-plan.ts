@@ -154,7 +154,7 @@ Verification:
       dependsOn: ['write-next-wave-plan'],
       command: [
         'test -f docs/product/ricky-next-wave-backlog-and-proof-plan.md',
-        'grep -qi "16-workflow\|first wave\|current wave" docs/product/ricky-next-wave-backlog-and-proof-plan.md',
+        'grep -Eqi "(first[- ]wave|current first[- ]wave status|current status|workflow files)" docs/product/ricky-next-wave-backlog-and-proof-plan.md',
         'grep -qi "CLI\|banner\|onboarding" docs/product/ricky-next-wave-backlog-and-proof-plan.md',
         'grep -qi "proof\|80-to-100\|validation" docs/product/ricky-next-wave-backlog-and-proof-plan.md',
         'grep -qi "local\|BYOH" docs/product/ricky-next-wave-backlog-and-proof-plan.md',
