@@ -192,7 +192,7 @@ Verification:
         'grep -q "Cloud" packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/mode-selector.ts',
         'grep -q "cloud connect google\\|agent-relay cloud connect" packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/onboarding.ts',
         'grep -q "GitHub\\|Nango\\|dashboard" packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/onboarding.ts',
-        'changed="$(git diff --name-only -- src/cli; git ls-files --others --exclude-standard -- src/cli)" && printf "%s\n" "$changed" | grep -Eq "^packages/cli/src/cli/"',
+        'changed="$(git diff --name-only -- packages/cli/src/cli; git ls-files --others --exclude-standard -- packages/cli/src/cli)" && printf "%s\n" "$changed" | grep -Eq "^packages/cli/src/cli/"',
         'echo CLI_ONBOARDING_TEST_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,

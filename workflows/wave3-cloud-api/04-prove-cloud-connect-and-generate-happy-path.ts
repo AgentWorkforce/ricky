@@ -225,7 +225,7 @@ Write the files to disk, then exit cleanly.`,
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only -- src/cloud/api workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path)"',
+        'changed="$(git diff --name-only -- packages/cloud/src/api workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path)"',
         'printf "%s\n" "$changed" | grep -Eq "^(src/cloud/api/|workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path\\.ts|\\.workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/)"',
         '! printf "%s\n" "$changed" | grep -Ev "^(src/cloud/api/|workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path\\.ts|\\.workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/)"',
         'echo RICKY_CLOUD_PROOF_REGRESSION_GATE_PASS',

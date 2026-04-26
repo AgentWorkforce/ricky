@@ -121,7 +121,7 @@ async function main() {
         "grep -q 'cloud connect google\\|agent-relay cloud connect google' packages/cli/src/cli/onboarding.test.ts",
         "grep -q 'GitHub\\|Nango\\|dashboard' packages/cli/src/cli/onboarding.test.ts",
         "grep -q 'recovery\\|missing\\|blocked' packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/onboarding.ts",
-        'changed="$(git diff --name-only -- src/cli; git ls-files --others --exclude-standard -- src/cli)" && printf "%s\n" "$changed" | grep -Eq "^packages/cli/src/cli/"',
+        'changed="$(git diff --name-only -- packages/cli/src/cli; git ls-files --others --exclude-standard -- packages/cli/src/cli)" && printf "%s\n" "$changed" | grep -Eq "^packages/cli/src/cli/"',
         'echo CLI_ONBOARDING_IMPL_TESTS_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -273,7 +273,7 @@ Rules:
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only -- src/cli workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts workflows/shared/scripts/restore-ricky-cli-onboarding.sh docs/architecture/ricky-wave4-runtime-completion-findings.md docs/architecture/ricky-runtime-notes.md workflows/wave0-foundation/100-debug-codex-source-edit-runtime.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec)"',
+        'changed="$(git diff --name-only -- packages/cli/src/cli workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts workflows/shared/scripts/restore-ricky-cli-onboarding.sh docs/architecture/ricky-wave4-runtime-completion-findings.md docs/architecture/ricky-runtime-notes.md workflows/wave0-foundation/100-debug-codex-source-edit-runtime.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec)"',
         'printf "%s\n" "$changed" | grep -Eq "^(packages/cli/src/cli/|workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec\.ts|workflows/shared/scripts/restore-ricky-cli-onboarding\.sh|docs/architecture/ricky-wave4-runtime-completion-findings\.md|docs/architecture/ricky-runtime-notes\.md|workflows/wave0-foundation/100-debug-codex-source-edit-runtime\.ts|\.workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/)"',
         '! printf "%s\n" "$changed" | grep -Ev "^(packages/cli/src/cli/|workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec\.ts|workflows/shared/scripts/restore-ricky-cli-onboarding\.sh|docs/architecture/ricky-wave4-runtime-completion-findings\.md|docs/architecture/ricky-runtime-notes\.md|workflows/wave0-foundation/100-debug-codex-source-edit-runtime\.ts|\.workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/)"',
         'echo CLI_ONBOARDING_IMPL_REGRESSION_GATE_PASS',

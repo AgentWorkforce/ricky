@@ -250,7 +250,7 @@ Write the files to disk, then exit cleanly.`,
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only -- src/cloud/api workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice)"',
+        'changed="$(git diff --name-only -- packages/cloud/src/api workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice)"',
         'printf "%s\n" "$changed" | grep -Eq "^(src/cloud/api/|workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice\\.ts|\\.workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/)"',
         '! printf "%s\n" "$changed" | grep -Ev "^(src/cloud/api/|workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice\\.ts|\\.workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/)"',
         'echo RICKY_CLOUD_GENERATE_REGRESSION_GATE_PASS',

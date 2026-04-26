@@ -239,7 +239,7 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only -- src/cli workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery)"',
+        'changed="$(git diff --name-only -- packages/cli/src/cli workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery)"',
         'printf "%s\n" "$changed" | grep -Eq "^(packages/cli/src/cli/|workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery\.ts|\.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/)"',
         '! printf "%s\n" "$changed" | grep -Ev "^(packages/cli/src/cli/|workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery\.ts|\.workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/)"',
         'echo CLI_ONBOARDING_PROOF_REGRESSION_GATE_PASS',

@@ -184,7 +184,7 @@ Verification:
         'grep -q "normalize\\|spec\\|MCP\\|Claude" packages/local/src/entrypoint.test.ts packages/local/src/request-normalizer.ts',
         'grep -q "local\\|BYOH\\|agent-relay" packages/local/src/entrypoint.test.ts packages/local/src/entrypoint.ts',
         'grep -q "artifact\\|log\\|warning" packages/local/src/entrypoint.test.ts packages/local/src/entrypoint.ts',
-        'changed="$(git diff --name-only -- src/local; git ls-files --others --exclude-standard -- src/local)" && printf "%s\n" "$changed" | grep -Eq "^packages/local/src/"',
+        'changed="$(git diff --name-only -- packages/local/src; git ls-files --others --exclude-standard -- packages/local/src)" && printf "%s\n" "$changed" | grep -Eq "^packages/local/src/"',
         'echo LOCAL_ENTRYPOINT_TEST_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
