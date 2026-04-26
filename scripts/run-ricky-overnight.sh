@@ -7,6 +7,9 @@ DURATION_HOURS="${RICKY_OVERNIGHT_HOURS:-7}"
 POLL_SECONDS="${RICKY_OVERNIGHT_POLL_SECONDS:-15}"
 PASSES="${RICKY_OVERNIGHT_PASSES:-3}"
 QUEUE_MODE="${RICKY_OVERNIGHT_QUEUE_MODE:-expanded}"
+MAX_WORKFLOWS_PER_INVOCATION="${RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION:-4}"
+STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
+RESUME_FLAG="${1:-}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_DIR="$REPO_ROOT/.workflow-artifacts/overnight-$STAMP"
 LOG_FILE="$ARTIFACT_DIR/overnight.log"
@@ -15,16 +18,26 @@ SUMMARY_FILE="$ARTIFACT_DIR/summary.md"
 LAST_COMMIT_FILE="$ARTIFACT_DIR/last-commit.txt"
 QUEUE_FILE="$ARTIFACT_DIR/queue.txt"
 FAILED_FILE="$ARTIFACT_DIR/failed.txt"
+SKIPPED_FILE="$ARTIFACT_DIR/skipped.txt"
+CHECKPOINT_FILE="$ARTIFACT_DIR/checkpoint.env"
 STOP_FILE="$ARTIFACT_DIR/STOP"
+STATE_FILE="$STATE_ROOT/checkpoint.env"
+STATE_LOG="$STATE_ROOT/latest-run.txt"
 
-mkdir -p "$ARTIFACT_DIR"
+mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT"
 : > "$LOG_FILE"
 : > "$FAILED_FILE"
+: > "$SKIPPED_FILE"
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 START_EPOCH="$(date +%s)"
 END_EPOCH="$((START_EPOCH + DURATION_HOURS * 3600))"
+INITIAL_GIT_HEAD=""
+CURRENT_PASS=1
+CURRENT_INDEX=0
+WORKFLOWS_RUN=0
+STATUS_REASON=""
 
 write_queue() {
   case "$QUEUE_MODE" in
@@ -73,38 +86,79 @@ EOF
   esac
 }
 
-write_queue
-
-if [[ ! -x "$RUNNER" ]]; then
-  echo "ERROR: agent-relay runner not found at $RUNNER"
-  exit 1
-fi
-
-cd "$REPO_ROOT"
-
-echo "running" > "$STATUS_FILE"
-git rev-parse HEAD > "$LAST_COMMIT_FILE"
+queue_count() {
+  awk 'NF { count += 1 } END { print count + 0 }' "$QUEUE_FILE"
+}
 
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+persist_checkpoint() {
+  cat > "$CHECKPOINT_FILE" <<EOF
+queue_mode=$QUEUE_MODE
+current_pass=$CURRENT_PASS
+current_index=$CURRENT_INDEX
+workflows_run=$WORKFLOWS_RUN
+artifact_dir=$ARTIFACT_DIR
+initial_git_head=$INITIAL_GIT_HEAD
+updated_at=$(date '+%Y-%m-%dT%H:%M:%S%z')
+EOF
+  cp "$CHECKPOINT_FILE" "$STATE_FILE"
+  printf '%s\n' "$ARTIFACT_DIR" > "$STATE_LOG"
+}
+
+restore_checkpoint() {
+  if [[ "$RESUME_FLAG" != "--resume" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$STATE_FILE" ]]; then
+    log "resume requested but no checkpoint exists for queue mode $QUEUE_MODE"
+    return 0
+  fi
+
+  log "restoring checkpoint from $STATE_FILE"
+  source "$STATE_FILE"
+  CURRENT_PASS="${current_pass:-1}"
+  CURRENT_INDEX="${current_index:-0}"
+  INITIAL_GIT_HEAD="${initial_git_head:-}"
+}
+
 write_summary() {
   local status="$1"
+  local queue_total
+  queue_total="$(queue_count)"
   cat > "$SUMMARY_FILE" <<EOF
 # Ricky overnight run
 
 - status: $status
+- reason: ${STATUS_REASON:-n/a}
 - started: $(date -r "$START_EPOCH" '+%Y-%m-%d %H:%M:%S %Z')
 - current: $(date '+%Y-%m-%d %H:%M:%S %Z')
 - duration_hours: $DURATION_HOURS
 - passes: $PASSES
 - queue_mode: $QUEUE_MODE
+- max_workflows_per_invocation: $MAX_WORKFLOWS_PER_INVOCATION
+- queue_total: $queue_total
+- current_pass: $CURRENT_PASS
+- current_index: $CURRENT_INDEX
+- workflows_run_this_invocation: $WORKFLOWS_RUN
 - artifact_dir: $ARTIFACT_DIR
+- checkpoint_file: $STATE_FILE
 - last_commit: $(cat "$LAST_COMMIT_FILE" 2>/dev/null || echo unknown)
 - failed_workflows:
 $(sed 's/^/  - /' "$FAILED_FILE" 2>/dev/null || true)
+- skipped_workflows:
+$(sed 's/^/  - /' "$SKIPPED_FILE" 2>/dev/null || true)
 EOF
+}
+
+mark_status() {
+  local status="$1"
+  STATUS_REASON="${2:-}"
+  echo "$status" > "$STATUS_FILE"
+  persist_checkpoint
+  write_summary "$status"
 }
 
 validate_repo() {
@@ -119,9 +173,13 @@ inspect_repo_changes() {
   git diff --stat > "$ARTIFACT_DIR/git-diff-stat.txt" || true
 }
 
+repo_has_meaningful_delta() {
+  ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]]
+}
+
 commit_if_clean_delta() {
   local workflow_path="$1"
-  if git diff --quiet && [[ -z "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]]; then
+  if ! repo_has_meaningful_delta; then
     log "no tracked/untracked repo delta after $workflow_path"
     return 0
   fi
@@ -141,15 +199,20 @@ run_one() {
   local workflow_path="$1"
   log ">>> running $workflow_path"
 
+  if [[ ! -f "$workflow_path" ]]; then
+    log "skipping missing workflow: $workflow_path"
+    echo "$workflow_path" >> "$SKIPPED_FILE"
+    return 0
+  fi
+
   if ! "$RUNNER" run "$workflow_path"; then
     log "workflow exited non-zero: $workflow_path"
     echo "$workflow_path" >> "$FAILED_FILE"
     inspect_repo_changes
 
-    if git diff --quiet && [[ -z "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]]; then
+    if ! repo_has_meaningful_delta; then
       log "no useful repo changes after failure; stopping on uncertainty"
-      echo "blocked" > "$STATUS_FILE"
-      write_summary "blocked"
+      mark_status "blocked" "failed without repo delta: $workflow_path"
       return 1
     fi
 
@@ -163,35 +226,86 @@ run_one() {
   return 0
 }
 
-for pass in $(seq 1 "$PASSES"); do
-  log "starting overnight pass $pass/$PASSES"
+should_stop_before_next_workflow() {
+  local now
+  now="$(date +%s)"
 
-  while IFS= read -r workflow_path; do
-    [[ -z "$workflow_path" ]] && continue
+  if [[ -f "$STOP_FILE" ]]; then
+    mark_status "stopped" "stop file detected"
+    return 0
+  fi
 
-    if [[ -f "$STOP_FILE" ]]; then
-      log "stop file detected; ending overnight run"
-      echo "stopped" > "$STATUS_FILE"
-      write_summary "stopped"
+  if (( now >= END_EPOCH )); then
+    mark_status "complete" "duration reached"
+    return 0
+  fi
+
+  if (( WORKFLOWS_RUN >= MAX_WORKFLOWS_PER_INVOCATION )); then
+    mark_status "checkpointed" "workflow chunk limit reached"
+    return 0
+  fi
+
+  return 1
+}
+
+write_queue
+
+if [[ ! -x "$RUNNER" ]]; then
+  echo "ERROR: agent-relay runner not found at $RUNNER"
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+
+echo "running" > "$STATUS_FILE"
+git rev-parse HEAD > "$LAST_COMMIT_FILE"
+INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
+restore_checkpoint
+if [[ -z "$INITIAL_GIT_HEAD" ]]; then
+  INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
+fi
+persist_checkpoint
+
+mapfile -t QUEUE_ITEMS < "$QUEUE_FILE"
+QUEUE_TOTAL="${#QUEUE_ITEMS[@]}"
+
+for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
+  CURRENT_PASS="$pass"
+  local_start_index=0
+  if (( pass == CURRENT_PASS )); then
+    local_start_index="$CURRENT_INDEX"
+  fi
+
+  log "starting overnight pass $pass/$PASSES at queue index $local_start_index"
+
+  for (( idx = local_start_index; idx < QUEUE_TOTAL; idx++ )); do
+    CURRENT_INDEX="$idx"
+    persist_checkpoint
+
+    if should_stop_before_next_workflow; then
       exit 0
     fi
 
-    now="$(date +%s)"
-    if (( now >= END_EPOCH )); then
-      log "overnight duration reached"
-      echo "complete" > "$STATUS_FILE"
-      write_summary "complete"
-      exit 0
+    workflow_path="${QUEUE_ITEMS[$idx]}"
+    if [[ -z "$workflow_path" ]]; then
+      continue
     fi
 
     if ! run_one "$workflow_path"; then
       exit 1
     fi
 
+    WORKFLOWS_RUN="$((WORKFLOWS_RUN + 1))"
+    CURRENT_INDEX="$((idx + 1))"
+    persist_checkpoint
     sleep "$POLL_SECONDS"
-  done < "$QUEUE_FILE"
+  done
+
+  CURRENT_INDEX=0
+  persist_checkpoint
+
 done
 
-echo "complete" > "$STATUS_FILE"
-write_summary "complete"
+mark_status "complete" "queue finished"
+rm -f "$STATE_FILE"
 log "overnight queue finished"

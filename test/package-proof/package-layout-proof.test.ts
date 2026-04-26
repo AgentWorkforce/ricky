@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -109,6 +111,17 @@ describe('Ricky workspace package layout and npm script parity proof', () => {
     expect(evidence).toContain('bash scripts/');
     expect(evidence).toContain('batch .sh exists: true');
     expect(evidence).toContain('overnight .sh exists: true');
+  });
+
+  it('keeps the overnight harness restart-safe and chunk-bounded', () => {
+    const script = readFileSync('scripts/run-ricky-overnight.sh', 'utf8');
+
+    expect(script).toContain('RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION');
+    expect(script).toContain('RICKY_OVERNIGHT_STATE_DIR');
+    expect(script).toContain('restore_checkpoint()');
+    expect(script).toContain('persist_checkpoint()');
+    expect(script).toContain('skipping missing workflow');
+    expect(script).toContain('checkpointed');
   });
 
   it('is fully deterministic — repeated evaluation yields identical results', () => {

@@ -32,7 +32,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint',
-        'mkdir -p src/local',
+        'mkdir -p packages/local/src',
         'echo LOCAL_BYOH_ENTRYPOINT_IMPL_READY',
       ].join(' && '),
       captureOutput: true,
@@ -56,11 +56,11 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'find src -maxdepth 2 -type f | sort | sed -n "1,120p"',
+        'find packages/local/src packages/cli/src -maxdepth 3 -type f | sort | sed -n "1,160p"',
         'printf "\n---\n\n"',
-        'test -f src/cli/onboarding.ts && sed -n "1,240p" src/cli/onboarding.ts || true',
+        'test -f packages/cli/src/cli/onboarding.ts && sed -n "1,240p" packages/cli/src/cli/onboarding.ts || true',
         'printf "\n---\n\n"',
-        'test -f src/cli/proof/onboarding-proof.ts && sed -n "1,220p" src/cli/proof/onboarding-proof.ts || true',
+        'test -f packages/cli/src/cli/proof/onboarding-proof.ts && sed -n "1,220p" packages/cli/src/cli/proof/onboarding-proof.ts || true',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -77,10 +77,10 @@ async function main() {
       agent: 'impl-claude',
       dependsOn: ['read-product-spec', 'read-backlog-plan', 'read-local-context', 'read-workflow-standards'],
       task: `Implement the Ricky local/BYOH entrypoint in only these files:
-- src/local/entrypoint.ts
-- src/local/request-normalizer.ts
-- src/local/entrypoint.test.ts
-- src/local/index.ts
+- packages/local/src/entrypoint.ts
+- packages/local/src/request-normalizer.ts
+- packages/local/src/entrypoint.test.ts
+- packages/local/src/index.ts
 
 Requirements:
 - accept spec handoff from CLI, MCP, Claude-style structured handoff, or workflow artifact path
@@ -91,19 +91,19 @@ Requirements:
 - keep tests deterministic and bounded
 
 This is bounded product implementation work. Write the files to disk, then exit cleanly.`,
-      verification: { type: 'file_exists', value: 'src/local/entrypoint.ts' },
+      verification: { type: 'file_exists', value: 'packages/local/src/entrypoint.ts' },
     })
     .step('implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-local-entrypoint'],
       command: [
-        'test -f src/local/entrypoint.ts',
-        'test -f src/local/request-normalizer.ts',
-        'test -f src/local/entrypoint.test.ts',
-        'test -f src/local/index.ts',
-        "grep -q 'local\\|BYOH\\|agent-relay' src/local/entrypoint.ts src/local/request-normalizer.ts src/local/entrypoint.test.ts",
-        "grep -q 'spec\\|workflow\\|artifact\\|Claude\\|MCP' src/local/request-normalizer.ts src/local/entrypoint.ts src/local/entrypoint.test.ts",
-        "grep -q 'warning\\|log\\|artifact\\|next' src/local/entrypoint.ts src/local/entrypoint.test.ts",
+        'test -f packages/local/src/entrypoint.ts',
+        'test -f packages/local/src/request-normalizer.ts',
+        'test -f packages/local/src/entrypoint.test.ts',
+        'test -f packages/local/src/index.ts',
+        "grep -q 'local\\|BYOH\\|agent-relay' packages/local/src/entrypoint.ts packages/local/src/request-normalizer.ts packages/local/src/entrypoint.test.ts",
+        "grep -q 'spec\\|workflow\\|artifact\\|Claude\\|MCP' packages/local/src/request-normalizer.ts packages/local/src/entrypoint.ts packages/local/src/entrypoint.test.ts",
+        "grep -q 'warning\\|log\\|artifact\\|next' packages/local/src/entrypoint.ts packages/local/src/entrypoint.test.ts",
         'echo LOCAL_BYOH_ENTRYPOINT_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -112,7 +112,7 @@ This is bounded product implementation work. Write the files to disk, then exit 
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['implementation-file-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/local/',
+      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
       captureOutput: true,
       failOnError: false,
     })
@@ -179,11 +179,11 @@ This is bounded product implementation work. Write the files to disk, then exit 
       type: 'deterministic',
       dependsOn: ['fix-local-entrypoint'],
       command: [
-        'test -f src/local/entrypoint.ts',
-        'test -f src/local/request-normalizer.ts',
-        'test -f src/local/entrypoint.test.ts',
-        'test -f src/local/index.ts',
-        "grep -q 'local\\|BYOH\\|agent-relay' src/local/entrypoint.ts src/local/entrypoint.test.ts",
+        'test -f packages/local/src/entrypoint.ts',
+        'test -f packages/local/src/request-normalizer.ts',
+        'test -f packages/local/src/entrypoint.test.ts',
+        'test -f packages/local/src/index.ts',
+        "grep -q 'local\\|BYOH\\|agent-relay' packages/local/src/entrypoint.ts packages/local/src/entrypoint.test.ts",
         'echo LOCAL_BYOH_ENTRYPOINT_POST_FIX_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -192,7 +192,7 @@ This is bounded product implementation work. Write the files to disk, then exit 
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/local/',
+      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
       captureOutput: true,
       failOnError: false,
     })
@@ -240,7 +240,7 @@ This is bounded product implementation work. Write the files to disk, then exit 
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/local/',
+      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
       captureOutput: true,
       failOnError: true,
     })
@@ -248,9 +248,9 @@ This is bounded product implementation work. Write the files to disk, then exit 
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only -- src/local workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(src/local/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"',
-        '! printf "%s\n" "$changed" | grep -Ev "^(src/local/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"',
+        'changed="$(git diff --name-only -- packages/local/src workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint)"',
+        'printf "%s\n" "$changed" | grep -Eq "^(packages/local/src/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"',
+        '! printf "%s\n" "$changed" | grep -Ev "^(packages/local/src/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"',
         'echo LOCAL_BYOH_ENTRYPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -264,8 +264,8 @@ This is bounded product implementation work. Write the files to disk, then exit 
         '# Ricky local/BYOH entrypoint signoff',
         '',
         'Validation commands:',
-        '- npx tsc --noEmit',
-        '- npx vitest run src/local/',
+        '- npm run typecheck --workspace @ricky/local',
+        '- npm test --workspace @ricky/local',
         '',
         'Expected contract:',
         '- local spec handoff accepted',

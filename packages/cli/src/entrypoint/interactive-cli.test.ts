@@ -255,4 +255,60 @@ describe('runInteractiveCli', () => {
     expect(result.guidance.join('\n')).toMatch(/Stale relay state/);
     expect(result.guidance.join('\n')).toMatch(/Invalidate relay cache/);
   });
+
+  it('in both mode, skips cloud when local execution fails', async () => {
+    const cloudExecutor = { generate: vi.fn() };
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('both')),
+      handoff: { source: 'cli', spec: 'Failing workflow', mode: 'both' },
+      cloudRequest: cloudRequest(),
+      localExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          ok: false,
+          artifacts: [],
+          logs: ['something broke'],
+          warnings: ['local failure'],
+          nextActions: ['Fix and retry'],
+        }),
+      },
+      cloudExecutor,
+      diagnoseFn: vi.fn().mockReturnValue(null),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.mode).toBe('both');
+    expect(result.localResult?.ok).toBe(false);
+    expect(result.cloudResult).toBeUndefined();
+    expect(cloudExecutor.generate).not.toHaveBeenCalled();
+  });
+
+  it('propagates onboarding failure as a rejected promise', async () => {
+    await expect(
+      runInteractiveCli({
+        onboard: vi.fn().mockRejectedValue(new Error('TTY not available')),
+      }),
+    ).rejects.toThrow('TTY not available');
+  });
+
+  it('passes mode override through to onboarding', async () => {
+    const onboardFn = vi.fn().mockResolvedValue(onboarding('cloud'));
+
+    await runInteractiveCli({
+      onboard: onboardFn,
+      mode: 'cloud',
+      cloudRequest: cloudRequest(),
+      cloudExecutor: {
+        generate: vi.fn().mockResolvedValue({
+          artifacts: [],
+          warnings: [],
+          followUpActions: [],
+        }),
+      },
+    });
+
+    expect(onboardFn).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'cloud' }),
+    );
+  });
 });

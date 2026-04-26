@@ -99,7 +99,7 @@ export interface InteractiveCliDeps {
 
 async function executeLocalPath(
   deps: InteractiveCliDeps,
-  mode: RickyMode,
+  _mode: RickyMode,
 ): Promise<{ localResult?: LocalResponse; diagnoses: Diagnosis[]; guidance: string[]; awaitingInput: boolean }> {
   if (!deps.handoff) {
     return {

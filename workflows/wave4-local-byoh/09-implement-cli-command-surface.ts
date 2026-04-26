@@ -238,7 +238,7 @@ Requirements:
         'git diff --name-only -- packages/cli/src/commands package.json workflows/wave4-local-byoh/09-implement-cli-command-surface.ts > .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/tracked-changes.txt',
         'git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface > .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/untracked-artifacts.txt',
         'cat .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/tracked-changes.txt .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/untracked-artifacts.txt > .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/changed.txt',
-        '! grep -Ev "^(|src/commands/|package\\.json|workflows/wave4-local-byoh/09-implement-cli-command-surface\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/)" .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/changed.txt',
+        '! grep -Ev "^(|packages/cli/src/commands/|package\\.json|workflows/wave4-local-byoh/09-implement-cli-command-surface\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/)" .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/changed.txt',
         'echo RICKY_CLI_COMMAND_SURFACE_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,

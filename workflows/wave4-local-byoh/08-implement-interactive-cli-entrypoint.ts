@@ -250,7 +250,7 @@ Requirements:
         'git diff --name-only -- packages/cli/src/entrypoint workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/tracked-changes.txt',
         'git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/untracked-artifacts.txt',
         'cat .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/tracked-changes.txt .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/untracked-artifacts.txt > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/changed.txt',
-        '! grep -Ev "^(|src/entrypoint/|workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/)" .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/changed.txt',
+        '! grep -Ev "^(|packages/cli/src/entrypoint/|workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/)" .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/changed.txt',
         'echo RICKY_INTERACTIVE_ENTRYPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
