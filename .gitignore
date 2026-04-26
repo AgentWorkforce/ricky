@@ -17,6 +17,9 @@ dist/
 # scratch / temp
 tmp/
 
+# OS
+.DS_Store
+
 # editor / IDE
 .idea/
 .vscode/
