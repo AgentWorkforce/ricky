@@ -278,11 +278,18 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 }
 
 /**
- * Module-level default executor — created at import time with
- * `createProcessCommandRunner()`. Only used when callers omit
- * `options.executor` and `options.localExecutor` from `runLocal()`.
+ * Lazily-initialized default executor. Deferred to first use so that
+ * importing this module does not spawn a `LocalCoordinator` (and its
+ * underlying `createProcessCommandRunner()`) as an import side-effect.
  */
-export const defaultExecutor: LocalExecutor = createLocalExecutor();
+let _defaultExecutor: LocalExecutor | null = null;
+
+export function getDefaultExecutor(): LocalExecutor {
+  if (!_defaultExecutor) {
+    _defaultExecutor = createLocalExecutor();
+  }
+  return _defaultExecutor;
+}
 
 // ---------------------------------------------------------------------------
 // Entrypoint options
@@ -310,7 +317,7 @@ export async function runLocal(
   handoff: RawHandoff,
   options: LocalEntrypointOptions = {},
 ): Promise<LocalResponse> {
-  const { executor = options.localExecutor ? createLocalExecutor(options.localExecutor) : defaultExecutor, artifactReader } = options;
+  const { executor = options.localExecutor ? createLocalExecutor(options.localExecutor) : getDefaultExecutor(), artifactReader } = options;
 
   // Normalize
   let request: LocalInvocationRequest;
