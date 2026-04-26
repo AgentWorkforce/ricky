@@ -214,23 +214,23 @@ async function main() {
         "// Each family lists commands the closure agent MUST attempt (at least one must succeed)",
         "// or explicitly document why it cannot run (which forces a blocker).",
         "const validationFamilies = {",
-        "  'repo-standards': ['npm run typecheck', 'npm test -- --grep \"standards\\\\|convention\"'],",
+        "  'repo-standards': ['npx vitest run test/smoke.test.ts test/package-proof/package-layout-proof.test.ts'],",
         "  'toolchain': ['npm run typecheck', 'npm test'],",
-        "  'shared-models': ['npm test -- --grep \"shared\\\\|model\\\\|config\"', 'npm run typecheck'],",
+        "  'shared-models': ['npx vitest run packages/runtime/src/evidence/capture.test.ts'],",
         "  'architecture-docs': ['test -f docs/architecture/ricky-architecture-decision-log.md'],",
-        "  'run-coordinator': ['npm test -- --grep \"coordinator\\\\|runtime\"'],",
-        "  'evidence-model': ['npm test -- --grep \"evidence\"'],",
-        "  'failure-classification': ['npm test -- --grep \"failure\\\\|classification\"'],",
-        "  'spec-intake': ['npm test -- --grep \"spec\\\\|intake\"'],",
-        "  'debugger': ['npm test -- --grep \"debug\"'],",
-        "  'validator': ['npm test -- --grep \"validator\"'],",
-        "  'generate-endpoint': ['npm test -- --grep \"generate\\\\|endpoint\"'],",
-        "  'local-invocation': ['npm test -- --grep \"local\\\\|invocation\\\\|entrypoint\"'],",
-        "  'cli-onboarding-ux': ['npm test -- --grep \"onboarding\\\\|ux\\\\|spec\"'],",
-        "  'cli-onboarding-first-run': ['npm test -- --grep \"onboarding\\\\|first.run\\\\|recovery\"'],",
-        "  'cli-command-surface': ['npm test -- --grep \"command\\\\|surface\\\\|cli\"'],",
+        "  'run-coordinator': ['npx vitest run packages/runtime/src/local-coordinator.test.ts'],",
+        "  'evidence-model': ['npx vitest run packages/runtime/src/evidence/capture.test.ts'],",
+        "  'failure-classification': ['npx vitest run packages/runtime/src/failure/classifier.test.ts'],",
+        "  'spec-intake': ['npx vitest run packages/product/src/spec-intake/parser.test.ts'],",
+        "  'debugger': ['npx vitest run packages/product/src/specialists/debugger/debugger.test.ts'],",
+        "  'validator': ['npx vitest run packages/product/src/specialists/validator/validator.test.ts'],",
+        "  'generate-endpoint': ['npx vitest run packages/cloud/src/api/generate-endpoint.test.ts'],",
+        "  'local-invocation': ['npx vitest run packages/local/src/entrypoint.test.ts packages/local/src/proof/local-entrypoint-proof.test.ts'],",
+        "  'cli-onboarding-ux': ['npx vitest run packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/proof/onboarding-proof.test.ts'],",
+        "  'cli-onboarding-first-run': ['npx vitest run packages/cli/src/cli/proof/onboarding-proof.test.ts'],",
+        "  'cli-command-surface': ['npx vitest run packages/cli/src/commands/cli-main.test.ts'],",
         "  'backlog': ['test -f docs/product/ricky-next-wave-backlog-and-proof-plan.md'],",
-        "  'split-workspace': ['npm test -- --grep \"workspace\\\\|package\\\\|split\"', 'npm run typecheck'],",
+        "  'split-workspace': ['npx vitest run test/package-proof/package-layout-proof.test.ts', 'npm run typecheck'],",
         "};",
         "",
         "// Match each unsigned workflow to its validation family",
@@ -305,7 +305,12 @@ Required closure protocol:
 1. Read unsigned-workflows.tsv and validation-plan.json. Cover every row exactly once.
 2. Do not attempt to close historical workflows inline by editing their workflow files or product code. Validate the current repo state and write only Wave 6 closure artifacts.
 3. For each unsigned workflow, inspect its workflow file, related implementation or proof files, and existing artifacts before deciding.
-4. Run the validation commands listed in validation-plan.json for each workflow. Capture output in validation-output.txt. If at least one command produces meaningful non-compile-only evidence, the workflow may be signed off. If no command succeeds beyond compile/typecheck, write a blocker.
+4. Run the validation commands listed in validation-plan.json for each workflow. Capture output in validation-output.txt using this exact repeated record shape for every attempted command:
+   - COMMAND: <exact command>
+   - EXIT_CODE: <integer>
+   - RESULT: PASS or RESULT: FAIL
+   - OUTPUT: followed by the captured output snippet
+   If a workflow is marked SIGNED_OFF, validation-output.txt MUST show at least one successful non-compile-only command, meaning a PASS record whose command is not just npm run typecheck, tsc, or another compile-only check.
 5. Capture changed-file scope proof for every workflow. The proof MUST contain exactly these sections with non-empty content:
    - "## Tracked changes" (output of git diff --name-only)
    - "## Untracked changes" (output of git ls-files --others --exclude-standard)
@@ -315,7 +320,7 @@ Required closure protocol:
    - "## Workflow path"
    - "## Summary of validated behavior"
    - "## Validation commands" (must list actual commands run)
-   - "## Validation result" (must include captured output or summary)
+   - "## Validation result" (must reference validation-output.txt and summarize the successful non-compile proof)
    - "## Changed-file scope proof path"
    - "## Evidence beyond compile-only" (explicit statement of why evidence is stronger)
 7. If closure is blocked, write exactly one per-workflow blocker.md with these exact headings:
@@ -360,6 +365,13 @@ The summary artifact is the operator handoff. It must be specific enough to run 
         '  echo "TSV_ROW_COUNT_MISMATCH: expected=$expected_count actual=$tsv_count"',
         '  exit 1',
         'fi',
+        'cut -f1,2 "$root/unsigned-workflows.tsv" | LC_ALL=C sort > "$root/expected-ids-paths.txt"',
+        'cut -f1,2 "$summary_tsv" | LC_ALL=C sort > "$root/actual-ids-paths.txt"',
+        'if [ "$(uniq "$root/actual-ids-paths.txt" | wc -l | tr -d " ")" -ne "$tsv_count" ]; then',
+        '  echo "TSV_DUPLICATE_ID_PATH_ROWS"',
+        '  exit 1',
+        'fi',
+        'diff -u "$root/expected-ids-paths.txt" "$root/actual-ids-paths.txt" >/dev/null || { echo "TSV_EXACT_ONCE_MEMBERSHIP_MISMATCH"; exit 1; }',
         '',
         '# Verify every TSV row has allowed state',
         'while IFS=$\'\\t\' read -r tsv_id tsv_path tsv_state tsv_artifact tsv_taxonomy tsv_cmd tsv_scope; do',
@@ -385,6 +397,7 @@ The summary artifact is the operator handoff. It must be specific enough to run 
         '  dir="$root/per-workflow/$id"',
         '  signoff="$dir/signoff.md"',
         '  blocker="$dir/blocker.md"',
+        '  validation_output="$dir/validation-output.txt"',
         '  scope_proof="$dir/changed-file-scope-proof.txt"',
         '',
         '  # Exactly one of signoff or blocker',
@@ -422,6 +435,8 @@ The summary artifact is the operator handoff. It must be specific enough to run 
         '    grep -q "## Owner-facing next step" "$blocker" || { echo "BLOCKER_MISSING_HEADING_OWNER:$id"; exit 1; }',
         '    grep -q "## Validation commands" "$blocker" || { echo "BLOCKER_MISSING_HEADING_VALIDATION:$id"; exit 1; }',
         '    grep -q "## Changed-file scope proof path" "$blocker" || { echo "BLOCKER_MISSING_HEADING_SCOPE:$id"; exit 1; }',
+        '    test -f "$validation_output" || { echo "BLOCKER_MISSING_VALIDATION_OUTPUT:$id"; exit 1; }',
+        '    grep -Eq "^(COMMAND: .+)$" "$validation_output" || { echo "BLOCKER_BAD_VALIDATION_OUTPUT_COMMANDS:$id"; exit 1; }',
         '    # Taxonomy value check',
         '    grep -Eq "## Taxonomy classification" "$blocker" && grep -A2 "## Taxonomy classification" "$blocker" | grep -Eq "(agent_runtime|environment|workflow_structure|validation_strategy)\\." || { echo "BLOCKER_BAD_TAXONOMY:$id"; exit 1; }',
         '    # Non-empty observed symptom (at least one line of content after heading)',
@@ -540,6 +555,13 @@ After fixes, write ${artifactRoot}/fixes.md with:
         '  echo "POST_FIX_TSV_ROW_MISMATCH: expected=$expected_count actual=$tsv_count"',
         '  exit 1',
         'fi',
+        'cut -f1,2 "$root/unsigned-workflows.tsv" | LC_ALL=C sort > "$root/post-fix-expected-ids-paths.txt"',
+        'cut -f1,2 "$summary_tsv" | LC_ALL=C sort > "$root/post-fix-actual-ids-paths.txt"',
+        'if [ "$(uniq "$root/post-fix-actual-ids-paths.txt" | wc -l | tr -d " ")" -ne "$tsv_count" ]; then',
+        '  echo "POST_FIX_TSV_DUPLICATE_ID_PATH_ROWS"',
+        '  exit 1',
+        'fi',
+        'diff -u "$root/post-fix-expected-ids-paths.txt" "$root/post-fix-actual-ids-paths.txt" >/dev/null || { echo "POST_FIX_TSV_EXACT_ONCE_MEMBERSHIP_MISMATCH"; exit 1; }',
         '',
         '# Verify every TSV row has allowed state and existing artifact path',
         'while IFS=$\'\\t\' read -r tsv_id tsv_path tsv_state tsv_artifact tsv_taxonomy tsv_cmd tsv_scope; do',
@@ -563,6 +585,7 @@ After fixes, write ${artifactRoot}/fixes.md with:
         '  dir="$root/per-workflow/$id"',
         '  signoff="$dir/signoff.md"',
         '  blocker="$dir/blocker.md"',
+        '  validation_output="$dir/validation-output.txt"',
         '  scope_proof="$dir/changed-file-scope-proof.txt"',
         '',
         '  if [ -f "$signoff" ] && [ -f "$blocker" ]; then echo "POST_FIX_AMBIGUOUS:$id"; exit 1; fi',
