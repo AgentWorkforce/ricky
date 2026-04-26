@@ -254,8 +254,8 @@ Write .workflow-artifacts/wave5-scale-and-ops/next-wave-backlog-and-proof-plan/f
       type: 'deterministic',
       dependsOn: ['final-review-next-wave-plan-claude', 'final-review-next-wave-plan-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/next-wave-backlog-and-proof-plan/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/next-wave-backlog-and-proof-plan/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/next-wave-backlog-and-proof-plan/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
+        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/next-wave-backlog-and-proof-plan/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo NEXT_WAVE_PLAN_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,

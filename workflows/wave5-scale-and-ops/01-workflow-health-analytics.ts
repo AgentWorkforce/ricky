@@ -241,8 +241,8 @@ Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-c
       type: 'deterministic',
       dependsOn: ['read-review-feedback'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-claude.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_CLAUDE_PASS$\"",
+        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/review-codex.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_CODEX_PASS$\"",
         "cat <<'EOF' > .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/fix-health-analytics.md",
         '# Workflow health analytics fix pass',
         '',
@@ -310,8 +310,8 @@ Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-re
       type: 'deterministic',
       dependsOn: ['final-review-analytics-claude', 'final-review-analytics-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
+        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo HEALTH_ANALYTICS_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,

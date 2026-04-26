@@ -287,8 +287,8 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-c
       type: 'deterministic',
       dependsOn: ['final-review-cli-ux-spec-claude', 'final-review-cli-ux-spec-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo CLI_UX_SPEC_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,

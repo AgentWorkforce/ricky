@@ -349,8 +349,8 @@ Check the original TypeScript review checklist again and verify any earlier conc
       type: 'deterministic',
       dependsOn: ['final-review-shared-models-claude', 'final-review-shared-models-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/final-review-claude.md | grep -Eq "^REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/final-review-codex.md | grep -Eq "^REVIEW_CODEX_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_CLAUDE_PASS$\"",
+        "tail -n 1 .workflow-artifacts/wave0-foundation/shared-models/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_CODEX_PASS$\"",
         'echo W0_SHARED_MODELS_REVIEW_PASS_GATE',
       ].join(' && '),
       captureOutput: true,

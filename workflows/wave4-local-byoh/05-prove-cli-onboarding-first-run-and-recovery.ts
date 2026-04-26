@@ -221,8 +221,8 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['final-review-claude', 'final-review-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/prove-cli-onboarding-first-run-and-recovery/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo CLI_ONBOARDING_PROOF_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,

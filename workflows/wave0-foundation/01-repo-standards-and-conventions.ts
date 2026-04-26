@@ -281,7 +281,7 @@ Check the same review checklist again and verify any earlier concrete failures w
       type: 'deterministic',
       dependsOn: ['final-review-repo-standards'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave0-foundation/repo-standards/final-review.md | grep -Eq "^REVIEW_REPO_STANDARDS_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave0-foundation/repo-standards/final-review.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_REPO_STANDARDS_PASS$\"",
         'echo W0_REPO_STANDARDS_REVIEW_PASS_GATE',
       ].join(' && '),
       captureOutput: true,

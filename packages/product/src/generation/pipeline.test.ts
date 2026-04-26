@@ -240,6 +240,7 @@ describe('workflow generation pipeline', () => {
 
     expect(passGate.command).toContain(claudePathMatch![1]);
     expect(passGate.command).toContain(codexPathMatch![1]);
+    expect(passGate.command).toContain("tr -d '[:space:]*'");
   });
 
   it('no-target spec uses output manifest instead of artifact path in file gates', () => {

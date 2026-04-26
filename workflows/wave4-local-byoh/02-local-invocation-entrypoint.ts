@@ -305,8 +305,8 @@ Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-rev
       type: 'deterministic',
       dependsOn: ['final-review-local-claude', 'final-review-local-codex'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
-        'tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md | grep -Eq "^FINAL_REVIEW_CODEX_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo LOCAL_ENTRYPOINT_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,

@@ -287,7 +287,7 @@ Check the original review checklist again and verify any earlier concrete failur
       type: 'deterministic',
       dependsOn: ['final-review-architecture-docs'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md | grep -Eq "^REVIEW_ARCHITECTURE_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_ARCHITECTURE_PASS$\"",
         'echo W0_ARCHITECTURE_DOCS_REVIEW_PASS_GATE',
       ].join(' && '),
       captureOutput: true,

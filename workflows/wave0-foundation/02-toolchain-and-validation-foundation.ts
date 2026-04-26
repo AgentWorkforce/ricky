@@ -232,7 +232,7 @@ Confirm prior findings are fixed or explicitly non-blocking. Write .workflow-art
       type: 'deterministic',
       dependsOn: ['final-review-toolchain-claude'],
       command: [
-        'tail -n 1 .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-claude.md | grep -Eq "^FINAL_REVIEW_CLAUDE_PASS$"',
+        "tail -n 1 .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
         'echo W0_TOOLCHAIN_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,

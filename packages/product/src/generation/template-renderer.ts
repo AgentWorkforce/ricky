@@ -211,8 +211,8 @@ function buildGates(
     gate(
       'final-review-pass-gate',
       [
-        `tail -n 1 ${shellQuote(`${artifactsDir}/final-review-claude.md`)} | grep -Eq '^FINAL_REVIEW_CLAUDE_PASS$'`,
-        `tail -n 1 ${shellQuote(`${artifactsDir}/final-review-codex.md`)} | grep -Eq '^FINAL_REVIEW_CODEX_PASS$'`,
+        `tail -n 1 ${shellQuote(`${artifactsDir}/final-review-claude.md`)} | tr -d '[:space:]*' | grep -Eq '^FINAL_REVIEW_CLAUDE_PASS$'`,
+        `tail -n 1 ${shellQuote(`${artifactsDir}/final-review-codex.md`)} | tr -d '[:space:]*' | grep -Eq '^FINAL_REVIEW_CODEX_PASS$'`,
       ].join(' && '),
       'output_contains',
       true,
