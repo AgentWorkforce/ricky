@@ -156,6 +156,25 @@ describe('normalizeRequest', () => {
     expect(result.metadata).toEqual({ toolCallId: 'abc-123' });
   });
 
+  it('normalizes an MCP handoff from tool arguments when no spec is provided', async () => {
+    const raw: McpHandoff = {
+      source: 'mcp',
+      toolName: 'ricky.generate',
+      arguments: {
+        goal: 'generate a local workflow',
+        workflowFile: 'workflows/local.workflow.ts',
+      },
+      mcpMetadata: { toolCallId: 'tool-1' },
+    };
+    const result = await normalizeRequest(raw);
+
+    expect(result.source).toBe('mcp');
+    expect(result.spec).toBe('generate a local workflow');
+    expect(result.structuredSpec).toEqual(raw.arguments);
+    expect(result.mode).toBe('local');
+    expect(result.metadata).toEqual({ toolCallId: 'tool-1', toolName: 'ricky.generate' });
+  });
+
   it('normalizes a free-form spec handoff', async () => {
     const result = await normalizeRequest({
       source: 'free-form',
@@ -229,6 +248,8 @@ describe('normalizeRequest', () => {
 
   it('defaults mode to local when not specified', async () => {
     const sources: RawHandoff[] = [
+      { source: 'free-form', spec: 'x' },
+      { source: 'structured', spec: { description: 'x' } },
       { source: 'cli', spec: 'x' },
       { source: 'mcp', spec: 'x' },
       { source: 'claude', spec: 'x' },
@@ -394,8 +415,11 @@ describe('runLocal', () => {
 
     expect(result.ok).toBe(true);
     expect(localExecutor.writes).toHaveLength(0);
+    expect(localExecutor.runner.invocations).toHaveLength(1);
+    expect(localExecutor.runner.invocations[0].args).toContain('workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts');
     expect(result.artifacts[0].path).toBe('workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts');
     expect(result.logs.some((l) => l.includes('[local] spec intake route: execute'))).toBe(true);
+    expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
   });
 
   it('default executor warns on cloud mode', async () => {
@@ -417,6 +441,19 @@ describe('runLocal', () => {
 
     expect(result.ok).toBe(true);
     expect(result.nextActions.some((a) => a.includes('promote to Cloud'))).toBe(true);
+  });
+
+  it('uses the local executor path by default for BYOH requests without Cloud warnings', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    const result = await runLocal(
+      { source: 'mcp', arguments: { goal: 'generate a local workflow for packages/local/src/entrypoint.ts' } },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(localExecutor.runner.invocations).toHaveLength(1);
+    expect(result.logs.some((l) => l.includes('[local] mode: local'))).toBe(true);
+    expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
   });
 
   it('passes configured cwd to artifact writer so artifacts are placed in execution directory', async () => {
