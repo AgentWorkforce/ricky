@@ -1,0 +1,484 @@
+import { describe, expect, it } from 'vitest';
+
+import { intake } from '../spec-intake/index.js';
+import type { NormalizedWorkflowSpec, RawSpecPayload } from '../spec-intake/types.js';
+import { generate } from './pipeline.js';
+
+const RECEIVED_AT = '2026-04-26T00:00:00.000Z';
+
+interface SpecFixtureOverrides {
+  description?: string;
+  targetFiles?: string[];
+  constraints?: string[];
+  evidenceRequirements?: string[];
+  acceptanceGates?: string[];
+  executionPreference?: NormalizedWorkflowSpec['executionPreference'];
+}
+
+describe('workflow generation pipeline', () => {
+  it('turns a code-writing spec into an implementation team workflow with 80-to-100 validation', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a TypeScript API endpoint with parallel independent file slices and deterministic proof.',
+        targetFiles: [
+          'src/cloud/api/generate-endpoint.ts',
+          'src/cloud/api/proof/cloud-generate-proof.test.ts',
+          'src/product/generation/pipeline.test.ts',
+        ],
+        constraints: ['Must use parallel implementation where files are independent.'],
+        evidenceRequirements: ['Record deterministic proof for typecheck and tests.'],
+        acceptanceGates: ['npx tsc --noEmit', 'npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/code-generation.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact).not.toBeNull();
+    const artifact = result.artifact!;
+
+    expect(result.patternDecision).toMatchObject({
+      pattern: 'dag',
+      riskLevel: 'high',
+      overrideUsed: false,
+    });
+    expect(artifact).toMatchObject({
+      artifactPath: 'workflows/generated/code-generation.ts',
+      pattern: 'dag',
+      channel: expect.stringMatching(/^wf-ricky-/),
+    });
+    expect(artifact.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'implement-artifact', agentRole: 'impl-primary-codex' }),
+        expect.objectContaining({ id: 'fix-loop', name: '80-to-100 fix loop' }),
+        expect.objectContaining({ id: 'final-review-claude' }),
+        expect.objectContaining({ id: 'final-review-codex' }),
+      ]),
+    );
+    expect(artifact.content).toContain('.agent("impl-primary-codex"');
+    expect(artifact.content).toContain('.agent("impl-tests-codex"');
+    expect(result.validation).toMatchObject({
+      valid: true,
+      hasReviewStage: true,
+      hasDeterministicGates: true,
+    });
+    expect(result.validation.issues).toEqual([]);
+    expect(artifact.content).toMatch(/80-to-100 fix loop/i);
+    expect(artifact.content).toContain('final-review');
+  });
+
+  it('accepts a natural doc/spec request and selects a lighter workflow with deterministic review gates', () => {
+    const payload: RawSpecPayload = {
+      kind: 'natural_language',
+      surface: 'cli',
+      receivedAt: RECEIVED_AT,
+      requestId: 'doc-spec-request',
+      text: [
+        'Create a workflow spec document for release readiness.',
+        'Only modify docs/release-readiness.md.',
+        'Acceptance: reviewer signoff is recorded.',
+      ].join('\n'),
+    };
+    const intakeResult = intake(payload);
+    const normalizedSpec = intakeResult.routing?.normalizedSpec;
+
+    expect(intakeResult.success).toBe(true);
+    expect(intakeResult.routing?.target).toBe('generate');
+    expect(normalizedSpec?.desiredAction.workflowFileHint).toBeUndefined();
+    expect(normalizedSpec?.desiredAction.specText).toContain('workflow spec document');
+    expect(normalizedSpec?.targetFiles).toEqual(['docs/release-readiness.md']);
+
+    const result = generate({
+      spec: normalizedSpec!,
+      artifactPath: 'workflows/generated/doc-spec.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact).not.toBeNull();
+    const artifact = result.artifact!;
+
+    expect(result.patternDecision).toMatchObject({
+      pattern: 'supervisor',
+      riskLevel: 'medium',
+    });
+    expect(artifact.content).toContain('.agent("author-codex"');
+    expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
+    expect(artifact.gates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'initial-soft-validation',
+          failOnError: false,
+          stage: 'pre_review',
+        }),
+        expect.objectContaining({
+          name: 'final-review-pass-gate',
+          failOnError: true,
+          stage: 'final',
+        }),
+        expect.objectContaining({
+          name: 'final-hard-validation',
+          failOnError: true,
+          stage: 'final',
+        }),
+      ]),
+    );
+  });
+
+  it('reports a missing optional skill as a structured validation issue without crashing', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Draft a workflow plan for docs handoff.',
+        targetFiles: ['docs/generated-handoff.md'],
+      }),
+      skillOverrides: ['missing-optional-skill'],
+      artifactPath: 'workflows/generated/missing-skill.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.skillContext.skills).toEqual([
+      expect.objectContaining({
+        name: 'missing-optional-skill',
+        loaded: false,
+        applicable: true,
+        prerequisitesMet: false,
+      }),
+    ]);
+    expect(result.validation.issues).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        stage: 'skill_loading',
+        code: 'SKILL_UNKNOWN',
+        field: 'skillOverrides',
+        blocking: false,
+        message: expect.stringContaining('missing-optional-skill'),
+      }),
+    ]);
+    expect(result.validation.errors).toEqual([]);
+  });
+
+  it('renders the required workflow structure and deterministic gates', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow generation tests with deterministic validation.',
+        targetFiles: ['src/product/generation/pipeline.test.ts'],
+        acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/pipeline-tests.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact).not.toBeNull();
+    const artifact = result.artifact!;
+
+    expect(artifact).toMatchObject({
+      workflowId: expect.stringMatching(/^ricky-/),
+      channel: expect.stringMatching(/^wf-ricky-/),
+    });
+    expect(artifact.content).toContain('workflow(');
+    expect(artifact.content).toContain(`.channel("${artifact.channel}")`);
+    expect(artifact.content).toContain('review-claude');
+    expect(artifact.content).toContain('review-codex');
+    expect(artifact.gates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'initial-soft-validation', failOnError: false }),
+        expect.objectContaining({ name: 'final-hard-validation', failOnError: true }),
+        expect.objectContaining({ name: 'git-diff-gate', command: expect.stringContaining('git diff --name-only') }),
+      ]),
+    );
+    expect(result.validation.issues).toEqual([]);
+  });
+
+  it('returns dry-run and deterministic validation commands without executing agent-relay', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow generation command evidence.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+        acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/command-evidence.ts',
+    });
+
+    expect(result.dryRunCommand).toBe('npx agent-relay run --dry-run workflows/generated/command-evidence.ts');
+    expect(result.plannedChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'dry-run',
+          command: result.dryRunCommand,
+          stage: 'dry_run',
+          failOnError: true,
+        }),
+        expect.objectContaining({ name: 'final-hard-validation', command: expect.stringContaining('npx tsc --noEmit') }),
+        expect.objectContaining({ name: 'regression-gate', command: 'npx vitest run' }),
+      ]),
+    );
+    expect(result.deterministicValidationCommands).not.toContain(result.dryRunCommand);
+    expect(result.deterministicValidationCommands).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('npx tsc --noEmit'),
+        expect.stringContaining('npx vitest run'),
+        expect.stringContaining('git diff --name-only'),
+      ]),
+    );
+  });
+
+  it('final review output paths match the final-review-pass-gate check paths', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement path-consistency validation for review artifacts.',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+      }),
+      artifactPath: 'workflows/generated/path-consistency.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const passGate = artifact.gates.find((g) => g.name === 'final-review-pass-gate')!;
+
+    const claudePathMatch = artifact.content.match(/Write\s+(\S+\/final-review-claude\.md)/);
+    const codexPathMatch = artifact.content.match(/Write\s+(\S+\/final-review-codex\.md)/);
+    expect(claudePathMatch).not.toBeNull();
+    expect(codexPathMatch).not.toBeNull();
+
+    expect(passGate.command).toContain(claudePathMatch![1]);
+    expect(passGate.command).toContain(codexPathMatch![1]);
+  });
+
+  it('no-target spec uses output manifest instead of artifact path in file gates', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a code change without explicit target files.',
+        targetFiles: [],
+      }),
+      artifactPath: 'workflows/generated/no-target.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const fileGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
+
+    expect(fileGate.command).toContain('output-manifest.txt');
+    expect(fileGate.command).not.toContain('workflows/generated/no-target.ts');
+    expect(artifact.content).toContain('output-manifest.txt');
+  });
+
+  it('selects pipeline pattern for low-risk simple spec', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Update a readme file.',
+        targetFiles: ['README.md'],
+      }),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.patternDecision).toMatchObject({
+      pattern: 'pipeline',
+      riskLevel: 'low',
+      overrideUsed: false,
+    });
+  });
+
+  it('respects pattern override', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Simple change to one file.',
+        targetFiles: ['README.md'],
+      }),
+      patternOverride: 'dag',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.patternDecision).toMatchObject({
+      pattern: 'dag',
+      overrideUsed: true,
+    });
+    expect(artifact(result).content).toContain('.pattern("dag")');
+  });
+
+  it('returns null dryRunCommand when dryRunEnabled is false', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow with dry run disabled.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      dryRunEnabled: false,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.dryRunCommand).toBeNull();
+    expect(result.plannedChecks.find((c) => c.stage === 'dry_run')).toBeUndefined();
+  });
+
+  it('reports blocking error for unknown template override', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Generate with a bad template.',
+        targetFiles: ['src/something.ts'],
+      }),
+      templateOverride: 'nonexistent-template',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          stage: 'template_resolution',
+          code: 'TEMPLATE_MISSING',
+          blocking: true,
+        }),
+      ]),
+    );
+  });
+
+  it('routes cloud execution correctly', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a cloud-routed workflow.',
+        targetFiles: ['src/cloud/handler.ts'],
+        executionPreference: 'cloud',
+      }),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.executionRoute).toMatchObject({
+      requestedPreference: 'cloud',
+      resolvedTarget: 'cloud',
+      artifactDelivery: 'cloud_artifact',
+    });
+  });
+
+  it('routes local non-CLI surface to return_artifact', () => {
+    const mcpSpec = spec({
+      description: 'Generate via MCP surface.',
+      targetFiles: ['src/api/endpoint.ts'],
+    });
+    mcpSpec.providerContext.surface = 'mcp';
+
+    const result = generate({ spec: mcpSpec });
+
+    expect(result.success).toBe(true);
+    expect(result.executionRoute).toMatchObject({
+      resolvedTarget: 'local',
+      invocationSurface: 'mcp',
+      artifactDelivery: 'return_artifact',
+    });
+  });
+
+  it('reports non-blocking warning when an unknown skill is force-loaded via override', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Generate with an unknown skill override.',
+        targetFiles: ['src/something.ts'],
+      }),
+      skillOverrides: ['unknown-optional-skill'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'warning',
+          code: 'SKILL_UNKNOWN',
+          blocking: false,
+        }),
+      ]),
+    );
+  });
+
+  it('all rendered artifact paths are scoped under the workflow-specific artifacts directory', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Verify artifact directory scoping for generated paths.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/scoped-paths.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const content = artifact(result).content;
+
+    const slug = 'verify-artifact-directory-scoping-for-generated';
+    const artifactsDir = `.workflow-artifacts/generated/${slug}`;
+    expect(content).toContain(`${artifactsDir}/lead-plan.md`);
+    expect(content).toContain(`${artifactsDir}/review-claude.md`);
+    expect(content).toContain(`${artifactsDir}/review-codex.md`);
+    expect(content).toContain(`${artifactsDir}/final-review-claude.md`);
+    expect(content).toContain(`${artifactsDir}/final-review-codex.md`);
+    expect(content).toContain(`${artifactsDir}/signoff.md`);
+  });
+});
+
+function artifact(result: ReturnType<typeof generate>): NonNullable<ReturnType<typeof generate>['artifact']> {
+  expect(result.artifact).not.toBeNull();
+  return result.artifact!;
+}
+
+function spec(overrides: SpecFixtureOverrides = {}): NormalizedWorkflowSpec {
+  const description = overrides.description ?? 'Generate a workflow for deterministic product work.';
+  const rawPayload: RawSpecPayload = {
+    kind: 'natural_language',
+    surface: 'cli',
+    receivedAt: RECEIVED_AT,
+    requestId: 'generation-test-request',
+    text: description,
+  };
+  const providerContext = {
+    surface: 'cli' as const,
+    requestId: rawPayload.requestId,
+    metadata: {},
+  };
+  const targetFiles = overrides.targetFiles ?? [];
+  const constraints = overrides.constraints ?? [];
+  const evidenceRequirements = overrides.evidenceRequirements ?? [];
+  const acceptanceGates = overrides.acceptanceGates ?? [];
+
+  return {
+    intent: 'generate',
+    description,
+    targetRepo: null,
+    targetContext: null,
+    targetFiles,
+    desiredAction: {
+      kind: 'generate',
+      summary: description,
+      specText: description,
+      targetFiles,
+    },
+    constraints: constraints.map((constraint) => ({
+      constraint,
+      category: /\bonly\b|\bmust\b/i.test(constraint) ? 'scope' : 'quality',
+    })),
+    evidenceRequirements: evidenceRequirements.map((requirement) => ({
+      requirement,
+      verificationType: 'output_contains',
+    })),
+    requiredEvidence: evidenceRequirements.map((requirement) => ({
+      requirement,
+      verificationType: 'output_contains',
+    })),
+    acceptanceGates: acceptanceGates.map((gate) => ({
+      gate,
+      kind: /review/i.test(gate) ? 'review' : 'deterministic',
+    })),
+    acceptanceCriteria: acceptanceGates.map((gate) => ({
+      gate,
+      kind: /review/i.test(gate) ? 'review' : 'deterministic',
+    })),
+    providerContext,
+    sourceSpec: {
+      surface: 'cli',
+      intent: { primary: 'generate', signals: ['test fixture'] },
+      description,
+      targetRepo: undefined,
+      targetContext: undefined,
+      targetFiles,
+      constraints,
+      evidenceRequirements,
+      acceptanceGates,
+      providerContext,
+      rawPayload,
+      parseConfidence: 'high',
+      parseWarnings: [],
+    },
+    executionPreference: overrides.executionPreference ?? 'auto',
+  };
+}
