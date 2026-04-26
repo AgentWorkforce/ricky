@@ -32,7 +32,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface',
-        'mkdir -p src/commands',
+        'mkdir -p packages/cli/src/commands',
         'echo RICKY_CLI_COMMAND_SURFACE_READY',
       ].join(' && '),
       captureOutput: true,
@@ -42,9 +42,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,320p" src/entrypoint/interactive-cli.ts',
+        'sed -n "1,320p" packages/cli/src/entrypoint/interactive-cli.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,220p" src/entrypoint/index.ts',
+        'sed -n "1,220p" packages/cli/src/entrypoint/index.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -53,11 +53,11 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" src/cli/index.ts',
+        'sed -n "1,260p" packages/cli/src/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" src/cli/onboarding.ts',
+        'sed -n "1,260p" packages/cli/src/cli/onboarding.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" src/cli/mode-selector.ts',
+        'sed -n "1,260p" packages/cli/src/cli/mode-selector.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -81,9 +81,9 @@ async function main() {
       agent: 'impl-claude',
       dependsOn: ['read-entrypoint-context', 'read-cli-context', 'read-product-spec', 'read-workflow-standards'],
       task: `Implement a thin Ricky CLI command surface in only these files:
-- src/commands/cli-main.ts
-- src/commands/cli-main.test.ts
-- src/commands/index.ts
+- packages/cli/src/commands/cli-main.ts
+- packages/cli/src/commands/cli-main.test.ts
+- packages/cli/src/commands/index.ts
 - package.json
 
 Requirements:
@@ -96,16 +96,16 @@ Requirements:
 - write only the requested files to disk, then exit cleanly
 - do not emit long report-style stdout
 `,
-      verification: { type: 'file_exists', value: 'src/commands/cli-main.ts' },
+      verification: { type: 'file_exists', value: 'packages/cli/src/commands/cli-main.ts' },
     })
     .step('implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-cli-command-surface'],
       command: [
-        'test -f src/commands/cli-main.ts',
-        'test -f src/commands/cli-main.test.ts',
-        'test -f src/commands/index.ts',
-        "grep -q 'help\|mode\|interactive\|runInteractiveCli' src/commands/cli-main.ts src/commands/cli-main.test.ts",
+        'test -f packages/cli/src/commands/cli-main.ts',
+        'test -f packages/cli/src/commands/cli-main.test.ts',
+        'test -f packages/cli/src/commands/index.ts',
+        "grep -q 'help\|mode\|interactive\|runInteractiveCli' packages/cli/src/commands/cli-main.ts packages/cli/src/commands/cli-main.test.ts",
         "grep -q 'scripts\|bin\|start' package.json",
         'echo RICKY_CLI_COMMAND_SURFACE_FILES_PRESENT',
       ].join(' && '),
@@ -115,7 +115,7 @@ Requirements:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['implementation-file-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/commands/',
+      command: 'npm run typecheck && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: false,
     })
@@ -179,7 +179,7 @@ Requirements:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['fix-command-surface'],
-      command: 'npx tsc --noEmit && npx vitest run src/commands/',
+      command: 'npm run typecheck && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: false,
     })
@@ -227,7 +227,7 @@ Requirements:
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/commands/',
+      command: 'npm run typecheck && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: true,
     })
@@ -235,7 +235,7 @@ Requirements:
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'git diff --name-only -- src/commands package.json workflows/wave4-local-byoh/09-implement-cli-command-surface.ts > .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/tracked-changes.txt',
+        'git diff --name-only -- packages/cli/src/commands package.json workflows/wave4-local-byoh/09-implement-cli-command-surface.ts > .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/tracked-changes.txt',
         'git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface > .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/untracked-artifacts.txt',
         'cat .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/tracked-changes.txt .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/untracked-artifacts.txt > .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/changed.txt',
         '! grep -Ev "^(|src/commands/|package\\.json|workflows/wave4-local-byoh/09-implement-cli-command-surface\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/)" .workflow-artifacts/wave4-local-byoh/implement-cli-command-surface/changed.txt',
@@ -253,7 +253,7 @@ Requirements:
         '',
         'Validation commands:',
         '- npx tsc --noEmit',
-        '- npx vitest run src/commands/',
+        '- npm test --workspace @ricky/cli',
         '',
         'Expected contract:',
         '- Ricky has a thin runnable command layer over the interactive entrypoint',

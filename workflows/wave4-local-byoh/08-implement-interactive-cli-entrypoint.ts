@@ -32,7 +32,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint',
-        'mkdir -p src/entrypoint',
+        'mkdir -p packages/cli/src/entrypoint',
         'echo RICKY_INTERACTIVE_ENTRYPOINT_READY',
       ].join(' && '),
       captureOutput: true,
@@ -49,9 +49,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" src/cli/index.ts',
+        'sed -n "1,260p" packages/cli/src/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,320p" src/cli/onboarding.ts',
+        'sed -n "1,320p" packages/cli/src/cli/onboarding.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -60,9 +60,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" src/local/index.ts',
+        'sed -n "1,260p" packages/local/src/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,340p" src/local/entrypoint.ts',
+        'sed -n "1,340p" packages/local/src/entrypoint.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -71,13 +71,13 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" src/cloud/api/index.ts',
+        'sed -n "1,260p" packages/cloud/src/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,340p" src/cloud/api/generate-endpoint.ts',
+        'sed -n "1,340p" packages/cloud/src/api/generate-endpoint.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" src/runtime/diagnostics/index.ts',
+        'sed -n "1,260p" packages/runtime/src/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,320p" src/runtime/diagnostics/failure-diagnosis.ts',
+        'sed -n "1,320p" packages/runtime/src/diagnostics/failure-diagnosis.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -94,9 +94,9 @@ async function main() {
       agent: 'impl-claude',
       dependsOn: ['read-product-spec', 'read-cli-context', 'read-local-context', 'read-cloud-runtime-context', 'read-workflow-standards'],
       task: `Implement a bounded interactive Ricky CLI entry surface in only these files:
-- src/entrypoint/interactive-cli.ts
-- src/entrypoint/interactive-cli.test.ts
-- src/entrypoint/index.ts
+- packages/cli/src/entrypoint/interactive-cli.ts
+- packages/cli/src/entrypoint/interactive-cli.test.ts
+- packages/cli/src/entrypoint/index.ts
 
 Requirements:
 - compose the existing CLI onboarding, local/BYOH surface, Cloud generate surface, and runtime diagnosis engine
@@ -108,17 +108,17 @@ Requirements:
 - write only the requested files to disk, then exit cleanly
 - do not emit long report-style stdout
 `,
-      verification: { type: 'file_exists', value: 'src/entrypoint/interactive-cli.ts' },
+      verification: { type: 'file_exists', value: 'packages/cli/src/entrypoint/interactive-cli.ts' },
     })
     .step('implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-interactive-entrypoint'],
       command: [
-        'test -f src/entrypoint/interactive-cli.ts',
-        'test -f src/entrypoint/interactive-cli.test.ts',
-        'test -f src/entrypoint/index.ts',
-        "grep -q 'local\|cloud\|diagnos\|onboarding' src/entrypoint/interactive-cli.ts src/entrypoint/interactive-cli.test.ts",
-        "grep -q 'runOnboarding\|runLocal\|handleCloudGenerate\|diagnose' src/entrypoint/interactive-cli.ts",
+        'test -f packages/cli/src/entrypoint/interactive-cli.ts',
+        'test -f packages/cli/src/entrypoint/interactive-cli.test.ts',
+        'test -f packages/cli/src/entrypoint/index.ts',
+        "grep -q 'local\|cloud\|diagnos\|onboarding' packages/cli/src/entrypoint/interactive-cli.ts packages/cli/src/entrypoint/interactive-cli.test.ts",
+        "grep -q 'runOnboarding\|runLocal\|handleCloudGenerate\|diagnose' packages/cli/src/entrypoint/interactive-cli.ts",
         'echo RICKY_INTERACTIVE_ENTRYPOINT_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -127,7 +127,7 @@ Requirements:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['implementation-file-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/entrypoint/',
+      command: 'npm run typecheck && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: false,
     })
@@ -191,7 +191,7 @@ Requirements:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['fix-entrypoint'],
-      command: 'npx tsc --noEmit && npx vitest run src/entrypoint/',
+      command: 'npm run typecheck && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: false,
     })
@@ -239,7 +239,7 @@ Requirements:
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npx tsc --noEmit && npx vitest run src/entrypoint/',
+      command: 'npm run typecheck && npm test --workspace @ricky/cli',
       captureOutput: true,
       failOnError: true,
     })
@@ -247,7 +247,7 @@ Requirements:
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'git diff --name-only -- src/entrypoint workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/tracked-changes.txt',
+        'git diff --name-only -- packages/cli/src/entrypoint workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/tracked-changes.txt',
         'git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/untracked-artifacts.txt',
         'cat .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/tracked-changes.txt .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/untracked-artifacts.txt > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/changed.txt',
         '! grep -Ev "^(|src/entrypoint/|workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/)" .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/changed.txt',
@@ -265,7 +265,7 @@ Requirements:
         '',
         'Validation commands:',
         '- npx tsc --noEmit',
-        '- npx vitest run src/entrypoint/',
+        '- npm test --workspace @ricky/cli',
         '',
         'Expected contract:',
         '- one interactive entry surface composes onboarding + local + cloud + diagnosis',
