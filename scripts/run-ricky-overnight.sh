@@ -160,6 +160,13 @@ workflow_is_already_satisfied() {
       git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.ts 2>/dev/null \
         && git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.test.ts 2>/dev/null
       ;;
+    workflows/wave5-scale-and-ops/01-workflow-health-analytics.ts)
+      git cat-file -e HEAD:packages/product/src/analytics/health-analyzer.ts 2>/dev/null \
+        && git cat-file -e HEAD:packages/product/src/analytics/digest-generator.ts 2>/dev/null \
+        && git cat-file -e HEAD:packages/product/src/analytics/types.ts 2>/dev/null \
+        && git cat-file -e HEAD:packages/product/src/analytics/health-analyzer.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:packages/product/src/analytics/index.ts 2>/dev/null
+      ;;
     *)
       return 1
       ;;
