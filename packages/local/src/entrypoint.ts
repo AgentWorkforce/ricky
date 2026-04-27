@@ -345,7 +345,7 @@ export async function runLocal(
   let request: LocalInvocationRequest;
   try {
     request = isLocalInvocationRequest(handoff)
-      ? { ...handoff, executionPreference: handoff.executionPreference ?? handoff.mode }
+      ? handoff
       : await normalizeRequest(handoff, artifactReader);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -436,15 +436,21 @@ function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
 
 /**
  * Map handoff source to spec-intake surface.
- * `free-form`, `structured`, and `workflow-artifact` intentionally fall through
- * to `'cli'` — they share intake routing behavior with CLI handoffs today.
+ * `free-form`, `structured`, and `workflow-artifact` share intake routing
+ * behavior with CLI handoffs today, so they map explicitly to `'cli'`.
  */
 function sourceToSurface(source: LocalInvocationRequest['source']): InputSurface {
-  if (source === 'mcp') return 'mcp';
-  if (source === 'claude') return 'claude_handoff';
-  if (source === 'cli') return 'cli';
-  // free-form, structured, workflow-artifact → cli surface
-  return 'cli';
+  switch (source) {
+    case 'mcp':
+      return 'mcp';
+    case 'claude':
+      return 'claude_handoff';
+    case 'cli':
+    case 'free-form':
+    case 'structured':
+    case 'workflow-artifact':
+      return 'cli';
+  }
 }
 
 function workflowFileForRoute(

@@ -13,6 +13,7 @@ export type {
   LocalSourceMetadata,
   McpHandoff,
   RawHandoff,
+  BaseHandoff,
   SpecInput,
   StructuredSpec,
   StructuredSpecHandoff,

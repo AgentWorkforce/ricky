@@ -373,15 +373,13 @@ describe('normalizeRequest', () => {
     const result = await normalizeRequest(raw);
 
     expect(result.mode).toBe('both');
-    expect(result.executionPreference).toBe('both');
   });
 
-  it('accepts executionPreference as an explicit alias for mode', async () => {
+  it('accepts executionPreference as an explicit alias for mode on the handoff input', async () => {
     const raw: CliHandoff = { source: 'cli', spec: 'test', executionPreference: 'both' };
     const result = await normalizeRequest(raw);
 
     expect(result.mode).toBe('both');
-    expect(result.executionPreference).toBe('both');
   });
 
   it('reads execution preference from structured spec payloads when top-level mode is absent', async () => {
@@ -394,7 +392,6 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('both');
-    expect(result.executionPreference).toBe('both');
   });
 
   it('lets top-level mode override nested structured execution preference', async () => {
@@ -408,7 +405,6 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('local');
-    expect(result.executionPreference).toBe('local');
   });
 
   it('maps MCP auto execution preference to both for the local contract', async () => {
@@ -421,7 +417,6 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('both');
-    expect(result.executionPreference).toBe('both');
   });
 
   it('defaults mode to local when not specified', async () => {
@@ -437,7 +432,6 @@ describe('normalizeRequest', () => {
     for (const raw of sources) {
       const result = await normalizeRequest(raw, mockArtifactReader());
       expect(result.mode).toBe('local');
-      expect(result.executionPreference).toBe('local');
     }
   });
 
@@ -539,7 +533,6 @@ describe('normalizeRequest', () => {
       expect(result, testCase.name).toMatchObject({
         _normalized: true,
         mode: 'local',
-        executionPreference: 'local',
         ...testCase.expected,
       });
     }
@@ -917,7 +910,6 @@ describe('runLocal', () => {
       expect(executor.calls[0], handoff.source).toMatchObject({
         source: handoff.source,
         mode: 'local',
-        executionPreference: 'local',
       });
     }
   });

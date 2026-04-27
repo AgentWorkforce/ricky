@@ -106,13 +106,6 @@ export interface LocalInvocationRequest {
   source: HandoffSource;
   /** Execution mode — defaults to 'local' for BYOH. */
   mode: LocalExecutionMode;
-  /**
-   * Always equals `mode`. Exposed as a convenience alias for callers that model
-   * the choice as an execution preference rather than a mode. Intentionally
-   * duplicated — both fields are set identically across all normalization branches
-   * so downstream code can use whichever name reads more naturally.
-   */
-  executionPreference?: LocalExecutionPreference;
   /** Optional file path when the spec came from a file or artifact. */
   specPath?: string;
   /** Opaque metadata from the originating surface. */
@@ -158,7 +151,6 @@ export async function normalizeRequest(
         spec: raw.spec,
         source: 'free-form',
         mode,
-        executionPreference: mode,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
@@ -172,7 +164,6 @@ export async function normalizeRequest(
         structuredSpec: raw.spec,
         source: 'structured',
         mode,
-        executionPreference: mode,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
@@ -187,7 +178,6 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'cli',
         mode,
-        executionPreference: mode,
         specPath: raw.specFile,
         metadata: {
           ...(raw.metadata ?? {}),
@@ -208,7 +198,6 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'mcp',
         mode,
-        executionPreference: mode,
         metadata: {
           ...(raw.metadata ?? {}),
           ...(raw.mcpMetadata ?? {}),
@@ -231,7 +220,6 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'claude',
         mode,
-        executionPreference: mode,
         metadata,
         sourceMetadata: sourceMetadataForClaude(raw),
         requestId: raw.requestId,
@@ -246,7 +234,6 @@ export async function normalizeRequest(
         spec,
         source: 'workflow-artifact',
         mode,
-        executionPreference: mode,
         specPath: raw.artifactPath,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
