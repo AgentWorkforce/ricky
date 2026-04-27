@@ -404,6 +404,20 @@ runner_output_idle_for_too_long() {
   (( now_epoch - last_modified >= IDLE_TIMEOUT_SECONDS ))
 }
 
+start_runner() {
+  local workflow_path="$1"
+  local runner_output="$2"
+
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+  else
+    log "setsid unavailable; launching runner without detached process-group isolation"
+    "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+  fi
+
+  printf '%s\n' "$!"
+}
+
 run_one() {
   local workflow_path="$1"
   local runner_output=""
@@ -444,11 +458,23 @@ run_one() {
   runner_output="$ARTIFACT_DIR/runner-$(basename "$workflow_path" .ts).log"
   : > "$runner_output"
 
-  setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
-  runner_pid=$!
+  runner_pid="$(start_runner "$workflow_path" "$runner_output")"
   RUN_PID="$runner_pid"
-  RUN_PGID="$runner_pid"
+  RUN_PGID=""
+  if command -v ps >/dev/null 2>&1; then
+    RUN_PGID="$(ps -o pgid= -p "$runner_pid" 2>/dev/null | tr -d '[:space:]')"
+  fi
   persist_checkpoint
+
+  if ! is_pid_running "$runner_pid"; then
+    log "workflow runner failed to start: $workflow_path"
+    echo "$workflow_path" >> "$FAILED_FILE"
+    inspect_repo_changes
+    mark_status "blocked" "runner failed to start: $workflow_path"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
+    return 1
+  fi
 
   while is_pid_running "$runner_pid"; do
     if workflow_hit_claude_rate_limit "$runner_output"; then

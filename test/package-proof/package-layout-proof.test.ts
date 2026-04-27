@@ -126,6 +126,9 @@ describe('Ricky workspace package layout and npm script parity proof', () => {
     expect(script).toContain('run_pid=$RUN_PID');
     expect(script).toContain("printf '%s\\n' 'stale' > \"$previous_status_file\"");
     expect(script).toContain('CURRENT_WORKFLOW="$workflow_path"');
+    expect(script).toContain('start_runner()');
+    expect(script).toContain('setsid unavailable; launching runner without detached process-group isolation');
+    expect(script).toContain('workflow runner failed to start');
     expect(script).toContain('skipping missing workflow');
     expect(script).toContain('RUN_RESULT="skipped"');
     expect(script).toContain('if [[ "$RUN_RESULT" == "ran" ]]');
