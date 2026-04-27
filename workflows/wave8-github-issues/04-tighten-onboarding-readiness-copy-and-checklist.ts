@@ -92,6 +92,7 @@ Likely files:
         '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt',
         'grep -F "docs/product/ricky-cofounder-interactive-readiness-checklist.md" .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt',
         'grep -Eq "packages/cli/src/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt',
+        'if grep -Ev "^(docs/product/ricky-cofounder-interactive-readiness-checklist\\.md|packages/cli/src/.+\\.(ts|test\\.ts)|workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist\\.ts|\\.workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/.*)$" .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt; then echo "UNRELATED_CHANGED_FILES" >&2; exit 1; fi',
         'grep -Ei "first-run|local mode|spec handoff|generated artifact|next command|recovery|execution|generation" docs/product/ricky-cofounder-interactive-readiness-checklist.md',
         'grep -R "artifact generation\\|execution result\\|--spec-file\\|--stdin" packages/cli/src docs/product/ricky-cofounder-interactive-readiness-checklist.md >/dev/null',
         'echo POST_IMPLEMENTATION_FILE_GATE_OK',
