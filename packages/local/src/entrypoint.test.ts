@@ -382,6 +382,13 @@ describe('normalizeRequest', () => {
     expect(result.mode).toBe('both');
   });
 
+  it('maps top-level auto execution preference to local-first both mode', async () => {
+    const raw: CliHandoff = { source: 'cli', spec: 'test', executionPreference: 'auto' };
+    const result = await normalizeRequest(raw);
+
+    expect(result.mode).toBe('both');
+  });
+
   it('reads execution preference from structured spec payloads when top-level mode is absent', async () => {
     const result = await normalizeRequest({
       source: 'structured',

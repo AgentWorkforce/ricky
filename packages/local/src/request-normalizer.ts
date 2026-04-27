@@ -12,7 +12,7 @@
 
 export type HandoffSource = 'free-form' | 'structured' | 'cli' | 'mcp' | 'claude' | 'workflow-artifact';
 export type LocalExecutionMode = 'local' | 'cloud' | 'both';
-export type LocalExecutionPreference = LocalExecutionMode;
+export type LocalExecutionPreference = LocalExecutionMode | 'auto';
 export type StructuredSpec = Record<string, unknown>;
 export type SpecInput = string | StructuredSpec;
 
@@ -248,16 +248,23 @@ export async function normalizeRequest(
 }
 
 function executionModeFor(raw: BaseHandoff, spec?: SpecInput): LocalExecutionMode {
-  return raw.mode ?? raw.executionPreference ?? executionModeFromStructuredSpec(spec) ?? 'local';
+  if (raw.mode) return raw.mode;
+  if (raw.executionPreference) return normalizeExecutionPreference(raw.executionPreference);
+  return executionModeFromStructuredSpec(spec) ?? 'local';
 }
 
 function executionModeFromStructuredSpec(spec?: SpecInput): LocalExecutionMode | undefined {
   if (!spec || typeof spec === 'string') return undefined;
 
   const value = spec.mode ?? spec.executionPreference ?? spec.execution_mode ?? spec.execution_preference;
-  if (value === 'local' || value === 'cloud' || value === 'both') return value;
-  if (value === 'auto') return 'both';
+  if (value === 'local' || value === 'cloud' || value === 'both' || value === 'auto') {
+    return normalizeExecutionPreference(value);
+  }
   return undefined;
+}
+
+function normalizeExecutionPreference(preference: LocalExecutionPreference): LocalExecutionMode {
+  return preference === 'auto' ? 'both' : preference;
 }
 
 function structuredSpecFrom(spec: SpecInput): StructuredSpec | undefined {
