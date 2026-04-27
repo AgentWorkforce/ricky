@@ -265,35 +265,33 @@ Rules:
     .step('final-signoff', {
       type: 'deterministic',
       dependsOn: ['regression-gate'],
-      command: [
-        'changed="$(git diff --name-only -- packages/local/src)"',
-        'if [[ -z "$changed" ]]; then changed="(no source changes captured at signoff)"; fi',
-        "cat <<'EOF' > .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md",
-        '# Ricky local invocation entrypoint signoff',
-        '',
-        '## Workflow path',
-        '- workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
-        '',
-        '## Changed files',
-        '${changed}',
-        '',
-        '## Summary of validated behavior',
-        '- local/BYOH request normalization covers CLI, MCP, Claude, structured-spec, and workflow-artifact handoffs.',
-        '- ready-workflow handoffs route directly to the local runtime without Cloud fallback or regeneration.',
-        '- local execution returns artifacts, logs, warnings, and next actions honestly.',
-        '',
-        '## Validation commands',
-        '- npm run typecheck --workspace @ricky/local',
-        '- npm test --workspace @ricky/local',
-        '- npx tsc --noEmit',
-        '',
-        '## Remaining risks',
-        '- workflow keeps the earlier Claude review plus deterministic post-fix gates, but avoids a second non-deterministic signoff agent because that seam previously failed after producing passing evidence.',
-        '',
-        'LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE',
-        'EOF',
-        'echo LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE',
-      ].join(' && '),
+      command: `changed="$(git diff --name-only -- packages/local/src)"
+if [[ -z "$changed" ]]; then changed="(no source changes captured at signoff)"; fi
+cat > .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md <<EOF
+# Ricky local invocation entrypoint signoff
+
+## Workflow path
+- workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts
+
+## Changed files
+\${changed}
+
+## Summary of validated behavior
+- local/BYOH request normalization covers CLI, MCP, Claude, structured-spec, and workflow-artifact handoffs.
+- ready-workflow handoffs route directly to the local runtime without Cloud fallback or regeneration.
+- local execution returns artifacts, logs, warnings, and next actions honestly.
+
+## Validation commands
+- npm run typecheck --workspace @ricky/local
+- npm test --workspace @ricky/local
+- npx tsc --noEmit
+
+## Remaining risks
+- workflow keeps the earlier Claude review plus deterministic post-fix gates, but avoids a second non-deterministic signoff agent because that seam previously failed after producing passing evidence.
+
+LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE
+EOF
+echo LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE`,
       captureOutput: true,
       failOnError: true,
     })
