@@ -94,6 +94,8 @@ export interface LocalExecutorOptions {
   artifactWriter?: ArtifactWriter;
   /** Override the default execution route for the local runtime. */
   route?: ExecutionRoute;
+  /** When true, stop after writing/generated artifact and return it without launching local runtime. */
+  returnGeneratedArtifactOnly?: boolean;
 }
 
 /**
@@ -250,6 +252,12 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         warnings.push('No executable local workflow artifact was available.');
         nextActions.push('Provide a workflows/**/*.ts artifact or a generation spec that can produce one.');
         return { ok: false, artifacts, logs, warnings, nextActions };
+      }
+
+      if (artifact && options.returnGeneratedArtifactOnly === true) {
+        logs.push('[local] runtime launch skipped: returning generated artifact only');
+        nextActions.push('Inspect the generated workflow artifact and choose whether to run it locally.');
+        return { ok: true, artifacts: dedupeArtifacts(artifacts), logs, warnings, nextActions };
       }
 
       const runResult = await coordinator.launch({

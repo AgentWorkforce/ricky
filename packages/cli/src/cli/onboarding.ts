@@ -52,6 +52,8 @@ export interface OnboardingOptions {
   env?: NodeJS.ProcessEnv;
   configStore?: RickyConfigStore;
   firstRun?: boolean;
+  skipFirstRunPersistence?: boolean;
+  compactForExecution?: boolean;
 }
 
 export interface OnboardingResult {
@@ -326,6 +328,16 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
     return { mode, firstRun: false, bannerShown, output: text };
   }
 
+  if (options.compactForExecution === true && modeOverride) {
+    const text = '';
+    return {
+      mode: modeOverride,
+      firstRun: true,
+      bannerShown: false,
+      output: text,
+    };
+  }
+
   sections.push(renderWelcome());
 
   let choice: OnboardingChoice;
@@ -347,7 +359,7 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
 
   // Only persist config for interactive selections, not per-invocation overrides
   // (options.mode, RICKY_MODE). Overrides are ephemeral execution context.
-  if (!isOverride && choice !== 'explore') {
+  if (!isOverride && choice !== 'explore' && options.skipFirstRunPersistence !== true) {
     await configStore.writeProjectConfig({
       mode: toRickyMode(choice),
       firstRunComplete: true,

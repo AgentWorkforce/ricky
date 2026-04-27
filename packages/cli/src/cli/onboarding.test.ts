@@ -166,6 +166,27 @@ describe('runOnboarding', () => {
     expect(store.written).toBeNull();
   });
 
+  it('suppresses first-run onboarding copy when a live handoff execution is already in flight', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream(''),
+      output,
+      isTTY: true,
+      mode: 'local',
+      configStore: store,
+      compactForExecution: true,
+      skipFirstRunPersistence: true,
+    });
+
+    expect(result.mode).toBe('local');
+    expect(result.firstRun).toBe(true);
+    expect(result.output).toBe('');
+    expect(store.written).toBeNull();
+    expect(output.read()?.toString() ?? '').toBe('');
+  });
+
   it('does not persist config when mode comes from RICKY_MODE env var', async () => {
     const store = mockConfigStore();
     const output = new PassThrough();

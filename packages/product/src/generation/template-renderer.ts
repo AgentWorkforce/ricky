@@ -81,7 +81,7 @@ function renderSource(input: {
   gates: DeterministicGate[];
   isCodeWorkflow: boolean;
 }): string {
-  const onError = input.pattern.riskLevel === 'low' ? "'fail'" : `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS} }`;
+  const onError = input.pattern.riskLevel === 'low' ? "'fail-fast'" : `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS} }`;
   const lines: string[] = [
     "import { workflow } from '@agent-relay/sdk/workflows';",
     '',

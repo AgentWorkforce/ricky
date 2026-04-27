@@ -123,6 +123,7 @@ async function executeLocalPath(
 
   const localResult = await runLocal(deps.handoff, {
     executor: deps.localExecutor,
+    localExecutor: deps.localExecutor ? undefined : { returnGeneratedArtifactOnly: true },
   });
 
   const diagnoses: Diagnosis[] = [];
@@ -236,6 +237,8 @@ export async function runInteractiveCli(
     isTTY: deps.isTTY,
     mode: deps.mode,
     configStore: deps.configStore,
+    compactForExecution: deps.handoff !== undefined,
+    skipFirstRunPersistence: deps.handoff !== undefined,
   });
 
   const mode = toRickyMode(onboarding.mode);

@@ -237,6 +237,33 @@ describe('cliMain', () => {
     expect(result.interactiveResult?.localResult?.ok).toBe(true);
   });
 
+  it('returns a generated workflow artifact to the user without requiring immediate runtime launch', async () => {
+    const result = await cliMain({
+      argv: ['--mode', 'local', '--spec', 'generate a workflow for package checks'],
+      onboard: vi.fn().mockResolvedValue({
+        mode: 'local',
+        firstRun: false,
+        bannerShown: false,
+        output: 'mode=local',
+      }),
+      localExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          ok: true,
+          artifacts: [{ path: 'workflows/generated/package-checks.ts', type: 'text/typescript' }],
+          logs: ['[local] workflow generation: passed'],
+          warnings: [],
+          nextActions: ['Inspect the generated workflow artifact and choose whether to run it locally.'],
+        }),
+      },
+    });
+
+    const output = result.output.join('\n');
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain('Local handoff completed.');
+    expect(output).toContain('Artifact: workflows/generated/package-checks.ts');
+    expect(output).toContain('Next: Inspect the generated workflow artifact and choose whether to run it locally.');
+  });
+
   it('keeps npm start -- --mode local blocked until a real spec or file is provided', async () => {
     const result = await cliMain({
       argv: ['--mode', 'local'],

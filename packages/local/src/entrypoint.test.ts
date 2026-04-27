@@ -1073,6 +1073,33 @@ describe('runLocal', () => {
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
   });
 
+  it('can return a generated artifact without launching the local runtime', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['local run completed'] });
+    const result = await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts' },
+      {
+        localExecutor: {
+          ...localExecutor,
+          returnGeneratedArtifactOnly: true,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(localExecutor.writes).toHaveLength(1);
+    expect(localExecutor.runner.invocations).toHaveLength(0);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: generate',
+        '[local] workflow generation: passed',
+        '[local] runtime launch skipped: returning generated artifact only',
+      ]),
+    );
+    expect(result.nextActions).toContain('Inspect the generated workflow artifact and choose whether to run it locally.');
+  });
+
   it('keeps CLI, MCP, and Claude generation handoffs on the explicit local/BYOH path', async () => {
     const cases: Array<{
       name: string;
