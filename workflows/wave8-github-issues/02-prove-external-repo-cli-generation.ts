@@ -60,7 +60,7 @@ Use mkdtemp external repos and injected runners when possible. If a linked binar
       type: 'deterministic',
       dependsOn: ['implement-external-repo-proof'],
       command: [
-        'git diff --name-only > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/changed-files.txt',
+        '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/changed-files.txt',
         'grep -Eq "packages/cli/src/.+\\.(ts|test\\.ts)$|docs/product/.+\\.md$|package\\.json|packages/cli/package\\.json" .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/changed-files.txt',
         'grep -R "external repo\\|separate repo\\|INIT_CWD\\|workflows/generated\\|agent-relay run" packages/cli/src docs/product package.json packages/cli/package.json >/dev/null',
         'echo POST_IMPLEMENTATION_FILE_GATE_OK',
