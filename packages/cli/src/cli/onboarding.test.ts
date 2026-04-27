@@ -60,8 +60,13 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('Claude');
     expect(output).toContain('MCP');
     expect(output).toContain('Local/BYOH handoff is available through the current CLI');
+    expect(output).toContain('npm start -- --mode local --spec "generate a workflow for package checks"');
+    expect(output).toContain('npm start -- --mode local --spec-file ./path/to/spec.md');
+    expect(output).toContain('npm start -- --mode local --stdin');
     expect(output).toContain('ricky.generate');
+    expect(output).not.toContain('npx ricky generate --spec');
     expect(output).not.toContain('npx ricky generate --spec-file');
+    expect(output).not.toMatch(/rerun.*later/i);
   });
 
   it('includes a recovery path when the local runtime is blocked', () => {

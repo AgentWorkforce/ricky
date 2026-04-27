@@ -75,6 +75,19 @@ describe('renderHelp', () => {
     expect(lines.some((l) => l.includes('--mode'))).toBe(true);
     expect(lines.some((l) => l.includes('--help'))).toBe(true);
   });
+
+  it('shows the current local handoff journey without obsolete generate guidance', () => {
+    const helpText = renderHelp().join('\n');
+
+    expect(helpText).toContain('npm start -- --mode local --spec <text>');
+    expect(helpText).toContain('npm start -- --mode local --spec-file <path>');
+    expect(helpText).toContain('npm start -- --mode local --stdin');
+    expect(helpText).toContain(
+      'npm start -- --mode local --spec "generate a workflow for package checks"',
+    );
+    expect(helpText).not.toContain('npx ricky generate');
+    expect(helpText).not.toMatch(/rerun.*later/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -193,11 +206,81 @@ describe('cliMain', () => {
     );
   });
 
+  it('runs npm start -- --mode local with an inline spec through local execution', async () => {
+    const result = await cliMain({
+      argv: ['--mode', 'local', '--spec', 'build a workflow'],
+      onboard: vi.fn().mockResolvedValue({
+        mode: 'local',
+        firstRun: false,
+        bannerShown: false,
+        output: 'mode=local',
+      }),
+      localExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          ok: true,
+          artifacts: [{ path: 'out/workflow.ts', type: 'text/typescript' }],
+          logs: ['local execution accepted spec'],
+          warnings: [],
+          nextActions: ['Review workflow'],
+        }),
+      },
+    });
+
+    const output = result.output.join('\n');
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain('Local handoff completed.');
+    expect(output).toContain('Artifact: out/workflow.ts');
+    expect(output).toContain('Next: Review workflow');
+    expect(output).not.toContain('Local handoff blocker:');
+    expect(output).not.toMatch(/rerun.*later/i);
+    expect(result.interactiveResult?.awaitingInput).toBe(false);
+    expect(result.interactiveResult?.localResult?.ok).toBe(true);
+  });
+
+  it('keeps npm start -- --mode local blocked until a real spec or file is provided', async () => {
+    const result = await cliMain({
+      argv: ['--mode', 'local'],
+      onboard: vi.fn().mockResolvedValue({
+        mode: 'local',
+        firstRun: false,
+        bannerShown: false,
+        output: 'mode=local',
+      }),
+      localExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          ok: true,
+          artifacts: [],
+          logs: [],
+          warnings: [],
+          nextActions: [],
+        }),
+      },
+    });
+
+    const output = result.output.join('\n');
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain('Local handoff blocker:');
+    expect(output).toContain('Inline spec: npm start -- --mode local --spec');
+    expect(output).toContain('File spec:   npm start -- --mode local --spec-file');
+    expect(output).toContain('Stdin spec:');
+    expect(result.interactiveResult?.awaitingInput).toBe(true);
+    expect(result.interactiveResult?.localResult).toBeUndefined();
+  });
+
   it('returns recovery output when CLI spec flags are invalid', async () => {
     const result = await cliMain({ argv: ['--spec'] });
 
     expect(result.exitCode).toBe(1);
     expect(result.output.join('\n')).toContain('CLI input blocker:');
     expect(result.output.join('\n')).toContain('--spec requires a value.');
+  });
+
+  it('returns recovery output when a spec file flag has no file path', async () => {
+    const result = await cliMain({ argv: ['--mode', 'local', '--spec-file'] });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output.join('\n')).toContain('CLI input blocker:');
+    expect(result.output.join('\n')).toContain('--spec-file requires a value.');
+    expect(result.output.join('\n')).toContain('provide one of --spec, --spec-file, or --stdin');
   });
 });

@@ -54,19 +54,25 @@ describe('runInteractiveCli', () => {
     expect(result.cloudResult).toBeUndefined();
     expect(result.diagnoses).toEqual([]);
     expect(result.guidance).toEqual([]);
+    expect(result.awaitingInput).toBe(false);
   });
 
   it('stops cleanly after onboarding when no handoff was provided', async () => {
+    const localExecutor = { execute: vi.fn() };
+
     const result = await runInteractiveCli({
       onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      localExecutor,
     });
 
     expect(result.ok).toBe(true);
     expect(result.awaitingInput).toBe(true);
     expect(result.localResult).toBeUndefined();
     expect(result.guidance.join('\n')).toMatch(/no spec was provided for local execution/i);
+    expect(result.guidance.join('\n')).toMatch(/Inline spec: npm start -- --mode local --spec/i);
     expect(result.guidance.join('\n')).toMatch(/--spec-file/i);
     expect(result.guidance.join('\n')).toMatch(/--stdin/i);
+    expect(localExecutor.execute).not.toHaveBeenCalled();
   });
 
   it('surfaces runtime diagnosis guidance when local execution fails', async () => {
