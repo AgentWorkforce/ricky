@@ -173,6 +173,12 @@ filter_queue_for_repo_state() {
       continue
     fi
 
+    if workflow_is_already_satisfied "$workflow_path"; then
+      log "dropping already-satisfied workflow from queue: $workflow_path"
+      removed_count=$((removed_count + 1))
+      continue
+    fi
+
     printf '%s\n' "$workflow_path" >> "$filtered_queue"
   done < "$QUEUE_FILE"
 
