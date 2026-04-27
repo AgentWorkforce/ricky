@@ -674,11 +674,11 @@ done < "$QUEUE_FILE"
 QUEUE_TOTAL="${#QUEUE_ITEMS[@]}"
 
 for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
-  CURRENT_PASS="$pass"
-  local_start_index=0
-  if (( pass == CURRENT_PASS )); then
-    local_start_index="$CURRENT_INDEX"
+  local_start_index="$CURRENT_INDEX"
+  if (( pass > CURRENT_PASS )); then
+    local_start_index=0
   fi
+  CURRENT_PASS="$pass"
 
   log "starting overnight pass $pass/$PASSES at queue index $local_start_index"
 
@@ -711,6 +711,11 @@ for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
   persist_checkpoint
 
 done
+
+CURRENT_PASS="$PASSES"
+CURRENT_INDEX="$QUEUE_TOTAL"
+CURRENT_WORKFLOW=""
+persist_checkpoint
 
 if [[ -s "$FAILED_FILE" ]]; then
   mark_status "complete-with-failures" "queue finished with failed workflows"
