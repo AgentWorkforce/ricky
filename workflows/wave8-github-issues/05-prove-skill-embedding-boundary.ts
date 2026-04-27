@@ -26,7 +26,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary',
-        'gh issue view 5 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/issue-5.json',
+        'command -v gh >/dev/null 2>&1 && gh issue view 5 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/issue-5.json || true',
         'sed -n "1,260p" packages/product/src/generation/skill-loader.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/skill-loader.before.txt',
         'sed -n "1,320p" packages/product/src/generation/pipeline.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/pipeline.before.txt',
         'sed -n "1,360p" packages/product/src/generation/template-renderer.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/template-renderer.before.txt',

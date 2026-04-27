@@ -26,7 +26,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation',
-        'gh issue view 6 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/issue-6.json',
+        'command -v gh >/dev/null 2>&1 && gh issue view 6 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/issue-6.json || true',
         'cat package.json > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/root-package.json',
         'cat packages/cli/package.json > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/cli-package.json',
         'sed -n "1,300p" packages/cli/src/commands/cli-main.test.ts > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/cli-main-test.before.txt',

@@ -32,8 +32,8 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist',
-        'gh issue view 4 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-4.json',
-        'gh issue view 7 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-7.json',
+        'command -v gh >/dev/null 2>&1 && gh issue view 4 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-4.json || true',
+        'command -v gh >/dev/null 2>&1 && gh issue view 7 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-7.json || true',
         'sed -n "1,360p" packages/cli/src/cli/onboarding.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/onboarding.before.txt',
         'sed -n "1,320p" packages/cli/src/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/cli-main.before.txt',
         'sed -n "1,320p" packages/cli/src/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/interactive-cli.before.txt',

@@ -38,7 +38,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop',
-        'gh issue view 3 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/issue-3.json',
+        'command -v gh >/dev/null 2>&1 && gh issue view 3 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/issue-3.json || true',
         'sed -n "1,380p" packages/local/src/entrypoint.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/local-entrypoint.before.txt',
         'sed -n "1,320p" packages/runtime/src/local-coordinator.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/local-coordinator.before.txt',
         'sed -n "1,320p" packages/runtime/src/diagnostics/failure-diagnosis.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/failure-diagnosis.before.txt',

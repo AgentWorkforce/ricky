@@ -32,8 +32,8 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root',
-        'gh issue view 1 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-1.json',
-        'gh issue view 2 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-2.json',
+        'command -v gh >/dev/null 2>&1 && gh issue view 1 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-1.json || true',
+        'command -v gh >/dev/null 2>&1 && gh issue view 2 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-2.json || true',
         'sed -n "1,280p" packages/cli/src/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/cli-main.before.txt',
         'sed -n "1,320p" packages/cli/src/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/interactive-cli.before.txt',
         'sed -n "1,360p" packages/local/src/entrypoint.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/local-entrypoint.before.txt',
