@@ -13,6 +13,8 @@
 Ricky is a workflow reliability, workflow coordination, and workflow authoring product for AgentWorkforce.
 
 Ricky is built to:
+Ricky is the product answer to the workflow monitor problem described in `AgentWorkforce/cloud#161`: a cheap, workflow-native monitor/recovery agent that can watch long-running workflow programs, diagnose failures, fix common issues, resume from the right point, and keep a truthful evidence trail instead of requiring expensive manual babysitting.
+
 - debug failed workflows
 - fix broken workflows
 - restart or rerun them safely when appropriate

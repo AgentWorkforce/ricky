@@ -32,6 +32,15 @@ Ricky should be implemented on top of **Agent Assistant** rather than as a stand
 
 ## 2. Problem Statement
 
+A core motivating product problem is captured in `AgentWorkforce/cloud#161` (`Build workflow monitor agent: cheap model watches, fixes, and retriggers workflows`). Ricky should be treated as the productization and expansion of that idea, not a disconnected greenfield concept.
+
+That means Ricky must stay aligned with the original operational need:
+- cheap or low-cost long-running monitoring
+- diagnosis when failures actually happen
+- bounded autonomous fixes for common workflow/runtime issues
+- resume/retrigger from the correct wave or step instead of restarting blindly
+- structured logs/artifacts showing what was monitored, what failed, what was fixed, and what was retried
+
 Today, workflows in the AgentWorkforce ecosystem are powerful but fragile in a few recurring ways:
 - workflows can compile but fail operationally at runtime
 - workflow debugging often requires deep Relay-specific knowledge

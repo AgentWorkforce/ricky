@@ -2,6 +2,8 @@
 
 ## Purpose
 
+This backlog should stay explicitly aligned with the original workflow monitor-agent problem captured in `AgentWorkforce/cloud#161`. Ricky is not just a general workflow product idea; it is the productization of the need for a cheap, observant, restart-aware workflow monitor that can diagnose failures, apply bounded fixes, and resume from the right point with evidence.
+
 This document defines the bounded next Ricky backlog after the first-wave buildout and proof closure. It is a workflow-authoring plan, not a replacement product spec, and it does not create follow-on workflow files.
 
 The goal is to make the next implementation and proof workflows specific enough to author without rediscovering priorities, evidence bars, or sequencing.
@@ -57,6 +59,8 @@ The current runnable CLI is still development-mode oriented: `npm start`, `npm s
 Therefore the next wave should not treat the spec as a product surface that is already complete. It should first prove implementation follow-through against the spec, then use that honest CLI surface as one input to the cross-surface proof work.
 
 ## Recommended Bounded Next Batch
+
+Before expanding into broader surfaces, each next-wave workflow should be checked against that originating monitor-agent intent. If a workflow does not improve Ricky's ability to monitor, diagnose, recover, resume, or explain workflow runs truthfully, it is probably a later-wave concern rather than current critical path work.
 
 Do **not** open a broad "everything Ricky eventually needs" wave next. The next batch should be seven workflows: three implementation workflows and four proof workflows. This is enough to move Ricky from signed-off subsystems to proven product journeys without mixing in every future surface.
 
