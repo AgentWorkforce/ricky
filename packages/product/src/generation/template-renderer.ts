@@ -10,6 +10,7 @@ import type {
   DeterministicGate,
   PatternDecision,
   RenderedArtifact,
+  SkillApplicationEvidence,
   SkillContext,
   WorkflowTask,
 } from './types.js';
@@ -42,10 +43,12 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
   const team = buildTeam(input.pattern.pattern, isCodeWorkflow);
   const tasks = buildTasks(input.spec, isCodeWorkflow);
   const gates = buildGates(input.spec, artifactsDir, artifactPath, isCodeWorkflow);
+  const skillApplicationEvidence = buildRenderingSkillEvidence(input.skills, tasks, gates);
   const content = renderSource({
     spec: input.spec,
     pattern: input.pattern,
     skills: input.skills,
+    skillApplicationEvidence,
     workflowId,
     channel,
     artifactsDir,
@@ -66,6 +69,7 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
     gateCount: gates.length,
     tasks,
     gates,
+    skillApplicationEvidence,
   };
 }
 
@@ -73,6 +77,7 @@ function renderSource(input: {
   spec: NormalizedWorkflowSpec;
   pattern: PatternDecision;
   skills: SkillContext;
+  skillApplicationEvidence: SkillApplicationEvidence[];
   workflowId: string;
   channel: string;
   artifactsDir: string;
@@ -96,7 +101,9 @@ function renderSource(input: {
     '',
     ...input.team.map(renderAgentLine),
     '',
-    renderPrepareContextStep(input.spec, input.artifactsDir, input.pattern, input.skills),
+    renderPrepareContextStep(input.spec, input.artifactsDir, input.pattern, input.skills, input.skillApplicationEvidence),
+    '',
+    renderGateStep(input.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!),
     '',
     renderLeadPlanStep(input.spec, input.artifactsDir),
     '',
@@ -176,7 +183,7 @@ function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean): Work
   const implementer = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
   return [
     task('prepare-context', 'Prepare context', 'deterministic', 'Read or materialize the normalized spec and target context.', []),
-    task('lead-plan', 'Lead plan', 'lead-claude', 'Plan deliverables, non-goals, ownership, and verification gates.', ['prepare-context']),
+    task('lead-plan', 'Lead plan', 'lead-claude', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
     task('implement-artifact', 'Implement artifact', implementer, describeImplementation(spec), ['lead-plan']),
     task('review-claude', 'Review with Claude', 'reviewer-claude', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
     task('review-codex', 'Review with Codex', 'reviewer-codex', 'Review generated work for code quality and deterministic checks.', ['initial-soft-validation']),
@@ -202,8 +209,17 @@ function buildGates(
   const testCommand = deriveTestCommand(spec);
   const typecheckCommand = 'npx tsc --noEmit';
   const acceptanceCommands = spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate));
+  const skillBoundaryPath = `${artifactsDir}/skill-application-boundary.json`;
 
   return [
+    gate(
+      'skill-boundary-metadata-gate',
+      `test -f ${shellQuote(skillBoundaryPath)} && grep -F ${shellQuote('generation_time_only')} ${shellQuote(skillBoundaryPath)} && grep -F ${shellQuote('"runtimeEmbodiment":false')} ${shellQuote(skillBoundaryPath)}`,
+      'artifact_exists',
+      true,
+      ['prepare-context'],
+      'pre_review',
+    ),
     gate('post-implementation-file-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['implement-artifact'], 'pre_review'),
     gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
     gate('post-fix-verification-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['fix-loop'], 'post_fix'),
@@ -243,12 +259,22 @@ function renderPrepareContextStep(
   artifactsDir: string,
   pattern: PatternDecision,
   skills: SkillContext,
+  skillApplicationEvidence: SkillApplicationEvidence[],
 ): string {
+  const skillBoundary = {
+    behavior: 'generation_time_only',
+    runtimeEmbodiment: false,
+    boundary: 'Skills influence Ricky generator selection, loading, template rendering, workflow contract, validation gates, and metadata. Generated runtime agents receive only the rendered workflow instructions; they do not load or embody skill files at runtime.',
+    loadedSkills: skills.applicableSkillNames,
+    applicationEvidence: skillApplicationEvidence,
+  };
   const commands = [
     `mkdir -p ${shellQuote(artifactsDir)}`,
     `printf '%s\\n' ${shellQuote(spec.description)} > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
     `printf '%s\\n' ${shellQuote(`pattern=${pattern.pattern}; reason=${pattern.reason}`)} > ${shellQuote(`${artifactsDir}/pattern-decision.txt`)}`,
     `printf '%s\\n' ${shellQuote(skills.applicableSkillNames.join(','))} > ${shellQuote(`${artifactsDir}/loaded-skills.txt`)}`,
+    `printf '%s\\n' ${shellQuote(JSON.stringify(skillBoundary))} > ${shellQuote(`${artifactsDir}/skill-application-boundary.json`)}`,
+    `printf '%s\\n' ${shellQuote(skillBoundary.boundary)} > ${shellQuote(`${artifactsDir}/skill-runtime-boundary.txt`)}`,
     ...(spec.targetContext ? [`cat ${shellQuote(spec.targetContext)} > ${shellQuote(`${artifactsDir}/target-context.txt`)}`] : []),
     'echo GENERATED_WORKFLOW_CONTEXT_READY',
   ];
@@ -259,8 +285,13 @@ function renderPrepareContextStep(
 function renderLeadPlanStep(spec: NormalizedWorkflowSpec, artifactsDir: string): string {
   return `    .step('lead-plan', {
       agent: 'lead-claude',
-      dependsOn: ['prepare-context'],
+      dependsOn: ['skill-boundary-metadata-gate'],
       task: ${templateLiteral(`Plan the workflow execution from the normalized spec.
+
+Generation-time skill boundary:
+- Read ${artifactsDir}/skill-application-boundary.json and treat it as generator metadata only.
+- Skills are applied by Ricky during selection, loading, and template rendering.
+- Do not claim generated agents load, retain, or embody skill files at runtime unless a future runtime test proves that path.
 
 Description:
 ${spec.description}
@@ -370,6 +401,7 @@ Include:
 - dry-run command to execute before runtime launch
 - deterministic validation commands
 - review verdicts
+- skill application boundary from ${artifactsDir}/skill-application-boundary.json
 - remaining risks or environmental blockers
 
 End with GENERATED_WORKFLOW_READY.`)},
@@ -404,6 +436,39 @@ function gate(
   stage: DeterministicGate['stage'],
 ): DeterministicGate {
   return { name, command, verificationType, failOnError, dependsOn, stage };
+}
+
+function buildRenderingSkillEvidence(
+  skills: SkillContext,
+  tasks: WorkflowTask[],
+  gates: DeterministicGate[],
+): SkillApplicationEvidence[] {
+  const loaded = new Set(skills.applicableSkillNames);
+  const evidence: SkillApplicationEvidence[] = [...skills.applicationEvidence];
+
+  if (loaded.has('writing-agent-relay-workflows')) {
+    evidence.push({
+      skillName: 'writing-agent-relay-workflows',
+      stage: 'generation_rendering',
+      effect: 'workflow_contract',
+      behavior: 'generation_time_only',
+      runtimeEmbodiment: false,
+      evidence: `Rendered ${tasks.length} workflow tasks with dedicated channel setup, explicit agents, step dependencies, review stages, and final signoff.`,
+    });
+  }
+
+  if (loaded.has('relay-80-100-workflow')) {
+    evidence.push({
+      skillName: 'relay-80-100-workflow',
+      stage: 'generation_rendering',
+      effect: 'validation_gates',
+      behavior: 'generation_time_only',
+      runtimeEmbodiment: false,
+      evidence: `Rendered ${gates.length} deterministic gates including initial soft validation, fix-loop checks, final hard validation, git diff, and regression gates.`,
+    });
+  }
+
+  return evidence;
 }
 
 function maxConcurrency(pattern: SwarmPattern): number {

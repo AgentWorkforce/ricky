@@ -89,8 +89,43 @@ export function validateGeneratedArtifact(
   if (!/prepare-context/.test(content)) {
     issues.push(blockingIssue('validation', 'CONTEXT_READ_MISSING', 'Rendered workflow does not include deterministic context preparation.'));
   }
+  if (!/skill-application-boundary\.json/.test(content) || !/generation_time_only/.test(content) || !/runtimeEmbodiment/.test(content)) {
+    issues.push(blockingIssue('validation', 'SKILL_BOUNDARY_EVIDENCE_MISSING', 'Rendered workflow does not expose generation-time skill boundary metadata.'));
+  }
   if (!/\.run\(\{ cwd: process\.cwd\(\) \}\)/.test(content)) {
     issues.push(blockingIssue('validation', 'RUN_CWD_MISSING', 'Rendered workflow does not run with explicit cwd.'));
+  }
+
+  for (const skillName of skillContext.applicableSkillNames) {
+    const stages = skillContext.applicationEvidence
+      .filter((evidence) => evidence.skillName === skillName)
+      .map((evidence) => evidence.stage);
+    if (!stages.includes('generation_selection') || !stages.includes('generation_loading')) {
+      issues.push(blockingIssue(
+        'validation',
+        'SKILL_LOAD_EVIDENCE_MISSING',
+        `Loaded skill ${skillName} is missing selection/loading generation-time evidence.`,
+      ));
+    }
+  }
+
+  for (const requiredRenderingSkill of ['writing-agent-relay-workflows', 'relay-80-100-workflow']) {
+    if (
+      skillContext.applicableSkillNames.includes(requiredRenderingSkill) &&
+      !artifact.skillApplicationEvidence.some(
+        (evidence) => evidence.skillName === requiredRenderingSkill && evidence.stage === 'generation_rendering',
+      )
+    ) {
+      issues.push(blockingIssue(
+        'validation',
+        'SKILL_RENDER_EVIDENCE_MISSING',
+        `Loaded skill ${requiredRenderingSkill} is missing generation-rendering evidence in the artifact.`,
+      ));
+    }
+  }
+
+  if (artifact.skillApplicationEvidence.some((evidence) => evidence.behavior !== 'generation_time_only' || evidence.runtimeEmbodiment !== false)) {
+    issues.push(blockingIssue('validation', 'SKILL_RUNTIME_EMBODIMENT_CLAIM', 'Skill evidence must not claim runtime agent embodiment.'));
   }
 
   const finalReviewPassGate = artifact.gates.find((gate) => gate.name === 'final-review-pass-gate');

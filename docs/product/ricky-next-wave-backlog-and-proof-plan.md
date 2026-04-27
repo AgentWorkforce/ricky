@@ -36,7 +36,7 @@ Combined with the 15 product-build workflows that already had signoff, Ricky now
 - Product spec intake, workflow generation, debugger, validator, and analytics modules are unit-proven.
 - Cloud auth, workspace scoping, provider setup guidance, and generate endpoint behavior are unit-proven.
 - Local/BYOH normalization and local entrypoint behavior are unit-proven.
-- CLI banner/onboarding behavior and the current command surface are unit-proven.
+- CLI banner/onboarding behavior, the current command surface, and linked external-repo CLI invocation proof are covered deterministically.
 - First-wave workflow signoff evidence exists for all product-build workflows.
 
 ### What Is Not Proven

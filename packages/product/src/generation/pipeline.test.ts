@@ -66,6 +66,90 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('final-review');
   });
 
+  it('proves required generation skills are loaded and applied only during generation', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement strict TypeScript workflow proof with deterministic tests and 80-to-100 validation.',
+        targetFiles: ['src/product/generation/template-renderer.ts', 'src/product/generation/pipeline.test.ts'],
+        acceptanceGates: ['npx vitest run packages/product/src/generation/pipeline.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/skill-boundary.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+
+    expect(result.skillContext.applicableSkillNames).toEqual(
+      expect.arrayContaining(['writing-agent-relay-workflows', 'relay-80-100-workflow']),
+    );
+    expect(result.skillContext.applicationEvidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          skillName: 'writing-agent-relay-workflows',
+          stage: 'generation_selection',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+        }),
+        expect.objectContaining({
+          skillName: 'writing-agent-relay-workflows',
+          stage: 'generation_loading',
+          effect: 'metadata',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+        }),
+        expect.objectContaining({
+          skillName: 'relay-80-100-workflow',
+          stage: 'generation_selection',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+        }),
+        expect.objectContaining({
+          skillName: 'relay-80-100-workflow',
+          stage: 'generation_loading',
+          effect: 'metadata',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+        }),
+      ]),
+    );
+    expect(artifact.skillApplicationEvidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          skillName: 'writing-agent-relay-workflows',
+          stage: 'generation_rendering',
+          effect: 'workflow_contract',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+          evidence: expect.stringContaining('dedicated channel'),
+        }),
+        expect.objectContaining({
+          skillName: 'relay-80-100-workflow',
+          stage: 'generation_rendering',
+          effect: 'validation_gates',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+          evidence: expect.stringContaining('deterministic gates'),
+        }),
+      ]),
+    );
+    expect(artifact.content).toContain('loaded-skills.txt');
+    expect(artifact.content).toContain('skill-application-boundary.json');
+    expect(artifact.content).toContain('generation_time_only');
+    expect(artifact.content).toContain('runtimeEmbodiment');
+    expect(artifact.content).toContain('Skills are applied by Ricky during selection, loading, and template rendering.');
+    expect(artifact.content).toContain('Do not claim generated agents load, retain, or embody skill files at runtime');
+    expect(artifact.gates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'skill-boundary-metadata-gate',
+          command: expect.stringContaining('skill-application-boundary.json'),
+          failOnError: true,
+          stage: 'pre_review',
+        }),
+      ]),
+    );
+  });
+
   it('accepts a natural doc/spec request and selects a lighter workflow with deterministic review gates', () => {
     const payload: RawSpecPayload = {
       kind: 'natural_language',
@@ -404,6 +488,8 @@ describe('workflow generation pipeline', () => {
     expect(content).toContain(`${artifactsDir}/review-codex.md`);
     expect(content).toContain(`${artifactsDir}/final-review-claude.md`);
     expect(content).toContain(`${artifactsDir}/final-review-codex.md`);
+    expect(content).toContain(`${artifactsDir}/skill-application-boundary.json`);
+    expect(content).toContain(`${artifactsDir}/skill-runtime-boundary.txt`);
     expect(content).toContain(`${artifactsDir}/signoff.md`);
   });
 });

@@ -110,13 +110,16 @@ async function executeLocalPath(
       guidance: [
         'Local handoff blocker:',
         '  Ricky is ready for a real spec or workflow handoff.',
-        '  Ricky is ready, but no spec was provided for local execution.',
-        '  Current CLI command layer is still limited to onboarding, mode selection, and local spec handoff.',
+        '  no spec was provided for local execution, so nothing was generated and nothing was executed.',
+        '  Current CLI command layer is limited to onboarding, mode selection, and local spec handoff.',
         '',
         'Recovery:',
+        '  These commands generate a workflow artifact only. Add --run to also execute it.',
         '  Inline spec: npm start -- --mode local --spec "generate a workflow for package checks"',
         '  File spec:   npm start -- --mode local --spec-file ./path/to/spec.md',
         '  Stdin spec:  printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
+        '  Generate + run: append --run to any of the above (opt-in execution).',
+        '  Run existing artifact: ricky run workflows/generated/<file>.ts',
         '',
         'Cloud setup guidance remains available through: npx agent-relay cloud connect google',
       ],
@@ -130,7 +133,7 @@ async function executeLocalPath(
       ? undefined
       : {
           cwd: deps.cwd ?? deps.handoff.invocationRoot ?? process.env.INIT_CWD ?? process.cwd(),
-          returnGeneratedArtifactOnly: true,
+          returnGeneratedArtifactOnly: deps.handoff.stageMode !== 'run',
         },
   });
 

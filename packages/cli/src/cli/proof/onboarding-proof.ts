@@ -210,9 +210,9 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             localOption?.choice === '1',
             appearsBefore(selector, 'Local / BYOH', 'Cloud'),
             containsAll(localResult, [
-              'generate workflows into your local repo',
-              'validate workflows using local tools',
-              'run workflows via local agent-relay',
+              'writes a workflow artifact into workflows/generated/ in your repo',
+              'launch the artifact through local agent-relay',
+              'execution is opt-in',
               'No Cloud credentials required.',
               'currently implemented CLI surface',
             ]),
@@ -236,7 +236,8 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             containsAll(selector, ['[2] Cloud', 'AgentWorkforce Cloud']),
             containsAll(cloudResult, [
               'Cloud mode selected.',
-              'generate and run workflows on AgentWorkforce Cloud',
+              'hand workflow generation requests to AgentWorkforce Cloud',
+              'does not stream Cloud execution evidence',
               'Connect Google',
               'Connect GitHub',
               'Cloud dashboard',

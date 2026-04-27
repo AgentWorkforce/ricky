@@ -155,14 +155,23 @@ export function renderHandoffGuidance(): string {
     '  The user-facing generate/debug command layer is not exposed yet.',
     '  `ricky.generate` is not a CLI command in this slice.',
     '',
-    '  Inline spec:',
+    '  By default, a spec handoff generates a workflow artifact and stops there.',
+    '  Add --run to also execute the artifact through local agent-relay (opt-in).',
+    '',
+    '  Inline spec (generate only):',
     '  $ npm start -- --mode local --spec "generate a workflow for package checks"',
+    '',
+    '  Inline spec (generate + run):',
+    '  $ npm start -- --mode local --spec "generate a workflow for package checks" --run',
     '',
     '  File spec:',
     '  $ npm start -- --mode local --spec-file ./path/to/spec.md',
     '',
     '  Stdin spec:',
     '  $ printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
+    '',
+    '  Run an existing artifact:',
+    '  $ ricky run workflows/generated/<file>.ts',
     '',
     '  MCP integrations should reuse the same spec, mode, and source fields when that surface calls local/BYOH.',
   ].join('\n');
@@ -189,8 +198,14 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
     return [
       'Recovery:',
       '  If setup is interrupted, rerun `npm start`.',
+      '  If a generation handoff fails, retry with one of:',
+      '    npm start -- --mode local --spec "<rephrased spec>"',
+      '    npm start -- --mode local --spec-file ./path/to/spec.md',
+      '    printf "%s\\n" "<spec text>" | npm start -- --mode local --stdin',
+      '  If a --run execution is blocked, Ricky surfaces a classified blocker',
+      '  (MISSING_BINARY, MISSING_ENV_VAR, INVALID_ARTIFACT, CREDENTIALS_REJECTED, NETWORK_UNREACHABLE,',
+      '   UNSUPPORTED_RUNTIME) with concrete recovery steps. Run those steps, then retry --run.',
       '  If Cloud setup is blocked, continue in local mode: npm start -- --mode local',
-      '  Ricky should say what is blocked and show the nearest useful next step.',
     ].join('\n');
   }
 
@@ -198,6 +213,9 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
     'Recovery:',
     `  Ricky can continue, but something is blocked: ${blockedReason}`,
     '  fix the local runtime issue or continue with Cloud setup instead.',
+    '  Use the classified blocker steps Ricky printed (MISSING_BINARY, MISSING_ENV_VAR,',
+    '  INVALID_ARTIFACT, CREDENTIALS_REJECTED, NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME),',
+    '  or run: npx agent-relay cloud connect google.',
   ].join('\n');
 }
 
@@ -221,8 +239,11 @@ export function renderWorkflowGenerationFailureRecovery(): string {
   return [
     '  Workflow generation failed.',
     '',
+    '  This means Ricky did not produce a workflow artifact — nothing was executed.',
     '  Check the Cloud request context and provider connection, then retry Cloud mode.',
     '  To continue without Cloud, use local mode with --spec, --spec-file, or --stdin.',
+    '  If the spec was ambiguous, rephrase it (state the trigger, action, and target),',
+    '  then retry: npm start -- --mode local --spec "<clarified spec>".',
   ].join('\n');
 }
 

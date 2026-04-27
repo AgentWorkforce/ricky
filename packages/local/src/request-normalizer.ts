@@ -13,6 +13,7 @@
 export type HandoffSource = 'free-form' | 'structured' | 'cli' | 'mcp' | 'claude' | 'workflow-artifact';
 export type LocalExecutionMode = 'local' | 'cloud' | 'both';
 export type LocalExecutionPreference = LocalExecutionMode | 'auto';
+export type LocalStageMode = 'generate' | 'run';
 export type StructuredSpec = Record<string, unknown>;
 export type SpecInput = string | StructuredSpec;
 
@@ -24,7 +25,11 @@ export interface LocalSourceMetadata {
 
 export interface BaseHandoff {
   /** Preferred execution target. `mode` is kept as the stable shorthand. */
-  mode?: LocalExecutionMode;
+  mode?: LocalExecutionMode | LocalStageMode;
+  /** Whether a generated artifact should stop at generation or continue into local runtime. */
+  stageMode?: LocalStageMode;
+  /** Alias accepted by CLI/API callers that model the choice as behavior rather than stage. */
+  behavior?: LocalStageMode;
   /**
    * Real caller root captured at the invocation boundary.
    * Used to keep generated artifact writes anchored to the user's repo even
@@ -117,6 +122,8 @@ export interface LocalInvocationRequest {
    * to inspect `mode`.
    */
   mode: LocalExecutionMode;
+  /** Product-stage behavior. Undefined preserves legacy executor behavior for direct callers. */
+  stageMode?: LocalStageMode;
   /** Caller repo root captured at the CLI boundary when available. */
   invocationRoot?: string;
   /** Optional file path when the spec came from a file or artifact. */
@@ -164,6 +171,7 @@ export async function normalizeRequest(
         spec: raw.spec,
         source: 'free-form',
         mode,
+        stageMode: stageModeFor(raw, raw.spec),
         invocationRoot: raw.invocationRoot,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
@@ -178,6 +186,7 @@ export async function normalizeRequest(
         structuredSpec: raw.spec,
         source: 'structured',
         mode,
+        stageMode: stageModeFor(raw, raw.spec),
         invocationRoot: raw.invocationRoot,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
@@ -193,6 +202,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'cli',
         mode,
+        stageMode: stageModeFor(raw, raw.spec),
         invocationRoot: raw.invocationRoot,
         specPath: raw.specFile,
         metadata: {
@@ -214,6 +224,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'mcp',
         mode,
+        stageMode: stageModeFor(raw, spec),
         invocationRoot: raw.invocationRoot,
         metadata: {
           ...(raw.metadata ?? {}),
@@ -237,6 +248,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'claude',
         mode,
+        stageMode: stageModeFor(raw, raw.spec),
         invocationRoot: raw.invocationRoot,
         metadata,
         sourceMetadata: sourceMetadataForClaude(raw),
@@ -252,6 +264,7 @@ export async function normalizeRequest(
         spec,
         source: 'workflow-artifact',
         mode,
+        stageMode: stageModeFor(raw) ?? 'run',
         invocationRoot: raw.invocationRoot,
         specPath: raw.artifactPath,
         metadata: raw.metadata ?? {},
@@ -262,9 +275,16 @@ export async function normalizeRequest(
 }
 
 function executionModeFor(raw: BaseHandoff, spec?: SpecInput): LocalExecutionMode {
-  if (raw.mode) return raw.mode;
+  if (raw.mode === 'local' || raw.mode === 'cloud' || raw.mode === 'both') return raw.mode;
   if (raw.executionPreference) return normalizeExecutionPreference(raw.executionPreference);
   return executionModeFromStructuredSpec(spec) ?? 'local';
+}
+
+function stageModeFor(raw: BaseHandoff, spec?: SpecInput): LocalStageMode | undefined {
+  if (raw.stageMode) return raw.stageMode;
+  if (raw.behavior) return raw.behavior;
+  if (raw.mode === 'generate' || raw.mode === 'run') return raw.mode;
+  return stageModeFromStructuredSpec(spec);
 }
 
 function executionModeFromStructuredSpec(spec?: SpecInput): LocalExecutionMode | undefined {
@@ -275,6 +295,13 @@ function executionModeFromStructuredSpec(spec?: SpecInput): LocalExecutionMode |
     return normalizeExecutionPreference(value);
   }
   return undefined;
+}
+
+function stageModeFromStructuredSpec(spec?: SpecInput): LocalStageMode | undefined {
+  if (!spec || typeof spec === 'string') return undefined;
+
+  const value = spec.stageMode ?? spec.stage_mode ?? spec.behavior ?? spec.localBehavior ?? spec.local_behavior ?? spec.mode;
+  return value === 'generate' || value === 'run' ? value : undefined;
 }
 
 function normalizeExecutionPreference(preference: LocalExecutionPreference): LocalExecutionMode {

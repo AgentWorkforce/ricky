@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream';
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -11,6 +12,7 @@ import {
   renderRecoveryGuidance,
   renderSuggestedNextAction,
   renderWelcome,
+  renderWorkflowGenerationFailureRecovery,
   runOnboarding,
   shouldShowBanner,
   type RickyConfig,
@@ -45,6 +47,24 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('Connect providers such as Google, then continue with hosted workflow generation and execution.');
   });
 
+  it('keeps artifact-only onboarding copy from promising automatic execution', () => {
+    const output = [
+      renderWelcome({ isFirstRun: true }),
+      renderModeResult('local'),
+      renderHandoffGuidance(),
+      renderOnboarding({ isFirstRun: true, isTTY: true, mode: 'local', env: {} }),
+    ].join('\n');
+
+    expect(output).toContain('Today, locally, Ricky generates a workflow artifact into your repo.');
+    expect(output).toContain('Executing it is a separate, opt-in step');
+    expect(output).toContain('By default, a spec handoff generates a workflow artifact and stops there.');
+    expect(output).toContain('execution is opt-in');
+    expect(output).not.toMatch(/automatic execution/i);
+    expect(output).not.toMatch(/automatically execute/i);
+    expect(output).not.toMatch(/execution (runs|starts|launches) by default/i);
+    expect(output).not.toContain('npx ricky generate');
+  });
+
   it('uses real Google Cloud guidance and honest GitHub dashboard guidance', () => {
     const output = `${renderCloudGuidance()}\n${renderModeResult('cloud')}`;
 
@@ -76,6 +96,19 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('fix the local runtime issue or continue with Cloud setup instead');
   });
 
+  it('names the real supported local handoff inputs in recovery guidance', () => {
+    const output = `${renderRecoveryGuidance()}\n${renderWorkflowGenerationFailureRecovery()}\n${renderSuggestedNextAction('local')}`;
+
+    expect(output).toContain('--spec');
+    expect(output).toContain('--spec-file');
+    expect(output).toContain('--stdin');
+    expect(output).toContain('npm start -- --mode local --spec "<rephrased spec>"');
+    expect(output).toContain('npm start -- --mode local --spec-file ./path/to/spec.md');
+    expect(output).toContain('npm start -- --mode local --stdin');
+    expect(output).not.toContain('npx ricky generate');
+    expect(output).not.toContain('spec-stdin');
+  });
+
   it('suppresses the banner for quiet, no-banner, and non-TTY invocations', () => {
     expect(shouldShowBanner({ isFirstRun: true, isTTY: true, quiet: true })).toBe(false);
     expect(shouldShowBanner({ isFirstRun: true, isTTY: true, noBanner: true })).toBe(false);
@@ -102,6 +135,30 @@ describe('Ricky CLI onboarding', () => {
     expect(shouldShowBanner({ isTTY: true, env: { RICKY_BANNER: '0' } })).toBe(false);
     expect(shouldShowBanner({ isTTY: true, env: {} })).toBe(true);
     expect(shouldShowBanner({ isTTY: true, rickyBanner: '0' })).toBe(false);
+  });
+
+  it('keeps the cofounder readiness checklist aligned with issue #7 readiness areas', async () => {
+    const checklist = await readFile(
+      new URL('../../../../docs/product/ricky-cofounder-interactive-readiness-checklist.md', import.meta.url),
+      'utf8',
+    );
+
+    for (const area of [
+      'First-run onboarding clarity',
+      'Local mode selection clarity',
+      'Spec handoff works immediately',
+      'Generated artifact appears where promised',
+      'Next command points to a real file',
+      'Execution-vs-generation distinction is understandable',
+      'Recovery guidance is truthful when something fails',
+    ]) {
+      expect(checklist).toContain(area);
+    }
+
+    expect(checklist).toContain('live cofounder testing');
+    expect(checklist).toContain('generation-only must not look like an');
+    expect(checklist).toMatch(/first-run onboarding/i);
+    expect(checklist).toContain('interactive/local onboarding');
   });
 });
 

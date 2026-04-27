@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { InteractiveCliResult } from '../entrypoint/interactive-cli.js';
 import type { OnboardingResult } from '../cli/onboarding.js';
+import type { LocalResponse } from '@ricky/local/entrypoint.js';
 import { cliMain, parseArgs, renderHelp } from './cli-main.js';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,26 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses opt-in local run behavior and artifact execution', () => {
+    expect(parseArgs(['--mode', 'local', '--spec', 'build a workflow', '--run'])).toEqual({
+      command: 'run',
+      mode: 'local',
+      spec: 'build a workflow',
+      runRequested: true,
+    });
+    expect(parseArgs(['run', 'workflows/generated/example.ts'])).toEqual({
+      command: 'run',
+      artifact: 'workflows/generated/example.ts',
+      runRequested: true,
+    });
+    expect(parseArgs(['run', '--artifact', 'workflows/generated/example.ts', '--json'])).toEqual({
+      command: 'run',
+      artifact: 'workflows/generated/example.ts',
+      runRequested: true,
+      json: true,
+    });
+  });
+
   it('reports missing values for spec flags', () => {
     expect(parseArgs(['--spec'])).toEqual({
       command: 'run',
@@ -88,6 +109,19 @@ describe('renderHelp', () => {
     expect(helpText).not.toContain('npx ricky generate');
     expect(helpText).not.toMatch(/rerun.*later/i);
   });
+
+  it('states that spec handoff returns an artifact unless execution is explicitly requested', () => {
+    const helpText = renderHelp().join('\n');
+
+    expect(helpText).toContain('Two distinct stages — generation runs by default, execution is opt-in:');
+    expect(helpText).toContain('npm start -- --mode local --spec <text>            Generate a workflow artifact only');
+    expect(helpText).toContain('Without --run, Ricky returns the generated artifact path and stops.');
+    expect(helpText).toContain('only with --run');
+    expect(helpText).toContain('or `ricky run <artifact>`');
+    expect(helpText).not.toMatch(/automatic execution/i);
+    expect(helpText).not.toMatch(/automatically execute/i);
+    expect(helpText).not.toMatch(/execution (runs|starts|launches) by default/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -107,6 +141,81 @@ function fakeInteractiveResult(overrides: Partial<InteractiveCliResult> = {}): I
     onboarding,
     diagnoses: [],
     guidance: [],
+    ...overrides,
+  };
+}
+
+function stagedLocalResult(overrides: Partial<LocalResponse> = {}): LocalResponse {
+  const artifactPath = 'workflows/generated/issue-3.ts';
+  return {
+    ok: true,
+    artifacts: [{ path: artifactPath, type: 'text/typescript', content: 'workflow("issue-3")' }],
+    logs: [],
+    warnings: [],
+    nextActions: ['Inspect generated artifacts and local run evidence.'],
+    exitCode: 0,
+    generation: {
+      stage: 'generate',
+      status: 'ok',
+      artifact: {
+        path: artifactPath,
+        workflow_id: 'wf-issue-3',
+        spec_digest: 'digest-issue-3',
+      },
+      next: {
+        run_command: `npx --no-install agent-relay run ${artifactPath}`,
+        run_mode_hint: `ricky run --artifact ${artifactPath}`,
+      },
+    },
+    execution: {
+      stage: 'execute',
+      status: 'success',
+      execution: {
+        workflow_id: 'wf-issue-3',
+        artifact_path: artifactPath,
+        command: `npx --no-install agent-relay run ${artifactPath}`,
+        workflow_file: artifactPath,
+        cwd: '/repo',
+        started_at: '2026-01-01T00:00:00.000Z',
+        finished_at: '2026-01-01T00:00:01.000Z',
+        duration_ms: 1000,
+        steps_completed: 1,
+        steps_total: 1,
+      },
+      evidence: {
+        outcome_summary: 'Workflow completed successfully with deterministic evidence.',
+        artifacts_produced: [{ path: artifactPath, kind: 'workflow', bytes: 128 }],
+        logs: {
+          stdout_path: '/repo/.workflow-artifacts/ricky-local-runs/run-1/stdout.log',
+          stderr_path: '/repo/.workflow-artifacts/ricky-local-runs/run-1/stderr.log',
+          truncated: false,
+        },
+        side_effects: {
+          files_written: [
+            artifactPath,
+            '/repo/.workflow-artifacts/ricky-local-runs/run-1/stdout.log',
+            '/repo/.workflow-artifacts/ricky-local-runs/run-1/stderr.log',
+          ],
+          commands_invoked: [`npx --no-install agent-relay run ${artifactPath}`],
+          network_calls: [],
+        },
+        assertions: [
+          {
+            name: 'runtime_exit_code',
+            status: 'pass',
+            detail: 'Runtime exited with code 0.',
+          },
+        ],
+        workflow_steps: [
+          {
+            id: 'runtime-launch',
+            name: 'Local runtime execution',
+            status: 'pass',
+            duration_ms: 1000,
+          },
+        ],
+      },
+    },
     ...overrides,
   };
 }
@@ -287,6 +396,194 @@ describe('cliMain', () => {
     expect(output).not.toMatch(/rerun.*later/i);
     expect(result.interactiveResult?.awaitingInput).toBe(false);
     expect(result.interactiveResult?.localResult?.ok).toBe(true);
+  });
+
+  it('passes --run into the local handoff and preserves blocker exit code 2 in JSON output', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({
+      ok: false,
+      localResult: {
+        ok: false,
+        artifacts: [{ path: 'workflows/generated/example.ts', type: 'text/typescript' }],
+        logs: [],
+        warnings: ['Runtime package "agent-relay" is not installed in this workspace.'],
+        nextActions: ['npm install'],
+        exitCode: 2,
+        generation: {
+          stage: 'generate',
+          status: 'ok',
+          artifact: {
+            path: 'workflows/generated/example.ts',
+            workflow_id: 'wf-example',
+            spec_digest: 'abc123',
+          },
+          next: {
+            run_command: 'npx --no-install agent-relay run workflows/generated/example.ts',
+            run_mode_hint: 'ricky run --artifact workflows/generated/example.ts',
+          },
+        },
+        execution: {
+          stage: 'execute',
+          status: 'blocker',
+          execution: {
+            workflow_id: 'wf-example',
+            artifact_path: 'workflows/generated/example.ts',
+            command: 'npx --no-install agent-relay run workflows/generated/example.ts',
+            workflow_file: 'workflows/generated/example.ts',
+            cwd: '/repo',
+            started_at: '2026-01-01T00:00:00.000Z',
+            finished_at: '2026-01-01T00:00:00.000Z',
+            duration_ms: 0,
+            steps_completed: 0,
+            steps_total: 1,
+          },
+          blocker: {
+            code: 'MISSING_BINARY',
+            category: 'dependency',
+            message: 'Runtime package "agent-relay" is not installed in this workspace.',
+            detected_at: '2026-01-01T00:00:00.000Z',
+            detected_during: 'precheck',
+            recovery: {
+              actionable: true,
+              steps: ['npm install'],
+            },
+            context: {
+              missing: ['node_modules/.bin/agent-relay'],
+              found: ['npx'],
+            },
+          },
+        },
+      },
+    }));
+
+    const result = await cliMain({
+      argv: ['--mode', 'local', '--spec', 'build a workflow', '--run', '--json'],
+      runInteractive: runner,
+    });
+
+    expect(runner.mock.calls[0][0].handoff).toMatchObject({
+      source: 'cli',
+      stageMode: 'run',
+    });
+    expect(result.exitCode).toBe(2);
+    const parsed = JSON.parse(result.output.join('\n'));
+    expect(parsed[0]).toMatchObject({ stage: 'generate', status: 'ok' });
+    expect(parsed[1]).toMatchObject({ stage: 'execute', status: 'blocker' });
+    expect(parsed[1].blocker.recovery.steps).toEqual(['npm install']);
+  });
+
+  describe('regression: issue #3 staged local output', () => {
+    it('distinguishes artifact generation from execution result in human CLI output', async () => {
+      const runner = vi.fn().mockResolvedValue(
+        fakeInteractiveResult({
+          ok: true,
+          localResult: stagedLocalResult(),
+        }),
+      );
+
+      const result = await cliMain({
+        argv: ['--mode', 'local', '--spec', 'build a workflow', '--run'],
+        runInteractive: runner,
+      });
+
+      const output = result.output.join('\n');
+      const generationIndex = result.output.indexOf('stage: generate');
+      const executionIndex = result.output.indexOf('--- execution ---');
+
+      expect(result.exitCode).toBe(0);
+      expect(generationIndex).toBeGreaterThan(-1);
+      expect(executionIndex).toBeGreaterThan(generationIndex);
+      expect(output).toContain('  Artifact: workflows/generated/issue-3.ts');
+      expect(output).toContain('  workflow_id: wf-issue-3');
+      expect(output).toContain('--- execution ---');
+      expect(output).toContain('stage: execute');
+      expect(output).toContain('status: success');
+      expect(output).toContain('  command: npx --no-install agent-relay run workflows/generated/issue-3.ts');
+      expect(output).toContain('  outcome_summary: Workflow completed successfully with deterministic evidence.');
+    });
+
+    it('keeps stop-after-generation human output artifact-only when no execution stage is returned', async () => {
+      const artifactOnly = stagedLocalResult({
+        execution: undefined,
+        nextActions: [
+          'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+          'Inspect the generated workflow artifact and choose whether to run it locally.',
+        ],
+      });
+      const runner = vi.fn().mockResolvedValue(
+        fakeInteractiveResult({
+          ok: true,
+          localResult: artifactOnly,
+        }),
+      );
+
+      const result = await cliMain({
+        argv: ['--mode', 'local', '--spec', 'build a workflow'],
+        runInteractive: runner,
+      });
+
+      const output = result.output.join('\n');
+      expect(result.exitCode).toBe(0);
+      expect(output).toContain('stage: generate');
+      expect(output).toContain('status: ok');
+      expect(output).toContain('  Artifact: workflows/generated/issue-3.ts');
+      expect(output).toContain(
+        '  Next: Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+      );
+      expect(output).not.toContain('--- execution ---');
+      expect(output).not.toContain('outcome_summary:');
+      expect(output).not.toContain('blocker_code:');
+    });
+  });
+
+  describe('regression: issues #4 and #7 user-facing contracts', () => {
+    it('labels generated artifacts as generation output, not execution evidence', async () => {
+      const artifactOnly = stagedLocalResult({
+        execution: undefined,
+        nextActions: [],
+      });
+      const runner = vi.fn().mockResolvedValue(
+        fakeInteractiveResult({
+          ok: true,
+          localResult: artifactOnly,
+        }),
+      );
+
+      const result = await cliMain({
+        argv: ['--mode', 'local', '--spec', 'generate a workflow for package checks'],
+        runInteractive: runner,
+      });
+
+      const output = result.output.join('\n');
+      const generationIndex = result.output.indexOf('stage: generate');
+      const artifactIndex = result.output.indexOf('  Artifact: workflows/generated/issue-3.ts');
+      const runModeIndex = result.output.indexOf('  Run mode: ricky run --artifact workflows/generated/issue-3.ts');
+
+      expect(result.exitCode).toBe(0);
+      expect(output).toContain('Local handoff completed.');
+      expect(output).toContain('  Generation: ok. Execution: not requested (pass --run or use `ricky run <artifact>` to execute).');
+      expect(generationIndex).toBeGreaterThan(-1);
+      expect(artifactIndex).toBeGreaterThan(generationIndex);
+      expect(runModeIndex).toBeGreaterThan(artifactIndex);
+      expect(output).toContain('  workflow_id: wf-issue-3');
+      expect(output).toContain('  spec_digest: digest-issue-3');
+      expect(output).not.toContain('--- execution ---');
+      expect(output).not.toContain('Execution: success.');
+      expect(output).not.toContain('outcome_summary:');
+      expect(output).not.toContain('stdout_path:');
+      expect(output).not.toContain('stderr_path:');
+    });
+
+    it('prints recovery guidance with the implemented spec inputs', async () => {
+      const result = await cliMain({ argv: ['--spec'] });
+      const output = result.output.join('\n');
+
+      expect(result.exitCode).toBe(1);
+      expect(output).toContain('CLI input blocker:');
+      expect(output).toContain('--spec requires a value.');
+      expect(output).toContain('For local handoff, provide one of --spec, --spec-file, or --stdin.');
+      expect(output).not.toContain('npx ricky generate');
+      expect(output).not.toContain('spec-stdin');
+    });
   });
 
   it('returns a generated workflow artifact to the user without requiring immediate runtime launch', async () => {

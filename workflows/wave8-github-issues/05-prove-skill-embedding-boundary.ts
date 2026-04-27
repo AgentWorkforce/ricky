@@ -60,7 +60,7 @@ Likely files:
       type: 'deterministic',
       dependsOn: ['implement-skill-boundary-proof'],
       command: [
-        'git diff --name-only > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/changed-files.txt',
+        '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/changed-files.txt',
         'grep -F "docs/product/ricky-skill-embedding-boundary.md" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/changed-files.txt',
         'grep -Eq "packages/product/src/generation/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/changed-files.txt',
         'grep -F "writing-agent-relay-workflows" docs/product/ricky-skill-embedding-boundary.md packages/product/src/generation/pipeline.test.ts',

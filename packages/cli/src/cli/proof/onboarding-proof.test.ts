@@ -57,7 +57,7 @@ describe('Ricky CLI onboarding proof', () => {
   it.each([
     ['first-run-experience', ['Welcome to Ricky', 'Local / BYOH', 'Cloud', 'Recovery']],
     ['returning-user-compact-header', ['Ricky is ready', 'ricky · local mode · ready']],
-    ['local-byoh-path', ['generate workflows into your local repo', 'No Cloud credentials required']],
+    ['local-byoh-path', ['writes a workflow artifact into workflows/generated/ in your repo', 'No Cloud credentials required']],
     ['cloud-path', ['Cloud mode selected', 'AgentWorkforce Cloud', 'Cloud dashboard']],
     ['google-connect-guidance', ['npx agent-relay cloud connect google']],
     ['github-dashboard-nango-guidance', ['GitHub', 'Cloud dashboard']],

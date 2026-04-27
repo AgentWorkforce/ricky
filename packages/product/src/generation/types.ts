@@ -18,6 +18,10 @@ export type PlannedCheckStage = 'dry_run' | 'pre_review' | 'post_fix' | 'final' 
 
 export type WorkflowExecutionTarget = 'local' | 'cloud';
 
+export type SkillApplicationStage = 'generation_selection' | 'generation_loading' | 'generation_rendering';
+
+export type SkillApplicationEffect = 'workflow_contract' | 'validation_gates' | 'metadata';
+
 export interface GenerationIssue {
   severity: GenerationIssueSeverity;
   stage: GenerationIssueStage;
@@ -61,11 +65,21 @@ export interface TemplateDescriptor {
   missingPrerequisites: string[];
 }
 
+export interface SkillApplicationEvidence {
+  skillName: string;
+  stage: SkillApplicationStage;
+  effect: SkillApplicationEffect;
+  behavior: 'generation_time_only';
+  runtimeEmbodiment: false;
+  evidence: string;
+}
+
 export interface SkillContext {
   skills: SkillDescriptor[];
   templates: TemplateDescriptor[];
   loadWarnings: string[];
   applicableSkillNames: string[];
+  applicationEvidence: SkillApplicationEvidence[];
   issues: GenerationIssue[];
 }
 
@@ -105,6 +119,7 @@ export interface RenderedArtifact {
   gateCount: number;
   tasks: WorkflowTask[];
   gates: DeterministicGate[];
+  skillApplicationEvidence: SkillApplicationEvidence[];
 }
 
 export interface GenerationValidationResult {

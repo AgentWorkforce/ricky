@@ -6,10 +6,11 @@
  * suggested next actions — without routing through Cloud by default.
  */
 
-import type { ArtifactReader, LocalInvocationRequest, RawHandoff } from './request-normalizer';
+import type { ArtifactReader, LocalInvocationRequest, LocalStageMode, RawHandoff } from './request-normalizer';
 import { normalizeRequest } from './request-normalizer';
 import { spawn } from 'node:child_process';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { generate } from '@ricky/product/generation/index';
@@ -39,6 +40,97 @@ export interface LocalResponseArtifact {
   content?: string;
 }
 
+export type LocalGenerationStatus = 'ok' | 'error';
+export type LocalExecutionStatus = 'success' | 'blocker' | 'error';
+
+export interface LocalGenerationStageResult {
+  stage: 'generate';
+  status: LocalGenerationStatus;
+  artifact?: {
+    path: string;
+    workflow_id: string;
+    spec_digest: string;
+  };
+  next?: {
+    run_command: string;
+    run_mode_hint: string;
+  };
+  error?: string;
+}
+
+export type LocalBlockerCode =
+  | 'MISSING_ENV_VAR'
+  | 'MISSING_BINARY'
+  | 'INVALID_ARTIFACT'
+  | 'UNSUPPORTED_RUNTIME'
+  | 'CREDENTIALS_REJECTED'
+  | 'WORKDIR_DIRTY'
+  | 'NETWORK_UNREACHABLE';
+
+export type LocalBlockerCategory =
+  | 'environment'
+  | 'credentials'
+  | 'dependency'
+  | 'workflow_invalid'
+  | 'resource'
+  | 'unsupported';
+
+export interface LocalClassifiedBlocker {
+  code: LocalBlockerCode;
+  category: LocalBlockerCategory;
+  message: string;
+  detected_at: string;
+  detected_during: 'precheck' | 'launch' | 'step_setup';
+  recovery: {
+    actionable: boolean;
+    steps: string[];
+    docs_url?: string;
+  };
+  context: {
+    missing: string[];
+    found: string[];
+  };
+}
+
+export interface LocalExecutionEvidence {
+  outcome_summary: string;
+  artifacts_produced?: Array<{ path: string; kind: string; bytes: number }>;
+  failed_step?: { id: string; name: string };
+  exit_code?: number | null;
+  logs: {
+    stdout_path?: string;
+    stderr_path?: string;
+    tail?: string[];
+    truncated: boolean;
+  };
+  side_effects: {
+    files_written: string[];
+    commands_invoked: string[];
+    network_calls?: Array<{ host: string; status_code: number }>;
+  };
+  assertions: Array<{ name: string; status: 'pass' | 'fail' | 'skipped'; detail: string }>;
+  workflow_steps?: Array<{ id: string; name: string; status: 'pass' | 'fail' | 'skipped'; duration_ms: number }>;
+}
+
+export interface LocalExecutionStageResult {
+  stage: 'execute';
+  status: LocalExecutionStatus;
+  execution: {
+    workflow_id: string;
+    artifact_path: string;
+    command: string;
+    workflow_file: string;
+    cwd: string;
+    started_at: string;
+    finished_at: string;
+    duration_ms: number;
+    steps_completed: number;
+    steps_total: number;
+  };
+  evidence?: LocalExecutionEvidence;
+  blocker?: LocalClassifiedBlocker;
+}
+
 export interface LocalResponse {
   /** Whether the local invocation succeeded. */
   ok: boolean;
@@ -50,6 +142,12 @@ export interface LocalResponse {
   warnings: string[];
   /** Suggested next actions for the user. */
   nextActions: string[];
+  /** Stage 1 result: artifact generation or artifact selection. */
+  generation?: LocalGenerationStageResult;
+  /** Stage 2 result: populated only when run behavior was requested. */
+  execution?: LocalExecutionStageResult;
+  /** Process-oriented exit code: 0 success, 2 blocker, 1 error. */
+  exitCode?: 0 | 1 | 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,9 +274,14 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       const artifactWriter = options.artifactWriter ?? defaultArtifactWriter;
       const coordinator =
         options.coordinator ?? new LocalCoordinator(options.commandRunner ?? createProcessCommandRunner());
+      const stageMode = resolveStageMode(request.stageMode, options.returnGeneratedArtifactOnly);
+      const includeStageContract = request.stageMode !== undefined;
+      const specDigest = digestSpec(request.spec);
+      let generationStage: LocalGenerationStageResult | undefined;
 
       logs.push(`[local] received spec from ${request.source}`);
       logs.push(`[local] mode: ${request.mode}`);
+      if (stageMode) logs.push(`[local] stage mode: ${stageMode}`);
 
       if (request.specPath) {
         logs.push(`[local] spec path: ${request.specPath}`);
@@ -202,7 +305,12 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       if (!intakeResult.routing || intakeResult.routing.target === 'clarify' || !intakeResult.success) {
         if (intakeResult.routing?.suggestedFollowUp) nextActions.push(intakeResult.routing.suggestedFollowUp);
         nextActions.push('Clarify the local workflow request and retry.');
-        return { ok: false, artifacts, logs, warnings, nextActions };
+        generationStage = {
+          stage: 'generate',
+          status: 'error',
+          error: warnings[0] ?? 'Spec intake could not produce an executable workflow artifact.',
+        };
+        return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
       }
 
       const workflowFile = workflowFileForRoute(
@@ -240,32 +348,73 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         if (!generationResult.success || !artifact) {
           warnings.push(...generationResult.validation.errors);
           nextActions.push('Fix the generated workflow validation errors before local execution.');
-          return { ok: false, artifacts, logs, warnings, nextActions };
+          generationStage = createGenerationStage('error', artifact, specDigest, generationResult.validation.errors[0]);
+          return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
         }
 
         await artifactWriter.writeArtifact(artifact.artifactPath, artifact.content, cwd);
         logs.push(`[local] wrote workflow artifact: ${artifact.artifactPath}`);
+        generationStage = createGenerationStage('ok', artifact, specDigest);
       }
 
       const runTarget = artifact?.artifactPath ?? workflowFile;
       if (!runTarget) {
         warnings.push('No executable local workflow artifact was available.');
         nextActions.push('Provide a workflows/**/*.ts artifact or a generation spec that can produce one.');
-        return { ok: false, artifacts, logs, warnings, nextActions };
+        generationStage = {
+          stage: 'generate',
+          status: 'error',
+          error: 'No executable local workflow artifact was available.',
+        };
+        return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
       }
 
-      if (artifact && options.returnGeneratedArtifactOnly === true) {
+      if (!generationStage) {
+        generationStage = createArtifactReferenceGenerationStage(runTarget, request.requestId, specDigest);
+      }
+
+      if (artifact && stageMode === 'generate') {
         logs.push('[local] runtime launch skipped: returning generated artifact only');
         nextActions.push(`Run the generated workflow locally: npx --no-install agent-relay run ${artifact.artifactPath}`);
         nextActions.push('Inspect the generated workflow artifact and choose whether to run it locally.');
-        return { ok: true, artifacts: dedupeArtifacts(artifacts), logs, warnings, nextActions };
+        return {
+          ok: true,
+          artifacts: dedupeArtifacts(artifacts),
+          logs,
+          warnings,
+          nextActions,
+          ...stageResponse(includeStageContract, generationStage, undefined, 0),
+        };
+      }
+
+      const route = options.route ?? DEFAULT_LOCAL_ROUTE;
+      const workflowId = artifact?.workflowId ?? generationStage.artifact?.workflow_id ?? workflowIdForPath(runTarget);
+      const precheckBlocker = await precheckRuntimeLaunch(runTarget, cwd, route, options);
+      if (precheckBlocker) {
+        const execution = createBlockerExecutionStage({
+          workflowId,
+          artifactPath: runTarget,
+          cwd,
+          route,
+          blocker: precheckBlocker,
+        });
+        warnings.push(precheckBlocker.message);
+        nextActions.push(...precheckBlocker.recovery.steps);
+        return {
+          ok: false,
+          artifacts: dedupeArtifacts(artifacts),
+          logs,
+          warnings,
+          nextActions,
+          ...stageResponse(includeStageContract, generationStage, execution, 2),
+        };
       }
 
       const runResult = await coordinator.launch({
         workflowFile: runTarget,
         cwd,
         timeoutMs: options.timeoutMs,
-        route: options.route ?? DEFAULT_LOCAL_ROUTE,
+        route,
         metadata: {
           requestId: intakeResult.requestId,
           source: request.source,
@@ -280,11 +429,24 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         type: 'text/typescript',
         ...(artifact ? { content: artifact.content } : {}),
       });
+      const execution = await createExecutionStageFromCoordinatorResult(
+        runResult,
+        workflowId,
+        artifact?.content,
+        artifact?.artifactPath,
+      );
 
       if (runResult.status !== 'passed') {
-        warnings.push(runResult.error ?? `Local workflow finished with status ${runResult.status}.`);
-        nextActions.push('Inspect the local runtime logs and rerun after resolving the environment blocker.');
-        return { ok: false, artifacts: dedupeArtifacts(artifacts), logs, warnings, nextActions };
+        warnings.push(execution.blocker?.message ?? runResult.error ?? `Local workflow finished with status ${runResult.status}.`);
+        nextActions.push(...(execution.blocker?.recovery.steps ?? ['Inspect the local runtime logs and resolve the classified blocker.']));
+        return {
+          ok: false,
+          artifacts: dedupeArtifacts(artifacts),
+          logs,
+          warnings,
+          nextActions,
+          ...stageResponse(includeStageContract, generationStage, execution, 1),
+        };
       }
 
       nextActions.push('Inspect generated artifacts and local run evidence.');
@@ -292,7 +454,14 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         nextActions.push('After local validation, optionally promote to Cloud execution.');
       }
 
-      return { ok: true, artifacts: dedupeArtifacts(artifacts), logs, warnings, nextActions };
+      return {
+        ok: true,
+        artifacts: dedupeArtifacts(artifacts),
+        logs,
+        warnings,
+        nextActions,
+        ...stageResponse(includeStageContract, generationStage, execution, 0),
+      };
     },
   };
 }
@@ -495,6 +664,453 @@ function mapCoordinatorLogs(result: CoordinatorResult): string[] {
     ...result.stdout.map((line) => `[stdout] ${line}`),
     ...result.stderr.map((line) => `[stderr] ${line}`),
   ];
+}
+
+function stageResponse(
+  include: boolean,
+  generation: LocalGenerationStageResult | undefined,
+  execution: LocalExecutionStageResult | undefined,
+  exitCode: 0 | 1 | 2,
+): Pick<LocalResponse, 'generation' | 'execution' | 'exitCode'> {
+  if (!include) return {};
+  return {
+    ...(generation ? { generation } : {}),
+    ...(execution ? { execution } : {}),
+    exitCode,
+  };
+}
+
+function resolveStageMode(
+  requestStageMode: LocalStageMode | undefined,
+  returnGeneratedArtifactOnly: boolean | undefined,
+): LocalStageMode | undefined {
+  if (returnGeneratedArtifactOnly === true) return 'generate';
+  if (returnGeneratedArtifactOnly === false) return requestStageMode;
+  return requestStageMode;
+}
+
+function createGenerationStage(
+  status: LocalGenerationStatus,
+  artifact: RenderedArtifact | null,
+  specDigest: string,
+  error?: string,
+): LocalGenerationStageResult {
+  return {
+    stage: 'generate',
+    status,
+    ...(artifact
+      ? {
+          artifact: {
+            path: artifact.artifactPath,
+            workflow_id: artifact.workflowId,
+            spec_digest: specDigest,
+          },
+        }
+      : {}),
+    ...(status === 'ok' && artifact
+      ? {
+          next: {
+            run_command: `npx --no-install agent-relay run ${artifact.artifactPath}`,
+            run_mode_hint: `ricky run --artifact ${artifact.artifactPath}`,
+          },
+        }
+      : {}),
+    ...(error ? { error } : {}),
+  };
+}
+
+function createArtifactReferenceGenerationStage(
+  artifactPath: string,
+  requestId: string | undefined,
+  specDigest: string,
+): LocalGenerationStageResult {
+  return {
+    stage: 'generate',
+    status: 'ok',
+    artifact: {
+      path: artifactPath,
+      workflow_id: requestId ?? workflowIdForPath(artifactPath),
+      spec_digest: specDigest,
+    },
+    next: {
+      run_command: `npx --no-install agent-relay run ${artifactPath}`,
+      run_mode_hint: `ricky run --artifact ${artifactPath}`,
+    },
+  };
+}
+
+function digestSpec(spec: string): string {
+  return createHash('sha256').update(spec).digest('hex');
+}
+
+function workflowIdForPath(path: string): string {
+  return `wf-${digestSpec(path).slice(0, 12)}`;
+}
+
+async function precheckRuntimeLaunch(
+  artifactPath: string,
+  cwd: string,
+  route: ExecutionRoute,
+  options: LocalExecutorOptions,
+): Promise<LocalClassifiedBlocker | null> {
+  if (options.commandRunner || options.coordinator) {
+    return null;
+  }
+
+  const { access } = await import('node:fs/promises');
+  const resolvedArtifact = isAbsolute(artifactPath) ? artifactPath : resolve(cwd, artifactPath);
+  try {
+    await access(resolvedArtifact);
+  } catch {
+    return blocker({
+      code: 'INVALID_ARTIFACT',
+      category: 'workflow_invalid',
+      detectedDuring: 'precheck',
+      message: `Workflow artifact is not readable at ${resolvedArtifact}.`,
+      missing: [resolvedArtifact],
+      found: [],
+      steps: [`test -f ${shellQuote(resolvedArtifact)}`, `ricky run ${shellQuote(artifactPath)}`],
+    });
+  }
+
+  const command = route.command ?? 'agent-relay';
+  const executable = await findExecutable(command);
+  if (!executable) {
+    return blocker({
+      code: 'MISSING_BINARY',
+      category: 'dependency',
+      detectedDuring: 'precheck',
+      message: `Runtime command "${command}" is not available on PATH.`,
+      missing: [command],
+      found: [`PATH=${process.env.PATH ?? ''}`],
+      steps: [`command -v ${shellQuote(command)}`, 'npm install'],
+    });
+  }
+
+  const baseArgs = route.baseArgs ?? [];
+  const noInstallIndex = baseArgs.indexOf('--no-install');
+  const npxPackage = command === 'npx' && noInstallIndex !== -1 ? baseArgs[noInstallIndex + 1] : undefined;
+  if (npxPackage) {
+    const localBin = resolve(cwd, 'node_modules', '.bin', npxPackage);
+    try {
+      await access(localBin);
+    } catch {
+      return blocker({
+        code: 'MISSING_BINARY',
+        category: 'dependency',
+        detectedDuring: 'precheck',
+        message: `Runtime package "${npxPackage}" is not installed in this workspace.`,
+        missing: [localBin],
+        found: [executable],
+        steps: [
+          'npm install',
+          `test -x ${shellQuote(localBin)}`,
+          `npx --no-install ${shellQuote(npxPackage)} run ${shellQuote(artifactPath)}`,
+        ],
+      });
+    }
+  }
+
+  return null;
+}
+
+function blocker(params: {
+  code: LocalBlockerCode;
+  category: LocalBlockerCategory;
+  detectedDuring: LocalClassifiedBlocker['detected_during'];
+  message: string;
+  missing: string[];
+  found: string[];
+  steps: string[];
+}): LocalClassifiedBlocker {
+  return {
+    code: params.code,
+    category: params.category,
+    message: params.message,
+    detected_at: new Date().toISOString(),
+    detected_during: params.detectedDuring,
+    recovery: {
+      actionable: params.steps.length > 0,
+      steps: params.steps,
+    },
+    context: {
+      missing: params.missing,
+      found: params.found,
+    },
+  };
+}
+
+async function findExecutable(command: string): Promise<string | null> {
+  const { access } = await import('node:fs/promises');
+  const { constants } = await import('node:fs');
+
+  if (command.includes('/')) {
+    try {
+      await access(command, constants.X_OK);
+      return command;
+    } catch {
+      return null;
+    }
+  }
+
+  for (const pathEntry of (process.env.PATH ?? '').split(delimiter)) {
+    if (!pathEntry) continue;
+    const candidate = join(pathEntry, command);
+    try {
+      await access(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Continue searching PATH.
+    }
+  }
+  return null;
+}
+
+function createBlockerExecutionStage(params: {
+  workflowId: string;
+  artifactPath: string;
+  cwd: string;
+  route: ExecutionRoute;
+  blocker: LocalClassifiedBlocker;
+}): LocalExecutionStageResult {
+  const detectedAt = params.blocker.detected_at;
+  const command = commandString(params.route, params.artifactPath);
+  return {
+    stage: 'execute',
+    status: 'blocker',
+    execution: {
+      workflow_id: params.workflowId,
+      artifact_path: params.artifactPath,
+      command,
+      workflow_file: params.artifactPath,
+      cwd: params.cwd,
+      started_at: detectedAt,
+      finished_at: detectedAt,
+      duration_ms: 0,
+      steps_completed: 0,
+      steps_total: 1,
+    },
+    blocker: params.blocker,
+  };
+}
+
+async function createExecutionStageFromCoordinatorResult(
+  result: CoordinatorResult,
+  workflowId: string,
+  generatedContent: string | undefined,
+  generatedArtifactPath: string | undefined,
+): Promise<LocalExecutionStageResult> {
+  const status: LocalExecutionStatus = result.status === 'passed' ? 'success' : 'blocker';
+  const logs = await writeRuntimeLogs(result);
+  const command = `${result.invocation.command} ${result.invocation.args.join(' ')}`;
+  const classifiedBlocker = status === 'blocker' ? classifyCoordinatorBlocker(result, command) : undefined;
+  const artifactBytes = generatedContent
+    ? Buffer.byteLength(generatedContent, 'utf8')
+    : await artifactSize(result.workflowFile, result.cwd);
+  const artifactsProduced = [
+    {
+      path: generatedArtifactPath ?? result.workflowFile,
+      kind: 'workflow',
+      bytes: artifactBytes,
+    },
+  ];
+  const filesWritten = [
+    ...(generatedArtifactPath ? [generatedArtifactPath] : []),
+    ...(logs.stdout_path ? [logs.stdout_path] : []),
+    ...(logs.stderr_path ? [logs.stderr_path] : []),
+  ];
+  const stepStatus = status === 'success' ? 'pass' : 'fail';
+  const outcome = status === 'success'
+    ? `Workflow ${result.workflowFile} completed successfully with ${result.stdout.length} stdout line(s) and ${result.stderr.length} stderr line(s).`
+    : `Workflow ${result.workflowFile} was blocked during local runtime execution: ${classifiedBlocker?.message ?? result.error ?? result.status}.`;
+
+  return {
+    stage: 'execute',
+    status,
+    execution: {
+      workflow_id: workflowId,
+      artifact_path: result.workflowFile,
+      command,
+      workflow_file: result.workflowFile,
+      cwd: result.cwd,
+      started_at: result.startedAt,
+      finished_at: result.completedAt,
+      duration_ms: result.durationMs,
+      steps_completed: status === 'success' ? 1 : 0,
+      steps_total: 1,
+    },
+    ...(classifiedBlocker ? { blocker: classifiedBlocker } : {}),
+    evidence: {
+      outcome_summary: outcome,
+      ...(status === 'success' ? { artifacts_produced: artifactsProduced } : {}),
+      ...(status === 'blocker' ? { failed_step: { id: 'runtime-launch', name: 'Local runtime execution' } } : {}),
+      ...(status === 'blocker' ? { exit_code: result.exitCode } : {}),
+      logs,
+      side_effects: {
+        files_written: filesWritten,
+        commands_invoked: [command],
+        ...(status === 'success' ? { network_calls: [] } : {}),
+      },
+      assertions: [
+        {
+          name: 'runtime_exit_code',
+          status: stepStatus,
+          detail: result.exitCode === 0 ? 'Runtime exited with code 0.' : `Runtime exit code: ${result.exitCode ?? 'unknown'}.`,
+        },
+      ],
+      ...(status === 'success'
+        ? {
+            workflow_steps: [
+              {
+                id: 'runtime-launch',
+                name: 'Local runtime execution',
+                status: stepStatus,
+                duration_ms: result.durationMs,
+              },
+            ],
+          }
+        : {}),
+    },
+  };
+}
+
+function classifyCoordinatorBlocker(
+  result: CoordinatorResult,
+  command: string,
+): LocalClassifiedBlocker {
+  const signal = firstRuntimeSignal(result);
+  const combined = [result.error, ...result.stderr, ...result.stdout].filter(Boolean).join('\n');
+  const runtimePackage = npxNoInstallPackage(result.invocation.args);
+
+  if (result.exitCode === 127 || /(?:command not found|enoent|not found)/i.test(combined)) {
+    return blocker({
+      code: 'MISSING_BINARY',
+      category: 'dependency',
+      detectedDuring: 'launch',
+      message: `Runtime dependency is unavailable: ${signal}.`,
+      missing: [runtimePackage ?? result.invocation.command],
+      found: [`cwd=${result.cwd}`],
+      steps: [
+        'npm install',
+        runtimePackage
+          ? `npx --no-install ${shellQuote(runtimePackage)} run ${shellQuote(result.workflowFile)}`
+          : `command -v ${shellQuote(result.invocation.command)}`,
+      ],
+    });
+  }
+
+  const missingEnvVars = extractMissingEnvVars(combined);
+  if (missingEnvVars.length > 0 || /(?:missing|required).*(?:env|environment)|not set/i.test(combined)) {
+    return blocker({
+      code: 'MISSING_ENV_VAR',
+      category: 'environment',
+      detectedDuring: 'launch',
+      message: `Required runtime environment is missing: ${signal}.`,
+      missing: missingEnvVars.length > 0 ? missingEnvVars : ['required environment variable'],
+      found: [`cwd=${result.cwd}`],
+      steps: missingEnvVars.length > 0
+        ? missingEnvVars.map((name) => `export ${name}=...`)
+        : ['Set the required environment variables and rerun the workflow.'],
+    });
+  }
+
+  if (/(?:credential|auth|unauthorized|forbidden|token|api key)/i.test(combined)) {
+    return blocker({
+      code: 'CREDENTIALS_REJECTED',
+      category: 'credentials',
+      detectedDuring: 'launch',
+      message: `Runtime credentials were rejected: ${signal}.`,
+      missing: ['valid runtime credentials'],
+      found: [`cwd=${result.cwd}`],
+      steps: ['Refresh local provider credentials.', command],
+    });
+  }
+
+  if (/(?:econnrefused|enotfound|network|timeout|timed out|dns)/i.test(combined)) {
+    return blocker({
+      code: 'NETWORK_UNREACHABLE',
+      category: 'resource',
+      detectedDuring: 'launch',
+      message: `Runtime network dependency is unreachable: ${signal}.`,
+      missing: ['reachable network dependency'],
+      found: [`cwd=${result.cwd}`],
+      steps: ['Check local network connectivity and service availability.', command],
+    });
+  }
+
+  return blocker({
+    code: 'UNSUPPORTED_RUNTIME',
+    category: 'unsupported',
+    detectedDuring: 'launch',
+    message: `Local runtime could not execute the workflow: ${signal}.`,
+    missing: ['supported local runtime execution'],
+    found: [`status=${result.status}`, `exitCode=${result.exitCode ?? 'unknown'}`],
+    steps: ['Inspect the captured stdout/stderr logs.', command],
+  });
+}
+
+function firstRuntimeSignal(result: CoordinatorResult): string {
+  return result.error ?? result.stderr[0] ?? result.stdout[0] ?? `status ${result.status}`;
+}
+
+function npxNoInstallPackage(args: string[]): string | undefined {
+  const noInstallIndex = args.indexOf('--no-install');
+  if (noInstallIndex === -1) return undefined;
+  return args[noInstallIndex + 1];
+}
+
+function extractMissingEnvVars(text: string): string[] {
+  const names = new Set<string>();
+  for (const match of text.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
+    const name = match[1];
+    if (['ENOENT', 'PATH'].includes(name)) continue;
+    names.add(name);
+  }
+  return [...names];
+}
+
+async function writeRuntimeLogs(result: CoordinatorResult): Promise<LocalExecutionEvidence['logs']> {
+  const base = resolve(process.cwd(), '.workflow-artifacts', 'ricky-local-runs', result.runId);
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const stdoutPath = join(base, 'stdout.log');
+  const stderrPath = join(base, 'stderr.log');
+
+  try {
+    await mkdir(base, { recursive: true });
+    await writeFile(stdoutPath, `${result.stdout.join('\n')}${result.stdout.length ? '\n' : ''}`, 'utf8');
+    await writeFile(stderrPath, `${result.stderr.join('\n')}${result.stderr.length ? '\n' : ''}`, 'utf8');
+    return {
+      stdout_path: stdoutPath,
+      stderr_path: stderrPath,
+      ...(result.status === 'passed' ? {} : { tail: [...result.stdoutSnippet.lines, ...result.stderrSnippet.lines] }),
+      truncated: result.stdoutSnippet.truncated || result.stderrSnippet.truncated,
+    };
+  } catch {
+    return {
+      ...(result.status === 'passed' ? {} : { tail: [...result.stdoutSnippet.lines, ...result.stderrSnippet.lines] }),
+      truncated: result.stdoutSnippet.truncated || result.stderrSnippet.truncated,
+    };
+  }
+}
+
+async function artifactSize(path: string, cwd: string): Promise<number> {
+  const { stat } = await import('node:fs/promises');
+  const resolved = isAbsolute(path) ? path : resolve(cwd, path);
+  try {
+    return (await stat(resolved)).size;
+  } catch {
+    return 0;
+  }
+}
+
+function commandString(route: ExecutionRoute, workflowFile: string): string {
+  const command = route.command ?? 'agent-relay';
+  const args = [...(route.baseArgs ?? ['run']), workflowFile];
+  return `${command} ${args.join(' ')}`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /**

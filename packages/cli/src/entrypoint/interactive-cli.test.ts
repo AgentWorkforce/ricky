@@ -683,6 +683,22 @@ describe('runInteractiveCli', () => {
       expect(guidance).toContain('--stdin');
     });
 
+    it('fixture: missing spec recovery names supported inputs without obsolete command forms', async () => {
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      });
+      const guidance = result.guidance.join('\n');
+
+      expect(result.ok).toBe(true);
+      expect(result.awaitingInput).toBe(true);
+      expect(guidance).toContain('Inline spec: npm start -- --mode local --spec');
+      expect(guidance).toContain('File spec:   npm start -- --mode local --spec-file');
+      expect(guidance).toContain('Stdin spec:  printf');
+      expect(guidance).toContain('--stdin');
+      expect(guidance).not.toContain('npx ricky generate');
+      expect(guidance).not.toContain('spec-stdin');
+    });
+
     it('fixture: local failure with diagnosis produces structured recovery', async () => {
       const result = await runInteractiveCli({
         onboard: vi.fn().mockResolvedValue(onboarding('local')),

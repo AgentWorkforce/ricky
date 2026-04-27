@@ -1,5 +1,5 @@
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
-import type { GenerationIssue, SkillContext, SkillDescriptor, TemplateDescriptor } from './types.js';
+import type { GenerationIssue, SkillApplicationEvidence, SkillContext, SkillDescriptor, TemplateDescriptor } from './types.js';
 
 interface SkillRegistryEntry {
   name: string;
@@ -46,12 +46,14 @@ export function loadSkills(spec: NormalizedWorkflowSpec, skillOverrides?: string
   const templates = resolveTemplates(templateOverride);
   const issues = buildIssues(skills, templates);
   const loadWarnings = issues.filter((issue) => issue.severity !== 'info').map((issue) => issue.message);
+  const applicationEvidence = buildGenerationTimeEvidence(skills);
 
   return {
     skills,
     templates,
     loadWarnings,
     applicableSkillNames: skills.filter((skill) => skill.loaded).map((skill) => skill.name),
+    applicationEvidence,
     issues,
   };
 }
@@ -134,6 +136,31 @@ function buildIssues(skills: SkillDescriptor[], templates: TemplateDescriptor[])
   });
 
   return [...skillIssues, ...templateIssues];
+}
+
+function buildGenerationTimeEvidence(skills: SkillDescriptor[]): SkillApplicationEvidence[] {
+  return skills.flatMap((skill): SkillApplicationEvidence[] => {
+    if (!skill.loaded) return [];
+
+    return [
+      {
+        skillName: skill.name,
+        stage: 'generation_selection',
+        effect: 'workflow_contract',
+        behavior: 'generation_time_only',
+        runtimeEmbodiment: false,
+        evidence: `Selected ${skill.name} during workflow generation because it was applicable to the normalized spec.`,
+      },
+      {
+        skillName: skill.name,
+        stage: 'generation_loading',
+        effect: 'metadata',
+        behavior: 'generation_time_only',
+        runtimeEmbodiment: false,
+        evidence: `Loaded ${skill.name} descriptor from ${skill.path} before template rendering.`,
+      },
+    ];
+  });
 }
 
 function requiresStrictValidation(spec: NormalizedWorkflowSpec): boolean {
