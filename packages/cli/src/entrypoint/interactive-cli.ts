@@ -66,6 +66,9 @@ export interface InteractiveCliDeps {
     configStore?: RickyConfigStore;
   }) => Promise<OnboardingResult>;
 
+  /** Caller workspace path for local artifact generation. Defaults to INIT_CWD or process.cwd(). */
+  cwd?: string;
+
   /** Local executor for the BYOH path. */
   localExecutor?: LocalExecutor;
 
@@ -123,7 +126,12 @@ async function executeLocalPath(
 
   const localResult = await runLocal(deps.handoff, {
     executor: deps.localExecutor,
-    localExecutor: deps.localExecutor ? undefined : { returnGeneratedArtifactOnly: true },
+    localExecutor: deps.localExecutor
+      ? undefined
+      : {
+          cwd: deps.cwd ?? process.env.INIT_CWD ?? process.cwd(),
+          returnGeneratedArtifactOnly: true,
+        },
   });
 
   const diagnoses: Diagnosis[] = [];

@@ -57,6 +57,39 @@ describe('runInteractiveCli', () => {
     expect(result.awaitingInput).toBe(false);
   });
 
+  it('uses INIT_CWD for the default local executor so generated workflows land in the caller repo', async () => {
+    const { mkdtemp, rm, access } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tempRepo = await mkdtemp(join(tmpdir(), 'ricky-user-repo-'));
+    const originalInitCwd = process.env.INIT_CWD;
+
+    process.env.INIT_CWD = tempRepo;
+
+    try {
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        handoff: { source: 'cli', spec: 'generate a workflow for package checks', mode: 'local' },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.localResult?.artifacts[0].path).toBe('workflows/generated/ricky-generate-a-workflow-for-package-checks.ts');
+      expect(result.localResult?.logs).toEqual(
+        expect.arrayContaining([
+          '[local] wrote workflow artifact: workflows/generated/ricky-generate-a-workflow-for-package-checks.ts',
+        ]),
+      );
+      await expect(access(join(tempRepo, 'workflows/generated/ricky-generate-a-workflow-for-package-checks.ts'))).resolves.toBeUndefined();
+    } finally {
+      if (originalInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = originalInitCwd;
+      }
+      await rm(tempRepo, { recursive: true, force: true });
+    }
+  });
+
   it('stops cleanly after onboarding when no handoff was provided', async () => {
     const localExecutor = { execute: vi.fn() };
 
