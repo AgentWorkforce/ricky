@@ -44,6 +44,7 @@ STATUS_REASON=""
 CURRENT_WORKFLOW=""
 RUN_PID="$$"
 RUN_PGID=""
+RUNNER_START_PID=""
 STATUS_MARKED="false"
 CLAUDE_RATE_LIMIT_PATTERNS=(
   "You've hit your limit"
@@ -415,7 +416,7 @@ start_runner() {
     "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
   fi
 
-  printf '%s\n' "$!"
+  RUNNER_START_PID="$!"
 }
 
 run_one() {
@@ -458,7 +459,8 @@ run_one() {
   runner_output="$ARTIFACT_DIR/runner-$(basename "$workflow_path" .ts).log"
   : > "$runner_output"
 
-  runner_pid="$(start_runner "$workflow_path" "$runner_output")"
+  start_runner "$workflow_path" "$runner_output"
+  runner_pid="$RUNNER_START_PID"
   RUN_PID="$runner_pid"
   RUN_PGID=""
   if command -v ps >/dev/null 2>&1; then

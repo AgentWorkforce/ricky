@@ -131,6 +131,9 @@ describe('Ricky workspace package layout and npm script parity proof', () => {
     expect(script).toContain('workflow runner failed to start');
     expect(script).toContain('skipping missing workflow');
     expect(script).toContain('RUN_RESULT="skipped"');
+    expect(script).toContain('RUNNER_START_PID=""');
+    expect(script).toContain('RUNNER_START_PID="$!"');
+    expect(script).not.toContain('runner_pid="$(start_runner');
     expect(script).toContain('if [[ "$RUN_RESULT" == "ran" ]]');
     expect(script).toContain('checkpointed');
     expect(script).toContain('workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts)');
