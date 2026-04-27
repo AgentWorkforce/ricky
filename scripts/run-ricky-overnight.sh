@@ -9,6 +9,7 @@ PASSES="${RICKY_OVERNIGHT_PASSES:-3}"
 QUEUE_MODE="${RICKY_OVERNIGHT_QUEUE_MODE:-flight-safe}"
 MAX_WORKFLOWS_PER_INVOCATION="${RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION:-4}"
 IDLE_TIMEOUT_SECONDS="${RICKY_OVERNIGHT_IDLE_TIMEOUT_SECONDS:-900}"
+DEFAULT_MAX_WORKFLOWS_PER_INVOCATION=4
 STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
 RESUME_FLAG="${1:-}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -50,6 +51,20 @@ CLAUDE_RATE_LIMIT_PATTERNS=(
   "What do you want to do?"
   "Stop and wait for limit to reset"
 )
+
+normalize_positive_integer() {
+  local value="$1"
+  local fallback="$2"
+
+  if [[ "$value" =~ ^[0-9]+$ ]] && (( value > 0 )); then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  printf '%s\n' "$fallback"
+}
+
+MAX_WORKFLOWS_PER_INVOCATION="$(normalize_positive_integer "$MAX_WORKFLOWS_PER_INVOCATION" "$DEFAULT_MAX_WORKFLOWS_PER_INVOCATION")"
 
 kill_process_group() {
   local pgid="$1"

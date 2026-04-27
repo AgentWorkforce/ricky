@@ -117,6 +117,9 @@ describe('Ricky workspace package layout and npm script parity proof', () => {
     const script = readFileSync('scripts/run-ricky-overnight.sh', 'utf8');
 
     expect(script).toContain('RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION');
+    expect(script).toContain('normalize_positive_integer()');
+    expect(script).toContain('DEFAULT_MAX_WORKFLOWS_PER_INVOCATION=4');
+    expect(script).toContain('MAX_WORKFLOWS_PER_INVOCATION="$(normalize_positive_integer');
     expect(script).toContain('RICKY_OVERNIGHT_STATE_DIR');
     expect(script).toContain('restore_checkpoint()');
     expect(script).toContain('persist_checkpoint()');
