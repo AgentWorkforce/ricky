@@ -134,7 +134,9 @@ First-run onboarding should open with a compact ASCII treatment based on the Ric
 - no more than 10 lines
 - no trailing whitespace
 
-Placeholder ASCII example (subject to revision before release; treat dimensions and display rules as canonical, artwork as draft):
+Placeholder ASCII example (subject to revision before release; treat dimensions and display rules as canonical, artwork as draft).
+
+**Artwork lock**: The artwork below is locked for the current implementation and test cycle. Changes to the artwork require a spec revision and corresponding test updates in the same PR. Do not change artwork in implementation code without updating this spec first.
 
 ```text
         __             RRRR
@@ -170,6 +172,8 @@ ricky - workflow reliability for AgentWorkforce
 | Terminal width below 60 columns | Use compact fallback |
 
 ANSI color is optional. If enabled, color must be disabled automatically for non-TTY output and when `NO_COLOR` is set.
+
+**`--quiet` / `--no-banner` interaction**: `--quiet` is a strict superset of `--no-banner`. `--quiet` suppresses both the banner and all non-essential output; `--no-banner` suppresses the banner only. Passing both flags on the same command is valid but redundant. Implementations should check `quiet` first and skip all output early, then check `noBanner` only if `quiet` is false.
 
 ## First-Run Flow
 
@@ -530,6 +534,22 @@ Useful examples:
 
 Explore mode must not mark `firstRunComplete`. If the user later runs `npx ricky` without a completed config, Ricky should show first-run onboarding again instead of treating explore as setup completion.
 
+**Copy honesty note**: The explore copy above uses target commands (`npx ricky generate --spec "..."`). Per the copy honesty rule, implementation copy must use conservative wording until those target commands land in `parseArgs()`. Implementation should reference `npm start -- --help` and describe what will be available rather than presenting unimplemented commands as usable.
+
+### Explore Re-Entry Behavior
+
+Because explore does not persist config, subsequent CLI invocations behave as follows:
+
+| Invocation after explore | Behavior |
+|---|---|
+| `npx ricky` (bare, interactive TTY) | Re-shows first-run onboarding (no config exists) |
+| `npx ricky setup` | Runs first-run setup as if explore never happened |
+| `npx ricky generate --mode local --spec-file spec.md` | Works normally — `--mode` is the highest-precedence override, no config required |
+| `npx ricky generate --spec-file spec.md` (no `--mode`, no config) | Returns the `setup-required` recovery error (see "Non-Interactive First Run" recovery path) |
+| `RICKY_MODE=local npx ricky generate --spec-stdin` | Works normally — `RICKY_MODE` overrides the missing config |
+
+The key rule: explore is a preview, not a setup completion. Any command that requires a resolved mode and finds no config, no `--mode`, and no `RICKY_MODE` should return the setup-required error rather than silently defaulting.
+
 ## Spec Handoff
 
 Ricky must support the idea that a user may write a workflow spec in another assistant and hand it to Ricky without rewriting it.
@@ -695,6 +715,7 @@ Behavior:
 - Do not mark the workflow run as failed due to generated workflow logic.
 - Classify as a local environment blocker.
 - Keep the user's selected mode unchanged.
+- `--verbose`: show the resolution paths that were tried (e.g., `which agent-relay`, npm global path, local node_modules lookup) and which failed.
 
 ### Missing Cloud Auth
 
@@ -723,6 +744,7 @@ Behavior:
 - Do not attempt GitHub OAuth locally.
 - Do not guess a Cloud dashboard URL.
 - Return a user-facing auth blocker with these next actions.
+- `--verbose`: show the provider status check result (e.g., status code, expiry reason, or "no credentials found").
 
 ### Provider Connect Failure
 
@@ -781,6 +803,7 @@ Behavior:
 - Keep the error scoped to the environment.
 - Do not dump a stack trace unless `--verbose` is set.
 - If an automated cleanup is safe, present it as an explicit action before running it.
+- `--verbose`: show the specific filesystem error (e.g., `EACCES`, `ENOENT`) or the tool resolution failure that caused the blocker.
 
 ### Non-Interactive First Run
 
@@ -807,6 +830,7 @@ Behavior:
 - Exit with a user-facing setup-required error.
 - Do not persist `RICKY_MODE`.
 - Do not render the banner.
+- `--verbose`: no-op for this recovery path. The message is already complete and there is no underlying error to surface.
 
 ### Corrupted or Unparseable Config
 
@@ -862,6 +886,7 @@ Behavior:
 - Preserve the normalized handoff metadata in logs or artifacts when available.
 - Classify the failure as generation/execution, not onboarding.
 - If diagnostics identify a more specific blocker, render that specific recovery path instead.
+- `--verbose`: show the executor error message, validation output, or provider/runtime error detail that caused generation to stop.
 
 ## Implementation Boundaries
 

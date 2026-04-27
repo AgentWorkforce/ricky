@@ -284,24 +284,15 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/review-codex.m
       task: `Re-review the Ricky CLI onboarding UX spec after fixes.
 
 Confirm the spec is welcoming, truthful, and implementation-ready.
-Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.
+Note that this workflow intentionally uses a single Claude final-review path because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing artifacts, including the active overnight run.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-claude.md' },
-    })
-    .step('final-review-cli-ux-spec-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['post-fix-verification-gate'],
-      task: `Re-review the Ricky CLI onboarding UX spec after fixes.
-
-Confirm the spec is precise, deterministic, and ready for a follow-on implementation workflow.
-Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-codex.md' },
     })
     .step('final-review-pass-gate', {
       type: 'deterministic',
-      dependsOn: ['final-review-cli-ux-spec-claude', 'final-review-cli-ux-spec-codex'],
+      dependsOn: ['final-review-cli-ux-spec-claude'],
       command: [
         "tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
-        "tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo CLI_UX_SPEC_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -325,6 +316,7 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/final-review-c
       task: `Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/signoff.md.
 
 Include what the spec now defines, why it is implementation-ready, review verdicts, and any remaining open questions.
+Note that this workflow intentionally uses a single Claude final-review path because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing artifacts, including the active overnight run.
 End with CLI_UX_SPEC_COMPLETE.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/signoff.md' },
     })
