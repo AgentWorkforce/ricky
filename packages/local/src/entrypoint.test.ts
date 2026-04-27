@@ -934,6 +934,75 @@ describe('runLocal', () => {
     expect(result.artifacts[0].content).toContain('workflow(');
   });
 
+  it('returns generated local artifacts and runtime logs without invoking Cloud adapters', async () => {
+    const launches: RunRequest[] = [];
+    const writes: Array<{ path: string; content: string; cwd: string }> = [];
+    const result = await runLocal(
+      {
+        source: 'mcp',
+        toolName: 'ricky.generate',
+        arguments: {
+          goal: 'generate a local BYOH workflow for packages/local/src/entrypoint.ts',
+          executionPreference: 'local',
+        },
+        requestId: 'req-generated-local-contract',
+      },
+      {
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          artifactWriter: {
+            async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+              writes.push({ path, content, cwd });
+            },
+          },
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                stdout: ['generated workflow ran locally'],
+                stderr: ['local runtime warning'],
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].cwd).toBe('/workspace/ricky');
+    expect(writes[0].content).toContain('workflow(');
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      cwd: '/workspace/ricky',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        requestId: 'req-generated-local-contract',
+        source: 'mcp',
+        route: 'generate',
+      },
+    });
+    expect(result.artifacts).toEqual([
+      {
+        path: writes[0].path,
+        type: 'text/typescript',
+        content: writes[0].content,
+      },
+    ]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from mcp',
+        '[local] mode: local',
+        '[local] spec intake route: generate',
+        '[local] workflow generation: passed',
+        '[local] runtime status: passed',
+        '[stdout] generated workflow ran locally',
+        '[stderr] local runtime warning',
+      ]),
+    );
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+  });
+
   it('coordinates an existing local workflow artifact without generating a replacement', async () => {
     const localExecutor = memoryLocalExecutorOptions();
     const result = await runLocal(

@@ -411,7 +411,7 @@ start_runner() {
   if command -v setsid >/dev/null 2>&1; then
     setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
   else
-    log "setsid unavailable; launching runner without detached process-group isolation"
+    log "setsid unavailable; launching runner without detached process-group isolation" >&2
     "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
   fi
 
