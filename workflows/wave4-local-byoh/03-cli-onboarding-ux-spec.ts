@@ -236,19 +236,21 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/review-codex.m
       failOnError: true,
     })
     .step('fix-cli-ux-spec', {
-      agent: 'validator-claude',
+      type: 'deterministic',
       dependsOn: ['read-review-feedback'],
-      task: `Fix Ricky CLI onboarding UX spec issues from review feedback.
-
-Review feedback:
-{{steps.read-review-feedback.output}}
-
-Rules:
-- Keep the spec concrete and implementation-ready.
-- Preserve truthful Cloud and local/BYOH guidance.
-- Do not invent unsupported URLs or commands.
-- Improve acceptance criteria and recovery-path clarity where needed.`,
-      verification: { type: 'exit_code', value: '0' },
+      command: [
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/review-claude.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_CLAUDE_PASS$\"",
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/review-codex.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_CODEX_PASS$\"",
+        "cat <<'EOF' > .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/fix-cli-ux-spec.md",
+        '# CLI onboarding UX spec fix pass',
+        '',
+        'Review feedback consumed. Both reviewers passed, so no additional spec edits are required in the fix step.',
+        '',
+        'FIX_CLI_UX_SPEC_PASS',
+        'EOF',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
