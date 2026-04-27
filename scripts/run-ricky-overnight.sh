@@ -80,7 +80,6 @@ EOF
       ;;
     flight-safe)
       cat > "$QUEUE_FILE" <<'EOF'
-workflows/wave0-foundation/02-toolchain-and-validation-foundation.ts
 workflows/wave0-foundation/03-shared-models-and-config.ts
 workflows/wave1-runtime/01-local-run-coordinator.ts
 workflows/wave1-runtime/02-workflow-evidence-model.ts
@@ -116,7 +115,6 @@ workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
 workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
 workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts
 workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts
-workflows/wave0-foundation/02-toolchain-and-validation-foundation.ts
 workflows/wave0-foundation/03-shared-models-and-config.ts
 workflows/wave0-foundation/04-initial-architecture-docs.ts
 workflows/wave1-runtime/01-local-run-coordinator.ts
