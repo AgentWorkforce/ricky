@@ -42,7 +42,7 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
   const isCodeWorkflow = isCodeWritingWorkflow(input.spec);
   const team = buildTeam(input.pattern.pattern, isCodeWorkflow);
   const tasks = buildTasks(input.spec, isCodeWorkflow);
-  const gates = buildGates(input.spec, artifactsDir, artifactPath, isCodeWorkflow);
+  const gates = buildGates(input.spec, artifactsDir, artifactPath, isCodeWorkflow, input.skills);
   const skillApplicationEvidence = buildRenderingSkillEvidence(input.skills, tasks, gates);
   const content = renderSource({
     spec: input.spec,
@@ -200,6 +200,7 @@ function buildGates(
   artifactsDir: string,
   artifactPath: string,
   isCodeWorkflow: boolean,
+  skills: SkillContext,
 ): DeterministicGate[] {
   const outputManifest = `${artifactsDir}/output-manifest.txt`;
   const targetFiles = spec.targetFiles.length > 0 ? spec.targetFiles : [outputManifest];
@@ -214,7 +215,7 @@ function buildGates(
   return [
     gate(
       'skill-boundary-metadata-gate',
-      `test -f ${shellQuote(skillBoundaryPath)} && grep -F ${shellQuote('generation_time_only')} ${shellQuote(skillBoundaryPath)} && grep -F ${shellQuote('"runtimeEmbodiment":false')} ${shellQuote(skillBoundaryPath)}`,
+      buildSkillBoundaryGateCommand(skillBoundaryPath, skills),
       'artifact_exists',
       true,
       ['prepare-context'],
@@ -246,6 +247,35 @@ function buildGates(
     ),
     gate('regression-gate', isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
   ];
+}
+
+function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillContext): string {
+  const quotedPath = shellQuote(skillBoundaryPath);
+  const commands = [
+    `test -f ${quotedPath}`,
+    `grep -F ${shellQuote('generation_time_only')} ${quotedPath}`,
+    `grep -F ${shellQuote('"runtimeEmbodiment":false')} ${quotedPath}`,
+    `grep -F ${shellQuote('"stage":"generation_selection"')} ${quotedPath}`,
+    `grep -F ${shellQuote('"stage":"generation_loading"')} ${quotedPath}`,
+    `grep -F ${shellQuote('"effect":"metadata"')} ${quotedPath}`,
+    ...skills.applicableSkillNames.map((skillName) => `grep -F ${shellQuote(skillName)} ${quotedPath}`),
+  ];
+
+  if (skills.applicableSkillNames.includes('writing-agent-relay-workflows')) {
+    commands.push(
+      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
+      `grep -F ${shellQuote('"effect":"workflow_contract"')} ${quotedPath}`,
+    );
+  }
+
+  if (skills.applicableSkillNames.includes('relay-80-100-workflow')) {
+    commands.push(
+      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
+      `grep -F ${shellQuote('"effect":"validation_gates"')} ${quotedPath}`,
+    );
+  }
+
+  return commands.join(' && ');
 }
 
 function renderAgentLine(member: TeamMemberSpec): string {

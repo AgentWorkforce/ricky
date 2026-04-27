@@ -12,7 +12,7 @@ For strict TypeScript or proof-oriented workflow generation, the expected loaded
 
 `writing-agent-relay-workflows` affects the generated workflow contract by shaping the dedicated channel, explicit agents, step dependencies, review stages, and final signoff. `relay-80-100-workflow` affects validation by shaping soft validation, review/fix/final-review flow, final hard validation, git diff, and regression gates. These are generation-time effects because they are materialized into the workflow text and deterministic metadata before any workflow runner launches agents.
 
-The generated workflow also includes a deterministic `skill-boundary-metadata-gate`. This gate checks that the generated boundary metadata exists and states the generation-time-only behavior. The gate proves the artifact carries the skill boundary forward as metadata; it does not prove runtime agents load skills.
+The generated workflow also includes a deterministic `skill-boundary-metadata-gate`. This gate checks that the generated boundary metadata exists, records `generation_time_only`, names the loaded skills, includes the `generation_selection`, `generation_loading`, and applicable `generation_rendering` stages, and records effects such as `workflow_contract` and `validation_gates`. The gate proves the artifact carries the skill boundary forward as metadata; it does not prove runtime agents load skills.
 
 ## Runtime Boundary
 
