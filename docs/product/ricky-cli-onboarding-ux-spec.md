@@ -44,8 +44,8 @@ This spec requires the following additions to `packages/cli/src/commands/cli-mai
 
 | Command / Flag | Parser contract | Dispatch target | Expected output |
 |---|---|---|---|
-| `ricky setup` | `{ command: 'setup' }` | `onboarding.runFirstRunSetup()` | Full banner, welcome, mode prompt, persist config |
-| `ricky welcome` | `{ command: 'welcome' }` | `onboarding.renderWelcome()` | Full banner and welcome copy only (no mode prompt) |
+| `ricky setup` | `{ command: 'setup' }` | Onboarding first-run orchestration | Full banner, welcome, mode prompt, persist config |
+| `ricky welcome` | `{ command: 'welcome' }` | Welcome renderer plus banner predicate | Full banner and welcome copy only (no mode prompt) |
 | `ricky generate --spec "..."` | `{ command: 'generate', specSource: 'inline', spec: string }` | Build `CliHandoff`, pass to `normalizeRequest`, then execute | Spec intake confirmation, then workflow generation |
 | `ricky generate --spec-file <path>` | `{ command: 'generate', specSource: 'file', specFile: string }` | Build `CliHandoff` with `specFile`, pass to `normalizeRequest`, then execute | Spec intake confirmation, then workflow generation |
 | `ricky generate --spec-stdin` | `{ command: 'generate', specSource: 'stdin' }` | Read stdin, build `CliHandoff`, pass to `normalizeRequest`, then execute | Spec intake confirmation, then workflow generation |
@@ -918,7 +918,7 @@ The table describes the preferred test organization, but the implementation may 
 
 The implementation is complete when:
 
-- The CLI parser in `cli-main.ts` supports all commands listed in the "Target CLI surface" table: `setup`, `welcome`, `generate` (with `--spec`, `--spec-file`, `--spec-stdin`), `status`, `--quiet`, and `--no-banner`.
+- The CLI parser in `cli-main.ts` supports all commands listed in the "Target CLI surface" table: `setup`, `welcome`, `generate` (with `--spec`, `--spec-file`, `--spec-stdin`), `status`, `--quiet`, `--no-banner`, and `--verbose`.
 - First-run onboarding renders the full Ricky banner and welcome in an interactive TTY.
 - Banner suppression works for `--quiet`, `--no-banner`, non-TTY output, `RICKY_BANNER=0`, and narrow terminals.
 - Returning users see a compact header instead of the full banner.
