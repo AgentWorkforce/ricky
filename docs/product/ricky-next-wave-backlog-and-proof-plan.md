@@ -62,7 +62,18 @@ Therefore the next wave should not treat the spec as a product surface that is a
 
 Before expanding into broader surfaces, each next-wave workflow should be checked against that originating monitor-agent intent. If a workflow does not improve Ricky's ability to monitor, diagnose, recover, resume, or explain workflow runs truthfully, it is probably a later-wave concern rather than current critical path work.
 
-Do **not** open a broad "everything Ricky eventually needs" wave next. The next batch should be seven workflows: three implementation workflows and four proof workflows. This is enough to move Ricky from signed-off subsystems to proven product journeys without mixing in every future surface.
+Do **not** open a broad "everything Ricky eventually needs" wave next. The next batch should be seven workflows: three implementation workflows and four proof workflows.
+
+For the immediate gym-run push, the first authored Wave 7 workflow batch is now:
+- `workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance.ts`
+- `workflows/wave7-cli-proof/02-prove-cli-onboarding-command-journeys.ts`
+- `workflows/wave7-local-proof/03-prove-local-byoh-spec-to-artifact-loop.ts`
+- `workflows/wave7-runtime-proof/05-prove-runtime-execution-outcome-loop.ts`
+- `workflows/wave7-recovery/06-implement-environment-recovery-unblockers.ts`
+- `workflows/wave7-analytics-proof/07-prove-proof-loop-analytics-feedback.ts`
+
+These are intended to move Ricky from the current local readiness dead-end toward a retestable local-first journey after a bounded workout-length run, without pretending live end-to-end proof already exists.
+ This is enough to move Ricky from signed-off subsystems to proven product journeys without mixing in every future surface.
 
 ### Priority 1: CLI/Banner UX Follow-Through
 
