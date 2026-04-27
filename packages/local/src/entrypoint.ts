@@ -406,23 +406,23 @@ function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
     };
   }
 
-  if (request.structuredSpec) {
-    return {
-      ...base,
-      kind: 'structured_json',
-      data: request.structuredSpec,
-    };
-  }
-
-  if (request.source === 'workflow-artifact' && request.specPath && isExecutableWorkflowPath(request.specPath)) {
+  if (request.specPath && isExecutableWorkflowPath(request.specPath)) {
     return {
       ...base,
       kind: 'structured_json',
       data: {
         intent: 'execute',
         workflowFile: request.specPath,
-        description: `execute ready artifact ${request.specPath}`,
+        description: request.spec.trim() || `execute ready artifact ${request.specPath}`,
       },
+    };
+  }
+
+  if (request.structuredSpec) {
+    return {
+      ...base,
+      kind: 'structured_json',
+      data: request.structuredSpec,
     };
   }
 

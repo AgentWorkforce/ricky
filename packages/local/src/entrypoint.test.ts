@@ -845,6 +845,36 @@ describe('runLocal', () => {
     expect(result.logs.some((l) => l.includes('[local] runtime status: passed'))).toBe(true);
   });
 
+  it('routes an executable CLI specFile as a ready workflow artifact without generation', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['cli specFile run ok'] });
+    const workflowFile = 'workflows/wave4-local-byoh/spec-file-ready.workflow.ts';
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: 'run this local workflow',
+        specFile: workflowFile,
+        cliMetadata: { argv: ['ricky', 'run', workflowFile] },
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(localExecutor.writes).toHaveLength(0);
+    expect(localExecutor.runner.invocations).toHaveLength(1);
+    expect(localExecutor.runner.invocations[0].args).toEqual([...(DEFAULT_LOCAL_ROUTE.baseArgs ?? []), workflowFile]);
+    expect(result.artifacts).toEqual([{ path: workflowFile, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        `[local] spec path: ${workflowFile}`,
+        '[local] spec intake route: execute',
+        '[stdout] cli specFile run ok',
+      ]),
+    );
+    expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
+  });
+
   it('returns local artifact and runtime log shape for an injected runtime adapter', async () => {
     const localExecutor = memoryLocalExecutorOptions({
       stdout: ['local workflow completed'],
