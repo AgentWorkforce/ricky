@@ -528,7 +528,7 @@ Useful examples:
 - Re-run setup:              npx ricky setup
 ```
 
-Explore mode must not mark `firstRunComplete`.
+Explore mode must not mark `firstRunComplete`. If the user later runs `npx ricky` without a completed config, Ricky should show first-run onboarding again instead of treating explore as setup completion.
 
 ## Spec Handoff
 
@@ -903,7 +903,7 @@ Implementation must not:
 | `packages/cli/src/cli/onboarding.test.ts` | First-run banner, welcome, mode copy, recovery copy, non-TTY behavior, corrupted config recovery | No — tests onboarding module directly |
 | `packages/cli/src/cli/ascii-art.test.ts` | Full banner, compact banner, terminal width fallback, color suppression, environment suppression | No — tests banner module directly |
 | `packages/cli/src/cli/mode-selector.test.ts` | Mode aliases, default local choice, explore non-persistence, copy snapshots | No — tests mode-selector module directly |
-| `packages/cli/src/commands/cli-main.test.ts` | Existing: `--mode`, `help`, `version`. **New (requires parser additions per "Target CLI surface" above):** `--quiet`, `--no-banner`, `setup`, `welcome`, `generate`, `status` dispatch | **Yes** — new commands require extending `ParsedArgs` and `parseArgs()` |
+| `packages/cli/src/commands/cli-main.test.ts` | Existing: `--mode`, `help`, `version`. **New (requires parser additions per "Target CLI surface" above):** `--quiet`, `--no-banner`, `--verbose`, `setup`, `welcome`, `generate`, `status` dispatch | **Yes** — new commands require extending `ParsedArgs` and `parseArgs()` |
 | `packages/cli/src/entrypoint/interactive-cli.test.ts` | Returning-user routing, handoff skips full onboarding, local/cloud/both composition | Partially — handoff routing depends on `generate` dispatch existing |
 | `packages/local/src/request-normalizer.test.ts` | CLI and MCP handoffs normalize to the same domain shape | No — normalizer already supports `CliHandoff` and `McpHandoff` |
 | `packages/runtime/src/diagnostics/*.test.ts` | Missing toolchain, missing auth, local environment blocker, and corrupted config classification | No — tests diagnostic classifiers directly |
