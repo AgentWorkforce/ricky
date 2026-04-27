@@ -152,6 +152,20 @@ workflow_has_stale_package_targets() {
   grep -Eq "packages/cli/packages/cli/|(^|[^[:alnum:]_])src/(shared|runtime|product|cloud|local|cli)/" "$workflow_path"
 }
 
+workflow_is_already_satisfied() {
+  local workflow_path="$1"
+
+  case "$workflow_path" in
+    workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts)
+      git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.ts 2>/dev/null \
+        && git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.test.ts 2>/dev/null
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 is_pid_running() {
   local pid="$1"
 
@@ -320,6 +334,15 @@ run_one() {
 
   if workflow_has_stale_package_targets "$workflow_path"; then
     log "skipping stale pre-package-split workflow: $workflow_path"
+    echo "$workflow_path" >> "$SKIPPED_FILE"
+    RUN_RESULT="skipped"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
+    return 0
+  fi
+
+  if workflow_is_already_satisfied "$workflow_path"; then
+    log "skipping already-satisfied workflow: $workflow_path"
     echo "$workflow_path" >> "$SKIPPED_FILE"
     RUN_RESULT="skipped"
     CURRENT_WORKFLOW=""
