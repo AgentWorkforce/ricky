@@ -1214,6 +1214,69 @@ describe('runLocal', () => {
     expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
   });
 
+  it('uses injected workflow artifact adapters without live process execution or machine-specific paths', async () => {
+    const artifactPath = 'workflows/wave4-local-byoh/injected-ready.workflow.ts';
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const liveRunner = throwingCommandRunner('live workflow process should not be used');
+    const launches: RunRequest[] = [];
+
+    const result = await runLocal(
+      {
+        source: 'workflow-artifact',
+        artifactPath,
+        metadata: { origin: 'artifact-gate' },
+        requestId: 'req-injected-artifact',
+      },
+      {
+        artifactReader,
+        localExecutor: {
+          cwd: 'workspace-under-test',
+          commandRunner: liveRunner,
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                stdout: ['injected local coordinator accepted artifact'],
+                stderr: ['injected local runtime warning'],
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(artifactReader.reads).toEqual([artifactPath]);
+    expect(liveRunner.invocations).toHaveLength(0);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile: artifactPath,
+      cwd: 'workspace-under-test',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        requestId: 'req-injected-artifact',
+        source: 'workflow-artifact',
+        route: 'execute',
+      },
+    });
+    expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from workflow-artifact',
+        '[local] mode: local',
+        `[local] spec path: ${artifactPath}`,
+        '[local] spec intake route: execute',
+        '[local] runtime status: passed',
+        `[local] runtime command: npx --no-install agent-relay run ${artifactPath}`,
+        '[stdout] injected local coordinator accepted artifact',
+        '[stderr] injected local runtime warning',
+      ]),
+    );
+    expect(result.nextActions).toEqual(['Inspect generated artifacts and local run evidence.']);
+    expect(result.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+  });
+
   it('surfaces local runtime environment warnings as local failures without Cloud fallback', async () => {
     const workflowFile = 'workflows/wave4-local-byoh/missing-environment.workflow.ts';
     const launches: RunRequest[] = [];
