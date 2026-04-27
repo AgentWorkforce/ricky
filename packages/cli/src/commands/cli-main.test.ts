@@ -227,6 +227,37 @@ describe('cliMain', () => {
     );
   });
 
+  it('prefers INIT_CWD over an injected package cwd when capturing the caller repo root', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+    const originalInitCwd = process.env.INIT_CWD;
+
+    process.env.INIT_CWD = '/caller-repo-from-init-cwd';
+
+    try {
+      await cliMain({
+        argv: ['--mode', 'local', '--spec', 'build a workflow'],
+        cwd: process.cwd(),
+        runInteractive: runner,
+      });
+    } finally {
+      if (originalInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = originalInitCwd;
+      }
+    }
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/caller-repo-from-init-cwd',
+        handoff: expect.objectContaining({
+          source: 'cli',
+          invocationRoot: '/caller-repo-from-init-cwd',
+        }),
+      }),
+    );
+  });
+
   it('runs npm start -- --mode local with an inline spec through local execution', async () => {
     const result = await cliMain({
       argv: ['--mode', 'local', '--spec', 'build a workflow'],
@@ -343,12 +374,15 @@ describe('cliMain', () => {
   describe('spec fixture proof coverage', () => {
     it('reads spec from --spec-file via injected file reader', async () => {
       const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const readFileText = vi.fn().mockResolvedValue('workflow spec from file');
 
       await cliMain({
         argv: ['--mode', 'local', '--spec-file', './my-spec.md'],
         runInteractive: runner,
-        readFileText: vi.fn().mockResolvedValue('workflow spec from file'),
+        readFileText,
       });
+
+      expect(readFileText).toHaveBeenCalledWith(expect.stringMatching(/my-spec\.md$/));
 
       expect(runner).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -356,7 +390,7 @@ describe('cliMain', () => {
           handoff: expect.objectContaining({
             source: 'cli',
             spec: 'workflow spec from file',
-            specFile: './my-spec.md',
+            specFile: expect.stringMatching(/my-spec\.md$/),
             mode: 'local',
             cliMetadata: { handoff: 'spec-file' },
           }),
@@ -454,18 +488,21 @@ describe('cliMain', () => {
 
     it('handles --file alias for --spec-file', async () => {
       const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const readFileText = vi.fn().mockResolvedValue('aliased file content');
 
       await cliMain({
         argv: ['--mode', 'local', '--file', './alias-spec.md'],
         runInteractive: runner,
-        readFileText: vi.fn().mockResolvedValue('aliased file content'),
+        readFileText,
       });
+
+      expect(readFileText).toHaveBeenCalledWith(expect.stringMatching(/alias-spec\.md$/));
 
       expect(runner).toHaveBeenCalledWith(
         expect.objectContaining({
           handoff: expect.objectContaining({
             spec: 'aliased file content',
-            specFile: './alias-spec.md',
+            specFile: expect.stringMatching(/alias-spec\.md$/),
             cliMetadata: { handoff: 'spec-file' },
           }),
         }),
@@ -502,13 +539,16 @@ describe('cliMain', () => {
 
     it('passes invocationRoot through spec-file handoff to the interactive runner', async () => {
       const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const readFileText = vi.fn().mockResolvedValue('file content from spec-file');
 
       await cliMain({
         argv: ['--mode', 'local', '--spec-file', './my-spec.md'],
         cwd: '/caller-repo-specfile',
         runInteractive: runner,
-        readFileText: vi.fn().mockResolvedValue('file content from spec-file'),
+        readFileText,
       });
+
+      expect(readFileText).toHaveBeenCalledWith('/caller-repo-specfile/my-spec.md');
 
       expect(runner).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -516,7 +556,7 @@ describe('cliMain', () => {
           handoff: expect.objectContaining({
             source: 'cli',
             spec: 'file content from spec-file',
-            specFile: './my-spec.md',
+            specFile: '/caller-repo-specfile/my-spec.md',
             invocationRoot: '/caller-repo-specfile',
             cliMetadata: { handoff: 'spec-file' },
           }),

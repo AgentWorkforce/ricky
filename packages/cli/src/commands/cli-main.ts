@@ -15,6 +15,7 @@ import type { InteractiveCliDeps, InteractiveCliResult } from '../entrypoint/int
 import type { RickyMode } from '../cli/mode-selector.js';
 import type { RawHandoff } from '@ricky/local/request-normalizer.js';
 import { readFile } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isRickyMode } from '../cli/mode-selector.js';
 import { runInteractiveCli } from '../entrypoint/interactive-cli.js';
@@ -205,11 +206,12 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
 
   if (parsed.specFile) {
     const readText = deps.readFileText ?? ((path: string) => readFile(path, 'utf8'));
-    const spec = await readText(parsed.specFile);
+    const specFilePath = resolveSpecFilePath(parsed.specFile, invocationRoot);
+    const spec = await readText(specFilePath);
     return {
       source: 'cli',
       spec,
-      specFile: parsed.specFile,
+      specFile: specFilePath,
       invocationRoot,
       mode: handoffMode,
       cliMetadata: { handoff: 'spec-file' },
@@ -235,7 +237,15 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
 }
 
 function resolveInvocationRoot(explicitCwd?: string): string {
-  return explicitCwd ?? process.env.INIT_CWD ?? process.cwd();
+  const processCwd = process.cwd();
+  if (process.env.INIT_CWD && (!explicitCwd || explicitCwd === processCwd)) {
+    return process.env.INIT_CWD;
+  }
+  return explicitCwd ?? processCwd;
+}
+
+function resolveSpecFilePath(specFile: string, invocationRoot: string): string {
+  return isAbsolute(specFile) ? specFile : resolve(invocationRoot, specFile);
 }
 
 // ---------------------------------------------------------------------------
