@@ -129,7 +129,7 @@ async function executeLocalPath(
     localExecutor: deps.localExecutor
       ? undefined
       : {
-          cwd: deps.cwd ?? process.env.INIT_CWD ?? process.cwd(),
+          cwd: deps.cwd ?? deps.handoff.invocationRoot ?? process.env.INIT_CWD ?? process.cwd(),
           returnGeneratedArtifactOnly: true,
         },
   });

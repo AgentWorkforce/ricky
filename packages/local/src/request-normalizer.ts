@@ -26,6 +26,12 @@ export interface BaseHandoff {
   /** Preferred execution target. `mode` is kept as the stable shorthand. */
   mode?: LocalExecutionMode;
   /**
+   * Real caller root captured at the invocation boundary.
+   * Used to keep generated artifact writes anchored to the user's repo even
+   * when the CLI itself executes from a workspace package directory.
+   */
+  invocationRoot?: string;
+  /**
    * Alias for `mode`. When both are set, `mode` takes priority (see `executionModeFor`).
    * Exists so callers that model the choice as a "preference" rather than a "mode"
    * can pass it naturally without mapping to the `mode` field.
@@ -111,6 +117,8 @@ export interface LocalInvocationRequest {
    * to inspect `mode`.
    */
   mode: LocalExecutionMode;
+  /** Caller repo root captured at the CLI boundary when available. */
+  invocationRoot?: string;
   /** Optional file path when the spec came from a file or artifact. */
   specPath?: string;
   /** Opaque metadata from the originating surface. */
@@ -156,6 +164,7 @@ export async function normalizeRequest(
         spec: raw.spec,
         source: 'free-form',
         mode,
+        invocationRoot: raw.invocationRoot,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
@@ -169,6 +178,7 @@ export async function normalizeRequest(
         structuredSpec: raw.spec,
         source: 'structured',
         mode,
+        invocationRoot: raw.invocationRoot,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
@@ -183,6 +193,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'cli',
         mode,
+        invocationRoot: raw.invocationRoot,
         specPath: raw.specFile,
         metadata: {
           ...(raw.metadata ?? {}),
@@ -203,6 +214,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'mcp',
         mode,
+        invocationRoot: raw.invocationRoot,
         metadata: {
           ...(raw.metadata ?? {}),
           ...(raw.mcpMetadata ?? {}),
@@ -225,6 +237,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'claude',
         mode,
+        invocationRoot: raw.invocationRoot,
         metadata,
         sourceMetadata: sourceMetadataForClaude(raw),
         requestId: raw.requestId,
@@ -239,6 +252,7 @@ export async function normalizeRequest(
         spec,
         source: 'workflow-artifact',
         mode,
+        invocationRoot: raw.invocationRoot,
         specPath: raw.artifactPath,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,

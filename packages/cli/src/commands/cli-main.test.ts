@@ -206,6 +206,27 @@ describe('cliMain', () => {
     );
   });
 
+  it('captures the caller repo root at the CLI boundary and passes it through the handoff deps', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['--mode', 'local', '--spec', 'build a workflow'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/repo-root',
+        handoff: expect.objectContaining({
+          source: 'cli',
+          spec: 'build a workflow',
+          invocationRoot: '/repo-root',
+        }),
+      }),
+    );
+  });
+
   it('runs npm start -- --mode local with an inline spec through local execution', async () => {
     const result = await cliMain({
       argv: ['--mode', 'local', '--spec', 'build a workflow'],
@@ -449,6 +470,236 @@ describe('cliMain', () => {
           }),
         }),
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Regression proof coverage for issue #1 and #2
+  // ---------------------------------------------------------------------------
+
+  describe('regression: invocation root passthrough for all handoff types', () => {
+    it('passes invocationRoot through inline-spec handoff to the interactive runner', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec', 'build a workflow'],
+        cwd: '/caller-repo-inline',
+        runInteractive: runner,
+      });
+
+      expect(runner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: '/caller-repo-inline',
+          handoff: expect.objectContaining({
+            source: 'cli',
+            spec: 'build a workflow',
+            invocationRoot: '/caller-repo-inline',
+            cliMetadata: { handoff: 'inline-spec' },
+          }),
+        }),
+      );
+    });
+
+    it('passes invocationRoot through spec-file handoff to the interactive runner', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec-file', './my-spec.md'],
+        cwd: '/caller-repo-specfile',
+        runInteractive: runner,
+        readFileText: vi.fn().mockResolvedValue('file content from spec-file'),
+      });
+
+      expect(runner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: '/caller-repo-specfile',
+          handoff: expect.objectContaining({
+            source: 'cli',
+            spec: 'file content from spec-file',
+            specFile: './my-spec.md',
+            invocationRoot: '/caller-repo-specfile',
+            cliMetadata: { handoff: 'spec-file' },
+          }),
+        }),
+      );
+    });
+
+    it('passes invocationRoot through stdin handoff to the interactive runner', async () => {
+      const { Readable } = await import('node:stream');
+      const input = Readable.from(['stdin content']);
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--mode', 'local', '--stdin'],
+        cwd: '/caller-repo-stdin',
+        runInteractive: runner,
+        input,
+      });
+
+      expect(runner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: '/caller-repo-stdin',
+          handoff: expect.objectContaining({
+            source: 'cli',
+            spec: 'stdin content',
+            invocationRoot: '/caller-repo-stdin',
+            cliMetadata: { handoff: 'stdin' },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('regression: artifact paths written relative to caller repo', () => {
+    it('writes artifact into caller repo root when using inline spec with local executor', async () => {
+      const { mkdtemp, rm, access, readFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const tempRepo = await mkdtemp(join(tmpdir(), 'ricky-inline-repo-'));
+
+      try {
+        const result = await cliMain({
+          argv: ['--mode', 'local', '--spec', 'generate a workflow for test coverage'],
+          cwd: tempRepo,
+          onboard: vi.fn().mockResolvedValue({
+            mode: 'local',
+            firstRun: false,
+            bannerShown: false,
+            output: 'mode=local',
+          }),
+        });
+
+        expect(result.exitCode).toBe(0);
+        expect(result.interactiveResult?.localResult?.ok).toBe(true);
+
+        const artifact = result.interactiveResult?.localResult?.artifacts[0];
+        expect(artifact).toBeDefined();
+        expect(artifact?.path).toMatch(/^workflows\/generated\//);
+
+        // Artifact physically exists in caller repo
+        const artifactFullPath = join(tempRepo, artifact!.path);
+        await expect(access(artifactFullPath)).resolves.toBeUndefined();
+
+        // Artifact content was written
+        const content = await readFile(artifactFullPath, 'utf8');
+        expect(content).toContain('workflow(');
+
+        // Next action command points to the same relative path
+        const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
+          a.includes('npx --no-install agent-relay run'),
+        );
+        expect(runAction).toContain(artifact?.path);
+
+        // Artifact is NOT in packages/cli/workflows/generated
+        const cliWorkflowsPath = join(process.cwd(), 'packages/cli/workflows/generated');
+        const artifactName = artifact!.path.split('/').pop()!;
+        const wrongPath = join(cliWorkflowsPath, artifactName);
+        await expect(access(wrongPath)).rejects.toThrow();
+      } finally {
+        await rm(tempRepo, { recursive: true, force: true });
+      }
+    });
+
+    it('writes artifact into caller repo root when using spec-file with local executor', async () => {
+      const { mkdtemp, rm, access, readFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const tempRepo = await mkdtemp(join(tmpdir(), 'ricky-specfile-repo-'));
+
+      try {
+        const result = await cliMain({
+          argv: ['--mode', 'local', '--spec-file', './workflow-spec.md'],
+          cwd: tempRepo,
+          readFileText: vi.fn().mockResolvedValue('generate a workflow for specfile test'),
+          onboard: vi.fn().mockResolvedValue({
+            mode: 'local',
+            firstRun: false,
+            bannerShown: false,
+            output: 'mode=local',
+          }),
+        });
+
+        expect(result.exitCode).toBe(0);
+        expect(result.interactiveResult?.localResult?.ok).toBe(true);
+
+        const artifact = result.interactiveResult?.localResult?.artifacts[0];
+        expect(artifact).toBeDefined();
+        expect(artifact?.path).toMatch(/^workflows\/generated\//);
+
+        // Artifact physically exists in caller repo
+        const artifactFullPath = join(tempRepo, artifact!.path);
+        await expect(access(artifactFullPath)).resolves.toBeUndefined();
+
+        // Artifact content was written
+        const content = await readFile(artifactFullPath, 'utf8');
+        expect(content).toContain('workflow(');
+
+        // Next action command points to the same relative path
+        const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
+          a.includes('npx --no-install agent-relay run'),
+        );
+        expect(runAction).toContain(artifact?.path);
+
+        // Artifact is NOT in packages/cli/workflows/generated
+        const cliWorkflowsPath = join(process.cwd(), 'packages/cli/workflows/generated');
+        const artifactName = artifact!.path.split('/').pop()!;
+        const wrongPath = join(cliWorkflowsPath, artifactName);
+        await expect(access(wrongPath)).rejects.toThrow();
+      } finally {
+        await rm(tempRepo, { recursive: true, force: true });
+      }
+    });
+
+    it('writes artifact into caller repo root when using stdin with local executor', async () => {
+      const { mkdtemp, rm, access, readFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const { Readable } = await import('node:stream');
+      const tempRepo = await mkdtemp(join(tmpdir(), 'ricky-stdin-repo-'));
+      const input = Readable.from(['generate a workflow for stdin test']);
+
+      try {
+        const result = await cliMain({
+          argv: ['--mode', 'local', '--stdin'],
+          cwd: tempRepo,
+          input,
+          onboard: vi.fn().mockResolvedValue({
+            mode: 'local',
+            firstRun: false,
+            bannerShown: false,
+            output: 'mode=local',
+          }),
+        });
+
+        expect(result.exitCode).toBe(0);
+        expect(result.interactiveResult?.localResult?.ok).toBe(true);
+
+        const artifact = result.interactiveResult?.localResult?.artifacts[0];
+        expect(artifact).toBeDefined();
+        expect(artifact?.path).toMatch(/^workflows\/generated\//);
+
+        // Artifact physically exists in caller repo
+        const artifactFullPath = join(tempRepo, artifact!.path);
+        await expect(access(artifactFullPath)).resolves.toBeUndefined();
+
+        // Artifact content was written
+        const content = await readFile(artifactFullPath, 'utf8');
+        expect(content).toContain('workflow(');
+
+        // Next action command points to the same relative path
+        const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
+          a.includes('npx --no-install agent-relay run'),
+        );
+        expect(runAction).toContain(artifact?.path);
+
+        // Artifact is NOT in packages/cli/workflows/generated
+        const cliWorkflowsPath = join(process.cwd(), 'packages/cli/workflows/generated');
+        const artifactName = artifact!.path.split('/').pop()!;
+        const wrongPath = join(cliWorkflowsPath, artifactName);
+        await expect(access(wrongPath)).rejects.toThrow();
+      } finally {
+        await rm(tempRepo, { recursive: true, force: true });
+      }
     });
   });
 });

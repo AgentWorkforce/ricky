@@ -186,6 +186,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
   }
 
   const handoffMode = parsed.mode ?? 'local';
+  const invocationRoot = resolveInvocationRoot(deps.cwd);
 
   if (parsed.spec !== undefined) {
     if (parsed.spec.trim().length === 0) {
@@ -195,6 +196,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
     return {
       source: 'cli',
       spec: parsed.spec,
+      invocationRoot,
       ...(parsed.specFile ? { specFile: parsed.specFile } : {}),
       mode: handoffMode,
       cliMetadata: { handoff: 'inline-spec' },
@@ -208,6 +210,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       source: 'cli',
       spec,
       specFile: parsed.specFile,
+      invocationRoot,
       mode: handoffMode,
       cliMetadata: { handoff: 'spec-file' },
     };
@@ -222,12 +225,17 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
     return {
       source: 'cli',
       spec,
+      invocationRoot,
       mode: handoffMode,
       cliMetadata: { handoff: 'stdin' },
     };
   }
 
   return undefined;
+}
+
+function resolveInvocationRoot(explicitCwd?: string): string {
+  return explicitCwd ?? process.env.INIT_CWD ?? process.cwd();
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +286,7 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
   const runner = deps.runInteractive ?? runInteractiveCli;
   const interactiveDeps: InteractiveCliDeps = {
     ...deps,
+    cwd: resolveInvocationRoot(deps.cwd),
     ...(parsed.mode ? { mode: parsed.mode } : cliHandoff ? { mode: 'local' } : {}),
     ...(cliHandoff ? { handoff: cliHandoff } : {}),
   };

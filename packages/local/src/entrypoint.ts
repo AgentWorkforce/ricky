@@ -172,7 +172,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       const logs: string[] = [];
       const warnings: string[] = [];
       const nextActions: string[] = [];
-      const cwd = options.cwd ?? process.cwd();
+      const cwd = request.invocationRoot ?? options.cwd ?? process.cwd();
       const artifactWriter = options.artifactWriter ?? defaultArtifactWriter;
       const coordinator =
         options.coordinator ?? new LocalCoordinator(options.commandRunner ?? createProcessCommandRunner());
@@ -348,7 +348,7 @@ export async function runLocal(
   handoff: LocalEntrypointInput,
   options: LocalEntrypointOptions = {},
 ): Promise<LocalResponse> {
-  const { executor = options.localExecutor ? createLocalExecutor(options.localExecutor) : getDefaultExecutor(), artifactReader } = options;
+  const { executor, artifactReader, localExecutor } = options;
 
   // Normalize
   let request: LocalInvocationRequest;
@@ -367,6 +367,15 @@ export async function runLocal(
     };
   }
 
+  const resolvedExecutor =
+    executor ??
+    (localExecutor
+      ? createLocalExecutor({
+          ...localExecutor,
+          cwd: localExecutor.cwd ?? request.invocationRoot,
+        })
+      : getDefaultExecutor());
+
   // Validate: local/BYOH entrypoint should not silently route to Cloud.
   if (request.mode === 'cloud') {
     return {
@@ -381,7 +390,7 @@ export async function runLocal(
   }
 
   // Execute
-  return executor.execute(request);
+  return resolvedExecutor.execute(request);
 }
 
 function isLocalInvocationRequest(input: LocalEntrypointInput): input is LocalInvocationRequest {
