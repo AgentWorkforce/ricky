@@ -423,6 +423,111 @@ describe('normalizeRequest', () => {
       expect(result.executionPreference).toBe('local');
     }
   });
+
+  it('normalizes supported local handoff surfaces without machine-specific paths', async () => {
+    const relativeArtifactPath = 'workflows/wave4-local-byoh/ready-local.workflow.ts';
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+
+    const cases: Array<{
+      name: string;
+      handoff: RawHandoff;
+      expected: Partial<LocalInvocationRequest>;
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            description: 'generate a local workflow from CLI',
+            workflowFile: 'workflows/cli.workflow.ts',
+          },
+          cliMetadata: { argv: ['ricky', 'run', '--local'] },
+          requestId: 'req-cli-local',
+        },
+        expected: {
+          source: 'cli',
+          spec: 'generate a local workflow from CLI',
+          structuredSpec: {
+            description: 'generate a local workflow from CLI',
+            workflowFile: 'workflows/cli.workflow.ts',
+          },
+          metadata: { argv: ['ricky', 'run', '--local'] },
+          requestId: 'req-cli-local',
+        },
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            prompt: 'generate a local workflow from MCP',
+            workflowFile: 'workflows/mcp.workflow.ts',
+          },
+          mcpMetadata: { toolCallId: 'tool-local' },
+          requestId: 'req-mcp-local',
+        },
+        expected: {
+          source: 'mcp',
+          spec: 'generate a local workflow from MCP',
+          structuredSpec: {
+            prompt: 'generate a local workflow from MCP',
+            workflowFile: 'workflows/mcp.workflow.ts',
+          },
+          metadata: { toolCallId: 'tool-local', toolName: 'ricky.generate' },
+          requestId: 'req-mcp-local',
+        },
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            request: 'generate a local workflow from Claude',
+            workflowFile: 'workflows/claude.workflow.ts',
+          },
+          conversationId: 'conv-local',
+          turnId: 'turn-local',
+        },
+        expected: {
+          source: 'claude',
+          spec: 'generate a local workflow from Claude',
+          structuredSpec: {
+            request: 'generate a local workflow from Claude',
+            workflowFile: 'workflows/claude.workflow.ts',
+          },
+          metadata: { conversationId: 'conv-local', turnId: 'turn-local' },
+        },
+      },
+      {
+        name: 'workflow-artifact',
+        handoff: {
+          source: 'workflow-artifact',
+          artifactPath: relativeArtifactPath,
+          requestId: 'req-artifact-local',
+        },
+        expected: {
+          source: 'workflow-artifact',
+          spec: 'import { workflow } from "@agent-relay/sdk/workflows";',
+          specPath: relativeArtifactPath,
+          metadata: {},
+          requestId: 'req-artifact-local',
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await normalizeRequest(testCase.handoff, artifactReader);
+
+      expect(result, testCase.name).toMatchObject({
+        _normalized: true,
+        mode: 'local',
+        executionPreference: 'local',
+        ...testCase.expected,
+      });
+    }
+    expect(artifactReader.reads).toEqual([relativeArtifactPath]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1006,6 +1111,66 @@ describe('runLocal', () => {
     );
     expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
+  });
+
+  it('returns the local/BYOH artifact and log contract from an injected coordinator', async () => {
+    const workflowFile = 'workflows/wave4-local-byoh/contract.workflow.ts';
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'mcp',
+        toolName: 'ricky.runLocal',
+        arguments: {
+          goal: 'run the local workflow artifact',
+          targetRepo: 'ricky',
+          workflowFile,
+        },
+        mcpMetadata: { toolCallId: 'tool-contract' },
+        requestId: 'req-contract',
+      },
+      {
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                stdout: ['local artifact executed'],
+                stderr: ['local environment warning'],
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      artifacts: [{ path: workflowFile, type: 'text/typescript' }],
+      logs: expect.arrayContaining([
+        '[local] received spec from mcp',
+        '[local] mode: local',
+        '[local] spec intake route: execute',
+        '[local] runtime status: passed',
+        `[local] runtime command: npx --no-install agent-relay run ${workflowFile}`,
+        '[stdout] local artifact executed',
+        '[stderr] local environment warning',
+      ]),
+      warnings: [],
+      nextActions: ['Inspect generated artifacts and local run evidence.'],
+    });
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile,
+      cwd: '/workspace/ricky',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        requestId: 'req-contract',
+        source: 'mcp',
+        route: 'execute',
+      },
+    });
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
   });
 
   it('surfaces injected local coordinator environment failures without Cloud fallback', async () => {
