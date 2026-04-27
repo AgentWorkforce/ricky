@@ -5,13 +5,15 @@ export interface WelcomeOptions {
 export const FIRST_RUN_WELCOME = [
   "  Welcome to Ricky! Let's get you set up.",
   '',
-  '  Ricky generates and runs workflow artifacts for your repo.',
-  '  Start locally or connect Cloud providers — tell Ricky what you want done.',
+  '  Ricky generates workflow artifacts for your repo.',
+  '  Running a generated artifact is a separate, opt-in step.',
   '',
-  '  Today, locally, Ricky generates a workflow artifact into your repo.',
-  '  Executing it is a separate, opt-in step (--run, or `ricky run <artifact>`',
-  '  if the CLI is npm-linked).',
-  '  Ricky will print the exact next command after generation.',
+  '  What happens by default:',
+  '    You give Ricky a spec → Ricky writes a workflow artifact to disk',
+  '    → Ricky prints the exact command to run it yourself.',
+  '',
+  '  Execution only happens when you explicitly pass --run or invoke',
+  '  `ricky run <artifact>` (requires npm-linked CLI).',
 ].join('\n');
 
 export const RETURNING_USER_WELCOME =

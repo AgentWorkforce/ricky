@@ -27,9 +27,9 @@ describe('Ricky external CLI proof', () => {
     const artifactContent = await readFile(result.artifactFullPath, 'utf8');
     expect(artifactContent).toContain('workflow(');
 
-    expect(result.cliOutput).toContain('Local handoff completed.');
+    expect(result.cliOutput).toContain('Generation: ok — artifact written to disk.');
     expect(result.cliOutput).toContain(`Artifact: ${result.artifactPath}`);
-    expect(result.cliOutput).toContain(`Next: Run the generated workflow locally: ${result.nextCommand}`);
+    expect(result.cliOutput).toContain(`To execute this artifact: ${result.nextCommand}`);
     expect(result.nextCommand).toBe(`npx --no-install agent-relay run ${result.artifactPath}`);
     expect(result.nextCommandOutput).toContain(`[fixture-agent-relay] ran ${result.artifactPath}`);
   });

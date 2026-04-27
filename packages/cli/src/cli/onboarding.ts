@@ -136,9 +136,9 @@ function streamIsTTY(input: NodeJS.ReadableStream): boolean {
 export function renderCloudGuidance(): string {
   return [
     'Cloud provider guidance:',
-    '  Connect providers such as Google, then continue with hosted workflow generation.',
-    '  This CLI slice does not stream Cloud execution evidence — what you see is what',
-    '  the Cloud generate endpoint returns.',
+    '  Cloud mode generates workflow artifacts through AgentWorkforce Cloud.',
+    '  This CLI does not stream Cloud execution results — it returns the',
+    '  generated artifact and any follow-up actions the Cloud endpoint suggests.',
     '',
     '  Connect Google for Cloud generation:',
     '  $ npx agent-relay cloud connect google',
@@ -152,23 +152,20 @@ export function renderCloudGuidance(): string {
 export function renderHandoffGuidance(): string {
   return [
     'Spec handoff:',
-    '  Local/BYOH handoff is available through the current CLI.',
-    '  The user-facing generate/debug command layer is not exposed yet.',
-    '  `ricky.generate` is not a CLI command in this slice.',
+    '  Give Ricky a spec. Ricky generates a workflow artifact and writes it to disk.',
+    '  Generation does not execute anything — it returns the artifact path.',
+    '  Add --run to also execute the generated artifact through local agent-relay.',
     '',
-    '  By default, a spec handoff generates a workflow artifact and stops there.',
-    '  Add --run to also execute the artifact through local agent-relay (opt-in).',
-    '',
-    '  Inline spec (generate only):',
+    '  Generate only (default):',
     '  $ npm start -- --mode local --spec "generate a workflow for package checks"',
     '',
-    '  Inline spec (generate + run):',
+    '  Generate + execute:',
     '  $ npm start -- --mode local --spec "generate a workflow for package checks" --run',
     '',
-    '  File spec:',
+    '  From file:',
     '  $ npm start -- --mode local --spec-file ./path/to/spec.md',
     '',
-    '  Stdin spec:',
+    '  From stdin:',
     '  $ printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
     '',
     '  Run an existing artifact (requires npm-linked CLI):',
@@ -197,16 +194,22 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
   if (!blockedReason) {
     return [
       'Recovery:',
-      '  If setup is interrupted, rerun `npm start`.',
-      '  If a generation handoff fails, rephrase the spec and retry:',
-      '    npm start -- --mode local --spec "<rephrased spec>"',
-      '    npm start -- --mode local --spec-file ./path/to/spec.md',
-      '    printf "%s\\n" "<spec text>" | npm start -- --mode local --stdin',
-      '  If a --run execution fails, Ricky prints a classified blocker code',
-      '  (MISSING_BINARY, MISSING_ENV_VAR, INVALID_ARTIFACT, CREDENTIALS_REJECTED,',
-      '   WORKDIR_DIRTY, NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME) with shell-ready',
-      '  recovery steps. Run the printed steps, then retry with --run.',
-      '  If Cloud setup is blocked, continue in local mode: npm start -- --mode local',
+      '  Setup interrupted?',
+      '    Rerun: npm start',
+      '    Or skip to local: npm start -- --mode local',
+      '',
+      '  Generation failed (no artifact was written)?',
+      '    Rephrase the spec and retry:',
+      '    $ npm start -- --mode local --spec "<rephrased spec>"',
+      '    $ npm start -- --mode local --spec-file ./path/to/spec.md',
+      '    $ printf "%s\\n" "<rephrased spec>" | npm start -- --mode local --stdin',
+      '',
+      '  Execution failed (artifact was generated but --run failed)?',
+      '    Ricky prints a blocker code (e.g. MISSING_BINARY, MISSING_ENV_VAR)',
+      '    with shell-ready recovery steps. Run those steps, then retry with --run.',
+      '',
+      '  Cloud blocked?',
+      '    Continue locally: npm start -- --mode local',
     ].join('\n');
   }
 
@@ -214,8 +217,8 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
     'Recovery:',
     `  Blocked: ${blockedReason}`,
     '  Fix the issue above, then retry the same command.',
-    '  If Ricky printed a classified blocker (MISSING_BINARY, MISSING_ENV_VAR, etc.),',
-    '  run the recovery steps it listed.',
+    '  If Ricky printed a blocker code (e.g. MISSING_BINARY, MISSING_ENV_VAR),',
+    '  run the shell commands it listed, then retry.',
     '  To skip Cloud and continue locally: npm start -- --mode local',
   ].join('\n');
 }
@@ -238,13 +241,15 @@ export function renderProviderConnectFailureRecovery(provider = 'google'): strin
 
 export function renderWorkflowGenerationFailureRecovery(): string {
   return [
-    '  Workflow generation failed.',
+    '  Generation failed — no workflow artifact was written to disk.',
+    '  Nothing was executed.',
     '',
-    '  This means Ricky did not produce a workflow artifact — nothing was executed.',
-    '  Check the Cloud request context and provider connection, then retry Cloud mode.',
-    '  To continue without Cloud, use local mode with --spec, --spec-file, or --stdin.',
-    '  If the spec was ambiguous, rephrase it (state the trigger, action, and target),',
-    '  then retry: npm start -- --mode local --spec "<clarified spec>".',
+    '  Next steps:',
+    '  - If using Cloud: check provider connection, then retry Cloud mode.',
+    '  - If the spec was ambiguous: rephrase it (state the trigger, action, and target).',
+    '  - To retry locally: npm start -- --mode local --spec "<clarified spec>"',
+    '  - To use a file: npm start -- --mode local --spec-file ./path/to/spec.md',
+    '  - To pipe stdin: printf "%s\\n" "<clarified spec>" | npm start -- --mode local --stdin',
   ].join('\n');
 }
 

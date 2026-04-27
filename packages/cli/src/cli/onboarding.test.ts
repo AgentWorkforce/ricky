@@ -25,7 +25,7 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('RRRR');
     expect(output).toContain("Welcome to Ricky! Let's get you set up.");
-    expect(output).toContain('Ricky generates and runs workflow artifacts for your repo.');
+    expect(output).toContain('Ricky generates workflow artifacts for your repo.');
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
   });
@@ -43,7 +43,7 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
     expect(output).toContain('Ready to hand over a spec.');
-    expect(output).toContain('Connect providers such as Google, then continue with hosted workflow generation.');
+    expect(output).toContain('Cloud mode generates workflow artifacts through AgentWorkforce Cloud.');
   });
 
   it('keeps artifact-only onboarding copy from promising automatic execution', () => {
@@ -54,10 +54,10 @@ describe('Ricky CLI onboarding', () => {
       renderOnboarding({ isFirstRun: true, isTTY: true, mode: 'local', env: {} }),
     ].join('\n');
 
-    expect(output).toContain('Today, locally, Ricky generates a workflow artifact into your repo.');
-    expect(output).toContain('Executing it is a separate, opt-in step');
-    expect(output).toContain('By default, a spec handoff generates a workflow artifact and stops there.');
-    expect(output).toContain('execution is opt-in');
+    expect(output).toContain('Ricky generates workflow artifacts for your repo.');
+    expect(output).toContain('Running a generated artifact is a separate, opt-in step.');
+    expect(output).toContain('Generation does not execute anything');
+    expect(output).toContain('Nothing is executed at this stage.');
     expect(output).not.toMatch(/automatic execution/i);
     expect(output).not.toMatch(/automatically execute/i);
     expect(output).not.toMatch(/execution (runs|starts|launches) by default/i);
@@ -69,18 +69,17 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('npx agent-relay cloud connect google');
     expect(output).toContain('Cloud dashboard');
-    expect(output).toContain('Nango-backed connection flow');
     expect(output).not.toContain('github/connect/local');
   });
 
   it('includes spec handoff language without overclaiming', () => {
     const output = renderHandoffGuidance();
 
-    expect(output).toContain('Local/BYOH handoff is available through the current CLI');
+    expect(output).toContain('Give Ricky a spec');
+    expect(output).toContain('Generation does not execute anything');
     expect(output).toContain('npm start -- --mode local --spec "generate a workflow for package checks"');
     expect(output).toContain('npm start -- --mode local --spec-file ./path/to/spec.md');
     expect(output).toContain('npm start -- --mode local --stdin');
-    expect(output).toContain('ricky.generate');
     expect(output).toContain('requires npm-linked CLI');
     expect(output).not.toContain('npx ricky generate --spec');
     expect(output).not.toContain('npx ricky generate --spec-file');
@@ -159,6 +158,8 @@ describe('Ricky CLI onboarding', () => {
     expect(checklist).toContain('generation-only must not look like an');
     expect(checklist).toMatch(/first-run onboarding/i);
     expect(checklist).toContain('interactive/local onboarding');
+    expect(checklist).toContain('Generation: ok');
+    expect(checklist).toContain('Execution: not requested');
   });
 });
 

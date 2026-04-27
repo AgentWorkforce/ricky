@@ -145,53 +145,51 @@ function readRunArtifactPositional(argv: string[]): string | undefined {
 
 export function renderHelp(): string[] {
   return [
-    'ricky CLI — workflow generation and local execution',
+    'ricky CLI — workflow artifact generation',
     '',
-    'Two distinct stages — generation runs by default, execution is opt-in:',
-    '  generate  Ricky writes a workflow artifact into workflows/generated/ in your repo.',
-    '  execute   Ricky launches the artifact through local agent-relay (only with --run',
-    '            or `ricky run <artifact>` when the CLI is npm-linked).',
+    'What Ricky does:',
+    '  generate   Ricky writes a workflow artifact into workflows/generated/ in your repo.',
+    '             This is the default. Nothing is executed.',
+    '  execute    Only with --run or `ricky run <artifact>` (npm-linked CLI).',
+    '             Launches the artifact through local agent-relay.',
     '',
     'Usage:',
-    '  npm start --                         Start interactive session (default)',
-    '  npm start -- --mode <mode>           Start with mode preset: local | cloud | both',
-    '  npm start -- --mode local --spec <text>            Generate a workflow artifact only',
-    '  npm start -- --mode local --spec <text> --run      Generate, then execute through agent-relay',
-    '  ricky run <artifact>                               Execute an artifact (requires npm-linked CLI)',
-    '  npm start -- --mode local --spec-file <path>',
-    '  npm start -- --mode local --stdin    Read spec text from stdin',
-    '  npm start -- help                    Show this help text',
-    '  npm start -- version                 Show version',
+    '  npm start --                                        Interactive session (default)',
+    '  npm start -- --mode <mode>                          Mode preset: local | cloud | both',
+    '  npm start -- --mode local --spec <text>             Generate artifact only',
+    '  npm start -- --mode local --spec <text> --run       Generate, then execute',
+    '  npm start -- --mode local --spec-file <path>        Generate from file',
+    '  npm start -- --mode local --stdin                   Generate from stdin',
+    '  ricky run <artifact>                                Execute existing artifact (npm-linked)',
+    '  npm start -- help                                   This help text',
+    '  npm start -- version                                Version',
     '',
     'Options:',
-    '  --mode <mode>       Override execution mode (local, cloud, both)',
-    '  --spec <text>       Hand inline spec text to the local/BYOH path',
-    '  --spec-file <path>  Read spec text from a file and hand it to the local/BYOH path',
-    '  --artifact <path>   Execute an existing local workflow artifact',
-    '  --run               Continue from generated artifact into local runtime execution',
-    '  --json              Print stage results as JSON',
-    '  --stdin             Read spec text from stdin and hand it to the local/BYOH path',
+    '  --mode <mode>       Set mode (local, cloud, both)',
+    '  --spec <text>       Inline spec text',
+    '  --spec-file <path>  Read spec from a file',
+    '  --artifact <path>   Execute an existing artifact (implies --run)',
+    '  --run               Execute the generated artifact after generation',
+    '  --json              Print results as JSON',
+    '  --stdin             Read spec from stdin',
     '  --help, -h          Show help',
     '  --version, -v       Show version',
     '',
-    'Notes:',
-    '  - Without --run, Ricky returns the generated artifact path and stops.',
-    '    Nothing is executed. The next command Ricky prints is the exact',
-    '    `npx --no-install agent-relay run ...` to launch it yourself.',
-    '  - With --run, execution failures surface as classified blockers (MISSING_BINARY,',
-    '    MISSING_ENV_VAR, INVALID_ARTIFACT, CREDENTIALS_REJECTED, WORKDIR_DIRTY,',
-    '    NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME) with shell-ready recovery steps',
-    '    and exit code 2.',
-    '  - Cloud mode generates through AgentWorkforce Cloud; this CLI slice does not',
-    '    stream Cloud execution evidence.',
+    'What you get back:',
+    '  Without --run:  artifact path on disk, logs, warnings, and the exact',
+    '                  `npx --no-install agent-relay run ...` command to run it yourself.',
+    '  With --run:     generation result + execution result. On failure, a classified',
+    '                  blocker code (e.g. MISSING_BINARY, MISSING_ENV_VAR) with',
+    '                  shell-ready recovery steps and exit code 2.',
+    '  Cloud mode:     generated artifact from AgentWorkforce Cloud. This CLI does',
+    '                  not stream Cloud execution results.',
     '',
     'Examples:',
-    '  npm start -- --mode local',
     '  npm start -- --mode local --spec "generate a workflow for package checks"',
     '  npm start -- --mode local --spec "generate a workflow for package checks" --run',
+    '  npm start -- --mode local --spec-file ./my-spec.md',
     '  printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
     '  ricky run workflows/generated/package-checks.ts',
-    '  npm start -- help',
   ];
 }
 
@@ -400,20 +398,24 @@ function renderLocalJson(localResult: NonNullable<InteractiveCliResult['localRes
 function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localResult']>): string[] {
   const lines: string[] = [];
   if (localResult.ok) {
-    lines.push('Local handoff completed.');
     if (localResult.execution?.status === 'success') {
-      lines.push('  Generation: ok. Execution: success.');
+      lines.push('Generation: ok — artifact written to disk.');
+      lines.push('Execution: success — artifact ran through local agent-relay.');
     } else if (localResult.generation) {
-      lines.push('  Generation: ok. Execution: not requested (pass --run or use `ricky run <artifact>` to execute).');
+      lines.push('Generation: ok — artifact written to disk.');
+      lines.push('Execution: not requested. Pass --run to execute, or run the command printed below.');
     } else {
-      lines.push('  Artifact returned. Execution was not attempted in this slice.');
+      lines.push('Artifact returned. No execution was attempted.');
     }
   } else {
-    lines.push('Local handoff failed.');
     if (localResult.execution) {
-      lines.push(`  Stage that failed: execute (status: ${localResult.execution.status}).`);
+      lines.push('Generation: ok — artifact written to disk.');
+      lines.push(`Execution: failed (status: ${localResult.execution.status}).`);
     } else if (localResult.generation) {
-      lines.push(`  Stage that failed: generate (status: ${localResult.generation.status}).`);
+      lines.push(`Generation: failed (status: ${localResult.generation.status}).`);
+      lines.push('No artifact was written. Nothing was executed.');
+    } else {
+      lines.push('Local handoff failed.');
     }
   }
 
@@ -430,8 +432,8 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
       }
     }
     if (localResult.generation.next) {
-      lines.push(`  Next: Run the generated workflow locally: ${localResult.generation.next.run_command}`);
-      lines.push(`  Run mode: ${localResult.generation.next.run_mode_hint}`);
+      lines.push(`  To execute this artifact: ${localResult.generation.next.run_command}`);
+      lines.push(`  Or with linked CLI: ${localResult.generation.next.run_mode_hint}`);
     }
     if (localResult.generation.error) {
       lines.push(`  Error: ${localResult.generation.error}`);

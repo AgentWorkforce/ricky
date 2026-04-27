@@ -99,8 +99,8 @@ export async function runExternalCliProof(
 
     const cliOutput = normalizeOutput(cliInvocation.stdout);
     const artifactPath = parseLabeledValue(cliOutput, 'Artifact');
-    const nextCommandText = parseLabeledValue(cliOutput, 'Next');
-    const nextCommand = parseNextCommand(nextCommandText);
+    const nextCommandText = parseLabeledValue(cliOutput, 'To execute this artifact');
+    const nextCommand = nextCommandText.trim();
     const artifactFullPath = join(repoDir, artifactPath);
 
     await access(artifactFullPath, constants.F_OK);

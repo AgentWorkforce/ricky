@@ -183,8 +183,8 @@ describe('runInteractiveCli', () => {
     expect(result.ok).toBe(true);
     expect(result.awaitingInput).toBe(true);
     expect(result.localResult).toBeUndefined();
-    expect(result.guidance.join('\n')).toMatch(/No spec was provided/i);
-    expect(result.guidance.join('\n')).toMatch(/Inline spec: npm start -- --mode local --spec/i);
+    expect(result.guidance.join('\n')).toMatch(/No spec provided/i);
+    expect(result.guidance.join('\n')).toMatch(/npm start -- --mode local --spec/i);
     expect(result.guidance.join('\n')).toMatch(/--spec-file/i);
     expect(result.guidance.join('\n')).toMatch(/--stdin/i);
     expect(localExecutor.execute).not.toHaveBeenCalled();
@@ -279,7 +279,7 @@ describe('runInteractiveCli', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.guidance.join('\n')).toMatch(/Workflow generation failed/i);
+    expect(result.guidance.join('\n')).toMatch(/Generation failed/i);
     expect(result.guidance.join('\n')).toMatch(/provider offline/i);
   });
 
@@ -332,7 +332,7 @@ describe('runInteractiveCli', () => {
     expect(result.ok).toBe(false);
     expect(result.cloudResult).toBeDefined();
     expect(result.cloudResult?.warnings).toHaveLength(1);
-    expect(result.guidance.join('\n')).toMatch(/Workflow generation failed/i);
+    expect(result.guidance.join('\n')).toMatch(/Generation failed/i);
     expect(result.guidance.join('\n')).toMatch(/quota exceeded/i);
   });
 
@@ -803,7 +803,7 @@ describe('runInteractiveCli', () => {
       expect(result.awaitingInput).toBe(true);
       expect(result.localResult).toBeUndefined();
       const guidance = result.guidance.join('\n');
-      expect(guidance).toContain('No spec was provided');
+      expect(guidance).toContain('No spec provided');
       expect(guidance).toContain('--spec');
       expect(guidance).toContain('--spec-file');
       expect(guidance).toContain('--stdin');
@@ -817,9 +817,8 @@ describe('runInteractiveCli', () => {
 
       expect(result.ok).toBe(true);
       expect(result.awaitingInput).toBe(true);
-      expect(guidance).toContain('Inline spec: npm start -- --mode local --spec');
-      expect(guidance).toContain('File spec:   npm start -- --mode local --spec-file');
-      expect(guidance).toContain('Stdin spec:  printf');
+      expect(guidance).toContain('npm start -- --mode local --spec');
+      expect(guidance).toContain('npm start -- --mode local --spec-file');
       expect(guidance).toContain('--stdin');
       expect(guidance).not.toContain('npx ricky generate');
       expect(guidance).not.toContain('spec-stdin');

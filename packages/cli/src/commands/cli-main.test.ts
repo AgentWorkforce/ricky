@@ -113,11 +113,10 @@ describe('renderHelp', () => {
   it('states that spec handoff returns an artifact unless execution is explicitly requested', () => {
     const helpText = renderHelp().join('\n');
 
-    expect(helpText).toContain('Two distinct stages — generation runs by default, execution is opt-in:');
-    expect(helpText).toContain('npm start -- --mode local --spec <text>            Generate a workflow artifact only');
-    expect(helpText).toContain('Without --run, Ricky returns the generated artifact path and stops.');
-    expect(helpText).toContain('only with --run');
-    expect(helpText).toContain('or `ricky run <artifact>` when the CLI is npm-linked');
+    expect(helpText).toContain('generate   Ricky writes a workflow artifact');
+    expect(helpText).toContain('This is the default. Nothing is executed.');
+    expect(helpText).toContain('Only with --run or `ricky run <artifact>`');
+    expect(helpText).toContain('Without --run:  artifact path on disk');
     expect(helpText).not.toMatch(/automatic execution/i);
     expect(helpText).not.toMatch(/automatically execute/i);
     expect(helpText).not.toMatch(/execution (runs|starts|launches) by default/i);
@@ -425,10 +424,9 @@ describe('cliMain', () => {
 
     const output = result.output.join('\n');
     expect(result.exitCode).toBe(0);
-    expect(output).toContain('Local handoff completed.');
+    expect(output).toContain('Artifact returned.');
     expect(output).toContain('Artifact: out/workflow.ts');
     expect(output).toContain('Next: Review workflow');
-    expect(output).not.toContain('Local handoff blocker:');
     expect(output).not.toMatch(/rerun.*later/i);
     expect(result.interactiveResult?.awaitingInput).toBe(false);
     expect(result.interactiveResult?.localResult?.ok).toBe(true);
@@ -526,6 +524,8 @@ describe('cliMain', () => {
       const executionIndex = result.output.indexOf('--- execution ---');
 
       expect(result.exitCode).toBe(0);
+      expect(output).toContain('Generation: ok — artifact written to disk.');
+      expect(output).toContain('Execution: success — artifact ran through local agent-relay.');
       expect(generationIndex).toBeGreaterThan(-1);
       expect(executionIndex).toBeGreaterThan(generationIndex);
       expect(output).toContain('  Artifact: workflows/generated/issue-3.ts');
@@ -563,7 +563,7 @@ describe('cliMain', () => {
       expect(output).toContain('status: ok');
       expect(output).toContain('  Artifact: workflows/generated/issue-3.ts');
       expect(output).toContain(
-        '  Next: Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+        '  To execute this artifact: npx --no-install agent-relay run workflows/generated/issue-3.ts',
       );
       expect(output).not.toContain('--- execution ---');
       expect(output).not.toContain('outcome_summary:');
@@ -592,18 +592,18 @@ describe('cliMain', () => {
       const output = result.output.join('\n');
       const generationIndex = result.output.indexOf('stage: generate');
       const artifactIndex = result.output.indexOf('  Artifact: workflows/generated/issue-3.ts');
-      const runModeIndex = result.output.indexOf('  Run mode: ricky run --artifact workflows/generated/issue-3.ts');
+      const linkedCliIndex = result.output.indexOf('  Or with linked CLI: ricky run --artifact workflows/generated/issue-3.ts');
 
       expect(result.exitCode).toBe(0);
-      expect(output).toContain('Local handoff completed.');
-      expect(output).toContain('  Generation: ok. Execution: not requested (pass --run or use `ricky run <artifact>` to execute).');
+      expect(output).toContain('Generation: ok — artifact written to disk.');
+      expect(output).toContain('Execution: not requested.');
       expect(generationIndex).toBeGreaterThan(-1);
       expect(artifactIndex).toBeGreaterThan(generationIndex);
-      expect(runModeIndex).toBeGreaterThan(artifactIndex);
+      expect(linkedCliIndex).toBeGreaterThan(artifactIndex);
       expect(output).toContain('  workflow_id: wf-issue-3');
       expect(output).toContain('  spec_digest: digest-issue-3');
       expect(output).not.toContain('--- execution ---');
-      expect(output).not.toContain('Execution: success.');
+      expect(output).not.toContain('Execution: success');
       expect(output).not.toContain('outcome_summary:');
       expect(output).not.toContain('stdout_path:');
       expect(output).not.toContain('stderr_path:');
@@ -647,7 +647,7 @@ describe('cliMain', () => {
 
     const output = result.output.join('\n');
     expect(result.exitCode).toBe(0);
-    expect(output).toContain('Local handoff completed.');
+    expect(output).toContain('Artifact returned.');
     expect(output).toContain('Artifact: workflows/generated/package-checks.ts');
     expect(output).toContain('Next: Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/package-checks.ts');
     expect(output).toContain('Next: Inspect the generated workflow artifact and choose whether to run it locally.');
@@ -675,10 +675,9 @@ describe('cliMain', () => {
 
     const output = result.output.join('\n');
     expect(result.exitCode).toBe(0);
-    expect(output).toContain('Local handoff blocker:');
-    expect(output).toContain('Inline spec: npm start -- --mode local --spec');
-    expect(output).toContain('File spec:   npm start -- --mode local --spec-file');
-    expect(output).toContain('Stdin spec:');
+    expect(output).toContain('No spec provided');
+    expect(output).toContain('npm start -- --mode local --spec');
+    expect(output).toContain('npm start -- --mode local --spec-file');
     expect(result.interactiveResult?.awaitingInput).toBe(true);
     expect(result.interactiveResult?.localResult).toBeUndefined();
   });

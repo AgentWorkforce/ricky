@@ -57,12 +57,12 @@ describe('Ricky CLI onboarding proof', () => {
   it.each([
     ['first-run-experience', ['Welcome to Ricky', 'Local / BYOH', 'Cloud', 'Recovery']],
     ['returning-user-compact-header', ['Ricky is ready', 'ricky · local mode · ready']],
-    ['local-byoh-path', ['writes a workflow artifact into workflows/generated/ in your repo', 'No Cloud credentials required']],
+    ['local-byoh-path', ['writes a workflow artifact into workflows/generated/ in your repo', 'No Cloud credentials required', 'Nothing is executed at this stage']],
     ['cloud-path', ['Cloud mode selected', 'AgentWorkforce Cloud', 'Cloud dashboard']],
     ['google-connect-guidance', ['npx agent-relay cloud connect google']],
     ['github-dashboard-nango-guidance', ['GitHub', 'Cloud dashboard']],
-    ['cli-mcp-handoff-language', ['CLI', 'ricky.generate']],
-    ['recovery-paths', ['agent-relay is missing', 'continue in local mode']],
+    ['cli-mcp-handoff-language', ['Give Ricky a spec', 'Generation does not execute']],
+    ['recovery-paths', ['agent-relay is missing', 'Continue locally']],
     ['banner-suppression', ['quiet: suppressed', 'RICKY_BANNER=0: suppressed']],
     ['narrow-terminal-fallback', ['ricky · workflow reliability for AgentWorkforce']],
   ] satisfies Array<[ProofCaseName, string[]]>)('%s exposes bounded proof evidence', (name, expectedEvidence) => {
