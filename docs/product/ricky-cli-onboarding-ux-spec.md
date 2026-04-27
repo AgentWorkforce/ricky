@@ -51,6 +51,49 @@ The `generate` command must build a `CliHandoff` (as defined in `packages/local/
 
 Until these are implemented, development-mode invocations use `npm start -- ...` with the current parser. User-facing copy in this spec uses `npx ricky` to represent the target surface. When the package gains a `bin` entry or is published, the `npx ricky` invocations become live.
 
+### Parser Delta Punch List
+
+`packages/cli/src/commands/cli-main.ts` must extend `ParsedArgs` from the current `run | help | version` shape to a discriminated union that can represent onboarding, status, and all three spec input modes:
+
+```ts
+type ParsedArgs =
+  | BaseParsedArgs & { command: 'run' }
+  | BaseParsedArgs & { command: 'help' }
+  | BaseParsedArgs & { command: 'version' }
+  | BaseParsedArgs & { command: 'setup' }
+  | BaseParsedArgs & { command: 'welcome' }
+  | BaseParsedArgs & { command: 'status' }
+  | BaseParsedArgs & {
+      command: 'generate';
+      specSource: 'inline';
+      spec: string;
+    }
+  | BaseParsedArgs & {
+      command: 'generate';
+      specSource: 'file';
+      specFile: string;
+    }
+  | BaseParsedArgs & {
+      command: 'generate';
+      specSource: 'stdin';
+    };
+
+type BaseParsedArgs = {
+  mode?: 'local' | 'cloud' | 'both';
+  quiet?: boolean;
+  noBanner?: boolean;
+  verbose?: boolean;
+};
+```
+
+Parser requirements:
+
+- `setup`, `welcome`, and `status` are standalone commands.
+- `generate` accepts exactly one of `--spec`, `--spec-file`, or `--spec-stdin`.
+- `--mode`, `--quiet`, `--no-banner`, and `--verbose` may appear before or after the command.
+- Missing or multiple spec sources return a user-facing usage error, not an uncaught exception.
+- Unknown commands should continue to fall back to help-oriented guidance.
+
 ## Entry Points
 
 The onboarding UX applies to these **target** CLI entry points (see "Current vs Target CLI Surface" above for implementation status):
@@ -513,6 +556,47 @@ Expected normalized behavior:
 - If mode is missing, Ricky uses normal mode precedence and may ask interactively only when the transport supports it.
 - If the MCP call is non-interactive and Ricky is unconfigured, return a structured setup-required error with next actions.
 
+## Interactive CLI Composition Contract
+
+`packages/cli/src/entrypoint/interactive-cli.ts` is the composition boundary between terminal UX and execution. It wires onboarding to the normalized request path but does not own banner artwork, copy strings, provider OAuth, or workflow generation internals.
+
+Required flow:
+
+1. Parse `ParsedArgs` in `packages/cli/src/commands/cli-main.ts`.
+2. Load config and provider status through injected dependencies.
+3. Resolve mode using `--mode`, `RICKY_MODE`, project config, global config, then interactive prompt.
+4. Render first-run onboarding only when there is no completed config and the current command is interactive.
+5. For `setup`, run first-run onboarding and persist the interactive mode choice.
+6. For `welcome`, render the banner and welcome copy without persisting config.
+7. For `status`, render mode, config path, and provider status.
+8. For `generate`, build a `CliHandoff`, pass it through `normalizeRequest()`, then route to local, Cloud, or both based on resolved mode.
+9. On execution failure, call diagnostics/recovery helpers and render the matching user-facing recovery path.
+10. Return an `InteractiveCliResult` with success/failure, selected mode, config effects, and any recovery classification.
+
+`InteractiveCliResult` shape:
+
+```ts
+type InteractiveCliResult = {
+  success: boolean;
+  mode: 'local' | 'cloud' | 'both' | 'explore' | undefined;
+  configEffects: {
+    persisted: boolean;       // true if config was written during this run
+    schemaVersion: number;    // version of config after this run
+  };
+  recovery?: {
+    classification: 'env-blocker' | 'auth-blocker' | 'config-blocker' | 'generation-failure' | 'setup-required';
+    message: string;          // user-facing recovery text rendered to terminal
+  };
+};
+```
+
+Composition rules:
+
+- Onboarding copy must live in CLI onboarding/welcome modules, not in `interactive-cli.ts`.
+- `interactive-cli.ts` may decide which recovery renderer to call, but recovery copy should remain testable without invoking real local or Cloud execution.
+- Non-interactive commands must return structured setup or usage errors instead of prompting.
+- Local and MCP/CLI handoffs must share the same normalization path before execution.
+
 ## Recovery Paths
 
 Recovery messages must include what failed and the nearest useful fix. They should be short enough to read in a terminal.
@@ -571,6 +655,36 @@ Behavior:
 - Do not attempt GitHub OAuth locally.
 - Do not guess a Cloud dashboard URL.
 - Return a user-facing auth blocker with these next actions.
+
+### Provider Connect Failure
+
+Detection:
+
+- User ran or was directed to `npx agent-relay cloud connect google`.
+- The connect command failed, timed out, or returned an incomplete provider status.
+- Cloud mode or Both mode remains selected.
+
+Message:
+
+```text
+Google did not finish connecting.
+
+Retry the Cloud connection:
+  npx agent-relay cloud connect google
+
+If GitHub is the provider you need, use the AgentWorkforce Cloud dashboard:
+  Settings -> Integrations -> GitHub
+
+You can keep working locally while Cloud setup is pending:
+  npx ricky generate --mode local --spec-file spec.md
+```
+
+Behavior:
+
+- Keep the selected mode unchanged.
+- Mark Google as not connected unless provider status proves otherwise.
+- Do not invent a browser URL or attempt GitHub OAuth in the CLI.
+- If `--verbose` is set, include the provider command exit code or provider status reason.
 
 ### Local Environment Blocker
 
@@ -653,6 +767,34 @@ Behavior:
 - Classify as a config blocker, not a workflow failure.
 - If `--verbose` is set, include the parse error message.
 
+### Workflow Generation Failure
+
+Detection:
+
+- A `generate` command reached local or Cloud execution.
+- Request normalization succeeded.
+- The generator or executor returned a recoverable failure, validation failure, or provider/runtime error.
+
+Message:
+
+```text
+Workflow generation did not complete.
+
+Ricky accepted the spec, but generation stopped during execution.
+Review the reported issue, then retry:
+  npx ricky generate --spec-file spec.md
+
+To check setup before retrying:
+  npx ricky status
+```
+
+Behavior:
+
+- Do not replay first-run onboarding.
+- Preserve the normalized handoff metadata in logs or artifacts when available.
+- Classify the failure as generation/execution, not onboarding.
+- If diagnostics identify a more specific blocker, render that specific recovery path instead.
+
 ## Implementation Boundaries
 
 The future implementation workflow should build within these boundaries.
@@ -699,6 +841,8 @@ Implementation must not:
 | `packages/runtime/src/diagnostics/*.test.ts` | Missing toolchain, missing auth, local environment blocker, and corrupted config classification | No — tests diagnostic classifiers directly |
 
 Tests must use injected input, output, config stores, provider status, and executors. They must not depend on the developer machine's actual Cloud auth, global config, or terminal width.
+
+The table describes the preferred test organization, but the implementation may consolidate files if the same behavioral coverage remains explicit and easy to locate. A consolidated test file is acceptable only when test names preserve the module or flow being covered.
 
 ## Acceptance Criteria
 
