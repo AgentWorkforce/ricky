@@ -189,6 +189,12 @@ workflow_is_already_satisfied() {
         && test -d packages/local \
         && test -d packages/cli
       ;;
+    workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts)
+      git cat-file -e HEAD:test/package-proof/package-layout-proof.ts 2>/dev/null \
+        && git cat-file -e HEAD:test/package-proof/package-layout-proof.test.ts 2>/dev/null \
+        && npm run typecheck >/dev/null \
+        && npm test >/dev/null
+      ;;
     *)
       return 1
       ;;

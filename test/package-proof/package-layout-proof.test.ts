@@ -127,6 +127,10 @@ describe('Ricky workspace package layout and npm script parity proof', () => {
     expect(script).toContain('RUN_RESULT="skipped"');
     expect(script).toContain('if [[ "$RUN_RESULT" == "ran" ]]');
     expect(script).toContain('checkpointed');
+    expect(script).toContain('workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts)');
+    expect(script).toContain("git cat-file -e HEAD:test/package-proof/package-layout-proof.ts 2>/dev/null");
+    expect(script).toContain('npm run typecheck >/dev/null');
+    expect(script).toContain('npm test >/dev/null');
   });
 
   it('is fully deterministic — repeated evaluation yields identical results', () => {
