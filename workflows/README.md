@@ -23,6 +23,7 @@ workflows/
   wave3-cloud-api/
   wave4-local-byoh/
   wave5-scale-and-ops/
+  wave8-github-issues/
 ```
 
 ## Principles
@@ -44,3 +45,12 @@ When authoring workflows, read in this order:
 ## Next expected artifacts
 
 The first major Ricky workflow initiative is a meta-workflow that generates a large wave-structured backlog of reliable implementation workflows to serve as the execution layer for building the application.
+
+## Current GitHub Issue Workflows
+
+`wave8-github-issues/` contains issue-focused workflows for the current open GitHub backlog:
+- `01-fix-cli-artifact-path-and-caller-root.ts` covers issues #1 and #2.
+- `02-prove-external-repo-cli-generation.ts` covers issue #6.
+- `03-close-local-execution-outcome-loop.ts` covers issue #3.
+- `04-tighten-onboarding-readiness-copy-and-checklist.ts` covers issues #4 and #7.
+- `05-prove-skill-embedding-boundary.ts` covers issue #5.
