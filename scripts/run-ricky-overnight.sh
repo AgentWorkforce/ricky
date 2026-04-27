@@ -450,6 +450,16 @@ run_one() {
   RUN_PID="$$"
   persist_checkpoint
 
+  if workflow_hit_claude_rate_limit "$runner_output"; then
+    log "workflow blocked by Claude rate limit prompt after runner exit: $workflow_path"
+    echo "$workflow_path" >> "$FAILED_FILE"
+    inspect_repo_changes
+    mark_status "blocked" "claude rate limit prompt: $workflow_path"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
+    return 1
+  fi
+
   if [[ "$runner_exit" != "0" ]] || workflow_log_shows_failure "$runner_output"; then
     if [[ "$runner_exit" != "0" ]]; then
       log "workflow exited non-zero: $workflow_path"
