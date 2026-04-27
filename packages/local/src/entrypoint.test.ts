@@ -887,6 +887,131 @@ describe('runLocal', () => {
     expect(executor.calls[0].mode).toBe('local');
   });
 
+  it('keeps CLI, MCP, and Claude handoffs BYOH-first without Cloud credentials', async () => {
+    const handoffs: RawHandoff[] = [
+      {
+        source: 'cli',
+        spec: {
+          description: 'generate a local workflow from CLI without hosted credentials',
+          targetFiles: ['packages/local/src/entrypoint.ts'],
+        },
+        cliMetadata: { argv: ['ricky', 'generate'] },
+      },
+      {
+        source: 'mcp',
+        toolName: 'ricky.generate',
+        arguments: {
+          prompt: 'generate a local workflow from MCP without hosted credentials',
+          targetFiles: ['packages/local/src/entrypoint.ts'],
+        },
+        mcpMetadata: { toolCallId: 'tool-byoh-first' },
+      },
+      {
+        source: 'claude',
+        spec: {
+          request: 'generate a local workflow from Claude without hosted credentials',
+          targetFiles: ['packages/local/src/entrypoint.ts'],
+        },
+        conversationId: 'conv-byoh-first',
+        turnId: 'turn-byoh-first',
+      },
+    ];
+
+    for (const handoff of handoffs) {
+      const executor = mockExecutor();
+      const result = await runLocal(handoff, { executor });
+
+      expect(result.ok, handoff.source).toBe(true);
+      expect(executor.calls, handoff.source).toHaveLength(1);
+      expect(executor.calls[0], handoff.source).toMatchObject({
+        source: handoff.source,
+        mode: 'local',
+      });
+      expect(executor.calls[0].metadata, handoff.source).not.toHaveProperty('auth');
+      expect(executor.calls[0].metadata, handoff.source).not.toHaveProperty('workspace');
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), handoff.source).toBe(false);
+    }
+  });
+
+  it('runs both-mode handoffs through the local entrypoint while preserving optional Cloud promotion', async () => {
+    const cases: RawHandoff[] = [
+      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts', mode: 'both' },
+      {
+        source: 'mcp',
+        arguments: {
+          goal: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          executionPreference: 'auto',
+        },
+      },
+      {
+        source: 'claude',
+        spec: {
+          request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          executionPreference: 'both',
+        },
+      },
+    ];
+
+    for (const handoff of cases) {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: [`${handoff.source} both-mode local run`] });
+      const result = await runLocal(handoff, { localExecutor });
+
+      expect(result.ok, handoff.source).toBe(true);
+      expect(localExecutor.runner.invocations, handoff.source).toHaveLength(1);
+      expect(localExecutor.runner.invocations[0].command, handoff.source).toBe(DEFAULT_LOCAL_ROUTE.command);
+      expect(result.logs, handoff.source).toEqual(
+        expect.arrayContaining([
+          `[local] received spec from ${handoff.source}`,
+          '[local] mode: both',
+          '[local] runtime status: passed',
+          `[stdout] ${handoff.source} both-mode local run`,
+        ]),
+      );
+      expect(result.nextActions.some((action) => action.includes('promote to Cloud')), handoff.source).toBe(true);
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), handoff.source).toBe(false);
+    }
+  });
+
+  it('rejects explicit cloud-only preferences from CLI, MCP, and Claude before local execution', async () => {
+    const handoffs: RawHandoff[] = [
+      {
+        source: 'cli',
+        spec: {
+          description: 'generate a hosted workflow',
+          executionPreference: 'cloud',
+        },
+      },
+      {
+        source: 'mcp',
+        toolName: 'ricky.generate',
+        arguments: {
+          goal: 'generate a hosted workflow',
+          executionPreference: 'cloud',
+        },
+      },
+      {
+        source: 'claude',
+        spec: {
+          request: 'generate a hosted workflow',
+          mode: 'cloud',
+        },
+      },
+    ];
+
+    for (const handoff of handoffs) {
+      const executor = mockExecutor();
+      const result = await runLocal(handoff, { executor });
+
+      expect(result.ok, handoff.source).toBe(false);
+      expect(executor.calls, handoff.source).toHaveLength(0);
+      expect(result.logs, handoff.source).toEqual([`[local] rejected cloud-only request from ${handoff.source}`]);
+      expect(result.warnings, handoff.source).toEqual([
+        'This is the local/BYOH entrypoint. Cloud-only requests should use the Cloud API surface.',
+      ]);
+      expect(result.nextActions, handoff.source).toEqual(['Use the Cloud API surface or re-invoke with mode=local.']);
+    }
+  });
+
   it('defaults every raw handoff surface to explicit local execution before adapter handoff', async () => {
     const handoffs: RawHandoff[] = [
       { source: 'free-form', spec: 'generate a local workflow' },
