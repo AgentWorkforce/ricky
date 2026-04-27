@@ -83,10 +83,10 @@ async function main() {
       failOnError: true,
     })
 
-    .step('lead-plan', {
-      agent: 'lead-claude',
+    .step('implement-health-analytics', {
+      agent: 'impl-primary-codex',
       dependsOn: ['read-workflow-standards', 'read-authoring-rules', 'read-generated-template', 'read-product-spec'],
-      task: `Plan the workflow health analytics implementation.
+      task: `Implement workflow health analytics.
 
 Context inputs:
 - docs/workflows/WORKFLOW_STANDARDS.md:
@@ -97,6 +97,10 @@ Context inputs:
 {{steps.read-generated-template.output}}
 - SPEC.md:
 {{steps.read-product-spec.output}}
+
+Before writing code, first write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md summarizing the concrete analytics contracts, files, and validation steps you are about to implement.
+End that plan artifact with HEALTH_ANALYTICS_PLAN_READY.
+Then implement the code and tests.
 
 Deliverables:
 - packages/product/src/analytics/health-analyzer.ts
@@ -109,44 +113,34 @@ Non-goals:
 - Do not build dashboards.
 - Do not require live Cloud telemetry.
 - Do not mutate workflows automatically from analytics findings.
+- Do not edit files outside packages/product/src/analytics except for narrowly required exports/imports.
 
 Verification:
 - Analyzer must identify common failure classes, bad pattern choices, oversized steps, weak verification, retry rates, timeout rates, and missing hard gates from structured run-history input.
 - Digest generator must produce concrete improvement recommendations, not generic summaries.
 - Tests must cover representative successful, degraded, and empty-history cases.
 - Post-edit gates must run after implementation and tests.
+- Keep analysis deterministic and typed so local or Cloud evidence stores can feed it later.
+- Recommendations must reference concrete signals from the analyzed history.
 
 Commit/PR boundary:
-- Keep changes scoped to packages/product/src/analytics and imports from runtime evidence/failure types if they already exist.
-
-Write .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md ending with HEALTH_ANALYTICS_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md' },
+- Keep changes scoped to packages/product/src/analytics and imports from runtime evidence/failure types if they already exist.`,
+      verification: { type: 'exit_code', value: '0' },
     })
-
-    .step('implement-health-analytics', {
-      agent: 'impl-primary-codex',
-      dependsOn: ['lead-plan'],
-      task: `Implement workflow health analytics.
-
-Deliverables:
-- health-analyzer.ts should accept structured run histories and calculate failure class counts, retry and timeout rates, weak verification signals, step size warnings, and pattern-choice warnings.
-- digest-generator.ts should convert analysis into structured digest output with findings, severity, evidence, and recommended actions.
-- types.ts and index.ts should export public analytics contracts.
-
-Non-goals:
-- Do not read live databases.
-- Do not implement notification delivery.
-- Do not auto-edit workflow files.
-
-Verification:
-- Keep analysis deterministic.
-- Prefer typed inputs that can be fed by local or Cloud evidence stores later.
-- Recommendations must reference concrete signals from the analyzed history.`,
-      verification: { type: 'file_exists', value: 'packages/product/src/analytics/health-analyzer.ts' },
+    .step('plan-gate', {
+      type: 'deterministic',
+      dependsOn: ['implement-health-analytics'],
+      command: [
+        'test -f .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md',
+        "tail -n 1 .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/plan.md | grep -Eq '^HEALTH_ANALYTICS_PLAN_READY$'",
+        'echo HEALTH_ANALYTICS_PLAN_VERIFIED',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
     .step('post-implementation-file-gate', {
       type: 'deterministic',
-      dependsOn: ['implement-health-analytics'],
+      dependsOn: ['implement-health-analytics', 'plan-gate'],
       command: [
         'test -f packages/product/src/analytics/health-analyzer.ts',
         'test -f packages/product/src/analytics/digest-generator.ts',
