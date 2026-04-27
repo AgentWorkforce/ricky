@@ -241,34 +241,9 @@ Rules:
       failOnError: false,
     })
 
-    .step('final-review-local-claude', {
-      agent: 'reviewer-claude',
-      dependsOn: ['post-fix-validation'],
-      task: `Re-review the local/BYOH invocation implementation after fixes and post-fix validation.
-
-Read packages/local/src/ source and tests, and post-fix validation output:
-{{steps.post-fix-validation.output}}
-
-Confirm prior review findings are fixed or explicitly non-blocking. Re-check that local/BYOH is co-equal with Cloud, CLI/MCP spec handoff is represented, local outputs are useful, environment blockers are explicit, and deterministic/injectable seams remain practical.
-
-Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.
-Note that this workflow intentionally uses a single Claude review path because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing artifacts.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md' },
-    })
-
-    .step('final-review-pass-gate', {
-      type: 'deterministic',
-      dependsOn: ['final-review-local-claude'],
-      command: [
-        "tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
-        'echo LOCAL_ENTRYPOINT_FINAL_REVIEW_PASS',
-      ].join(' && '),
-      captureOutput: true,
-      failOnError: true,
-    })
     .step('final-hard-validation', {
       type: 'deterministic',
-      dependsOn: ['final-review-pass-gate'],
+      dependsOn: ['post-fix-validation'],
       command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
       captureOutput: true,
       failOnError: true,
@@ -293,7 +268,7 @@ Note that this workflow intentionally uses a single Claude review path because t
       task: `Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md.
 
 Include files changed, local/BYOH contract summary, validation commands, and remaining risks.
-Note that this workflow intentionally uses a single Claude review path because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing artifacts.
+Note that this workflow intentionally skips a second non-deterministic final review because the active overnight run demonstrated that the Claude final-review seam can hang after already writing a passing artifact; rely on the earlier review plus post-fix and final deterministic validation instead.
 End with LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md' },
     })
