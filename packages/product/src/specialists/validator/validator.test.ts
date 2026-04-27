@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import {
+  FailureTaxonomyCategory,
+  RecoveryDecision,
+} from '@ricky/runtime/diagnostics/failure-diagnosis.js';
 import type { CommandResult, StructuralCheckName, ValidatorResult } from './types.js';
 import { validateWorkflow } from './validator.js';
 
@@ -94,6 +98,51 @@ describe('validateWorkflow', () => {
         fixHint: expect.stringContaining('Fix final hard-gate failures'),
       }),
     );
+  });
+
+  it('attaches recovery guidance for unsupported validation commands', () => {
+    const result = validate(completeWorkflowText(), {
+      finalDryRunResult: failed('npm run missing-proof', 'npm ERR! missing script: missing-proof'),
+    });
+
+    expect(result.proofLoopSteps).toContainEqual(
+      expect.objectContaining({
+        phase: 'final_gate',
+        passed: false,
+        recovery: expect.objectContaining({
+          taxonomyCategory: FailureTaxonomyCategory.ValidationStrategyUnsupportedCommand,
+          recommendation: expect.objectContaining({
+            decision: RecoveryDecision.ReplaceValidation,
+            rerunAllowed: true,
+            requiresMutation: false,
+          }),
+          operatorAction: expect.stringMatching(/Replace the unsupported gate/i),
+        }),
+      }),
+    );
+  });
+
+  it('attaches repo validation mismatch guidance without repair recommendations', () => {
+    const result = validate(completeWorkflowText(), {
+      buildResult: failed(
+        'npx tsc --noEmit',
+        'Root tsconfig is not configured for standalone generated workflow validation.',
+      ),
+    });
+
+    const buildStep = result.proofLoopSteps.find((step) => step.phase === 'build_typecheck_gate');
+    expect(buildStep).toMatchObject({
+      passed: false,
+      recovery: {
+        taxonomyCategory: FailureTaxonomyCategory.ValidationStrategyRepoMismatch,
+        recommendation: {
+          decision: RecoveryDecision.ReplaceValidation,
+          rerunAllowed: true,
+          requiresMutation: false,
+        },
+      },
+    });
+    expect(buildStep!.recovery!.operatorAction).not.toMatch(/repair|delete|remove|reset/i);
   });
 
   it('keeps verdict not ready when the regression gate fails', () => {

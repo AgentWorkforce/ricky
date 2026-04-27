@@ -1,9 +1,27 @@
 export {
   BlockerClass,
+  FailureTaxonomyCategory,
+  RecoveryDecision,
+  RerunMode,
   diagnose,
   diagnoseBatch,
   type BlockerClass as BlockerClassType,
   type Diagnosis,
   type DiagnosticSignal,
+  type FailureTaxonomyCategory as FailureTaxonomyCategoryType,
+  type RecoveryDecision as RecoveryDecisionType,
+  type RecoveryRecommendation,
+  type RerunMode as RerunModeType,
   type UnblockerGuidance,
 } from './failure-diagnosis.js';
+export {
+  runRuntimePreflight,
+  type PreflightIssueCode,
+  type RelayStateObservation,
+  type RepoValidationObservation,
+  type RequiredConfigObservation,
+  type RuntimePreflightInput,
+  type RuntimePreflightIssue,
+  type RuntimePreflightResult,
+  type ValidationCommandObservation,
+} from './recovery-preflight.js';

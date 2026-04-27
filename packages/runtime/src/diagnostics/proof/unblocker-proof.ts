@@ -1,8 +1,8 @@
 /**
  * Unblocker Proof Surface
  *
- * Maps the diagnosis engine's blocker classes into three operational
- * domains — runtime, environment, orchestration — and exposes a
+ * Maps the diagnosis engine's blocker classes into operational
+ * domains — runtime, environment, orchestration, validation strategy — and exposes a
  * bounded proof API that downstream tests use to verify:
  *
  *   1. Every blocker class belongs to exactly one domain.
@@ -27,6 +27,7 @@ export const UnblockerDomain = {
   Runtime: 'runtime',
   Environment: 'environment',
   Orchestration: 'orchestration',
+  ValidationStrategy: 'validation_strategy',
 } as const;
 
 export type UnblockerDomain =
@@ -37,9 +38,12 @@ export type UnblockerDomain =
 export const domainMap: ReadonlyMap<string, UnblockerDomain> = new Map([
   [BlockerClass.RuntimeHandoffStall, UnblockerDomain.Runtime],
   [BlockerClass.OpaqueProgress, UnblockerDomain.Runtime],
-  [BlockerClass.RepoValidationMismatch, UnblockerDomain.Environment],
-  [BlockerClass.StaleRelayState, UnblockerDomain.Orchestration],
+  [BlockerClass.StaleRelayState, UnblockerDomain.Environment],
+  [BlockerClass.MissingConfig, UnblockerDomain.Environment],
+  [BlockerClass.AlreadyRunning, UnblockerDomain.Environment],
   [BlockerClass.ControlFlowBreakage, UnblockerDomain.Orchestration],
+  [BlockerClass.UnsupportedValidationCommand, UnblockerDomain.ValidationStrategy],
+  [BlockerClass.RepoValidationMismatch, UnblockerDomain.ValidationStrategy],
 ]);
 
 // ── Canonical signals (one per blocker class) ─────────────────────
@@ -66,14 +70,29 @@ export const canonicalCases: readonly CanonicalCase[] = [
     signal: { source: 'progress-monitor', message: 'no progress' },
   },
   {
-    blockerClass: BlockerClass.RepoValidationMismatch,
+    blockerClass: BlockerClass.StaleRelayState,
     domain: UnblockerDomain.Environment,
-    signal: { source: 'repo-validation', message: 'validation mismatch' },
+    signal: { source: 'relay', message: 'relay stale' },
   },
   {
-    blockerClass: BlockerClass.StaleRelayState,
-    domain: UnblockerDomain.Orchestration,
-    signal: { source: 'relay', message: 'relay stale' },
+    blockerClass: BlockerClass.MissingConfig,
+    domain: UnblockerDomain.Environment,
+    signal: { source: 'config', message: 'missing config' },
+  },
+  {
+    blockerClass: BlockerClass.UnsupportedValidationCommand,
+    domain: UnblockerDomain.ValidationStrategy,
+    signal: { source: 'validation-command', message: 'unsupported validation' },
+  },
+  {
+    blockerClass: BlockerClass.AlreadyRunning,
+    domain: UnblockerDomain.Environment,
+    signal: { source: 'active-run', message: 'already running' },
+  },
+  {
+    blockerClass: BlockerClass.RepoValidationMismatch,
+    domain: UnblockerDomain.ValidationStrategy,
+    signal: { source: 'repo-validation', message: 'validation mismatch' },
   },
   {
     blockerClass: BlockerClass.ControlFlowBreakage,

@@ -4,11 +4,16 @@ import type {
   FailureClass,
   FailureClassification,
 } from '@ricky/runtime/failure/types.js';
+import type {
+  RuntimePreflightIssue,
+  RuntimePreflightResult,
+} from '@ricky/runtime/diagnostics/index.js';
 import type { WorkflowRunEvidence } from '@ricky/shared/models/workflow-evidence.js';
 
 export interface DebuggerInput {
   evidence: WorkflowRunEvidence;
   classification?: FailureClassification;
+  environmentPreflight?: RuntimePreflightResult;
   repairPolicy?: Partial<RepairPolicy>;
   analyzedAt?: string;
 }
@@ -69,6 +74,8 @@ export type FixAction =
   | 'add_missing_artifact'
   | 'replace_brittle_grep'
   | 'fix_environment'
+  | 'replace_validation_command'
+  | 'wait_for_active_run'
   | 'change_pattern'
   | 'restructure_workflow'
   | 'escalate'
@@ -102,6 +109,7 @@ export interface FixRecommendation {
   steps: FixStep[];
   directRepairEligible: boolean;
   directRepairRefusalReason?: string;
+  preflightIssues?: RuntimePreflightIssue[];
   confidence: Confidence;
   scope: FixScope;
   summary: string;

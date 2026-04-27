@@ -7,6 +7,11 @@ import {
   Severity,
   type FailureClassification,
 } from '@ricky/runtime/failure/types.js';
+import {
+  FailureTaxonomyCategory,
+  RecoveryDecision,
+  runRuntimePreflight,
+} from '@ricky/runtime/diagnostics/index.js';
 import type {
   VerificationResult,
   WorkflowRunEvidence,
@@ -202,6 +207,124 @@ describe('debugWorkflowRun', () => {
     expect(result.recommendation.directRepairEligible).toBe(false);
     expect(result.recommendation.directRepairRefusalReason).toMatch(/environment changes are disabled/i);
     expect(result.repairMode).toBe('guided');
+  });
+
+  it('prioritizes bounded environment preflight recommendations before repair or rerun', () => {
+    const environmentPreflight = runRuntimePreflight({
+      cwd: '/repo',
+      requestedWorkflowFile: 'workflows/generated/recovery-workflow.ts',
+      relayState: [{ path: '.agent-relay', present: true, stale: true }],
+      requiredConfig: [{ path: '.ricky/config.json', present: false }],
+      activeRuns: [
+        {
+          runId: 'run-active',
+          workflowFile: 'workflows/generated/recovery-workflow.ts',
+          cwd: '/repo',
+          status: 'running',
+          startedAt: RECORDED_AT,
+          retry: { attempt: 1 },
+          invocation: {
+            command: 'agent-relay',
+            args: ['run', 'workflows/generated/recovery-workflow.ts'],
+            cwd: '/repo',
+          },
+        },
+      ],
+    });
+
+    const result = debugWorkflowRun({
+      classification: classification(FailureClass.VerificationFailure, {
+        summary: 'A deterministic gate failed after local execution.',
+      }),
+      evidence: run({
+        finalSignoffPath: 'workflows/generated/recovery-workflow.ts',
+        steps: [
+          step({
+            stepId: 'verify-recovery',
+            verifications: [
+              failingVerification({
+                command: 'npx vitest run packages/product/src/specialists/debugger/debugger.test.ts',
+              }),
+            ],
+          }),
+        ],
+      }),
+      environmentPreflight,
+    });
+
+    expect(result.recommendation.preflightIssues?.map((issue) => issue.code)).toEqual([
+      'stale_relay_state',
+      'missing_config',
+      'already_running',
+    ]);
+    expect(result.recommendation.steps.map((step) => step.action)).toEqual([
+      'fix_environment',
+      'fix_environment',
+      'wait_for_active_run',
+    ]);
+    expect(result.recommendation.directRepairEligible).toBe(false);
+    expect(result.recommendation.directRepairRefusalReason).toMatch(/preflight/i);
+    expect(result.recommendation.steps[0].verificationPlan).toMatchObject({
+      commands: [],
+      deterministic: false,
+    });
+    expect(result.recommendation.steps[0].verificationPlan.expectations.join('\n')).toContain(
+      FailureTaxonomyCategory.EnvironmentRelayStateContaminated,
+    );
+    expect(result.repairMode).toBe('guided');
+  });
+
+  it('turns validation preflight mismatches into replace-command guidance without direct mutation', () => {
+    const environmentPreflight = runRuntimePreflight({
+      cwd: '/repo',
+      validationCommands: [
+        {
+          command: 'npm run prove:all',
+          supported: false,
+          reason: 'missing script: prove:all',
+        },
+      ],
+      repoValidation: {
+        command: 'npx tsc --noEmit',
+        meaningful: false,
+        reason: 'repo requires package-scoped typecheck',
+      },
+    });
+
+    const result = debugWorkflowRun({
+      classification: classification(FailureClass.VerificationFailure, {
+        summary: 'Repo-wide proof gate failed.',
+      }),
+      evidence: run({}),
+      environmentPreflight,
+    });
+
+    expect(result.recommendation.steps.map((step) => step.action)).toEqual([
+      'replace_validation_command',
+      'replace_validation_command',
+    ]);
+    expect(result.recommendation.preflightIssues).toEqual([
+      expect.objectContaining({
+        taxonomyCategory: FailureTaxonomyCategory.ValidationStrategyUnsupportedCommand,
+        recommendation: expect.objectContaining({
+          decision: RecoveryDecision.ReplaceValidation,
+          rerunAllowed: true,
+          requiresMutation: false,
+        }),
+        destructiveCleanupAllowed: false,
+      }),
+      expect.objectContaining({
+        taxonomyCategory: FailureTaxonomyCategory.ValidationStrategyRepoMismatch,
+        recommendation: expect.objectContaining({
+          decision: RecoveryDecision.ReplaceValidation,
+          rerunAllowed: true,
+          requiresMutation: false,
+        }),
+        destructiveCleanupAllowed: false,
+      }),
+    ]);
+    expect(result.recommendation.directRepairEligible).toBe(false);
+    expect(result.recommendation.steps.map((step) => step.description).join('\n')).not.toMatch(/delete|remove|reset/i);
   });
 
   it('returns manual review when evidence is weak or conflicting', () => {

@@ -6,7 +6,7 @@ import type { DebuggerInput, DebuggerResult, RepairMode } from './types.js';
 export function debugWorkflowRun(input: DebuggerInput): DebuggerResult {
   const classification = input.classification ?? classifyFailure(input.evidence);
   const diagnosis = diagnose(classification, input.evidence);
-  const recommendation = recommendFix(diagnosis, input.evidence, input.repairPolicy);
+  const recommendation = recommendFix(diagnosis, input.evidence, input.repairPolicy, input.environmentPreflight);
   const repairMode = deriveRepairMode(recommendation.directRepairEligible, recommendation.steps[0]?.action);
 
   return {

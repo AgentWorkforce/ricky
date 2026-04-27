@@ -1,5 +1,9 @@
 import { Confidence } from '@ricky/runtime/failure/types.js';
 import type {
+  RuntimePreflightIssue,
+  RuntimePreflightResult,
+} from '@ricky/runtime/diagnostics/index.js';
+import type {
   DeterministicGateResult,
   VerificationResult,
   WorkflowRunEvidence,
@@ -20,8 +24,14 @@ export function recommendFix(
   diagnosis: Diagnosis,
   evidence: WorkflowRunEvidence,
   policy?: Partial<RepairPolicy>,
+  environmentPreflight?: RuntimePreflightResult,
 ): FixRecommendation {
   const resolvedPolicy = resolvePolicy(policy);
+
+  if (environmentPreflight && environmentPreflight.issues.length > 0) {
+    return preflightRecommendation(environmentPreflight, resolvedPolicy);
+  }
+
   const primary = diagnosis.primaryCause;
   const steps = buildFixSteps(primary, evidence, resolvedPolicy);
   const scope = mergeScope(steps, primary, resolvedPolicy);
@@ -49,6 +59,10 @@ export function isDirectRepairEligible(
 ): { eligible: boolean; reason?: string } {
   if (!policy.allowDirectRepair) {
     return { eligible: false, reason: 'Direct repair is disabled by policy.' };
+  }
+
+  if (recommendation.preflightIssues?.length) {
+    return { eligible: false, reason: 'Preflight recommendations must be resolved before direct repair.' };
   }
 
   if (diagnosis && policy.directRepairBlocklist.includes(diagnosis.runtimeClassification.failureClass)) {
@@ -222,6 +236,69 @@ function buildFixSteps(
           manualVerification('Add failure evidence, rerun classification, and verify a specific cause.'),
         ),
       ];
+  }
+}
+
+function preflightRecommendation(
+  preflight: RuntimePreflightResult,
+  policy: RepairPolicy,
+): FixRecommendation {
+  const steps = preflight.issues.map((issue) => preflightStep(issue, policy));
+  const blockingCount = preflight.issues.filter((issue) => issue.blocking).length;
+  return {
+    steps,
+    directRepairEligible: false,
+    directRepairRefusalReason: blockingCount > 0
+      ? 'Environment preflight must be resolved before repair or rerun.'
+      : 'Validation preflight recommendations must be reviewed before rerun.',
+    preflightIssues: preflight.issues,
+    confidence: Confidence.High,
+    scope: {
+      targetStepIds: [],
+      filesLikelyTouched: [],
+      maxFilesToTouch: policy.maxFilesTouch,
+      bounded: true,
+      rationale: 'Recovery scope is bounded to operator preflight recommendations; Ricky does not mutate cleanup or validation state here.',
+    },
+    summary: `Preflight found ${preflight.issues.length} recovery recommendation(s); resolve them before direct repair or rerun.`,
+  };
+}
+
+function preflightStep(issue: RuntimePreflightIssue, policy: RepairPolicy): FixStep {
+  return {
+    action: actionForPreflightIssue(issue),
+    description: issue.operatorAction,
+    targetStepId: null,
+    filesToTouch: [],
+    scope: {
+      targetStepIds: [],
+      filesLikelyTouched: [],
+      maxFilesToTouch: policy.maxFilesTouch,
+      bounded: true,
+      rationale: 'Preflight guidance is bounded and recommendation-only.',
+    },
+    confidence: Confidence.High,
+    verificationPlan: {
+      commands: [],
+      expectations: [
+        issue.rationale,
+        `Taxonomy: ${issue.taxonomyCategory}; restart decision: ${issue.recommendation.decision}.`,
+      ],
+      deterministic: false,
+    },
+  };
+}
+
+function actionForPreflightIssue(issue: RuntimePreflightIssue): FixAction {
+  switch (issue.code) {
+    case 'already_running':
+      return 'wait_for_active_run';
+    case 'unsupported_validation_command':
+    case 'repo_validation_mismatch':
+      return 'replace_validation_command';
+    case 'stale_relay_state':
+    case 'missing_config':
+      return 'fix_environment';
   }
 }
 

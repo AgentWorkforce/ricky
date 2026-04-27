@@ -1,3 +1,8 @@
+import type {
+  FailureTaxonomyCategory,
+  RecoveryRecommendation,
+} from '@ricky/runtime/diagnostics/failure-diagnosis.js';
+
 export type FindingSeverity = 'error' | 'warning' | 'info';
 
 export interface FindingLocation {
@@ -62,7 +67,15 @@ export interface ProofLoopStep {
   blocking: boolean;
   message: string;
   commandResult?: CommandResult;
+  recovery?: ValidationRecovery;
   fixHint?: string;
+}
+
+export interface ValidationRecovery {
+  taxonomyCategory: FailureTaxonomyCategory;
+  recommendation: RecoveryRecommendation;
+  operatorAction: string;
+  rationale: string;
 }
 
 export interface ProofLoopConfig {

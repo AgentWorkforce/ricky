@@ -1,4 +1,5 @@
-import type { CommandResult, ProofLoopConfig, ProofLoopStep } from './types.js';
+import { diagnose } from '@ricky/runtime/diagnostics/failure-diagnosis.js';
+import type { CommandResult, ProofLoopConfig, ProofLoopStep, ValidationRecovery } from './types.js';
 
 export interface ProofLoopInput {
   dryRunResult?: CommandResult;
@@ -40,6 +41,7 @@ function evaluateInitialSoftRun(result: CommandResult | undefined, required: boo
     blocking: false,
     severity: result.exitCode === 0 ? 'info' : 'warning',
     commandResult: result,
+    recovery: result.exitCode === 0 ? undefined : deriveValidationRecovery(result),
     message: result.exitCode === 0
       ? 'Initial soft run completed without reported failures.'
       : 'Initial soft run found issues; this is allowed only if the fix loop and final hard gate pass.',
@@ -129,6 +131,7 @@ function evaluateFinalGate(finalResult: CommandResult | undefined, initialResult
     blocking: result.exitCode !== 0,
     severity: result.exitCode === 0 ? 'info' : 'error',
     commandResult: result,
+    recovery: result.exitCode === 0 ? undefined : deriveValidationRecovery(result),
     message: result.exitCode === 0
       ? 'Final hard gate passed.'
       : 'Final hard gate failed.',
@@ -156,6 +159,7 @@ function evaluateBuildGate(result: CommandResult | undefined, required: boolean)
     blocking: result.exitCode !== 0,
     severity: result.exitCode === 0 ? 'info' : 'error',
     commandResult: result,
+    recovery: result.exitCode === 0 ? undefined : deriveValidationRecovery(result),
     message: result.exitCode === 0
       ? 'Build/typecheck gate passed.'
       : 'Build/typecheck gate failed.',
@@ -190,6 +194,7 @@ function evaluateRegressionGate(
     blocking: Boolean(failed),
     severity: failed ? 'error' : 'info',
     commandResult: failed ?? results[0],
+    recovery: failed ? deriveValidationRecovery(failed) : undefined,
     message: failed
       ? `Regression gate failed: ${failed.command}.`
       : 'Regression gate passed.',
@@ -199,4 +204,41 @@ function evaluateRegressionGate(
 
 function step(input: ProofLoopStep): ProofLoopStep {
   return input;
+}
+
+function deriveValidationRecovery(result: CommandResult): ValidationRecovery | undefined {
+  const text = [result.command, result.stdout, result.stderr].filter(Boolean).join('\n');
+  const signal = unsupportedValidationCommand(text)
+    ? {
+        source: 'validation-command',
+        message: text,
+        meta: { unsupportedValidationCommand: true },
+      }
+    : repoValidationMismatch(text)
+      ? {
+          source: 'repo-validation',
+          message: text,
+          meta: { repoMismatch: true },
+        }
+      : undefined;
+
+  if (!signal) return undefined;
+
+  const diagnosis = diagnose(signal);
+  if (!diagnosis) return undefined;
+
+  return {
+    taxonomyCategory: diagnosis.taxonomyCategory,
+    recommendation: diagnosis.unblocker.recovery,
+    operatorAction: diagnosis.unblocker.action,
+    rationale: diagnosis.unblocker.rationale,
+  };
+}
+
+function unsupportedValidationCommand(text: string): boolean {
+  return /unsupported.*validation|validation.*unsupported|unknown option|missing script|command not found|npm ERR! missing script/i.test(text);
+}
+
+function repoValidationMismatch(text: string): boolean {
+  return /repo.*validation.*mismatch|validation.*repo.*mismatch|not meaningful|not configured|no inputs were found|cannot find.*tsconfig|tsconfig.*not found|root tsconfig/i.test(text);
 }

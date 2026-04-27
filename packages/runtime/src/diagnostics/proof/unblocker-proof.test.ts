@@ -25,11 +25,12 @@ describe('unblocker-proof: domain coverage', () => {
     }
   });
 
-  it('all three domains are represented', () => {
+  it('all operational domains are represented', () => {
     const domains = new Set(domainMap.values());
     expect(domains).toContain(UnblockerDomain.Runtime);
     expect(domains).toContain(UnblockerDomain.Environment);
     expect(domains).toContain(UnblockerDomain.Orchestration);
+    expect(domains).toContain(UnblockerDomain.ValidationStrategy);
   });
 
   it('canonical cases cover every blocker class exactly once', () => {

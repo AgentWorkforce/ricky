@@ -13,6 +13,7 @@ export type {
   SignoffVerdict,
   StructuralCheckName,
   StructuralFinding,
+  ValidationRecovery,
   ValidatorInput,
   ValidatorResult,
 } from './types.js';

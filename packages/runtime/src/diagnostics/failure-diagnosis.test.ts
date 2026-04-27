@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   BlockerClass,
+  FailureTaxonomyCategory,
+  RecoveryDecision,
   diagnose,
   diagnoseBatch,
   type Diagnosis,
@@ -16,10 +18,12 @@ function expectDiagnosis(
   const d = diagnose(signal);
   expect(d).not.toBeNull();
   expect(d!.blockerClass).toBe(expectedClass);
+  expect(d!.taxonomyCategory).toBeTruthy();
   expect(d!.label).toBeTruthy();
   expect(d!.unblocker).toBeDefined();
   expect(d!.unblocker.action).toBeTruthy();
   expect(d!.unblocker.rationale).toBeTruthy();
+  expect(d!.unblocker.recovery).toBeDefined();
   expect(typeof d!.unblocker.automatable).toBe('boolean');
   return d!;
 }
@@ -76,6 +80,27 @@ describe('failure-diagnosis: blocker differentiation', () => {
     );
   });
 
+  it('classifies missing config by source', () => {
+    expectDiagnosis(
+      { source: 'config', message: 'Ricky has not been configured yet' },
+      BlockerClass.MissingConfig,
+    );
+  });
+
+  it('classifies unsupported validation commands by message', () => {
+    expectDiagnosis(
+      { source: 'runtime', message: 'unsupported validation command: npm run prove' },
+      BlockerClass.UnsupportedValidationCommand,
+    );
+  });
+
+  it('classifies already-running state by source', () => {
+    expectDiagnosis(
+      { source: 'active-run', message: 'duplicate run is already active' },
+      BlockerClass.AlreadyRunning,
+    );
+  });
+
   it('classifies control-flow breakage by message', () => {
     expectDiagnosis(
       { source: 'runtime', message: 'unexpected branch taken in control flow' },
@@ -127,6 +152,18 @@ describe('failure-diagnosis: unblocker guidance shape', () => {
       signal: { source: 'relay', message: 'stale' },
     },
     {
+      class: BlockerClass.MissingConfig,
+      signal: { source: 'config', message: 'missing config' },
+    },
+    {
+      class: BlockerClass.UnsupportedValidationCommand,
+      signal: { source: 'validation-command', message: 'unsupported validation' },
+    },
+    {
+      class: BlockerClass.AlreadyRunning,
+      signal: { source: 'active-run', message: 'already running' },
+    },
+    {
       class: BlockerClass.ControlFlowBreakage,
       signal: { source: 'control-flow', message: 'break' },
     },
@@ -165,6 +202,36 @@ describe('failure-diagnosis: unblocker guidance shape', () => {
   it('handoff stall is automatable', () => {
     const d = diagnose({ source: 'handoff', message: 'stall' });
     expect(d!.unblocker.automatable).toBe(true);
+  });
+
+  it('stale relay and repo mismatch recommend before mutating', () => {
+    const staleRelay = diagnose({ source: 'relay', message: 'stale relay state' });
+    const repoMismatch = diagnose({ source: 'repo-validation', message: 'validation mismatch' });
+
+    expect(staleRelay).toMatchObject({
+      taxonomyCategory: FailureTaxonomyCategory.EnvironmentRelayStateContaminated,
+      unblocker: {
+        automatable: false,
+        recovery: {
+          decision: RecoveryDecision.BlockRerun,
+          rerunAllowed: false,
+          requiresMutation: true,
+        },
+      },
+    });
+    expect(repoMismatch).toMatchObject({
+      taxonomyCategory: FailureTaxonomyCategory.ValidationStrategyRepoMismatch,
+      unblocker: {
+        automatable: false,
+        recovery: {
+          decision: RecoveryDecision.ReplaceValidation,
+          rerunAllowed: true,
+          requiresMutation: false,
+        },
+      },
+    });
+    expect(staleRelay!.unblocker.action).not.toMatch(/delete|remove|repair|reset/i);
+    expect(repoMismatch!.unblocker.action).not.toMatch(/delete|remove|repair|reset/i);
   });
 });
 
