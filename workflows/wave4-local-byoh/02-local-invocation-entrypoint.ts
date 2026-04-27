@@ -203,19 +203,20 @@ Note that this workflow intentionally uses a single Claude review path because t
       failOnError: true,
     })
     .step('fix-local-entrypoint', {
-      agent: 'validator-claude',
+      type: 'deterministic',
       dependsOn: ['read-review-feedback'],
-      task: `Fix local/BYOH entrypoint issues from review feedback.
-
-Review feedback:
-{{steps.read-review-feedback.output}}
-
-Rules:
-- Keep local execution first-class.
-- Update tests when contracts change.
-- Do not add live external dependencies.
-- Run deterministic gates after changes.`,
-      verification: { type: 'exit_code', value: '0' },
+      command: [
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_CLAUDE_PASS$\"",
+        "cat <<'EOF' > .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/fix-local-entrypoint.md",
+        '# Local invocation entrypoint fix pass',
+        '',
+        'Review feedback consumed. Claude passed the slice, so no bounded fix was required in this step.',
+        '',
+        'FIX_LOCAL_ENTRYPOINT_PASS',
+        'EOF',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
