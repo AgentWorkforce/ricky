@@ -64,8 +64,9 @@ describe('runInteractiveCli', () => {
     expect(result.ok).toBe(true);
     expect(result.awaitingInput).toBe(true);
     expect(result.localResult).toBeUndefined();
-    expect(result.guidance.join('\n')).toMatch(/ready for a real spec or workflow handoff/i);
-    expect(result.guidance.join('\n')).toMatch(/command layer is still limited/i);
+    expect(result.guidance.join('\n')).toMatch(/no spec was provided for local execution/i);
+    expect(result.guidance.join('\n')).toMatch(/--spec-file/i);
+    expect(result.guidance.join('\n')).toMatch(/--stdin/i);
   });
 
   it('surfaces runtime diagnosis guidance when local execution fails', async () => {

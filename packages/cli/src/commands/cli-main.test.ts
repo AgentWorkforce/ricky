@@ -38,6 +38,29 @@ describe('parseArgs', () => {
   it('ignores --mode with no value', () => {
     expect(parseArgs(['--mode'])).toEqual({ command: 'run' });
   });
+
+  it('parses local spec handoff flags', () => {
+    expect(parseArgs(['--mode', 'local', '--spec', 'build a workflow'])).toEqual({
+      command: 'run',
+      mode: 'local',
+      spec: 'build a workflow',
+    });
+    expect(parseArgs(['--spec-file', './spec.md'])).toEqual({
+      command: 'run',
+      specFile: './spec.md',
+    });
+    expect(parseArgs(['--stdin'])).toEqual({
+      command: 'run',
+      stdin: true,
+    });
+  });
+
+  it('reports missing values for spec flags', () => {
+    expect(parseArgs(['--spec'])).toEqual({
+      command: 'run',
+      errors: ['--spec requires a value.'],
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -148,5 +171,33 @@ describe('cliMain', () => {
 
     expect(result.output).toEqual([]);
     expect(result.exitCode).toBe(0);
+  });
+
+  it('passes inline local spec handoff to the interactive runner', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['--mode', 'local', '--spec', 'build a workflow'],
+      runInteractive: runner,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'local',
+        handoff: expect.objectContaining({
+          source: 'cli',
+          spec: 'build a workflow',
+          mode: 'local',
+        }),
+      }),
+    );
+  });
+
+  it('returns recovery output when CLI spec flags are invalid', async () => {
+    const result = await cliMain({ argv: ['--spec'] });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output.join('\n')).toContain('CLI input blocker:');
+    expect(result.output.join('\n')).toContain('--spec requires a value.');
   });
 });

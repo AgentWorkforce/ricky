@@ -148,15 +148,21 @@ export function renderCloudGuidance(): string {
 export function renderHandoffGuidance(): string {
   return [
     'Spec handoff:',
-    '  Tip: You can hand specs from Claude directly to Ricky.',
-    '  In a Claude session, ask Claude to write a workflow spec.',
-    '  Ricky already has internal local/BYOH and Cloud handoff plumbing,',
-    '  but the user-facing generate/debug command layer is not exposed yet.',
+    '  Local/BYOH handoff is available through the current CLI.',
+    '  You can still draft the spec in Claude or another MCP client, then hand the result to Ricky.',
+    '  The user-facing generate/debug command layer is not exposed yet.',
+    '  `ricky.generate` is not a CLI command in this slice.',
     '',
-    '  For now, use the interactive CLI to choose mode, then rerun once',
-    '  you have a concrete workflow spec or artifact ready to wire into the next surface.',
+    '  Inline spec:',
+    '  $ npm start -- --mode local --spec "generate a workflow for package checks"',
     '',
-    '  Using MCP later? Invoke ricky.generate with the same spec, mode, and source fields.',
+    '  File spec:',
+    '  $ npm start -- --mode local --spec-file ./path/to/spec.md',
+    '',
+    '  Stdin spec:',
+    '  $ printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
+    '',
+    '  MCP integrations should reuse the same spec, mode, and source fields when that surface calls local/BYOH.',
   ].join('\n');
 }
 
@@ -213,8 +219,8 @@ export function renderWorkflowGenerationFailureRecovery(): string {
   return [
     '  Workflow generation failed.',
     '',
-    "  Ricky's user-facing generate/debug commands are not exposed yet.",
-    '  For now, inspect the local proof/test surface and retry through the interactive CLI path.',
+    '  Check the Cloud request context and provider connection, then retry Cloud mode.',
+    '  To continue without Cloud, use local mode with --spec, --spec-file, or --stdin.',
   ].join('\n');
 }
 
@@ -227,7 +233,7 @@ export function renderSuggestedNextAction(mode: RickyMode): string {
     return 'Next: choose your mode again with `npm start`, or connect Cloud with `npx agent-relay cloud connect google`.';
   }
 
-  return 'Next: rerun Ricky when you have a concrete spec or workflow artifact ready to hand off.';
+  return 'Next: run a local handoff with `npm start -- --mode local --spec "<workflow spec>"`, `--spec-file`, or `--stdin`.';
 }
 
 export function renderOnboarding(context: OnboardingContext = {}): string {

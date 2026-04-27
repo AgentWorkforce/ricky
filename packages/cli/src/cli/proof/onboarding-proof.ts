@@ -282,7 +282,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
               'Claude',
               'CLI',
               'MCP',
-              'user-facing generate/debug command layer is not exposed yet',
+              'Local/BYOH handoff is available through the current CLI',
               'ricky.generate',
             ]),
             excludesAll(handoff, ['npx ricky generate --spec', 'npx ricky generate --spec-file', 'spec-stdin']),

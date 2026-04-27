@@ -41,6 +41,7 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
     expect(output).toContain('Give Ricky a spec, a workflow artifact, or a Claude/MCP handoff and continue locally.');
+    expect(output).toContain('From this CLI, use inline, file, or stdin spec handoff.');
     expect(output).toContain('Connect providers such as Google, then continue with hosted workflow generation and execution.');
   });
 
@@ -58,7 +59,7 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('Claude');
     expect(output).toContain('MCP');
-    expect(output).toContain('user-facing generate/debug command layer is not exposed yet');
+    expect(output).toContain('Local/BYOH handoff is available through the current CLI');
     expect(output).toContain('ricky.generate');
     expect(output).not.toContain('npx ricky generate --spec-file');
   });
@@ -87,7 +88,7 @@ describe('Ricky CLI onboarding', () => {
 
   it('keeps local next action honest and Cloud next action provider-aware', () => {
     expect(renderSuggestedNextAction('local')).toBe(
-      'Next: rerun Ricky when you have a concrete spec or workflow artifact ready to hand off.',
+      'Next: run a local handoff with `npm start -- --mode local --spec "<workflow spec>"`, `--spec-file`, or `--stdin`.',
     );
     expect(renderSuggestedNextAction('cloud')).toContain('connect Google with `npx agent-relay cloud connect google`');
   });
