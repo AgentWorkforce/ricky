@@ -932,6 +932,23 @@ describe('runLocal', () => {
     expect(result.nextActions.some((a) => a.includes('environment blocker'))).toBe(true);
   });
 
+  it('deduplicates artifacts by path without dropping content from earlier entries', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    const result = await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { localExecutor },
+    );
+
+    // The executor adds the generated artifact (with content) during generation,
+    // then adds a run-target artifact (without content) after coordination.
+    // dedupeArtifacts should preserve the content from the first entry.
+    expect(result.ok).toBe(true);
+    expect(result.artifacts.length).toBeGreaterThanOrEqual(1);
+    const artifact = result.artifacts[0];
+    expect(artifact.content).toBeDefined();
+    expect(artifact.type).toBe('text/typescript');
+  });
+
   it('surfaces local runtime launch environment warnings without rerouting through Cloud', async () => {
     const runner = throwingCommandRunner('spawn agent-relay ENOENT');
     const result = await runLocal(

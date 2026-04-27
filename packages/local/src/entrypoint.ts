@@ -302,6 +302,15 @@ export function getDefaultExecutor(): LocalExecutor {
   return _defaultExecutor;
 }
 
+/**
+ * Reset the lazily-initialized default executor. Intended for test isolation
+ * where a previous test may have constructed the singleton with stale options.
+ * Production code should not need to call this.
+ */
+export function resetDefaultExecutor(): void {
+  _defaultExecutor = null;
+}
+
 // ---------------------------------------------------------------------------
 // Entrypoint options
 // ---------------------------------------------------------------------------
@@ -463,10 +472,27 @@ function mapCoordinatorLogs(result: CoordinatorResult): string[] {
   ];
 }
 
+/**
+ * Deduplicate artifacts by path. When two artifacts share a path, prefer the
+ * entry that carries content and/or a more specific type rather than blindly
+ * spreading (which would let a later content-less reference overwrite an
+ * earlier content-carrying entry).
+ */
 function dedupeArtifacts(artifacts: LocalResponseArtifact[]): LocalResponseArtifact[] {
   const byPath = new Map<string, LocalResponseArtifact>();
   for (const artifact of artifacts) {
-    byPath.set(artifact.path, { ...byPath.get(artifact.path), ...artifact });
+    const existing = byPath.get(artifact.path);
+    if (!existing) {
+      byPath.set(artifact.path, { ...artifact });
+      continue;
+    }
+    // Merge: prefer defined values over undefined, and prefer content-carrying
+    // entries to avoid overwriting content with undefined.
+    byPath.set(artifact.path, {
+      path: artifact.path,
+      type: artifact.type ?? existing.type,
+      content: artifact.content ?? existing.content,
+    });
   }
   return [...byPath.values()];
 }

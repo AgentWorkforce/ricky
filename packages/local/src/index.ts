@@ -18,7 +18,7 @@ export type {
   WorkflowArtifactHandoff,
 } from './request-normalizer';
 
-export { createLocalExecutor, createProcessCommandRunner, DEFAULT_LOCAL_ROUTE, getDefaultExecutor, runLocal } from './entrypoint';
+export { createLocalExecutor, createProcessCommandRunner, DEFAULT_LOCAL_ROUTE, getDefaultExecutor, resetDefaultExecutor, runLocal } from './entrypoint';
 export type {
   ArtifactWriter,
   CoordinatorLauncher,
