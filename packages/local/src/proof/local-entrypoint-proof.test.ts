@@ -20,6 +20,7 @@ describe('Ricky local/BYOH entrypoint proof', () => {
     const names = getLocalProofCases().map((proofCase) => proofCase.name);
 
     expect(names).toEqual([
+      'cli-spec-loop-proof',
       'cli-spec-handoff',
       'mcp-spec-handoff',
       'claude-structured-handoff',
@@ -31,6 +32,7 @@ describe('Ricky local/BYOH entrypoint proof', () => {
       'local-runtime-coordination',
       'stubbed-runtime-seam-honesty',
       'error-path-normalization-failure',
+      'cli-missing-spec-material',
       'cloud-mode-rejection',
     ]);
   });
@@ -47,6 +49,24 @@ describe('Ricky local/BYOH entrypoint proof', () => {
   // -------------------------------------------------------------------------
   // Spec handoff proof — one case per intake surface
   // -------------------------------------------------------------------------
+
+  it('proves the local CLI spec loop from normalized request to generated/validated response', async () => {
+    const result = await evaluateLocalProofCase('cli-spec-loop-proof');
+    const evidence = result.evidence.join('\n');
+
+    expect(result.passed).toBe(true);
+    expect(evidence).toContain('normalized request: source=cli mode=local requestId=req-local-cli-proof');
+    expect(evidence).toContain('generated artifact metadata: path=workflows/generated/');
+    expect(evidence).toContain('workflowId=ricky-');
+    expect(evidence).toContain('channel=wf-ricky-');
+    expect(evidence).toContain('validator result: valid=true errors=0');
+    expect(evidence).toContain('deterministicGates=true reviewStage=true');
+    expect(evidence).toContain('user response: ok=true');
+    expect(evidence).toContain('user response artifact: path=workflows/generated/');
+    expect(evidence).toContain('type=text/typescript contentIncludesWorkflow=true');
+    expect(evidence).toContain('Run the generated workflow locally');
+    expect(evidence).toContain('no Cloud credentials required: true');
+  });
 
   it.each([
     ['cli-spec-handoff', ['source: cli', 'spec: build a pipeline', 'mode: local', 'ok: true']],
@@ -116,6 +136,18 @@ describe('Ricky local/BYOH entrypoint proof', () => {
     expect(evidence).toContain('HONEST GAP');
     expect(evidence).toContain('injectable executor seam: true');
     expect(evidence).toContain('artifact writes via adapter: 1');
+  });
+
+  it('proves missing CLI spec material fails before local execution', async () => {
+    const result = await evaluateLocalProofCase('cli-missing-spec-material');
+    const evidence = result.evidence.join('\n');
+
+    expect(result.passed).toBe(true);
+    expect(evidence).toContain('ok: false');
+    expect(evidence).toContain('normalization failed');
+    expect(evidence).toContain("source 'cli'");
+    expect(evidence).toContain('Check the spec content or artifact path');
+    expect(evidence).toContain('executor reached: false');
   });
 
   it('proves normalization failure returns actionable error response', async () => {

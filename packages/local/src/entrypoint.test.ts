@@ -850,6 +850,20 @@ describe('runLocal', () => {
     expect(executor.calls).toHaveLength(0);
   });
 
+  it('returns actionable failure when CLI handoff has no spec material', async () => {
+    const executor = mockExecutor();
+    const result = await runLocal(
+      { source: 'cli' } as unknown as CliHandoff,
+      { executor },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(executor.calls).toHaveLength(0);
+    expect(result.logs[0]).toContain('normalization failed');
+    expect(result.warnings).toEqual(["Failed to normalize handoff from source 'cli'."]);
+    expect(result.nextActions).toEqual(['Check the spec content or artifact path and retry.']);
+  });
+
   it('surfaces warning when cloud mode is used on the local entrypoint', async () => {
     const executor = mockExecutor();
     const result = await runLocal(
@@ -1099,6 +1113,60 @@ describe('runLocal', () => {
     );
     expect(result.nextActions[0]).toMatch(/^Run the generated workflow locally: npx --no-install agent-relay run workflows\/generated\/.+\.ts$/);
     expect(result.nextActions).toContain('Inspect the generated workflow artifact and choose whether to run it locally.');
+  });
+
+  it('turns a structured local CLI spec into generated artifact metadata and user-facing response', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        requestId: 'req-local-cli-loop',
+        spec: {
+          description:
+            'generate a local workflow for packages/local/src/proof/local-entrypoint-proof.ts with deterministic validation evidence',
+          targetFiles: [
+            'packages/local/src/proof/local-entrypoint-proof.ts',
+            'packages/local/src/proof/local-entrypoint-proof.test.ts',
+          ],
+          acceptanceGates: ['npx vitest run packages/local/src/proof/local-entrypoint-proof.test.ts'],
+        },
+        cliMetadata: { argv: ['ricky', 'run', '--mode', 'local', '--spec'] },
+      },
+      {
+        localExecutor: {
+          ...localExecutor,
+          returnGeneratedArtifactOnly: true,
+        },
+      },
+    );
+
+    const artifact = result.artifacts[0];
+    const written = localExecutor.writes[0];
+
+    expect(result.ok).toBe(true);
+    expect(localExecutor.runner.invocations).toHaveLength(0);
+    expect(localExecutor.writes).toHaveLength(1);
+    expect(written.path).toMatch(/^workflows\/generated\/.+\.ts$/);
+    expect(written.content).toContain('workflow(');
+    expect(written.content).toContain('.channel("wf-ricky-');
+    expect(written.content).toContain('initial-soft-validation');
+    expect(written.content).toContain('final-hard-validation');
+    expect(artifact).toEqual({
+      path: written.path,
+      type: 'text/typescript',
+      content: written.content,
+    });
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: generate',
+        '[local] workflow generation: passed',
+        '[local] runtime launch skipped: returning generated artifact only',
+      ]),
+    );
+    expect(result.nextActions[0]).toBe(`Run the generated workflow locally: npx --no-install agent-relay run ${written.path}`);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
   });
 
   it('keeps CLI, MCP, and Claude generation handoffs on the explicit local/BYOH path', async () => {

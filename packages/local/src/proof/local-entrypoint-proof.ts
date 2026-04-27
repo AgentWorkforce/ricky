@@ -22,6 +22,8 @@ import type {
   WorkflowArtifactHandoff,
 } from '../index';
 import { normalizeRequest, runLocal } from '../index';
+import { generate } from '@ricky/product/generation/index';
+import { intake } from '@ricky/product/spec-intake/index';
 import type { CommandInvocation, CommandRunner, CommandRunnerOptions } from '@ricky/runtime/types';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +31,7 @@ import type { CommandInvocation, CommandRunner, CommandRunnerOptions } from '@ri
 // ---------------------------------------------------------------------------
 
 export type ProofCaseName =
+  | 'cli-spec-loop-proof'
   | 'cli-spec-handoff'
   | 'mcp-spec-handoff'
   | 'claude-structured-handoff'
@@ -39,6 +42,7 @@ export type ProofCaseName =
   | 'next-action-response-behavior'
   | 'local-runtime-coordination'
   | 'stubbed-runtime-seam-honesty'
+  | 'cli-missing-spec-material'
   | 'error-path-normalization-failure'
   | 'cloud-mode-rejection';
 
@@ -60,6 +64,11 @@ export interface LocalProofSummary {
   passed: boolean;
   failures: string[];
   gaps: string[];
+}
+
+interface ProofAssertion {
+  label: string;
+  passed: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,12 +177,148 @@ function containsAll(output: string, expected: string[]): boolean {
   return expected.every((text) => output.includes(text));
 }
 
+function assertionFailures(assertions: ProofAssertion[]): string[] {
+  return assertions.filter((assertion) => !assertion.passed).map((assertion) => assertion.label);
+}
+
+function cliSpecLoopHandoff(): CliHandoff {
+  return {
+    source: 'cli',
+    requestId: 'req-local-cli-proof',
+    cliMetadata: { argv: ['ricky', 'run', '--mode', 'local', '--spec'] },
+    spec: {
+      description:
+        'generate a local workflow for packages/local/src/proof/local-entrypoint-proof.ts with deterministic validation evidence',
+      targetFiles: [
+        'packages/local/src/proof/local-entrypoint-proof.ts',
+        'packages/local/src/proof/local-entrypoint-proof.test.ts',
+        'packages/local/src/entrypoint.test.ts',
+        'packages/cli/src/entrypoint/interactive-cli.test.ts',
+      ],
+      acceptanceGates: [
+        'npx vitest run packages/local/src/proof/local-entrypoint-proof.test.ts packages/local/src/entrypoint.test.ts packages/cli/src/entrypoint/interactive-cli.test.ts',
+      ],
+      evidenceRequirements: [
+        'normalized request',
+        'generated artifact metadata',
+        'validator result',
+        'user-facing response',
+      ],
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Proof cases
 // ---------------------------------------------------------------------------
 
 export function getLocalProofCases(): LocalProofCase[] {
   return [
+    {
+      name: 'cli-spec-loop-proof',
+      description:
+        'A local CLI spec becomes a normalized request, generated artifact metadata, validation result, and user response.',
+      async evaluate() {
+        const handoff = cliSpecLoopHandoff();
+        const normalized = await normalizeRequest(handoff);
+
+        const intakeResult = intake({
+          kind: 'structured_json',
+          surface: 'cli',
+          receivedAt: '2026-04-27T00:00:00.000Z',
+          requestId: normalized.requestId,
+          data: normalized.structuredSpec ?? { description: normalized.spec },
+          metadata: {
+            ...normalized.metadata,
+            mode: normalized.mode,
+          },
+        });
+
+        const generationResult = intakeResult.routing
+          ? generate({
+              spec: {
+                ...intakeResult.routing.normalizedSpec,
+                executionPreference: 'local',
+              },
+              dryRunEnabled: true,
+            })
+          : null;
+
+        const localExecutor = memoryLocalExecutorOptions();
+        localExecutor.returnGeneratedArtifactOnly = true;
+        const response = await runLocal(handoff, { localExecutor });
+
+        const artifact = generationResult?.artifact;
+        const validator = generationResult?.validation;
+        const responseArtifact = response.artifacts[0];
+        const logsText = response.logs.join('\n');
+        const nextActionsText = response.nextActions.join(' | ');
+
+        const assertions: ProofAssertion[] = [
+          {
+            label: 'normalized request keeps CLI source, local mode, request id, and structured spec',
+            passed:
+              normalized.source === 'cli' &&
+              normalized.mode === 'local' &&
+              normalized.requestId === 'req-local-cli-proof' &&
+              normalized.structuredSpec !== undefined &&
+              normalized.spec.includes('local workflow'),
+          },
+          {
+            label: 'generation produces artifact metadata with local workflow identity and gates',
+            passed:
+              intakeResult.routing?.target === 'generate' &&
+              generationResult?.success === true &&
+              artifact?.workflowId.startsWith('ricky-') === true &&
+              artifact?.channel.startsWith('wf-ricky-') === true &&
+              (artifact?.taskCount ?? 0) > 0 &&
+              (artifact?.gateCount ?? 0) > 0,
+          },
+          {
+            label: 'validator result approves the generated artifact with deterministic gates and review stage',
+            passed:
+              validator?.valid === true &&
+              validator.errors.length === 0 &&
+              validator.hasDeterministicGates === true &&
+              validator.hasReviewStage === true,
+          },
+          {
+            label: 'user-facing response returns generated artifact metadata and next actions',
+            passed:
+              response.ok === true &&
+              responseArtifact?.path === artifact?.artifactPath &&
+              responseArtifact?.type === 'text/typescript' &&
+              responseArtifact?.content?.includes('workflow(') === true &&
+              localExecutor.writes.length === 1 &&
+              nextActionsText.includes('Run the generated workflow locally'),
+          },
+          {
+            label: 'proof stays local and deterministic without Cloud credentials or live runtime',
+            passed:
+              !logsText.includes('Cloud API surface') &&
+              logsText.includes('[local] runtime launch skipped') &&
+              localExecutor.writes[0]?.cwd === '/repo',
+          },
+        ];
+
+        return result(
+          'cli-spec-loop-proof',
+          assertions.map((assertion) => assertion.passed),
+          [
+            `normalized request: source=${normalized.source} mode=${normalized.mode} requestId=${normalized.requestId}`,
+            `normalized spec: ${normalized.spec}`,
+            `generated artifact metadata: path=${artifact?.artifactPath} workflowId=${artifact?.workflowId} channel=${artifact?.channel} pattern=${artifact?.pattern} tasks=${artifact?.taskCount} gates=${artifact?.gateCount}`,
+            `validator result: valid=${validator?.valid} errors=${validator?.errors.length} warnings=${validator?.warnings.length} deterministicGates=${validator?.hasDeterministicGates} reviewStage=${validator?.hasReviewStage}`,
+            `user response: ok=${response.ok} artifactCount=${response.artifacts.length} writeCount=${localExecutor.writes.length}`,
+            `user response artifact: path=${responseArtifact?.path} type=${responseArtifact?.type} contentIncludesWorkflow=${responseArtifact?.content?.includes('workflow(') === true}`,
+            `user next actions: ${nextActionsText}`,
+            `no Cloud credentials required: ${!logsText.includes('Cloud API surface')}`,
+          ],
+          [],
+          assertionFailures(assertions),
+        );
+      },
+    },
     {
       name: 'cli-spec-handoff',
       description: 'CLI handoff normalizes and reaches the executor with source, spec, and local mode.',
@@ -499,6 +644,48 @@ export function getLocalProofCases(): LocalProofCase[] {
           `next-action: ${response.nextActions[0]}`,
           `executor reached: ${executor.calls.length > 0}`,
         ]);
+      },
+    },
+    {
+      name: 'cli-missing-spec-material',
+      description: 'A malformed CLI handoff without spec material fails before local execution with actionable guidance.',
+      async evaluate() {
+        const executor = mockExecutor();
+        const response = await runLocal(
+          { source: 'cli' } as unknown as CliHandoff,
+          { executor },
+        );
+
+        const assertions: ProofAssertion[] = [
+          { label: 'missing CLI spec returns ok=false', passed: response.ok === false },
+          {
+            label: 'normalization failure is surfaced in logs',
+            passed: response.logs[0]?.includes('normalization failed') === true,
+          },
+          {
+            label: 'warning identifies CLI handoff source',
+            passed: response.warnings[0]?.includes("source 'cli'") === true,
+          },
+          {
+            label: 'next action tells user to check spec content or artifact path',
+            passed: response.nextActions[0]?.includes('Check the spec content or artifact path') === true,
+          },
+          { label: 'executor is not reached after missing spec material', passed: executor.calls.length === 0 },
+        ];
+
+        return result(
+          'cli-missing-spec-material',
+          assertions.map((assertion) => assertion.passed),
+          [
+            `ok: ${response.ok}`,
+            `log: ${response.logs[0]}`,
+            `warning: ${response.warnings[0]}`,
+            `next-action: ${response.nextActions[0]}`,
+            `executor reached: ${executor.calls.length > 0}`,
+          ],
+          [],
+          assertionFailures(assertions),
+        );
       },
     },
     {

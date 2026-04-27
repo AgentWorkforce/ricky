@@ -314,4 +314,141 @@ describe('cliMain', () => {
     expect(result.output.join('\n')).toContain('--spec-file requires a value.');
     expect(result.output.join('\n')).toContain('provide one of --spec, --spec-file, or --stdin');
   });
+
+  // -------------------------------------------------------------------------
+  // Proof: spec fixture coverage — inline, spec-file, stdin, missing, recovery
+  // -------------------------------------------------------------------------
+
+  describe('spec fixture proof coverage', () => {
+    it('reads spec from --spec-file via injected file reader', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec-file', './my-spec.md'],
+        runInteractive: runner,
+        readFileText: vi.fn().mockResolvedValue('workflow spec from file'),
+      });
+
+      expect(runner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'local',
+          handoff: expect.objectContaining({
+            source: 'cli',
+            spec: 'workflow spec from file',
+            specFile: './my-spec.md',
+            mode: 'local',
+            cliMetadata: { handoff: 'spec-file' },
+          }),
+        }),
+      );
+    });
+
+    it('reads spec from stdin when --stdin is provided', async () => {
+      const { Readable } = await import('node:stream');
+      const input = Readable.from(['stdin workflow content']);
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--mode', 'local', '--stdin'],
+        runInteractive: runner,
+        input,
+      });
+
+      expect(runner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'local',
+          handoff: expect.objectContaining({
+            source: 'cli',
+            spec: 'stdin workflow content',
+            mode: 'local',
+            cliMetadata: { handoff: 'stdin' },
+          }),
+        }),
+      );
+    });
+
+    it('returns recovery when spec-file read fails (missing file)', async () => {
+      const result = await cliMain({
+        argv: ['--mode', 'local', '--spec-file', './nonexistent.md'],
+        readFileText: vi.fn().mockRejectedValue(new Error('ENOENT: no such file or directory')),
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output.join('\n')).toContain('CLI input blocker:');
+      expect(result.output.join('\n')).toContain('ENOENT');
+      expect(result.output.join('\n')).toContain('provide one of --spec, --spec-file, or --stdin');
+    });
+
+    it('returns recovery when inline spec is empty', async () => {
+      const result = await cliMain({
+        argv: ['--mode', 'local', '--spec', '   '],
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output.join('\n')).toContain('CLI input blocker:');
+      expect(result.output.join('\n')).toContain('Inline spec is empty');
+    });
+
+    it('returns recovery when stdin spec is empty', async () => {
+      const { Readable } = await import('node:stream');
+      const input = Readable.from(['   ']);
+
+      const result = await cliMain({
+        argv: ['--mode', 'local', '--stdin'],
+        input,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output.join('\n')).toContain('CLI input blocker:');
+      expect(result.output.join('\n')).toContain('Stdin spec is empty');
+    });
+
+    it('defaults to local mode when spec is provided without explicit --mode', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--spec', 'a workflow'],
+        runInteractive: runner,
+      });
+
+      expect(runner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'local',
+          handoff: expect.objectContaining({
+            mode: 'local',
+            spec: 'a workflow',
+          }),
+        }),
+      );
+    });
+
+    it('rejects cloud mode with spec handoff', async () => {
+      const result = await cliMain({
+        argv: ['--mode', 'cloud', '--spec', 'a workflow'],
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output.join('\n')).toContain('Cloud mode does not accept CLI spec handoff');
+    });
+
+    it('handles --file alias for --spec-file', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--mode', 'local', '--file', './alias-spec.md'],
+        runInteractive: runner,
+        readFileText: vi.fn().mockResolvedValue('aliased file content'),
+      });
+
+      expect(runner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          handoff: expect.objectContaining({
+            spec: 'aliased file content',
+            specFile: './alias-spec.md',
+            cliMetadata: { handoff: 'spec-file' },
+          }),
+        }),
+      );
+    });
+  });
 });

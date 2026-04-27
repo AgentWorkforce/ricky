@@ -90,6 +90,56 @@ describe('runInteractiveCli', () => {
     }
   });
 
+  it('returns a user-facing response for a structured local CLI spec without Cloud credentials', async () => {
+    const { mkdtemp, rm, access } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tempRepo = await mkdtemp(join(tmpdir(), 'ricky-structured-cli-spec-'));
+
+    try {
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        cwd: tempRepo,
+        handoff: {
+          source: 'cli',
+          requestId: 'req-structured-cli-spec',
+          spec: {
+            description:
+              'generate a local workflow for packages/local/src/proof/local-entrypoint-proof.ts with deterministic validation evidence',
+            targetFiles: ['packages/local/src/proof/local-entrypoint-proof.ts'],
+            acceptanceGates: ['npx vitest run packages/local/src/proof/local-entrypoint-proof.test.ts'],
+          },
+          cliMetadata: { argv: ['ricky', 'run', '--mode', 'local', '--spec'] },
+        },
+      });
+
+      const artifact = result.localResult?.artifacts[0];
+
+      expect(result.ok).toBe(true);
+      expect(result.mode).toBe('local');
+      expect(result.cloudResult).toBeUndefined();
+      expect(result.guidance).toEqual([]);
+      expect(artifact).toMatchObject({
+        path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+        type: 'text/typescript',
+      });
+      expect(artifact?.content).toContain('workflow(');
+      expect(result.localResult?.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from cli',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime launch skipped: returning generated artifact only',
+        ]),
+      );
+      expect(result.localResult?.nextActions[0]).toMatch(/^Run the generated workflow locally:/);
+      expect(result.localResult?.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+      await expect(access(join(tempRepo, artifact!.path))).resolves.toBeUndefined();
+    } finally {
+      await rm(tempRepo, { recursive: true, force: true });
+    }
+  });
+
   it('stops cleanly after onboarding when no handoff was provided', async () => {
     const localExecutor = { execute: vi.fn() };
 
@@ -350,5 +400,277 @@ describe('runInteractiveCli', () => {
     expect(onboardFn).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'cloud' }),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Journey proof coverage — default, local, setup, welcome, status, generate
+  // -------------------------------------------------------------------------
+
+  describe('journey proof coverage', () => {
+    it('default journey: no handoff → awaitingInput with recovery guidance', async () => {
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.awaitingInput).toBe(true);
+      expect(result.localResult).toBeUndefined();
+      expect(result.mode).toBe('local');
+      expect(result.guidance.join('\n')).toContain('--spec');
+      expect(result.guidance.join('\n')).toContain('--spec-file');
+      expect(result.guidance.join('\n')).toContain('--stdin');
+    });
+
+    it('local journey: inline spec handoff → successful execution with artifacts', async () => {
+      const localResponse: LocalResponse = {
+        ok: true,
+        artifacts: [{ path: 'workflows/my-workflow.ts', type: 'text/typescript' }],
+        logs: ['[local] workflow generated'],
+        warnings: [],
+        nextActions: ['Run the workflow locally'],
+      };
+
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        handoff: { source: 'cli', spec: 'build a CI workflow', mode: 'local' },
+        localExecutor: { execute: vi.fn().mockResolvedValue(localResponse) },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.awaitingInput).toBe(false);
+      expect(result.localResult?.ok).toBe(true);
+      expect(result.localResult?.artifacts).toHaveLength(1);
+      expect(result.guidance).toEqual([]);
+    });
+
+    it('setup journey: first-run onboarding is invoked with correct parameters', async () => {
+      const onboardFn = vi.fn().mockResolvedValue(onboarding('local'));
+
+      await runInteractiveCli({
+        onboard: onboardFn,
+        mode: 'local',
+        handoff: { source: 'cli', spec: 'test', mode: 'local' },
+        localExecutor: {
+          execute: vi.fn().mockResolvedValue({
+            ok: true, artifacts: [], logs: [], warnings: [], nextActions: [],
+          }),
+        },
+      });
+
+      expect(onboardFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'local',
+          compactForExecution: true,
+          skipFirstRunPersistence: true,
+        }),
+      );
+    });
+
+    it('welcome journey: onboarding result carries firstRun and bannerShown state', async () => {
+      const firstRunResult = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue({
+          mode: 'local',
+          firstRun: true,
+          bannerShown: true,
+          output: 'Welcome to Ricky',
+        }),
+      });
+
+      const returningResult = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue({
+          mode: 'local',
+          firstRun: false,
+          bannerShown: false,
+          output: 'Ricky is ready',
+        }),
+      });
+
+      expect(firstRunResult.onboarding.firstRun).toBe(true);
+      expect(firstRunResult.onboarding.bannerShown).toBe(true);
+      expect(returningResult.onboarding.firstRun).toBe(false);
+      expect(returningResult.onboarding.bannerShown).toBe(false);
+    });
+
+    it('status journey: mode is correctly resolved from onboarding choice', async () => {
+      const localResult = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      });
+      const cloudResult = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('cloud')),
+        cloudRequest: cloudRequest(),
+        cloudExecutor: {
+          generate: vi.fn().mockResolvedValue({
+            artifacts: [], warnings: [], followUpActions: [],
+          }),
+        },
+      });
+      const bothResult = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('both')),
+      });
+      const exploreResult = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('explore')),
+      });
+
+      expect(localResult.mode).toBe('local');
+      expect(cloudResult.mode).toBe('cloud');
+      expect(bothResult.mode).toBe('both');
+      expect(exploreResult.mode).toBe('local'); // explore maps to local
+    });
+
+    it('generate journey: spec handoff creates a generated workflow artifact', async () => {
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        handoff: {
+          source: 'cli',
+          spec: 'generate a workflow for package checks',
+          mode: 'local',
+          cliMetadata: { handoff: 'inline-spec' },
+        },
+        localExecutor: {
+          execute: vi.fn().mockResolvedValue({
+            ok: true,
+            artifacts: [{ path: 'workflows/generated/package-checks.ts', type: 'text/typescript' }],
+            logs: ['[local] workflow generation: passed'],
+            warnings: [],
+            nextActions: [
+              'Run the generated workflow locally',
+              'Inspect the generated workflow artifact',
+            ],
+          }),
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.awaitingInput).toBe(false);
+      expect(result.localResult?.artifacts[0].path).toContain('package-checks');
+      expect(result.localResult?.nextActions).toHaveLength(2);
+      expect(result.diagnoses).toEqual([]);
+      expect(result.guidance).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fixture proof coverage — inline spec, spec-file, stdin, missing spec
+  // -------------------------------------------------------------------------
+
+  describe('fixture proof coverage', () => {
+    it('fixture: inline spec handoff metadata is correct', async () => {
+      const executor = vi.fn().mockResolvedValue({
+        ok: true, artifacts: [], logs: [], warnings: [], nextActions: [],
+      });
+
+      await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        handoff: {
+          source: 'cli',
+          spec: 'inline spec text',
+          mode: 'local',
+          cliMetadata: { handoff: 'inline-spec' },
+        },
+        localExecutor: { execute: executor },
+      });
+
+      expect(executor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'cli',
+          spec: 'inline spec text',
+          mode: 'local',
+        }),
+      );
+    });
+
+    it('fixture: spec-file handoff metadata is correct', async () => {
+      const executor = vi.fn().mockResolvedValue({
+        ok: true, artifacts: [], logs: [], warnings: [], nextActions: [],
+      });
+
+      await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        handoff: {
+          source: 'cli',
+          spec: 'file spec content',
+          specFile: './spec.md',
+          mode: 'local',
+          cliMetadata: { handoff: 'spec-file' },
+        },
+        localExecutor: { execute: executor },
+      });
+
+      expect(executor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'cli',
+          spec: 'file spec content',
+          specPath: './spec.md',
+          sourceMetadata: {
+            cli: {
+              handoff: 'spec-file',
+              specFile: './spec.md',
+            },
+          },
+        }),
+      );
+    });
+
+    it('fixture: stdin handoff metadata is correct', async () => {
+      const executor = vi.fn().mockResolvedValue({
+        ok: true, artifacts: [], logs: [], warnings: [], nextActions: [],
+      });
+
+      await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        handoff: {
+          source: 'cli',
+          spec: 'stdin piped content',
+          mode: 'local',
+          cliMetadata: { handoff: 'stdin' },
+        },
+        localExecutor: { execute: executor },
+      });
+
+      expect(executor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'cli',
+          spec: 'stdin piped content',
+        }),
+      );
+    });
+
+    it('fixture: missing spec produces awaiting-input with recovery guidance', async () => {
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        // no handoff provided
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.awaitingInput).toBe(true);
+      expect(result.localResult).toBeUndefined();
+      const guidance = result.guidance.join('\n');
+      expect(guidance).toContain('no spec was provided');
+      expect(guidance).toContain('--spec');
+      expect(guidance).toContain('--spec-file');
+      expect(guidance).toContain('--stdin');
+    });
+
+    it('fixture: local failure with diagnosis produces structured recovery', async () => {
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('local')),
+        handoff: { source: 'cli', spec: 'broken spec', mode: 'local' },
+        localExecutor: {
+          execute: vi.fn().mockResolvedValue({
+            ok: false,
+            artifacts: [],
+            logs: ['timeout waiting for agent'],
+            warnings: ['handoff stalled waiting for ack'],
+            nextActions: [],
+          }),
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.diagnoses.length).toBeGreaterThan(0);
+      expect(result.guidance.length).toBeGreaterThan(0);
+      // No stack traces in guidance
+      expect(result.guidance.join('\n')).not.toMatch(/\n\s+at /);
+    });
   });
 });

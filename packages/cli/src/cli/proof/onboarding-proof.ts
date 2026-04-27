@@ -10,8 +10,9 @@ import {
   type ModeOption,
   type OnboardingChoice,
 } from '../mode-selector';
-import { renderCloudGuidance, renderHandoffGuidance, renderOnboarding, renderRecoveryGuidance } from '../onboarding';
+import { renderCloudGuidance, renderHandoffGuidance, renderOnboarding, renderRecoveryGuidance, renderSuggestedNextAction } from '../onboarding';
 import { renderWelcome } from '../welcome';
+import { parseArgs, renderHelp } from '../../commands/cli-main';
 
 export type ProofCaseName =
   | 'implementation-modules-present'
@@ -24,7 +25,18 @@ export type ProofCaseName =
   | 'cli-mcp-handoff-language'
   | 'recovery-paths'
   | 'banner-suppression'
-  | 'narrow-terminal-fallback';
+  | 'narrow-terminal-fallback'
+  | 'default-journey'
+  | 'local-journey'
+  | 'setup-journey'
+  | 'welcome-journey'
+  | 'status-journey'
+  | 'generate-journey'
+  | 'fixture-inline-spec'
+  | 'fixture-spec-file'
+  | 'fixture-stdin'
+  | 'fixture-missing-spec'
+  | 'fixture-missing-file-recovery';
 
 export interface OnboardingProofCase {
   name: ProofCaseName;
@@ -358,6 +370,331 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             full.includes('workflow reliability for AgentWorkforce'),
           ],
           [`compact banner: ${compact}`],
+        );
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // Journey proof cases — default, local, setup, welcome, status, generate
+    // -----------------------------------------------------------------------
+
+    {
+      name: 'default-journey',
+      description: 'Default (no args) journey parses to `run` and surfaces help/version/run as the only commands.',
+      specSection: 'CLI command surface — default journey',
+      evaluate: () => {
+        const parsed = parseArgs([]);
+        const helpParsed = parseArgs(['help']);
+        const versionParsed = parseArgs(['version']);
+        const helpLines = renderHelp();
+        const helpText = helpLines.join('\n');
+
+        return result(
+          'default-journey',
+          [
+            parsed.command === 'run',
+            parsed.mode === undefined,
+            parsed.spec === undefined,
+            helpParsed.command === 'help',
+            versionParsed.command === 'version',
+            helpText.includes('npm start --'),
+            !helpText.includes('npx ricky generate'),
+            !helpText.includes('npx ricky debug'),
+          ],
+          [
+            `default parse: command=${parsed.command}`,
+            `help parse: command=${helpParsed.command}`,
+            `version parse: command=${versionParsed.command}`,
+            `help mentions npm start: ${helpText.includes('npm start --')}`,
+            `no invented commands: ${!helpText.includes('npx ricky generate')}`,
+          ],
+        );
+      },
+    },
+    {
+      name: 'local-journey',
+      description: 'Local mode journey parses --mode local correctly and surfaces local handoff options.',
+      specSection: 'CLI command surface — local journey',
+      evaluate: () => {
+        const parsed = parseArgs(['--mode', 'local']);
+        const withSpec = parseArgs(['--mode', 'local', '--spec', 'build a workflow']);
+        const localResult = renderModeResult('local');
+        const nextAction = renderSuggestedNextAction('local');
+
+        return result(
+          'local-journey',
+          [
+            parsed.command === 'run',
+            parsed.mode === 'local',
+            withSpec.mode === 'local',
+            withSpec.spec === 'build a workflow',
+            localResult.includes('Local / BYOH mode selected'),
+            localResult.includes('No Cloud credentials required'),
+            nextAction.includes('--spec'),
+          ],
+          [
+            `local parse: mode=${parsed.mode}`,
+            `local+spec parse: spec=${withSpec.spec}`,
+            `local result contains handoff guidance: ${localResult.includes('--spec')}`,
+            compactEvidence('next action', nextAction),
+          ],
+        );
+      },
+    },
+    {
+      name: 'setup-journey',
+      description: 'Setup journey verifies first-run onboarding renders mode selector and all four choices.',
+      specSection: 'CLI command surface — setup journey',
+      evaluate: () => {
+        const output = renderOnboarding({ isFirstRun: true, isTTY: true, choice: 'local', env: {} });
+        const selector = renderModeSelector();
+
+        return result(
+          'setup-journey',
+          [
+            output.includes('Welcome to Ricky'),
+            output.includes('How would you like to use Ricky?'),
+            selector.includes('[1] Local / BYOH'),
+            selector.includes('[2] Cloud'),
+            selector.includes('[3] Both'),
+            selector.includes('[4] Just explore'),
+            selector.includes('Choice [1]:'),
+          ],
+          [
+            `first-run includes welcome: true`,
+            `selector has all 4 choices: true`,
+            compactEvidence('selector', selector),
+          ],
+        );
+      },
+    },
+    {
+      name: 'welcome-journey',
+      description: 'Welcome journey verifies first-run and returning user welcome text are distinct.',
+      specSection: 'CLI command surface — welcome journey',
+      evaluate: () => {
+        const firstRun = renderWelcome({ isFirstRun: true });
+        const returning = renderWelcome({ isFirstRun: false });
+
+        return result(
+          'welcome-journey',
+          [
+            firstRun.includes('Welcome to Ricky'),
+            firstRun.includes('generate, debug, recover, and run workflows'),
+            returning.includes('Ricky is ready'),
+            !returning.includes('Welcome to Ricky'),
+            firstRun !== returning,
+          ],
+          [
+            compactEvidence('first-run welcome', firstRun),
+            compactEvidence('returning welcome', returning),
+          ],
+        );
+      },
+    },
+    {
+      name: 'status-journey',
+      description: 'Status journey verifies compact header renders mode and provider status correctly.',
+      specSection: 'CLI command surface — status journey',
+      evaluate: () => {
+        const localHeader = renderCompactHeader('local');
+        const cloudConnected = renderCompactHeader('cloud', { google: { connected: true }, github: { connected: false } });
+        const cloudDisconnected = renderCompactHeader('cloud', { google: { connected: false }, github: { connected: false } });
+        const bothConnected = renderCompactHeader('both', { google: { connected: true }, github: { connected: false } });
+        const bothDisconnected = renderCompactHeader('both', { google: { connected: false }, github: { connected: false } });
+
+        return result(
+          'status-journey',
+          [
+            localHeader === 'ricky · local mode · ready',
+            cloudConnected.includes('google connected'),
+            cloudDisconnected.includes('google not connected'),
+            bothConnected.includes('cloud connected'),
+            bothDisconnected.includes('cloud not connected'),
+          ],
+          [
+            `local: ${localHeader}`,
+            `cloud+google: ${cloudConnected}`,
+            `cloud-google: ${cloudDisconnected}`,
+            `both+google: ${bothConnected}`,
+            `both-google: ${bothDisconnected}`,
+          ],
+        );
+      },
+    },
+    {
+      name: 'generate-journey',
+      description: 'Generate journey verifies spec handoff parsing and help text reference the generate example.',
+      specSection: 'CLI command surface — generate journey',
+      evaluate: () => {
+        const genSpec = parseArgs(['--mode', 'local', '--spec', 'generate a workflow for package checks']);
+        const helpText = renderHelp().join('\n');
+        const localResult = renderModeResult('local');
+
+        return result(
+          'generate-journey',
+          [
+            genSpec.command === 'run',
+            genSpec.mode === 'local',
+            genSpec.spec === 'generate a workflow for package checks',
+            helpText.includes('generate a workflow for package checks'),
+            localResult.includes('generate a workflow for package checks'),
+            !helpText.includes('npx ricky generate'),
+          ],
+          [
+            `generate spec parsed: ${genSpec.spec}`,
+            `help references generate example: ${helpText.includes('generate a workflow for package checks')}`,
+            `local result references generate: ${localResult.includes('generate a workflow for package checks')}`,
+            `no invented generate command: ${!helpText.includes('npx ricky generate')}`,
+          ],
+        );
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // Fixture proof cases — inline spec, spec file, stdin, missing spec, missing file recovery
+    // -----------------------------------------------------------------------
+
+    {
+      name: 'fixture-inline-spec',
+      description: 'Inline --spec flag parses correctly and creates a run command with spec text.',
+      specSection: 'CLI spec fixtures — inline spec',
+      evaluate: () => {
+        const simple = parseArgs(['--spec', 'hello world']);
+        const withMode = parseArgs(['--mode', 'local', '--spec', 'build a workflow']);
+        const empty = parseArgs(['--spec']);
+
+        return result(
+          'fixture-inline-spec',
+          [
+            simple.command === 'run',
+            simple.spec === 'hello world',
+            withMode.mode === 'local',
+            withMode.spec === 'build a workflow',
+            empty.errors !== undefined,
+            empty.errors?.[0]?.includes('--spec requires a value') === true,
+          ],
+          [
+            `simple inline: spec=${simple.spec}`,
+            `with mode: mode=${withMode.mode}, spec=${withMode.spec}`,
+            `empty --spec errors: ${JSON.stringify(empty.errors)}`,
+          ],
+        );
+      },
+    },
+    {
+      name: 'fixture-spec-file',
+      description: '--spec-file and --file flags parse to specFile field correctly.',
+      specSection: 'CLI spec fixtures — spec file',
+      evaluate: () => {
+        const specFile = parseArgs(['--spec-file', './spec.md']);
+        const fileAlias = parseArgs(['--file', './workflow.md']);
+        const missingValue = parseArgs(['--spec-file']);
+        const withMode = parseArgs(['--mode', 'local', '--spec-file', './path/to/spec.md']);
+
+        return result(
+          'fixture-spec-file',
+          [
+            specFile.command === 'run',
+            specFile.specFile === './spec.md',
+            fileAlias.specFile === './workflow.md',
+            missingValue.errors !== undefined,
+            missingValue.errors?.[0]?.includes('--spec-file requires a value') === true,
+            withMode.mode === 'local',
+            withMode.specFile === './path/to/spec.md',
+          ],
+          [
+            `--spec-file: ${specFile.specFile}`,
+            `--file alias: ${fileAlias.specFile}`,
+            `missing value errors: ${JSON.stringify(missingValue.errors)}`,
+            `with mode: mode=${withMode.mode}, specFile=${withMode.specFile}`,
+          ],
+        );
+      },
+    },
+    {
+      name: 'fixture-stdin',
+      description: '--stdin flag parses correctly and sets stdin=true.',
+      specSection: 'CLI spec fixtures — stdin',
+      evaluate: () => {
+        const stdinOnly = parseArgs(['--stdin']);
+        const stdinWithMode = parseArgs(['--mode', 'local', '--stdin']);
+        const noStdin = parseArgs(['--mode', 'local']);
+
+        return result(
+          'fixture-stdin',
+          [
+            stdinOnly.command === 'run',
+            stdinOnly.stdin === true,
+            stdinWithMode.mode === 'local',
+            stdinWithMode.stdin === true,
+            noStdin.stdin === undefined,
+          ],
+          [
+            `stdin only: stdin=${stdinOnly.stdin}`,
+            `stdin+mode: mode=${stdinWithMode.mode}, stdin=${stdinWithMode.stdin}`,
+            `no stdin flag: stdin=${noStdin.stdin}`,
+          ],
+        );
+      },
+    },
+    {
+      name: 'fixture-missing-spec',
+      description: 'Missing spec (no --spec, --spec-file, or --stdin) results in a run command with no spec fields.',
+      specSection: 'CLI spec fixtures — missing spec',
+      evaluate: () => {
+        const noSpec = parseArgs([]);
+        const modeOnly = parseArgs(['--mode', 'local']);
+        const recoveryText = renderOnboarding({ isFirstRun: false, isTTY: true, noBanner: true, mode: 'local' });
+
+        return result(
+          'fixture-missing-spec',
+          [
+            noSpec.command === 'run',
+            noSpec.spec === undefined,
+            noSpec.specFile === undefined,
+            noSpec.stdin === undefined,
+            modeOnly.spec === undefined,
+            modeOnly.specFile === undefined,
+            modeOnly.stdin === undefined,
+            recoveryText.includes('--spec') || recoveryText.includes('spec'),
+          ],
+          [
+            `no args: spec=${noSpec.spec}, specFile=${noSpec.specFile}, stdin=${noSpec.stdin}`,
+            `mode only: spec=${modeOnly.spec}, specFile=${modeOnly.specFile}`,
+            `recovery mentions spec: true`,
+          ],
+        );
+      },
+    },
+    {
+      name: 'fixture-missing-file-recovery',
+      description: 'Missing file value for --spec-file and --file flags produce actionable error messages.',
+      specSection: 'CLI spec fixtures — missing file recovery',
+      evaluate: () => {
+        const missingSpecFile = parseArgs(['--spec-file']);
+        const missingFile = parseArgs(['--file']);
+        const missingSpec = parseArgs(['--spec']);
+        const recoveryGuidance = renderRecoveryGuidance();
+
+        return result(
+          'fixture-missing-file-recovery',
+          [
+            missingSpecFile.errors !== undefined,
+            missingSpecFile.errors?.[0]?.includes('--spec-file requires a value') === true,
+            missingFile.errors !== undefined,
+            missingFile.errors?.[0]?.includes('--file requires a value') === true,
+            missingSpec.errors !== undefined,
+            missingSpec.errors?.[0]?.includes('--spec requires a value') === true,
+            recoveryGuidance.includes('Recovery:'),
+            recoveryGuidance.includes('continue in local mode'),
+          ],
+          [
+            `--spec-file error: ${JSON.stringify(missingSpecFile.errors)}`,
+            `--file error: ${JSON.stringify(missingFile.errors)}`,
+            `--spec error: ${JSON.stringify(missingSpec.errors)}`,
+            compactEvidence('generic recovery', recoveryGuidance),
+          ],
         );
       },
     },

@@ -31,6 +31,17 @@ describe('Ricky CLI onboarding proof', () => {
       'recovery-paths',
       'banner-suppression',
       'narrow-terminal-fallback',
+      'default-journey',
+      'local-journey',
+      'setup-journey',
+      'welcome-journey',
+      'status-journey',
+      'generate-journey',
+      'fixture-inline-spec',
+      'fixture-spec-file',
+      'fixture-stdin',
+      'fixture-missing-spec',
+      'fixture-missing-file-recovery',
     ]);
   });
 
@@ -62,5 +73,79 @@ describe('Ricky CLI onboarding proof', () => {
     for (const expected of expectedEvidence) {
       expect(evidence).toContain(expected);
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Journey proof cases
+  // ---------------------------------------------------------------------------
+
+  describe('journey proof cases', () => {
+    it.each([
+      ['default-journey', ['command=run', 'npm start']],
+      ['local-journey', ['mode=local', 'spec=build a workflow']],
+      ['setup-journey', ['all 4 choices']],
+      ['welcome-journey', ['Welcome to Ricky', 'Ricky is ready']],
+      ['status-journey', ['local mode', 'google connected', 'cloud connected']],
+      ['generate-journey', ['generate a workflow for package checks']],
+    ] satisfies Array<[ProofCaseName, string[]]>)('%s proves the journey contract', (name, expectedEvidence) => {
+      const result = evaluateOnboardingProofCase(name);
+      const evidence = result.evidence.join('\n');
+
+      expect(result.passed).toBe(true);
+      expect(result.failures).toEqual([]);
+      for (const expected of expectedEvidence) {
+        expect(evidence).toContain(expected);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Fixture proof cases
+  // ---------------------------------------------------------------------------
+
+  describe('fixture proof cases', () => {
+    it.each([
+      ['fixture-inline-spec', ['spec=hello world', 'spec=build a workflow']],
+      ['fixture-spec-file', ['--spec-file', './spec.md', '--file alias']],
+      ['fixture-stdin', ['stdin=true']],
+      ['fixture-missing-spec', ['spec=undefined']],
+      ['fixture-missing-file-recovery', ['--spec-file requires a value', '--file requires a value', '--spec requires a value']],
+    ] satisfies Array<[ProofCaseName, string[]]>)('%s proves the fixture contract', (name, expectedEvidence) => {
+      const result = evaluateOnboardingProofCase(name);
+      const evidence = result.evidence.join('\n');
+
+      expect(result.passed).toBe(true);
+      expect(result.failures).toEqual([]);
+      for (const expected of expectedEvidence) {
+        expect(evidence).toContain(expected);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Proof artifact summary
+  // ---------------------------------------------------------------------------
+
+  describe('proof artifact summary', () => {
+    it('produces a deterministic summary with no failures across all cases', () => {
+      const summary = summarizeOnboardingProof();
+      const results = evaluateOnboardingProof();
+
+      expect(summary.passed).toBe(true);
+      expect(summary.failures).toEqual([]);
+      expect(results.length).toBe(22);
+      expect(results.every((r) => r.passed)).toBe(true);
+    });
+
+    it('includes proof artifact metadata for every case', () => {
+      const cases = getOnboardingProofCases();
+
+      for (const proofCase of cases) {
+        expect(proofCase.name).toBeTruthy();
+        expect(proofCase.description).toBeTruthy();
+        expect(proofCase.specSection).toBeTruthy();
+        expect(typeof proofCase.evaluate).toBe('function');
+      }
+    });
   });
 });
