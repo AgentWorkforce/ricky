@@ -394,6 +394,7 @@ function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
       ...request.metadata,
       mode: request.mode,
       specPath: request.specPath,
+      sourceMetadata: request.sourceMetadata,
     },
   };
 

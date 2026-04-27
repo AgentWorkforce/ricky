@@ -16,6 +16,12 @@ export type LocalExecutionPreference = LocalExecutionMode;
 export type StructuredSpec = Record<string, unknown>;
 export type SpecInput = string | StructuredSpec;
 
+export interface LocalSourceMetadata {
+  cli?: Record<string, unknown>;
+  mcp?: Record<string, unknown>;
+  claude?: Record<string, unknown>;
+}
+
 export interface BaseHandoff {
   /** Preferred execution target. `mode` is kept as the stable shorthand. */
   mode?: LocalExecutionMode;
@@ -111,6 +117,8 @@ export interface LocalInvocationRequest {
   specPath?: string;
   /** Opaque metadata from the originating surface. */
   metadata: Record<string, unknown>;
+  /** Surface-specific metadata preserved without flattening. */
+  sourceMetadata?: LocalSourceMetadata;
   /** Stable request id when the caller supplied one. */
   requestId?: string;
 }
@@ -185,6 +193,7 @@ export async function normalizeRequest(
           ...(raw.metadata ?? {}),
           ...(raw.cliMetadata ?? {}),
         },
+        sourceMetadata: sourceMetadataForCli(raw),
         requestId: raw.requestId,
       };
     }
@@ -205,6 +214,7 @@ export async function normalizeRequest(
           ...(raw.mcpMetadata ?? {}),
           ...(raw.toolName ? { toolName: raw.toolName } : {}),
         },
+        sourceMetadata: sourceMetadataForMcp(raw),
         requestId: raw.requestId,
       };
     }
@@ -223,6 +233,7 @@ export async function normalizeRequest(
         mode,
         executionPreference: mode,
         metadata,
+        sourceMetadata: sourceMetadataForClaude(raw),
         requestId: raw.requestId,
       };
     }
@@ -259,6 +270,36 @@ function executionModeFromStructuredSpec(spec?: SpecInput): LocalExecutionMode |
 
 function structuredSpecFrom(spec: SpecInput): StructuredSpec | undefined {
   return typeof spec === 'string' ? undefined : spec;
+}
+
+function sourceMetadataForCli(raw: CliHandoff): LocalSourceMetadata | undefined {
+  if (!raw.cliMetadata && !raw.specFile) return undefined;
+  return {
+    cli: {
+      ...(raw.cliMetadata ?? {}),
+      ...(raw.specFile ? { specFile: raw.specFile } : {}),
+    },
+  };
+}
+
+function sourceMetadataForMcp(raw: McpHandoff): LocalSourceMetadata | undefined {
+  if (!raw.mcpMetadata && !raw.toolName) return undefined;
+  return {
+    mcp: {
+      ...(raw.mcpMetadata ?? {}),
+      ...(raw.toolName ? { toolName: raw.toolName } : {}),
+    },
+  };
+}
+
+function sourceMetadataForClaude(raw: ClaudeHandoff): LocalSourceMetadata | undefined {
+  if (!raw.conversationId && !raw.turnId) return undefined;
+  return {
+    claude: {
+      ...(raw.conversationId ? { conversationId: raw.conversationId } : {}),
+      ...(raw.turnId ? { turnId: raw.turnId } : {}),
+    },
+  };
 }
 
 /**

@@ -10,6 +10,7 @@ export type {
   LocalExecutionMode,
   LocalExecutionPreference,
   LocalInvocationRequest,
+  LocalSourceMetadata,
   McpHandoff,
   RawHandoff,
   SpecInput,

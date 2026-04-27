@@ -232,6 +232,11 @@ describe('normalizeRequest', () => {
     expect(result.structuredSpec).toEqual(raw.spec);
     expect(result.mode).toBe('local');
     expect(result.metadata).toEqual({ argv: ['ricky', 'run'] });
+    expect(result.sourceMetadata).toEqual({
+      cli: {
+        argv: ['ricky', 'run'],
+      },
+    });
     expect(result.requestId).toBe('req-cli-1');
   });
 
@@ -266,6 +271,12 @@ describe('normalizeRequest', () => {
     expect(result.structuredSpec).toEqual(raw.arguments);
     expect(result.mode).toBe('local');
     expect(result.metadata).toEqual({ toolCallId: 'tool-1', toolName: 'ricky.generate' });
+    expect(result.sourceMetadata).toEqual({
+      mcp: {
+        toolCallId: 'tool-1',
+        toolName: 'ricky.generate',
+      },
+    });
   });
 
   it('normalizes a free-form spec handoff', async () => {
@@ -309,6 +320,12 @@ describe('normalizeRequest', () => {
     expect(result.spec).toBe('run tests');
     expect(result.mode).toBe('local');
     expect(result.metadata).toEqual({ conversationId: 'conv-1', turnId: 'turn-5' });
+    expect(result.sourceMetadata).toEqual({
+      claude: {
+        conversationId: 'conv-1',
+        turnId: 'turn-5',
+      },
+    });
   });
 
   it('normalizes a Claude handoff without optional fields', async () => {
@@ -805,6 +822,12 @@ describe('runLocal', () => {
     expect(result.ok).toBe(true);
     expect(executor.calls).toHaveLength(1);
     expect(executor.calls[0].specPath).toBe('/tmp/spec.md');
+    expect(executor.calls[0].sourceMetadata).toEqual({
+      cli: {
+        argv: ['ricky', 'run'],
+        specFile: '/tmp/spec.md',
+      },
+    });
     expect(executor.calls[0].metadata).toMatchObject({
       caller: 'cli',
       argv: ['ricky', 'run'],
@@ -869,6 +892,34 @@ describe('runLocal', () => {
     await runLocal({ source: 'cli', spec: 'test' }, { executor });
 
     expect(executor.calls[0].mode).toBe('local');
+  });
+
+  it('defaults every raw handoff surface to explicit local execution before adapter handoff', async () => {
+    const handoffs: RawHandoff[] = [
+      { source: 'free-form', spec: 'generate a local workflow' },
+      { source: 'structured', spec: { description: 'generate a structured local workflow' } },
+      { source: 'cli', spec: 'generate a CLI local workflow' },
+      { source: 'mcp', arguments: { goal: 'generate an MCP local workflow' } },
+      { source: 'claude', spec: { request: 'generate a Claude local workflow' } },
+      { source: 'workflow-artifact', artifactPath: 'workflows/wave4-local-byoh/default-local.workflow.ts' },
+    ];
+
+    for (const handoff of handoffs) {
+      const executor = mockExecutor();
+      const result = await runLocal(handoff, {
+        executor,
+        artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+      });
+
+      expect(result.ok, handoff.source).toBe(true);
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), handoff.source).toBe(false);
+      expect(executor.calls, handoff.source).toHaveLength(1);
+      expect(executor.calls[0], handoff.source).toMatchObject({
+        source: handoff.source,
+        mode: 'local',
+        executionPreference: 'local',
+      });
+    }
   });
 
   it('defaults BYOH generation requests to the injected local runtime without Cloud fallback', async () => {
