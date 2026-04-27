@@ -19,7 +19,11 @@ export type SpecInput = string | StructuredSpec;
 export interface BaseHandoff {
   /** Preferred execution target. `mode` is kept as the stable shorthand. */
   mode?: LocalExecutionMode;
-  /** Alias for callers that model the choice as an execution preference. */
+  /**
+   * Alias for `mode`. When both are set, `mode` takes priority (see `executionModeFor`).
+   * Exists so callers that model the choice as a "preference" rather than a "mode"
+   * can pass it naturally without mapping to the `mode` field.
+   */
   executionPreference?: LocalExecutionPreference;
   metadata?: Record<string, unknown>;
   requestId?: string;
@@ -96,7 +100,12 @@ export interface LocalInvocationRequest {
   source: HandoffSource;
   /** Execution mode — defaults to 'local' for BYOH. */
   mode: LocalExecutionMode;
-  /** Same value as mode, exposed for callers that need an explicit preference field. */
+  /**
+   * Always equals `mode`. Exposed as a convenience alias for callers that model
+   * the choice as an execution preference rather than a mode. Intentionally
+   * duplicated — both fields are set identically across all normalization branches
+   * so downstream code can use whichever name reads more naturally.
+   */
   executionPreference?: LocalExecutionPreference;
   /** Optional file path when the spec came from a file or artifact. */
   specPath?: string;
@@ -243,6 +252,14 @@ function structuredSpecFrom(spec: SpecInput): StructuredSpec | undefined {
   return typeof spec === 'string' ? undefined : spec;
 }
 
+/**
+ * Extract a text representation from a structured spec.
+ *
+ * Key probe order is intentional: `description` and `prompt` are the most
+ * common carrier fields across CLI, MCP, and Claude handoffs; `goal` and
+ * `objective` are less frequent. The JSON.stringify fallback guarantees no
+ * structured spec is silently lost regardless of key naming.
+ */
 function specInputToText(spec: SpecInput): string {
   if (typeof spec === 'string') return spec;
 
