@@ -177,6 +177,18 @@ workflow_is_already_satisfied() {
         && grep -Eqi "(failure|recovery|unblock)" docs/product/ricky-next-wave-backlog-and-proof-plan.md \
         && grep -Eqi "(priority|sequence|dependency)" docs/product/ricky-next-wave-backlog-and-proof-plan.md
       ;;
+    workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts)
+      test -f package.json \
+        && grep -q '"typecheck"' package.json \
+        && grep -q '"test"' package.json \
+        && ! grep -q 'prpm install @prpm/self-improving' package.json \
+        && test -d packages/shared \
+        && test -d packages/runtime \
+        && test -d packages/product \
+        && test -d packages/cloud \
+        && test -d packages/local \
+        && test -d packages/cli
+      ;;
     *)
       return 1
       ;;
