@@ -173,6 +173,36 @@ queue_count() {
   awk 'NF { count += 1 } END { print count + 0 }' "$QUEUE_FILE"
 }
 
+filter_queue_for_repo_state() {
+  local filtered_queue="$ARTIFACT_DIR/queue.filtered.tmp"
+  local removed_count=0
+  local workflow_path=""
+
+  cp "$QUEUE_FILE" "$ARTIFACT_DIR/queue.raw.txt"
+  : > "$filtered_queue"
+
+  while IFS= read -r workflow_path; do
+    [[ -n "$workflow_path" ]] || continue
+
+    if [[ ! -f "$workflow_path" ]]; then
+      log "dropping missing workflow from queue: $workflow_path"
+      removed_count=$((removed_count + 1))
+      continue
+    fi
+
+    if workflow_has_stale_package_targets "$workflow_path"; then
+      log "dropping stale pre-package-split workflow from queue: $workflow_path"
+      removed_count=$((removed_count + 1))
+      continue
+    fi
+
+    printf '%s\n' "$workflow_path" >> "$filtered_queue"
+  done < "$QUEUE_FILE"
+
+  mv "$filtered_queue" "$QUEUE_FILE"
+  log "queue prepared with $(queue_count) actionable workflows (${removed_count} removed)"
+}
+
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
@@ -619,8 +649,6 @@ should_stop_before_next_workflow() {
   return 1
 }
 
-write_queue
-
 if [[ ! -x "$RUNNER" ]]; then
   echo "ERROR: agent-relay runner not found at $RUNNER"
   exit 1
@@ -632,6 +660,8 @@ echo "running" > "$STATUS_FILE"
 git rev-parse HEAD > "$LAST_COMMIT_FILE"
 INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 restore_checkpoint
+write_queue
+filter_queue_for_repo_state
 if [[ -z "$INITIAL_GIT_HEAD" ]]; then
   INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 fi
