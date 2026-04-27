@@ -378,6 +378,132 @@ describe('runInteractiveCli', () => {
     expect(result.guidance.join('\n')).toMatch(/Invalidate relay cache/);
   });
 
+  it('passes classified local execution blockers and evidence into interactive diagnosis guidance', async () => {
+    const customDiagnosis = {
+      blockerClass: BlockerClass.RuntimeHandoffStall,
+      label: 'Local runtime dependency missing',
+      unblocker: {
+        action: 'Install agent-relay and rerun the generated artifact command',
+        rationale: 'The local execution stage returned a MISSING_BINARY blocker with runtime stderr evidence.',
+        automatable: false,
+      },
+    };
+    const diagnoseFn = vi.fn().mockImplementation((signal) => (
+      signal.source === 'local-blocker' ? customDiagnosis : null
+    ));
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      handoff: { source: 'cli', spec: 'Build workflow', mode: 'local', stageMode: 'run' },
+      localExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          ok: false,
+          artifacts: [{ path: 'workflows/generated/issue-3.ts', type: 'text/typescript' }],
+          logs: [],
+          warnings: [],
+          nextActions: ['npm install', 'npx --no-install agent-relay run workflows/generated/issue-3.ts'],
+          exitCode: 2,
+          generation: {
+            stage: 'generate',
+            status: 'ok',
+            artifact: {
+              path: 'workflows/generated/issue-3.ts',
+              workflow_id: 'wf-issue-3',
+              spec_digest: 'digest-issue-3',
+            },
+            next: {
+              run_command: 'npx --no-install agent-relay run workflows/generated/issue-3.ts',
+              run_mode_hint: 'ricky run --artifact workflows/generated/issue-3.ts',
+            },
+          },
+          execution: {
+            stage: 'execute',
+            status: 'blocker',
+            execution: {
+              workflow_id: 'wf-issue-3',
+              artifact_path: 'workflows/generated/issue-3.ts',
+              command: 'npx --no-install agent-relay run workflows/generated/issue-3.ts',
+              workflow_file: 'workflows/generated/issue-3.ts',
+              cwd: '/repo',
+              started_at: '2026-01-01T00:00:00.000Z',
+              finished_at: '2026-01-01T00:00:00.000Z',
+              duration_ms: 0,
+              steps_completed: 0,
+              steps_total: 1,
+            },
+            blocker: {
+              code: 'MISSING_BINARY',
+              category: 'dependency',
+              message: 'Runtime dependency is unavailable: agent-relay: command not found.',
+              detected_at: '2026-01-01T00:00:00.000Z',
+              detected_during: 'launch',
+              recovery: {
+                actionable: true,
+                steps: ['npm install', 'npx --no-install agent-relay run workflows/generated/issue-3.ts'],
+              },
+              context: {
+                missing: ['agent-relay'],
+                found: ['cwd=/repo'],
+              },
+            },
+            evidence: {
+              outcome_summary: 'Workflow blocked during local runtime execution.',
+              failed_step: { id: 'runtime-launch', name: 'Local runtime execution' },
+              exit_code: 127,
+              logs: {
+                tail: ['agent-relay: command not found'],
+                truncated: false,
+              },
+              side_effects: {
+                files_written: ['workflows/generated/issue-3.ts'],
+                commands_invoked: ['npx --no-install agent-relay run workflows/generated/issue-3.ts'],
+              },
+              assertions: [
+                {
+                  name: 'runtime_exit_code',
+                  status: 'fail',
+                  detail: 'Runtime exit code: 127.',
+                },
+              ],
+            },
+          },
+        } satisfies LocalResponse),
+      },
+      diagnoseFn,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.diagnoses).toEqual([customDiagnosis]);
+    expect(result.guidance.join('\n')).toContain('[Local runtime dependency missing]');
+    expect(result.guidance.join('\n')).toContain(
+      'Install agent-relay and rerun the generated artifact command',
+    );
+    expect(result.guidance.join('\n')).not.toContain('Recovery:');
+    expect(diagnoseFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'local-blocker',
+        message: 'Runtime dependency is unavailable: agent-relay: command not found.',
+        meta: {
+          code: 'MISSING_BINARY',
+          category: 'dependency',
+          detectedDuring: 'launch',
+        },
+      }),
+    );
+    expect(diagnoseFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'local-evidence',
+        message: 'Workflow blocked during local runtime execution.',
+      }),
+    );
+    expect(diagnoseFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'local-runtime-tail',
+        message: 'agent-relay: command not found',
+      }),
+    );
+  });
+
   it('in both mode, skips cloud when local execution fails', async () => {
     const cloudExecutor = { generate: vi.fn() };
 

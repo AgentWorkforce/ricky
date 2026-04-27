@@ -275,13 +275,13 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       const coordinator =
         options.coordinator ?? new LocalCoordinator(options.commandRunner ?? createProcessCommandRunner());
       const stageMode = resolveStageMode(request.stageMode, options.returnGeneratedArtifactOnly);
-      const includeStageContract = request.stageMode !== undefined;
+      const includeStageContract = true;
       const specDigest = digestSpec(request.spec);
       let generationStage: LocalGenerationStageResult | undefined;
 
       logs.push(`[local] received spec from ${request.source}`);
       logs.push(`[local] mode: ${request.mode}`);
-      if (stageMode) logs.push(`[local] stage mode: ${stageMode}`);
+      logs.push(`[local] stage mode: ${stageMode}`);
 
       if (request.specPath) {
         logs.push(`[local] spec path: ${request.specPath}`);
@@ -373,9 +373,15 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         generationStage = createArtifactReferenceGenerationStage(runTarget, request.requestId, specDigest);
       }
 
-      if (artifact && stageMode === 'generate') {
+      if (stageMode === 'generate') {
+        if (!artifact) {
+          artifacts.push({
+            path: runTarget,
+            type: 'text/typescript',
+          });
+        }
         logs.push('[local] runtime launch skipped: returning generated artifact only');
-        nextActions.push(`Run the generated workflow locally: npx --no-install agent-relay run ${artifact.artifactPath}`);
+        nextActions.push(`Run the generated workflow locally: npx --no-install agent-relay run ${runTarget}`);
         nextActions.push('Inspect the generated workflow artifact and choose whether to run it locally.');
         return {
           ok: true,
@@ -683,10 +689,16 @@ function stageResponse(
 function resolveStageMode(
   requestStageMode: LocalStageMode | undefined,
   returnGeneratedArtifactOnly: boolean | undefined,
-): LocalStageMode | undefined {
+): 'generate' | 'run' {
   if (returnGeneratedArtifactOnly === true) return 'generate';
-  if (returnGeneratedArtifactOnly === false) return requestStageMode;
-  return requestStageMode;
+  const normalized = normalizeStageMode(requestStageMode);
+  if (returnGeneratedArtifactOnly === false) return normalized ?? 'run';
+  return normalized ?? 'generate';
+}
+
+function normalizeStageMode(stageMode: LocalStageMode | undefined): 'generate' | 'run' | undefined {
+  if (stageMode === 'generate-and-run') return 'run';
+  return stageMode;
 }
 
 function createGenerationStage(
@@ -891,6 +903,26 @@ function createBlockerExecutionStage(params: {
       steps_total: 1,
     },
     blocker: params.blocker,
+    evidence: {
+      outcome_summary: params.blocker.message,
+      failed_step: { id: 'runtime-precheck', name: 'Local runtime precheck' },
+      exit_code: null,
+      logs: {
+        tail: [params.blocker.message],
+        truncated: false,
+      },
+      side_effects: {
+        files_written: [],
+        commands_invoked: [command],
+      },
+      assertions: [
+        {
+          name: 'runtime_precheck',
+          status: 'fail',
+          detail: params.blocker.message,
+        },
+      ],
+    },
   };
 }
 
@@ -1026,6 +1058,18 @@ function classifyCoordinatorBlocker(
     });
   }
 
+  if (/(?:working tree|workdir|worktree|git status).*(?:dirty|uncommitted|modified)|(?:dirty|uncommitted).*(?:working tree|workdir|worktree)/i.test(combined)) {
+    return blocker({
+      code: 'WORKDIR_DIRTY',
+      category: 'resource',
+      detectedDuring: 'launch',
+      message: `Runtime requires a clean working directory: ${signal}.`,
+      missing: ['clean working directory'],
+      found: [`cwd=${result.cwd}`],
+      steps: ['Review local changes with git status --short.', 'Commit, stash, or move unrelated changes before rerunning.', command],
+    });
+  }
+
   if (/(?:econnrefused|enotfound|network|timeout|timed out|dns)/i.test(combined)) {
     return blocker({
       code: 'NETWORK_UNREACHABLE',
@@ -1082,12 +1126,12 @@ async function writeRuntimeLogs(result: CoordinatorResult): Promise<LocalExecuti
     return {
       stdout_path: stdoutPath,
       stderr_path: stderrPath,
-      ...(result.status === 'passed' ? {} : { tail: [...result.stdoutSnippet.lines, ...result.stderrSnippet.lines] }),
+      tail: [...result.stdoutSnippet.lines, ...result.stderrSnippet.lines],
       truncated: result.stdoutSnippet.truncated || result.stderrSnippet.truncated,
     };
   } catch {
     return {
-      ...(result.status === 'passed' ? {} : { tail: [...result.stdoutSnippet.lines, ...result.stderrSnippet.lines] }),
+      tail: [...result.stdoutSnippet.lines, ...result.stderrSnippet.lines],
       truncated: result.stdoutSnippet.truncated || result.stderrSnippet.truncated,
     };
   }

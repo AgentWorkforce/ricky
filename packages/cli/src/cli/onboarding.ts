@@ -203,8 +203,8 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
       '    npm start -- --mode local --spec-file ./path/to/spec.md',
       '    printf "%s\\n" "<spec text>" | npm start -- --mode local --stdin',
       '  If a --run execution is blocked, Ricky surfaces a classified blocker',
-      '  (MISSING_BINARY, MISSING_ENV_VAR, INVALID_ARTIFACT, CREDENTIALS_REJECTED, NETWORK_UNREACHABLE,',
-      '   UNSUPPORTED_RUNTIME) with concrete recovery steps. Run those steps, then retry --run.',
+      '  (MISSING_BINARY, MISSING_ENV_VAR, INVALID_ARTIFACT, CREDENTIALS_REJECTED, WORKDIR_DIRTY,',
+      '   NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME) with concrete recovery steps. Run those steps, then retry --run.',
       '  If Cloud setup is blocked, continue in local mode: npm start -- --mode local',
     ].join('\n');
   }
@@ -214,7 +214,7 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
     `  Ricky can continue, but something is blocked: ${blockedReason}`,
     '  fix the local runtime issue or continue with Cloud setup instead.',
     '  Use the classified blocker steps Ricky printed (MISSING_BINARY, MISSING_ENV_VAR,',
-    '  INVALID_ARTIFACT, CREDENTIALS_REJECTED, NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME),',
+    '  INVALID_ARTIFACT, CREDENTIALS_REJECTED, WORKDIR_DIRTY, NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME),',
     '  or run: npx agent-relay cloud connect google.',
   ].join('\n');
 }

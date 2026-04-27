@@ -143,10 +143,7 @@ async function executeLocalPath(
 
   if (!localResult.ok) {
     // Attempt runtime diagnosis on each log/warning signal
-    const signals: DiagnosticSignal[] = [
-      ...localResult.logs.map((msg) => ({ source: 'local-runtime', message: msg })),
-      ...localResult.warnings.map((msg) => ({ source: 'local-runtime', message: msg })),
-    ];
+    const signals = collectLocalDiagnosticSignals(localResult);
 
     const diagnoseFn = deps.diagnoseFn ?? diagnose;
     for (const signal of signals) {
@@ -168,6 +165,38 @@ async function executeLocalPath(
   }
 
   return { localResult, diagnoses, guidance, awaitingInput: false };
+}
+
+function collectLocalDiagnosticSignals(localResult: LocalResponse): DiagnosticSignal[] {
+  const signals: DiagnosticSignal[] = [
+    ...localResult.logs.map((msg) => ({ source: 'local-runtime', message: msg })),
+    ...localResult.warnings.map((msg) => ({ source: 'local-runtime', message: msg })),
+  ];
+
+  const execution = localResult.execution;
+  if (!execution) return signals;
+
+  if (execution.blocker) {
+    signals.push({
+      source: 'local-blocker',
+      message: execution.blocker.message,
+      meta: {
+        code: execution.blocker.code,
+        category: execution.blocker.category,
+        detectedDuring: execution.blocker.detected_during,
+      },
+    });
+  }
+
+  if (execution.evidence?.outcome_summary) {
+    signals.push({ source: 'local-evidence', message: execution.evidence.outcome_summary });
+  }
+
+  for (const line of execution.evidence?.logs.tail ?? []) {
+    signals.push({ source: 'local-runtime-tail', message: line });
+  }
+
+  return signals;
 }
 
 function resolveLocalInvocationRoot(deps: InteractiveCliDeps): string {

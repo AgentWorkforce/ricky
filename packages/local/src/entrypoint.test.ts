@@ -427,6 +427,16 @@ describe('normalizeRequest', () => {
     expect(result.mode).toBe('both');
   });
 
+  it('accepts generate-and-run as a stageMode alias for run behavior', async () => {
+    const result = await normalizeRequest({
+      source: 'cli',
+      spec: 'generate a local workflow',
+      stageMode: 'generate-and-run',
+    });
+
+    expect(result.stageMode).toBe('generate-and-run');
+  });
+
   it('defaults mode to local when not specified', async () => {
     const sources: RawHandoff[] = [
       { source: 'free-form', spec: 'x' },
@@ -698,6 +708,7 @@ describe('runLocal', () => {
         handoff: {
           source: 'cli',
           spec: 'run workflows/wave4-local-byoh/cli-ready.workflow.ts',
+          stageMode: 'run',
           cliMetadata: { argv: ['ricky', 'run', '--local'] },
         },
         expectedSource: 'cli',
@@ -708,6 +719,7 @@ describe('runLocal', () => {
         handoff: {
           source: 'mcp',
           toolName: 'ricky.runLocal',
+          stageMode: 'run',
           arguments: {
             goal: 'run local workflow',
             workflowFile: 'workflows/wave4-local-byoh/mcp-ready.workflow.ts',
@@ -721,6 +733,7 @@ describe('runLocal', () => {
         name: 'claude',
         handoff: {
           source: 'claude',
+          stageMode: 'run',
           spec: {
             description: 'run local workflow',
             workflowFile: 'workflows/wave4-local-byoh/claude-ready.workflow.ts',
@@ -802,6 +815,7 @@ describe('runLocal', () => {
         source: 'workflow-artifact',
         spec: 'import { workflow } from "@agent-relay/sdk/workflows";',
         mode: 'local',
+        stageMode: 'run',
         specPath: 'workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
         metadata: { caller: 'direct-local' },
       },
@@ -968,12 +982,13 @@ describe('runLocal', () => {
 
   it('runs both-mode handoffs through the local entrypoint while preserving optional Cloud promotion', async () => {
     const cases: RawHandoff[] = [
-      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts', mode: 'both' },
+      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts', mode: 'both', stageMode: 'run' },
       {
         source: 'mcp',
         arguments: {
           goal: 'generate a local workflow for packages/local/src/entrypoint.ts',
           executionPreference: 'auto',
+          stageMode: 'run',
         },
       },
       {
@@ -981,6 +996,7 @@ describe('runLocal', () => {
         spec: {
           request: 'generate a local workflow for packages/local/src/entrypoint.ts',
           executionPreference: 'both',
+          stageMode: 'run',
         },
       },
     ];
@@ -1075,7 +1091,7 @@ describe('runLocal', () => {
   it('defaults BYOH generation requests to the injected local runtime without Cloud fallback', async () => {
     const localExecutor = memoryLocalExecutorOptions({ stdout: ['local run completed'] });
     const result = await runLocal(
-      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts' },
+      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts', stageMode: 'run' },
       { localExecutor },
     );
 
@@ -1125,6 +1141,21 @@ describe('runLocal', () => {
     );
     expect(result.nextActions[0]).toMatch(/^Run the generated workflow locally: npx --no-install agent-relay run workflows\/generated\/.+\.ts$/);
     expect(result.nextActions).toContain('Inspect the generated workflow artifact and choose whether to run it locally.');
+  });
+
+  it('defaults stage mode to generation-only when no run behavior is requested', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch by default'] });
+    const result = await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts' },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.generation).toMatchObject({ stage: 'generate', status: 'ok' });
+    expect(result.execution).toBeUndefined();
+    expect(localExecutor.writes).toHaveLength(1);
+    expect(localExecutor.runner.invocations).toHaveLength(0);
   });
 
   it('emits the generation stage contract when generation mode is explicit', async () => {
@@ -1202,6 +1233,31 @@ describe('runLocal', () => {
       },
     });
     expect(result.execution?.blocker).toBeUndefined();
+    expect(localExecutor.runner.invocations).toHaveLength(1);
+  });
+
+  it('treats generate-and-run stage mode as explicit run behavior', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['alias run completed'] });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+        stageMode: 'generate-and-run',
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.execution).toMatchObject({
+      stage: 'execute',
+      status: 'success',
+      evidence: {
+        logs: {
+          tail: ['alias run completed'],
+          truncated: false,
+        },
+      },
+    });
     expect(localExecutor.runner.invocations).toHaveLength(1);
   });
 
@@ -1456,6 +1512,7 @@ describe('runLocal', () => {
         name: 'cli',
         handoff: {
           source: 'cli',
+          stageMode: 'run',
           spec: {
             description: 'generate a local workflow for packages/local/src/entrypoint.ts',
             workflowFile: 'workflows/local-cli.workflow.ts',
@@ -1469,6 +1526,7 @@ describe('runLocal', () => {
         handoff: {
           source: 'mcp',
           toolName: 'ricky.generate',
+          stageMode: 'run',
           arguments: {
             prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
             workflowFile: 'workflows/local-mcp.workflow.ts',
@@ -1481,6 +1539,7 @@ describe('runLocal', () => {
         name: 'claude',
         handoff: {
           source: 'claude',
+          stageMode: 'run',
           spec: {
             request: 'generate a local workflow for packages/local/src/entrypoint.ts',
             workflowFile: 'workflows/local-claude.workflow.ts',
@@ -1667,6 +1726,7 @@ describe('runLocal', () => {
           description: 'run the local workflow artifact',
           targetRepo: 'ricky',
           workflowFile,
+          stageMode: 'run',
         },
       },
       {
@@ -1733,7 +1793,7 @@ describe('runLocal', () => {
   it('runs intake, generation, artifact writing, and local runtime with injectable adapters', async () => {
     const localExecutor = memoryLocalExecutorOptions();
     const result = await runLocal(
-      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },
       { localExecutor },
     );
 
@@ -1756,6 +1816,7 @@ describe('runLocal', () => {
         arguments: {
           goal: 'generate a local BYOH workflow for packages/local/src/entrypoint.ts',
           executionPreference: 'local',
+          stageMode: 'run',
         },
         requestId: 'req-generated-local-contract',
       },
@@ -1818,7 +1879,7 @@ describe('runLocal', () => {
   it('coordinates an existing local workflow artifact without generating a replacement', async () => {
     const localExecutor = memoryLocalExecutorOptions();
     const result = await runLocal(
-      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts' },
+      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts', stageMode: 'run' },
       { localExecutor },
     );
 
@@ -1839,6 +1900,7 @@ describe('runLocal', () => {
         source: 'cli',
         spec: 'run this local workflow',
         specFile: workflowFile,
+        stageMode: 'run',
         cliMetadata: { argv: ['ricky', 'run', workflowFile] },
       },
       { localExecutor },
@@ -1867,7 +1929,7 @@ describe('runLocal', () => {
       stderr: ['local warning from runtime'],
     });
     const result = await runLocal(
-      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts' },
+      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts', stageMode: 'run' },
       { localExecutor },
     );
 
@@ -2005,6 +2067,7 @@ describe('runLocal', () => {
           goal: 'run the local workflow artifact',
           targetRepo: 'ricky',
           workflowFile,
+          stageMode: 'run',
         },
         mcpMetadata: { toolCallId: 'tool-contract' },
         requestId: 'req-contract',
@@ -2025,7 +2088,7 @@ describe('runLocal', () => {
       },
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: true,
       artifacts: [{ path: workflowFile, type: 'text/typescript' }],
       logs: expect.arrayContaining([
@@ -2057,7 +2120,7 @@ describe('runLocal', () => {
   it('surfaces injected local coordinator environment failures without Cloud fallback', async () => {
     const launches: RunRequest[] = [];
     const result = await runLocal(
-      { source: 'cli', spec: 'run workflows/wave4-local-byoh/missing-runtime.workflow.ts' },
+      { source: 'cli', spec: 'run workflows/wave4-local-byoh/missing-runtime.workflow.ts', stageMode: 'run' },
       {
         localExecutor: {
           cwd: '/workspace/ricky',
@@ -2110,6 +2173,7 @@ describe('runLocal', () => {
         source: 'cli',
         spec: 'generate a local workflow for src/local/entrypoint.ts with tests',
         mode: 'both',
+        stageMode: 'run',
       },
       { localExecutor: memoryLocalExecutorOptions() },
     );
@@ -2274,7 +2338,7 @@ describe('runLocal', () => {
   it('uses the local executor path by default for BYOH requests without Cloud warnings', async () => {
     const localExecutor = memoryLocalExecutorOptions();
     const result = await runLocal(
-      { source: 'mcp', arguments: { goal: 'generate a local workflow for packages/local/src/entrypoint.ts' } },
+      { source: 'mcp', stageMode: 'run', arguments: { goal: 'generate a local workflow for packages/local/src/entrypoint.ts' } },
       { localExecutor },
     );
 
@@ -2287,7 +2351,7 @@ describe('runLocal', () => {
   it('passes configured cwd to artifact writer so artifacts are placed in execution directory', async () => {
     const localExecutor = memoryLocalExecutorOptions();
     await runLocal(
-      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },
       { localExecutor },
     );
 
@@ -2298,7 +2362,7 @@ describe('runLocal', () => {
   it('uses DEFAULT_LOCAL_ROUTE with npx --no-install by default', async () => {
     const localExecutor = memoryLocalExecutorOptions();
     await runLocal(
-      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },
       { localExecutor },
     );
 
@@ -2315,7 +2379,7 @@ describe('runLocal', () => {
     const localExecutor = memoryLocalExecutorOptions();
     localExecutor.route = { command: 'custom-relay', baseArgs: ['execute'] };
     await runLocal(
-      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },
       { localExecutor },
     );
 
@@ -2333,7 +2397,7 @@ describe('runLocal', () => {
 
   it('returns runtime blockers instead of hiding local execution failures', async () => {
     const result = await runLocal(
-      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+      { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },
       {
         localExecutor: memoryLocalExecutorOptions({
           exitCode: 127,
@@ -2372,7 +2436,7 @@ describe('runLocal', () => {
   it('surfaces local runtime launch environment warnings without rerouting through Cloud', async () => {
     const runner = throwingCommandRunner('spawn agent-relay ENOENT');
     const result = await runLocal(
-      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts' },
+      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts', stageMode: 'run' },
       {
         localExecutor: {
           cwd: '/repo',

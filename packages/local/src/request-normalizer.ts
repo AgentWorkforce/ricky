@@ -13,7 +13,7 @@
 export type HandoffSource = 'free-form' | 'structured' | 'cli' | 'mcp' | 'claude' | 'workflow-artifact';
 export type LocalExecutionMode = 'local' | 'cloud' | 'both';
 export type LocalExecutionPreference = LocalExecutionMode | 'auto';
-export type LocalStageMode = 'generate' | 'run';
+export type LocalStageMode = 'generate' | 'run' | 'generate-and-run';
 export type StructuredSpec = Record<string, unknown>;
 export type SpecInput = string | StructuredSpec;
 
@@ -283,7 +283,7 @@ function executionModeFor(raw: BaseHandoff, spec?: SpecInput): LocalExecutionMod
 function stageModeFor(raw: BaseHandoff, spec?: SpecInput): LocalStageMode | undefined {
   if (raw.stageMode) return raw.stageMode;
   if (raw.behavior) return raw.behavior;
-  if (raw.mode === 'generate' || raw.mode === 'run') return raw.mode;
+  if (raw.mode === 'generate' || raw.mode === 'run' || raw.mode === 'generate-and-run') return raw.mode;
   return stageModeFromStructuredSpec(spec);
 }
 
@@ -301,7 +301,7 @@ function stageModeFromStructuredSpec(spec?: SpecInput): LocalStageMode | undefin
   if (!spec || typeof spec === 'string') return undefined;
 
   const value = spec.stageMode ?? spec.stage_mode ?? spec.behavior ?? spec.localBehavior ?? spec.local_behavior ?? spec.mode;
-  return value === 'generate' || value === 'run' ? value : undefined;
+  return value === 'generate' || value === 'run' || value === 'generate-and-run' ? value : undefined;
 }
 
 function normalizeExecutionPreference(preference: LocalExecutionPreference): LocalExecutionMode {

@@ -539,7 +539,7 @@ export function getLocalProofCases(): LocalProofCase[] {
       async evaluate() {
         const localExecutor = memoryLocalExecutorOptions();
         const response = await runLocal(
-          { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+          { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },
           { localExecutor },
         );
 
@@ -584,7 +584,7 @@ export function getLocalProofCases(): LocalProofCase[] {
         // behind an injectable adapter — prove that adapters are what get called.
         const localExecutor = memoryLocalExecutorOptions();
         const realPathResponse = await runLocal(
-          { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests' },
+          { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },
           { localExecutor },
         );
 
