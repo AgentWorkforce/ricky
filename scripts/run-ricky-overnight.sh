@@ -111,59 +111,36 @@ EOF
       ;;
     flight-safe)
       cat > "$QUEUE_FILE" <<'EOF'
-workflows/wave0-foundation/03-shared-models-and-config.ts
-workflows/wave1-runtime/01-local-run-coordinator.ts
-workflows/wave1-runtime/02-workflow-evidence-model.ts
-workflows/wave1-runtime/03-workflow-failure-classification.ts
-workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
-workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
-workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts
-workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts
-workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts
-workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts
-workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts
-workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts
-workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts
-workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts
-workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts
-workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
-workflows/wave4-local-byoh/09-implement-cli-command-surface.ts
-workflows/wave5-scale-and-ops/01-workflow-health-analytics.ts
-workflows/wave5-scale-and-ops/02-next-wave-backlog-and-proof-plan.ts
-workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts
-workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts
+workflows/wave6-proof/01-close-first-wave-signoff-and-blockers.ts
+workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance.ts
+workflows/wave7-cli-proof/02-prove-cli-onboarding-command-journeys.ts
+workflows/wave7-local-proof/03-prove-local-byoh-spec-to-artifact-loop.ts
+workflows/wave7-runtime-proof/05-prove-runtime-execution-outcome-loop.ts
+workflows/wave7-recovery/06-implement-environment-recovery-unblockers.ts
+workflows/wave7-analytics-proof/07-prove-proof-loop-analytics-feedback.ts
 EOF
       ;;
     expanded|*)
       cat > "$QUEUE_FILE" <<'EOF'
-workflows/wave4-local-byoh/09-implement-cli-command-surface.ts
-workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
-workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts
-workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts
-workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts
-workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts
+workflows/wave5-scale-and-ops/05-split-ricky-into-workspace-packages.ts
+workflows/wave6-proof/01-close-first-wave-signoff-and-blockers.ts
+workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance.ts
+workflows/wave7-cli-proof/02-prove-cli-onboarding-command-journeys.ts
+workflows/wave7-local-proof/03-prove-local-byoh-spec-to-artifact-loop.ts
+workflows/wave7-runtime-proof/05-prove-runtime-execution-outcome-loop.ts
+workflows/wave7-recovery/06-implement-environment-recovery-unblockers.ts
+workflows/wave7-analytics-proof/07-prove-proof-loop-analytics-feedback.ts
+workflows/wave0-foundation/04-initial-architecture-docs.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
 workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
-workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts
-workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts
-workflows/wave0-foundation/03-shared-models-and-config.ts
-workflows/wave0-foundation/04-initial-architecture-docs.ts
-workflows/wave1-runtime/01-local-run-coordinator.ts
-workflows/wave1-runtime/02-workflow-evidence-model.ts
-workflows/wave1-runtime/03-workflow-failure-classification.ts
-workflows/wave2-product/01-workflow-spec-intake.ts
 workflows/wave2-product/02-workflow-generation-pipeline.ts
-workflows/wave2-product/03-workflow-debugger-specialist.ts
-workflows/wave2-product/04-workflow-validator-specialist.ts
 workflows/wave3-cloud-api/01-cloud-connect-and-auth.ts
-workflows/wave3-cloud-api/02-generate-endpoint.ts
+workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts
+workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts
 workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts
-workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts
-workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts
 workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts
-workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts
-workflows/wave5-scale-and-ops/01-workflow-health-analytics.ts
-workflows/wave5-scale-and-ops/02-next-wave-backlog-and-proof-plan.ts
+workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts
+workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
 EOF
       ;;
   esac
@@ -210,7 +187,14 @@ log() {
 workflow_has_stale_package_targets() {
   local workflow_path="$1"
 
-  grep -Eq "packages/cli/packages/cli/|(^|[^[:alnum:]_])src/(shared|runtime|product|cloud|local|cli)/" "$workflow_path"
+  grep -Eq "packages/cli/packages/cli/|(^|[^[:alnum:]_/])src/(shared|runtime|product|cloud|local|cli)/" "$workflow_path"
+}
+
+artifact_signoff_has_marker() {
+  local signoff_path="$1"
+  local marker="$2"
+
+  [[ -f "$signoff_path" ]] && grep -q "$marker" "$signoff_path"
 }
 
 workflow_is_already_satisfied() {
@@ -260,6 +244,45 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:test/package-proof/package-layout-proof.test.ts 2>/dev/null \
         && npm run typecheck >/dev/null \
         && npm test >/dev/null
+      ;;
+    workflows/wave5-scale-and-ops/05-split-ricky-into-workspace-packages.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/per-workflow/wave5-scale-and-ops__05-split-ricky-into-workspace-packages/signoff.md \
+        'SIGNED_OFF'
+      ;;
+    workflows/wave6-proof/01-close-first-wave-signoff-and-blockers.ts)
+      test -f .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/closure-summary.md \
+        && grep -Eq 'Result:\*\* 16/16 SIGNED_OFF, 0 BLOCKED|\*\*Result:\*\* 16/16 SIGNED_OFF, 0 BLOCKED' .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/closure-summary.md
+      ;;
+    workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance/signoff.md \
+        'CLI_UX_CONFORMANCE_COMPLETE'
+      ;;
+    workflows/wave7-cli-proof/02-prove-cli-onboarding-command-journeys.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave7-cli-proof/prove-cli-onboarding-command-journeys/signoff.md \
+        'CLI_COMMAND_JOURNEY_PROOF_COMPLETE'
+      ;;
+    workflows/wave7-local-proof/03-prove-local-byoh-spec-to-artifact-loop.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave7-local-proof/prove-local-byoh-spec-to-artifact-loop/signoff.md \
+        'LOCAL_SPEC_LOOP_PROOF_COMPLETE'
+      ;;
+    workflows/wave7-runtime-proof/05-prove-runtime-execution-outcome-loop.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave7-runtime-proof/prove-runtime-execution-outcome-loop/signoff.md \
+        'RUNTIME_OUTCOME_PROOF_COMPLETE'
+      ;;
+    workflows/wave7-recovery/06-implement-environment-recovery-unblockers.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave7-recovery/implement-environment-recovery-unblockers/signoff.md \
+        'RECOVERY_UNBLOCKERS_COMPLETE'
+      ;;
+    workflows/wave7-analytics-proof/07-prove-proof-loop-analytics-feedback.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave7-analytics-proof/prove-proof-loop-analytics-feedback/signoff.md \
+        'ANALYTICS_FEEDBACK_COMPLETE'
       ;;
     *)
       return 1
