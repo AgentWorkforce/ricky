@@ -104,7 +104,12 @@ export interface LocalInvocationRequest {
   structuredSpec?: StructuredSpec;
   /** Where the handoff originated. */
   source: HandoffSource;
-  /** Execution mode — defaults to 'local' for BYOH. */
+  /**
+   * Execution mode — defaults to 'local' for BYOH.
+   * Callers that pass `executionPreference` on the handoff input get it
+   * resolved here (see `executionModeFor`), so downstream code only needs
+   * to inspect `mode`.
+   */
   mode: LocalExecutionMode;
   /** Optional file path when the spec came from a file or artifact. */
   specPath?: string;
