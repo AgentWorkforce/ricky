@@ -363,8 +363,10 @@ restore_checkpoint() {
 
 write_summary() {
   local status="$1"
-  local queue_total
+  local queue_total elapsed_seconds elapsed_hours
   queue_total="$(queue_count)"
+  elapsed_seconds="$(( $(date +%s) - START_EPOCH ))"
+  elapsed_hours="$(awk -v seconds="$elapsed_seconds" 'BEGIN { printf "%.2f", seconds / 3600 }')"
   cat > "$SUMMARY_FILE" <<EOF
 # Ricky overnight run
 
@@ -372,7 +374,9 @@ write_summary() {
 - reason: ${STATUS_REASON:-n/a}
 - started: $(date -r "$START_EPOCH" '+%Y-%m-%d %H:%M:%S %Z')
 - current: $(date '+%Y-%m-%d %H:%M:%S %Z')
-- duration_hours: $DURATION_HOURS
+- duration_hours: $elapsed_hours
+- elapsed_seconds: $elapsed_seconds
+- configured_duration_hours: $DURATION_HOURS
 - passes: $PASSES
 - queue_mode: $QUEUE_MODE
 - max_workflows_per_invocation: $MAX_WORKFLOWS_PER_INVOCATION
