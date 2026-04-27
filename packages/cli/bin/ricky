@@ -7,9 +7,21 @@ resolve_real_path() {
     return
   fi
 
-  if command -v readlink >/dev/null 2>&1; then
-    readlink -f "$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"
     return
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    node -e 'const fs = require("node:fs"); const path = require("node:path"); console.log(fs.realpathSync(path.resolve(process.argv[1])));' "$1"
+    return
+  fi
+
+  if command -v readlink >/dev/null 2>&1; then
+    if readlink -f "$1" >/dev/null 2>&1; then
+      readlink -f "$1"
+      return
+    fi
   fi
 
   echo "$1"

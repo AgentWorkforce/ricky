@@ -367,6 +367,42 @@ describe('cliMain', () => {
     );
   });
 
+  it('prefers INIT_CWD over the CLI package root when capturing the caller repo root', async () => {
+    const { join } = await import('node:path');
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+    const originalInitCwd = process.env.INIT_CWD;
+
+    process.env.INIT_CWD = '/caller-repo-from-init-cwd';
+
+    try {
+      const packageCwd = process.cwd().endsWith('/packages/cli')
+        ? process.cwd()
+        : join(process.cwd(), 'packages/cli');
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec', 'build a workflow'],
+        cwd: packageCwd,
+        runInteractive: runner,
+      });
+    } finally {
+      if (originalInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = originalInitCwd;
+      }
+    }
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/caller-repo-from-init-cwd',
+        handoff: expect.objectContaining({
+          source: 'cli',
+          invocationRoot: '/caller-repo-from-init-cwd',
+        }),
+      }),
+    );
+  });
+
   it('runs npm start -- --mode local with an inline spec through local execution', async () => {
     const result = await cliMain({
       argv: ['--mode', 'local', '--spec', 'build a workflow'],

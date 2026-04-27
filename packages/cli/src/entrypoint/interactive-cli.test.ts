@@ -797,6 +797,39 @@ describe('runInteractiveCli', () => {
       }
     });
 
+    it('prefers handoff.invocationRoot over deps.cwd for local artifact generation', async () => {
+      const { mkdtemp, rm, access } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const tempRepo = await mkdtemp(join(tmpdir(), 'ricky-invocationroot-wins-'));
+      const tempPackageCwd = await mkdtemp(join(tmpdir(), 'ricky-package-cwd-'));
+
+      try {
+        const result = await runInteractiveCli({
+          onboard: vi.fn().mockResolvedValue(onboarding('local')),
+          cwd: tempPackageCwd,
+          handoff: {
+            source: 'cli',
+            spec: 'generate a workflow for invocationRoot precedence test',
+            mode: 'local',
+            invocationRoot: tempRepo,
+          },
+        });
+
+        expect(result.ok).toBe(true);
+        const artifactPath = result.localResult!.artifacts[0].path;
+
+        await expect(access(join(tempRepo, artifactPath))).resolves.toBeUndefined();
+        await expect(access(join(tempPackageCwd, artifactPath))).rejects.toThrow();
+        expect(result.localResult?.nextActions).toContain(
+          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+        );
+      } finally {
+        await rm(tempRepo, { recursive: true, force: true });
+        await rm(tempPackageCwd, { recursive: true, force: true });
+      }
+    });
+
     it('no artifact appears in packages/cli/workflows/generated when using deterministic temp dir', async () => {
       const { mkdtemp, rm, access } = await import('node:fs/promises');
       const { tmpdir } = await import('node:os');

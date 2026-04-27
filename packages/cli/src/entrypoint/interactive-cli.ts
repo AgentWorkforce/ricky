@@ -28,6 +28,7 @@ import { toRickyMode } from '../cli/mode-selector.js';
 import { handleCloudGenerate } from '@ricky/cloud/api/generate-endpoint.js';
 import { runLocal } from '@ricky/local/entrypoint.js';
 import { diagnose } from '@ricky/runtime/diagnostics/failure-diagnosis.js';
+import { resolve } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Interactive CLI result contract
@@ -132,7 +133,7 @@ async function executeLocalPath(
     localExecutor: deps.localExecutor
       ? undefined
       : {
-          cwd: deps.cwd ?? deps.handoff.invocationRoot ?? process.env.INIT_CWD ?? process.cwd(),
+          cwd: resolveLocalInvocationRoot(deps),
           returnGeneratedArtifactOnly: deps.handoff.stageMode !== 'run',
         },
   });
@@ -167,6 +168,13 @@ async function executeLocalPath(
   }
 
   return { localResult, diagnoses, guidance, awaitingInput: false };
+}
+
+function resolveLocalInvocationRoot(deps: InteractiveCliDeps): string {
+  if (deps.handoff?.invocationRoot) return resolve(deps.handoff.invocationRoot);
+  if (deps.cwd) return resolve(deps.cwd);
+  if (process.env.INIT_CWD) return resolve(process.env.INIT_CWD);
+  return resolve(process.cwd());
 }
 
 // ---------------------------------------------------------------------------

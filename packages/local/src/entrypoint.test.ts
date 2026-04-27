@@ -1291,7 +1291,7 @@ describe('runLocal', () => {
       );
 
       expect(result.ok).toBe(false);
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(2);
       expect(result.generation).toMatchObject({ stage: 'generate', status: 'ok' });
       expect(result.execution).toMatchObject({
         stage: 'execute',

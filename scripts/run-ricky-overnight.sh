@@ -118,6 +118,11 @@ workflows/wave7-local-proof/03-prove-local-byoh-spec-to-artifact-loop.ts
 workflows/wave7-runtime-proof/05-prove-runtime-execution-outcome-loop.ts
 workflows/wave7-recovery/06-implement-environment-recovery-unblockers.ts
 workflows/wave7-analytics-proof/07-prove-proof-loop-analytics-feedback.ts
+workflows/wave8-github-issues/01-fix-cli-artifact-path-and-caller-root.ts
+workflows/wave8-github-issues/02-prove-external-repo-cli-generation.ts
+workflows/wave8-github-issues/03-close-local-execution-outcome-loop.ts
+workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist.ts
+workflows/wave8-github-issues/05-prove-skill-embedding-boundary.ts
 EOF
       ;;
     expanded|*)
@@ -130,6 +135,11 @@ workflows/wave7-local-proof/03-prove-local-byoh-spec-to-artifact-loop.ts
 workflows/wave7-runtime-proof/05-prove-runtime-execution-outcome-loop.ts
 workflows/wave7-recovery/06-implement-environment-recovery-unblockers.ts
 workflows/wave7-analytics-proof/07-prove-proof-loop-analytics-feedback.ts
+workflows/wave8-github-issues/01-fix-cli-artifact-path-and-caller-root.ts
+workflows/wave8-github-issues/02-prove-external-repo-cli-generation.ts
+workflows/wave8-github-issues/03-close-local-execution-outcome-loop.ts
+workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist.ts
+workflows/wave8-github-issues/05-prove-skill-embedding-boundary.ts
 workflows/wave0-foundation/04-initial-architecture-docs.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
 workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts

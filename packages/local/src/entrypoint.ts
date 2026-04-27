@@ -445,7 +445,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           logs,
           warnings,
           nextActions,
-          ...stageResponse(includeStageContract, generationStage, execution, 1),
+          ...stageResponse(includeStageContract, generationStage, execution, execution.blocker ? 2 : 1),
         };
       }
 

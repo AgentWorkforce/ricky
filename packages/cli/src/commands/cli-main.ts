@@ -15,8 +15,8 @@ import type { InteractiveCliDeps, InteractiveCliResult } from '../entrypoint/int
 import type { RickyMode } from '../cli/mode-selector.js';
 import type { RawHandoff } from '@ricky/local/request-normalizer.js';
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isRickyMode } from '../cli/mode-selector.js';
 import { runInteractiveCli } from '../entrypoint/interactive-cli.js';
 
@@ -292,11 +292,19 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
 }
 
 function resolveInvocationRoot(explicitCwd?: string): string {
-  const processCwd = process.cwd();
-  if (process.env.INIT_CWD && (!explicitCwd || explicitCwd === processCwd)) {
-    return process.env.INIT_CWD;
+  const processCwd = resolve(process.cwd());
+  const explicit = explicitCwd ? resolve(explicitCwd) : undefined;
+  const initCwd = process.env.INIT_CWD ? resolve(process.env.INIT_CWD) : undefined;
+
+  if (initCwd && (!explicit || explicit === processCwd || explicit === cliPackageRoot())) {
+    return initCwd;
   }
-  return explicitCwd ?? processCwd;
+
+  return explicit ?? initCwd ?? processCwd;
+}
+
+function cliPackageRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 }
 
 function resolveSpecFilePath(specFile: string, invocationRoot: string): string {
@@ -461,7 +469,12 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     }
   }
 
-  if (!localResult.generation) {
+  const shouldRenderNextActions =
+    !localResult.generation ||
+    localResult.generation.status !== 'ok' ||
+    localResult.execution?.status === 'blocker';
+
+  if (shouldRenderNextActions) {
     for (const action of localResult.nextActions) {
       lines.push(`  Next: ${action}`);
     }
