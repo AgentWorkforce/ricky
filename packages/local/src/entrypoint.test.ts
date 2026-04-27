@@ -609,6 +609,33 @@ describe('runLocal', () => {
     expect(executor.calls[0].mode).toBe('local');
   });
 
+  it('defaults BYOH generation requests to the injected local runtime without Cloud fallback', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['local run completed'] });
+    const result = await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts' },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(localExecutor.writes).toHaveLength(1);
+    expect(localExecutor.runner.invocations).toHaveLength(1);
+    expect(localExecutor.runner.invocations[0]).toMatchObject({
+      command: DEFAULT_LOCAL_ROUTE.command,
+      cwd: '/repo',
+    });
+    expect(localExecutor.runner.invocations[0].args.slice(0, 3)).toEqual(DEFAULT_LOCAL_ROUTE.baseArgs);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: generate',
+        '[local] runtime status: passed',
+        '[stdout] local run completed',
+      ]),
+    );
+    expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
+  });
+
   it('returns artifacts, logs, warnings, and nextActions in the response', async () => {
     const executor = mockExecutor({
       artifacts: [{ path: 'out/wf.ts', type: 'text/typescript', content: 'code' }],
