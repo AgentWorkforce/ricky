@@ -941,6 +941,204 @@ describe('runLocal', () => {
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
   });
 
+  it('keeps CLI, MCP, and Claude generation handoffs on the explicit local/BYOH path', async () => {
+    const cases: Array<{
+      name: string;
+      handoff: RawHandoff;
+      expectedSource: LocalInvocationRequest['source'];
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            workflowFile: 'workflows/local-cli.workflow.ts',
+          },
+          cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+        },
+        expectedSource: 'cli',
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            workflowFile: 'workflows/local-mcp.workflow.ts',
+          },
+          mcpMetadata: { toolCallId: 'tool-local-generation' },
+        },
+        expectedSource: 'mcp',
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            workflowFile: 'workflows/local-claude.workflow.ts',
+          },
+          conversationId: 'conversation-local-generation',
+          turnId: 'turn-local-generation',
+        },
+        expectedSource: 'claude',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const writes: Array<{ path: string; content: string; cwd: string }> = [];
+      const launches: RunRequest[] = [];
+      const result = await runLocal(testCase.handoff, {
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          artifactWriter: {
+            async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+              writes.push({ path, content, cwd });
+            },
+          },
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, { stdout: [`${testCase.name} local generation ran`] });
+            },
+          },
+        },
+      });
+
+      expect(result.ok, testCase.name).toBe(true);
+      expect(writes, testCase.name).toHaveLength(1);
+      expect(writes[0].cwd, testCase.name).toBe('/workspace/ricky');
+      expect(writes[0].content, testCase.name).toContain('workflow(');
+      expect(launches, testCase.name).toHaveLength(1);
+      expect(launches[0], testCase.name).toMatchObject({
+        cwd: '/workspace/ricky',
+        route: DEFAULT_LOCAL_ROUTE,
+        metadata: {
+          source: testCase.expectedSource,
+          route: 'generate',
+        },
+      });
+      expect(result.artifacts, testCase.name).toEqual([
+        {
+          path: writes[0].path,
+          type: 'text/typescript',
+          content: writes[0].content,
+        },
+      ]);
+      expect(result.logs, testCase.name).toEqual(
+        expect.arrayContaining([
+          `[local] received spec from ${testCase.expectedSource}`,
+          '[local] mode: local',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime status: passed',
+          `[stdout] ${testCase.name} local generation ran`,
+        ]),
+      );
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), testCase.name).toBe(false);
+    }
+  });
+
+  it('routes workflow artifact input paths directly to the injected local runtime', async () => {
+    const artifactPath = 'workflows/wave4-local-byoh/contract-entrypoint.workflow.ts';
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      { source: 'workflow-artifact', artifactPath, requestId: 'req-artifact-routing' },
+      {
+        artifactReader,
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, { stdout: ['artifact routed locally'] });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(artifactReader.reads).toEqual([artifactPath]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile: artifactPath,
+      cwd: '/workspace/ricky',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        requestId: 'req-artifact-routing',
+        source: 'workflow-artifact',
+        route: 'execute',
+      },
+    });
+    expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from workflow-artifact',
+        '[local] mode: local',
+        `[local] spec path: ${artifactPath}`,
+        '[local] spec intake route: execute',
+        `[local] runtime command: npx --no-install agent-relay run ${artifactPath}`,
+        '[stdout] artifact routed locally',
+      ]),
+    );
+    expect(result.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+  });
+
+  it('surfaces local runtime environment warnings as local failures without Cloud fallback', async () => {
+    const workflowFile = 'workflows/wave4-local-byoh/missing-environment.workflow.ts';
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: {
+          description: 'run the local workflow artifact',
+          targetRepo: 'ricky',
+          workflowFile,
+        },
+      },
+      {
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                status: 'failed',
+                exitCode: 127,
+                stderr: ['agent-relay: command not found'],
+                error: 'local runtime environment missing agent-relay',
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(launches).toHaveLength(1);
+    expect(launches[0].workflowFile).toBe(workflowFile);
+    expect(result.artifacts).toEqual([{ path: workflowFile, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: execute',
+        '[local] runtime status: failed',
+        '[stderr] agent-relay: command not found',
+      ]),
+    );
+    expect(result.warnings).toEqual(['local runtime environment missing agent-relay']);
+    expect(result.nextActions).toEqual([
+      'Inspect the local runtime logs and rerun after resolving the environment blocker.',
+    ]);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+  });
+
   it('returns artifacts, logs, warnings, and nextActions in the response', async () => {
     const executor = mockExecutor({
       artifacts: [{ path: 'out/wf.ts', type: 'text/typescript', content: 'code' }],
