@@ -263,14 +263,39 @@ Rules:
       failOnError: true,
     })
     .step('final-signoff', {
-      agent: 'validator-claude',
+      type: 'deterministic',
       dependsOn: ['regression-gate'],
-      task: `Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md.
-
-Include files changed, local/BYOH contract summary, validation commands, and remaining risks.
-Note that this workflow intentionally skips a second non-deterministic final review because the active overnight run demonstrated that the Claude final-review seam can hang after already writing a passing artifact; rely on the earlier review plus post-fix and final deterministic validation instead.
-End with LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md' },
+      command: [
+        'changed="$(git diff --name-only -- packages/local/src)"',
+        'if [[ -z "$changed" ]]; then changed="(no source changes captured at signoff)"; fi',
+        "cat <<'EOF' > .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md",
+        '# Ricky local invocation entrypoint signoff',
+        '',
+        '## Workflow path',
+        '- workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
+        '',
+        '## Changed files',
+        '${changed}',
+        '',
+        '## Summary of validated behavior',
+        '- local/BYOH request normalization covers CLI, MCP, Claude, structured-spec, and workflow-artifact handoffs.',
+        '- ready-workflow handoffs route directly to the local runtime without Cloud fallback or regeneration.',
+        '- local execution returns artifacts, logs, warnings, and next actions honestly.',
+        '',
+        '## Validation commands',
+        '- npm run typecheck --workspace @ricky/local',
+        '- npm test --workspace @ricky/local',
+        '- npx tsc --noEmit',
+        '',
+        '## Remaining risks',
+        '- workflow keeps the earlier Claude review plus deterministic post-fix gates, but avoids a second non-deterministic signoff agent because that seam previously failed after producing passing evidence.',
+        '',
+        'LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE',
+        'EOF',
+        'echo LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .run({ cwd: process.cwd() });
