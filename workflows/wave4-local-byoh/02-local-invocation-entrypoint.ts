@@ -25,12 +25,6 @@ async function main() {
       role: 'Product reviewer for local/BYOH behavior, artifact return, and local execution ergonomics.',
       retries: 1,
     })
-    .agent('reviewer-codex', {
-      cli: 'codex',
-      preset: 'reviewer',
-      role: 'Code reviewer for local adapter contracts, deterministic verification, and testability.',
-      retries: 1,
-    })
     .agent('validator-claude', {
       cli: 'claude',
       preset: 'worker',
@@ -194,29 +188,17 @@ Focus:
 - CLI/MCP spec handoff is represented.
 - Local artifact, log, warning, and next-action outputs are useful to users.
 - Environment blockers are explicit.
+- Deterministic gates, exported types, and injectable coordination seams remain practical.
 
-Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
+Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.
+Note that this workflow intentionally uses a single Claude review path because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing artifacts.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md' },
-    })
-    .step('review-local-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['initial-soft-validation'],
-      task: `Review the local entrypoint code and tests.
-
-Focus:
-- Deterministic gates and test coverage.
-- Injectable process/filesystem boundaries.
-- Exported type quality.
-- Practical fit with local agent-relay coordination.
-
-Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-codex.md' },
     })
 
     .step('read-review-feedback', {
       type: 'deterministic',
-      dependsOn: ['review-local-claude', 'review-local-codex'],
-      command: 'cat .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-codex.md',
+      dependsOn: ['review-local-claude'],
+      command: 'cat .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -267,31 +249,18 @@ Rules:
 Read packages/local/src/ source and tests, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
-Confirm prior review findings are fixed or explicitly non-blocking. Re-check that local/BYOH is co-equal with Cloud, CLI/MCP spec handoff is represented, local outputs are useful, and environment blockers are explicit.
+Confirm prior review findings are fixed or explicitly non-blocking. Re-check that local/BYOH is co-equal with Cloud, CLI/MCP spec handoff is represented, local outputs are useful, environment blockers are explicit, and deterministic/injectable seams remain practical.
 
-Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
+Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.
+Note that this workflow intentionally uses a single Claude review path because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing artifacts.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md' },
-    })
-    .step('final-review-local-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['post-fix-validation'],
-      task: `Re-review the local entrypoint code and tests after fixes.
-
-Read packages/local/src/ source and tests, and post-fix validation output:
-{{steps.post-fix-validation.output}}
-
-Confirm deterministic gates, injectable process/filesystem boundaries, exported type quality, and fit with local agent-relay coordination are ready for final hard gates.
-
-Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md' },
     })
 
     .step('final-review-pass-gate', {
       type: 'deterministic',
-      dependsOn: ['final-review-local-claude', 'final-review-local-codex'],
+      dependsOn: ['final-review-local-claude'],
       command: [
         "tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
-        "tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo LOCAL_ENTRYPOINT_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -324,6 +293,7 @@ Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-rev
       task: `Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md.
 
 Include files changed, local/BYOH contract summary, validation commands, and remaining risks.
+Note that this workflow intentionally uses a single Claude review path because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing artifacts.
 End with LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md' },
     })
