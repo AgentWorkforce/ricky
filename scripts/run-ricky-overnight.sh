@@ -251,16 +251,16 @@ is_process_group_running() {
 
 persist_checkpoint() {
   cat > "$CHECKPOINT_FILE" <<EOF
-queue_mode=$QUEUE_MODE
-current_pass=$CURRENT_PASS
-current_index=$CURRENT_INDEX
-workflows_run=$WORKFLOWS_RUN
-artifact_dir=$ARTIFACT_DIR
-initial_git_head=$INITIAL_GIT_HEAD
-current_workflow=$CURRENT_WORKFLOW
-run_pid=$RUN_PID
-run_pgid=$RUN_PGID
-updated_at=$(date '+%Y-%m-%dT%H:%M:%S%z')
+queue_mode=$(printf '%q' "$QUEUE_MODE")
+current_pass=$(printf '%q' "$CURRENT_PASS")
+current_index=$(printf '%q' "$CURRENT_INDEX")
+workflows_run=$(printf '%q' "$WORKFLOWS_RUN")
+artifact_dir=$(printf '%q' "$ARTIFACT_DIR")
+initial_git_head=$(printf '%q' "$INITIAL_GIT_HEAD")
+current_workflow=$(printf '%q' "$CURRENT_WORKFLOW")
+run_pid=$(printf '%q' "$RUN_PID")
+run_pgid=$(printf '%q' "$RUN_PGID")
+updated_at=$(printf '%q' "$(date '+%Y-%m-%dT%H:%M:%S%z')")
 EOF
   cp "$CHECKPOINT_FILE" "$STATE_FILE"
   printf '%s\n' "$ARTIFACT_DIR" > "$STATE_LOG"
@@ -276,12 +276,38 @@ restore_checkpoint() {
   fi
 
   log "restoring checkpoint from $STATE_FILE"
-  source "$STATE_FILE"
 
-  local previous_artifact_dir="${artifact_dir:-}"
+  local restored_queue_mode=""
+  local restored_current_pass=""
+  local restored_current_index=""
+  local restored_workflows_run=""
+  local restored_artifact_dir=""
+  local restored_initial_git_head=""
+  local restored_current_workflow=""
+  local restored_run_pid=""
+  local restored_run_pgid=""
+
+  while IFS='=' read -r key raw_value; do
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    value="$(printf '%b' "${raw_value//\\/\\\\}")"
+    eval "value=$raw_value" 2>/dev/null || value="$raw_value"
+    case "$key" in
+      queue_mode) restored_queue_mode="$value" ;;
+      current_pass) restored_current_pass="$value" ;;
+      current_index) restored_current_index="$value" ;;
+      workflows_run) restored_workflows_run="$value" ;;
+      artifact_dir) restored_artifact_dir="$value" ;;
+      initial_git_head) restored_initial_git_head="$value" ;;
+      current_workflow) restored_current_workflow="$value" ;;
+      run_pid) restored_run_pid="$value" ;;
+      run_pgid) restored_run_pgid="$value" ;;
+    esac
+  done < "$STATE_FILE"
+
+  local previous_artifact_dir="${restored_artifact_dir:-}"
   local previous_status_file=""
-  local previous_pid="${run_pid:-}"
-  local previous_pgid="${run_pgid:-}"
+  local previous_pid="${restored_run_pid:-}"
+  local previous_pgid="${restored_run_pgid:-}"
   if [[ -n "$previous_artifact_dir" ]]; then
     previous_status_file="$previous_artifact_dir/status.txt"
   fi
@@ -292,9 +318,14 @@ restore_checkpoint() {
     fi
   fi
 
-  CURRENT_PASS="${current_pass:-1}"
-  CURRENT_INDEX="${current_index:-0}"
-  INITIAL_GIT_HEAD="${initial_git_head:-}"
+  if [[ -n "$restored_queue_mode" ]]; then
+    QUEUE_MODE="$restored_queue_mode"
+  fi
+  CURRENT_PASS="${restored_current_pass:-1}"
+  CURRENT_INDEX="${restored_current_index:-0}"
+  WORKFLOWS_RUN="${restored_workflows_run:-0}"
+  CURRENT_WORKFLOW="${restored_current_workflow:-}"
+  INITIAL_GIT_HEAD="${restored_initial_git_head:-}"
 }
 
 write_summary() {
