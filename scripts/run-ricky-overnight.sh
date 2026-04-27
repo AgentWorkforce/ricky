@@ -323,7 +323,10 @@ restore_checkpoint() {
   fi
   CURRENT_PASS="${restored_current_pass:-1}"
   CURRENT_INDEX="${restored_current_index:-0}"
-  WORKFLOWS_RUN="${restored_workflows_run:-0}"
+  # `workflows_run` is an invocation-local chunk counter. Restoring it across
+  # `--resume` causes a fresh invocation to immediately checkpoint again once it
+  # reaches the prior chunk limit, without running the next queued workflow.
+  WORKFLOWS_RUN=0
   CURRENT_WORKFLOW="${restored_current_workflow:-}"
   INITIAL_GIT_HEAD="${restored_initial_git_head:-}"
 }
