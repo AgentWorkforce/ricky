@@ -25,7 +25,7 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('RRRR');
     expect(output).toContain("Welcome to Ricky! Let's get you set up.");
-    expect(output).toContain('Ricky helps you generate, debug, recover, and run workflows.');
+    expect(output).toContain('Ricky generates and runs workflow artifacts for your repo.');
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
   });
@@ -42,9 +42,8 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
-    expect(output).toContain('Give Ricky a spec, a workflow artifact, or a Claude/MCP handoff and continue locally.');
-    expect(output).toContain('From this CLI, use inline, file, or stdin spec handoff.');
-    expect(output).toContain('Connect providers such as Google, then continue with hosted workflow generation and execution.');
+    expect(output).toContain('Ready to hand over a spec.');
+    expect(output).toContain('Connect providers such as Google, then continue with hosted workflow generation.');
   });
 
   it('keeps artifact-only onboarding copy from promising automatic execution', () => {
@@ -74,16 +73,15 @@ describe('Ricky CLI onboarding', () => {
     expect(output).not.toContain('github/connect/local');
   });
 
-  it('includes Claude and MCP handoff language', () => {
+  it('includes spec handoff language without overclaiming', () => {
     const output = renderHandoffGuidance();
 
-    expect(output).toContain('Claude');
-    expect(output).toContain('MCP');
     expect(output).toContain('Local/BYOH handoff is available through the current CLI');
     expect(output).toContain('npm start -- --mode local --spec "generate a workflow for package checks"');
     expect(output).toContain('npm start -- --mode local --spec-file ./path/to/spec.md');
     expect(output).toContain('npm start -- --mode local --stdin');
     expect(output).toContain('ricky.generate');
+    expect(output).toContain('requires npm-linked CLI');
     expect(output).not.toContain('npx ricky generate --spec');
     expect(output).not.toContain('npx ricky generate --spec-file');
     expect(output).not.toMatch(/rerun.*later/i);
@@ -92,8 +90,8 @@ describe('Ricky CLI onboarding', () => {
   it('includes a recovery path when the local runtime is blocked', () => {
     const output = renderRecoveryGuidance('agent-relay is missing');
 
-    expect(output).toContain('blocked: agent-relay is missing');
-    expect(output).toContain('fix the local runtime issue or continue with Cloud setup instead');
+    expect(output).toContain('Blocked: agent-relay is missing');
+    expect(output).toContain('Fix the issue above, then retry the same command.');
   });
 
   it('names the real supported local handoff inputs in recovery guidance', () => {
@@ -103,6 +101,7 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('--spec-file');
     expect(output).toContain('--stdin');
     expect(output).toContain('npm start -- --mode local --spec "<rephrased spec>"');
+    expect(output).toContain('shell-ready');
     expect(output).toContain('npm start -- --mode local --spec-file ./path/to/spec.md');
     expect(output).toContain('npm start -- --mode local --stdin');
     expect(output).not.toContain('npx ricky generate');
@@ -151,8 +150,9 @@ describe('Ricky CLI onboarding', () => {
       'Next command points to a real file',
       'Execution-vs-generation distinction is understandable',
       'Recovery guidance is truthful when something fails',
-    ]) {
-      expect(checklist).toContain(area);
+    ].entries()) {
+      const [index, heading] = area;
+      expect(checklist).toContain(`## ${index + 1}. ${heading}`);
     }
 
     expect(checklist).toContain('live cofounder testing');

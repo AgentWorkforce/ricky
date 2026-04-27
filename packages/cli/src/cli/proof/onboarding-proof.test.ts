@@ -61,7 +61,7 @@ describe('Ricky CLI onboarding proof', () => {
     ['cloud-path', ['Cloud mode selected', 'AgentWorkforce Cloud', 'Cloud dashboard']],
     ['google-connect-guidance', ['npx agent-relay cloud connect google']],
     ['github-dashboard-nango-guidance', ['GitHub', 'Cloud dashboard']],
-    ['cli-mcp-handoff-language', ['Claude', 'CLI', 'MCP', 'ricky.generate']],
+    ['cli-mcp-handoff-language', ['CLI', 'ricky.generate']],
     ['recovery-paths', ['agent-relay is missing', 'continue in local mode']],
     ['banner-suppression', ['quiet: suppressed', 'RICKY_BANNER=0: suppressed']],
     ['narrow-terminal-fallback', ['ricky · workflow reliability for AgentWorkforce']],

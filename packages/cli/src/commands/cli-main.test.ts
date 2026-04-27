@@ -117,7 +117,7 @@ describe('renderHelp', () => {
     expect(helpText).toContain('npm start -- --mode local --spec <text>            Generate a workflow artifact only');
     expect(helpText).toContain('Without --run, Ricky returns the generated artifact path and stops.');
     expect(helpText).toContain('only with --run');
-    expect(helpText).toContain('or `ricky run <artifact>`');
+    expect(helpText).toContain('or `ricky run <artifact>` when the CLI is npm-linked');
     expect(helpText).not.toMatch(/automatic execution/i);
     expect(helpText).not.toMatch(/automatically execute/i);
     expect(helpText).not.toMatch(/execution (runs|starts|launches) by default/i);

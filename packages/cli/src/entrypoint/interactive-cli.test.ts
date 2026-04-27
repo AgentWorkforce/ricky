@@ -183,7 +183,7 @@ describe('runInteractiveCli', () => {
     expect(result.ok).toBe(true);
     expect(result.awaitingInput).toBe(true);
     expect(result.localResult).toBeUndefined();
-    expect(result.guidance.join('\n')).toMatch(/no spec was provided for local execution/i);
+    expect(result.guidance.join('\n')).toMatch(/No spec was provided/i);
     expect(result.guidance.join('\n')).toMatch(/Inline spec: npm start -- --mode local --spec/i);
     expect(result.guidance.join('\n')).toMatch(/--spec-file/i);
     expect(result.guidance.join('\n')).toMatch(/--stdin/i);
@@ -803,7 +803,7 @@ describe('runInteractiveCli', () => {
       expect(result.awaitingInput).toBe(true);
       expect(result.localResult).toBeUndefined();
       const guidance = result.guidance.join('\n');
-      expect(guidance).toContain('no spec was provided');
+      expect(guidance).toContain('No spec was provided');
       expect(guidance).toContain('--spec');
       expect(guidance).toContain('--spec-file');
       expect(guidance).toContain('--stdin');

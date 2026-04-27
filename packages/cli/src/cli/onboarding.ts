@@ -136,9 +136,11 @@ function streamIsTTY(input: NodeJS.ReadableStream): boolean {
 export function renderCloudGuidance(): string {
   return [
     'Cloud provider guidance:',
-    '  Connect providers such as Google, then continue with hosted workflow generation and execution.',
+    '  Connect providers such as Google, then continue with hosted workflow generation.',
+    '  This CLI slice does not stream Cloud execution evidence — what you see is what',
+    '  the Cloud generate endpoint returns.',
     '',
-    '  Connect Google for Cloud execution:',
+    '  Connect Google for Cloud generation:',
     '  $ npx agent-relay cloud connect google',
     '',
     '  Connect GitHub for repo-connected workflows:',
@@ -151,7 +153,6 @@ export function renderHandoffGuidance(): string {
   return [
     'Spec handoff:',
     '  Local/BYOH handoff is available through the current CLI.',
-    '  You can still draft the spec in Claude or another MCP client, then hand the result to Ricky.',
     '  The user-facing generate/debug command layer is not exposed yet.',
     '  `ricky.generate` is not a CLI command in this slice.',
     '',
@@ -170,10 +171,9 @@ export function renderHandoffGuidance(): string {
     '  Stdin spec:',
     '  $ printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
     '',
-    '  Run an existing artifact:',
+    '  Run an existing artifact (requires npm-linked CLI):',
     '  $ ricky run workflows/generated/<file>.ts',
-    '',
-    '  MCP integrations should reuse the same spec, mode, and source fields when that surface calls local/BYOH.',
+    '  Or without linking: npm start -- run workflows/generated/<file>.ts',
   ].join('\n');
 }
 
@@ -198,24 +198,25 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
     return [
       'Recovery:',
       '  If setup is interrupted, rerun `npm start`.',
-      '  If a generation handoff fails, retry with one of:',
+      '  If a generation handoff fails, rephrase the spec and retry:',
       '    npm start -- --mode local --spec "<rephrased spec>"',
       '    npm start -- --mode local --spec-file ./path/to/spec.md',
       '    printf "%s\\n" "<spec text>" | npm start -- --mode local --stdin',
-      '  If a --run execution is blocked, Ricky surfaces a classified blocker',
-      '  (MISSING_BINARY, MISSING_ENV_VAR, INVALID_ARTIFACT, CREDENTIALS_REJECTED, WORKDIR_DIRTY,',
-      '   NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME) with concrete recovery steps. Run those steps, then retry --run.',
+      '  If a --run execution fails, Ricky prints a classified blocker code',
+      '  (MISSING_BINARY, MISSING_ENV_VAR, INVALID_ARTIFACT, CREDENTIALS_REJECTED,',
+      '   WORKDIR_DIRTY, NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME) with shell-ready',
+      '  recovery steps. Run the printed steps, then retry with --run.',
       '  If Cloud setup is blocked, continue in local mode: npm start -- --mode local',
     ].join('\n');
   }
 
   return [
     'Recovery:',
-    `  Ricky can continue, but something is blocked: ${blockedReason}`,
-    '  fix the local runtime issue or continue with Cloud setup instead.',
-    '  Use the classified blocker steps Ricky printed (MISSING_BINARY, MISSING_ENV_VAR,',
-    '  INVALID_ARTIFACT, CREDENTIALS_REJECTED, WORKDIR_DIRTY, NETWORK_UNREACHABLE, UNSUPPORTED_RUNTIME),',
-    '  or run: npx agent-relay cloud connect google.',
+    `  Blocked: ${blockedReason}`,
+    '  Fix the issue above, then retry the same command.',
+    '  If Ricky printed a classified blocker (MISSING_BINARY, MISSING_ENV_VAR, etc.),',
+    '  run the recovery steps it listed.',
+    '  To skip Cloud and continue locally: npm start -- --mode local',
   ].join('\n');
 }
 

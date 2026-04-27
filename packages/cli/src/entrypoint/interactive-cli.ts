@@ -110,9 +110,8 @@ async function executeLocalPath(
       diagnoses: [],
       guidance: [
         'Local handoff blocker:',
-        '  Ricky is ready for a real spec or workflow handoff.',
-        '  no spec was provided for local execution, so nothing was generated and nothing was executed.',
-        '  Current CLI command layer is limited to onboarding, mode selection, and local spec handoff.',
+        '  No spec was provided, so nothing was generated and nothing was executed.',
+        '  This CLI accepts specs through --spec, --spec-file, or --stdin.',
         '',
         'Recovery:',
         '  These commands generate a workflow artifact only. Add --run to also execute it.',
@@ -120,9 +119,8 @@ async function executeLocalPath(
         '  File spec:   npm start -- --mode local --spec-file ./path/to/spec.md',
         '  Stdin spec:  printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
         '  Generate + run: append --run to any of the above (opt-in execution).',
-        '  Run existing artifact: ricky run workflows/generated/<file>.ts',
-        '',
-        'Cloud setup guidance remains available through: npx agent-relay cloud connect google',
+        '  Run existing artifact: ricky run workflows/generated/<file>.ts  (requires npm-linked CLI)',
+        '  Or without linking:    npm start -- run workflows/generated/<file>.ts',
       ],
       awaitingInput: true,
     };

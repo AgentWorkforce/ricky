@@ -147,7 +147,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
               'RICKY',
               'workflow reliability for AgentWorkforce',
               'Welcome to Ricky',
-              'Ricky helps you generate, debug, recover, and run workflows.',
+              'Ricky generates and runs workflow artifacts for your repo.',
               'How would you like to use Ricky?',
               'Local / BYOH',
               'Cloud',
@@ -211,10 +211,10 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             appearsBefore(selector, 'Local / BYOH', 'Cloud'),
             containsAll(localResult, [
               'writes a workflow artifact into workflows/generated/ in your repo',
-              'launch the artifact through local agent-relay',
+              'launch through',
               'execution is opt-in',
               'No Cloud credentials required.',
-              'currently implemented CLI surface',
+              'See the current CLI help',
             ]),
             excludesAll(localResult, ['npx ricky generate --spec', 'npx ricky debug --workflow', 'npx ricky setup']),
           ],
@@ -283,7 +283,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
     },
     {
       name: 'cli-mcp-handoff-language',
-      description: 'Onboarding supports Claude, CLI, and MCP handoff language.',
+      description: 'Onboarding supports CLI handoff language without overclaiming MCP/Claude surfaces.',
       specSection: '11. Claude / CLI / MCP handoff story',
       evaluate: () => {
         const handoff = renderHandoffGuidance();
@@ -292,9 +292,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
           'cli-mcp-handoff-language',
           [
             containsAll(handoff, [
-              'Claude',
               'CLI',
-              'MCP',
               'Local/BYOH handoff is available through the current CLI',
               'ricky.generate',
             ]),
@@ -316,12 +314,11 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
           'recovery-paths',
           [
             containsAll(blocked, [
-              'blocked: agent-relay is missing',
-              'fix the local runtime issue',
-              'Cloud setup',
+              'Blocked: agent-relay is missing',
+              'Fix the issue above',
             ]),
             containsAll(generic, ['setup is interrupted', 'Cloud setup is blocked', 'continue in local mode']),
-            excludesAll(`${blocked}\n${generic}`, ['TypeError:', 'Error:', '\n    at ', '\n  at ']),
+            excludesAll(`${blocked}\n${generic}`, ['TypeError:', '\n    at ', '\n  at ']),
           ],
           [compactEvidence('blocked recovery', blocked), compactEvidence('generic recovery', generic)],
         );
@@ -481,7 +478,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
           'welcome-journey',
           [
             firstRun.includes('Welcome to Ricky'),
-            firstRun.includes('generate, debug, recover, and run workflows'),
+            firstRun.includes('generates and runs workflow artifacts'),
             returning.includes('Ricky is ready'),
             !returning.includes('Welcome to Ricky'),
             firstRun !== returning,
