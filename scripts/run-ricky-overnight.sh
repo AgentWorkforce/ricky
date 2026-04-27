@@ -167,6 +167,16 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:packages/product/src/analytics/health-analyzer.test.ts 2>/dev/null \
         && git cat-file -e HEAD:packages/product/src/analytics/index.ts 2>/dev/null
       ;;
+    workflows/wave5-scale-and-ops/02-next-wave-backlog-and-proof-plan.ts)
+      git cat-file -e HEAD:docs/product/ricky-next-wave-backlog-and-proof-plan.md 2>/dev/null \
+        && grep -Eqi "(first[- ]wave|current first[- ]wave status|current status|workflow files|current first[- ]wave buildout)" docs/product/ricky-next-wave-backlog-and-proof-plan.md \
+        && grep -Eqi "(CLI|banner|onboarding)" docs/product/ricky-next-wave-backlog-and-proof-plan.md \
+        && grep -Eqi "(proof|80-to-100|validation)" docs/product/ricky-next-wave-backlog-and-proof-plan.md \
+        && grep -Eqi "(local|BYOH)" docs/product/ricky-next-wave-backlog-and-proof-plan.md \
+        && grep -Eqi "(Cloud)" docs/product/ricky-next-wave-backlog-and-proof-plan.md \
+        && grep -Eqi "(failure|recovery|unblock)" docs/product/ricky-next-wave-backlog-and-proof-plan.md \
+        && grep -Eqi "(priority|sequence|dependency)" docs/product/ricky-next-wave-backlog-and-proof-plan.md
+      ;;
     *)
       return 1
       ;;
