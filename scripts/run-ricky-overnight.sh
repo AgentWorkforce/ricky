@@ -386,10 +386,14 @@ restore_checkpoint() {
 
 write_summary() {
   local status="$1"
-  local queue_total elapsed_seconds elapsed_hours
+  local queue_total elapsed_seconds elapsed_hours summary_checkpoint_file
   queue_total="$(queue_count)"
   elapsed_seconds="$(( $(date +%s) - START_EPOCH ))"
   elapsed_hours="$(awk -v seconds="$elapsed_seconds" 'BEGIN { printf "%.2f", seconds / 3600 }')"
+  summary_checkpoint_file="$STATE_FILE"
+  if [[ ! -f "$summary_checkpoint_file" ]]; then
+    summary_checkpoint_file="cleared on completion"
+  fi
   cat > "$SUMMARY_FILE" <<EOF
 # Ricky overnight run
 
@@ -408,7 +412,7 @@ write_summary() {
 - current_index: $CURRENT_INDEX
 - workflows_run_this_invocation: $WORKFLOWS_RUN
 - artifact_dir: $ARTIFACT_DIR
-- checkpoint_file: $STATE_FILE
+- checkpoint_file: $summary_checkpoint_file
 - last_commit: $(cat "$LAST_COMMIT_FILE" 2>/dev/null || echo unknown)
 - failed_workflows:
 $(sed 's/^/  - /' "$FAILED_FILE" 2>/dev/null || true)
@@ -749,5 +753,8 @@ if [[ -s "$FAILED_FILE" ]]; then
 else
   mark_status "complete" "queue finished"
 fi
-rm -f "$STATE_FILE"
+if [[ -f "$STATE_FILE" ]]; then
+  rm -f "$STATE_FILE"
+  write_summary "$(cat "$STATUS_FILE")"
+fi
 log "overnight queue finished"
