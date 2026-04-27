@@ -1097,6 +1097,7 @@ describe('runLocal', () => {
         '[local] runtime launch skipped: returning generated artifact only',
       ]),
     );
+    expect(result.nextActions[0]).toMatch(/^Run the generated workflow locally: npx --no-install agent-relay run workflows\/generated\/.+\.ts$/);
     expect(result.nextActions).toContain('Inspect the generated workflow artifact and choose whether to run it locally.');
   });
 

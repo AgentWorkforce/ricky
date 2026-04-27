@@ -252,7 +252,10 @@ describe('cliMain', () => {
           artifacts: [{ path: 'workflows/generated/package-checks.ts', type: 'text/typescript' }],
           logs: ['[local] workflow generation: passed'],
           warnings: [],
-          nextActions: ['Inspect the generated workflow artifact and choose whether to run it locally.'],
+          nextActions: [
+            'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/package-checks.ts',
+            'Inspect the generated workflow artifact and choose whether to run it locally.',
+          ],
         }),
       },
     });
@@ -261,6 +264,7 @@ describe('cliMain', () => {
     expect(result.exitCode).toBe(0);
     expect(output).toContain('Local handoff completed.');
     expect(output).toContain('Artifact: workflows/generated/package-checks.ts');
+    expect(output).toContain('Next: Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/package-checks.ts');
     expect(output).toContain('Next: Inspect the generated workflow artifact and choose whether to run it locally.');
   });
 

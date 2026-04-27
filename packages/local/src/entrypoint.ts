@@ -256,6 +256,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
       if (artifact && options.returnGeneratedArtifactOnly === true) {
         logs.push('[local] runtime launch skipped: returning generated artifact only');
+        nextActions.push(`Run the generated workflow locally: npx --no-install agent-relay run ${artifact.artifactPath}`);
         nextActions.push('Inspect the generated workflow artifact and choose whether to run it locally.');
         return { ok: true, artifacts: dedupeArtifacts(artifacts), logs, warnings, nextActions };
       }
