@@ -1,6 +1,7 @@
 import { workflow } from '@agent-relay/sdk/workflows';
 
 const artifactRoot = '.workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers';
+const reviewSnippetPath = `${artifactRoot}/latest-codex-review-snippet.md`;
 
 async function main() {
   const result = await workflow('ricky-wave6-close-first-wave-signoff-and-blockers')
@@ -201,6 +202,23 @@ async function main() {
 
     // FIX #6: Define per-workflow validation command families so "stronger than compile-only"
     // is deterministic rather than left to agent judgment.
+    
+    .step('write-latest-review-snippet', {
+      type: 'deterministic',
+      dependsOn: ['unsigned-inventory-gate'],
+      command: [
+        `cat > ${reviewSnippetPath} <<'EOF'`,
+        '# Current blocking codex findings for Wave 6 closure workflow',
+        '',
+        '1. Replace invalid `npm test -- --grep ...` commands with repository-valid focused validation commands.',
+        '2. Strengthen exact-once TSV coverage by comparing sorted ids/paths and rejecting duplicates explicitly.',
+        '3. Strengthen signoff result substance: require non-empty validation result content, require validation-output.txt path, and require at least one successful non-typecheck/non-compile validation command for SIGNED_OFF rows.',
+        'EOF',
+      ].join('\n'),
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('generate-validation-plan', {
       type: 'deterministic',
       dependsOn: ['unsigned-inventory-gate'],
@@ -291,6 +309,7 @@ Inputs already materialized by deterministic steps:
 - ${artifactRoot}/current-signoff-and-blocker-artifacts.txt
 - ${artifactRoot}/validation-plan.json (per-workflow minimum validation command families)
 - ${artifactRoot}/validation-plan.md (human-readable validation plan)
+- ${reviewSnippetPath} (current blocking codex findings to satisfy directly)
 
 Allowed writes:
 - ${artifactRoot}/closure-summary.md
