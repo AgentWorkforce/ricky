@@ -9,12 +9,6 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', {
-      cli: 'claude',
-      interactive: false,
-      role: 'Local/BYOH lead who keeps local invocation first-class and distinct from Cloud execution assumptions.',
-      retries: 1,
-    })
     .agent('impl-primary-codex', {
       cli: 'codex',
       role: 'Primary implementer for local entrypoint, context detector, skill loader, types, and exports.',
@@ -83,10 +77,10 @@ async function main() {
       failOnError: true,
     })
 
-    .step('lead-plan', {
-      agent: 'lead-claude',
+    .step('implement-local-entrypoint', {
+      agent: 'impl-primary-codex',
       dependsOn: ['read-workflow-standards', 'read-authoring-rules', 'read-generated-template', 'read-product-spec'],
-      task: `Plan the local/BYOH invocation entrypoint.
+      task: `Implement the local/BYOH invocation entrypoint.
 
 Context inputs:
 - docs/workflows/WORKFLOW_STANDARDS.md:
@@ -98,34 +92,9 @@ Context inputs:
 - SPEC.md:
 {{steps.read-product-spec.output}}
 
-Deliverables:
-- packages/local/src/entrypoint.ts
-- packages/local/src/request-normalizer.ts
-- packages/local/src/entrypoint.test.ts
-- packages/local/src/index.ts
-
-Non-goals:
-- Do not implement Cloud execution.
-- Do not assume every workflow artifact is Cloud-compatible.
-- Do not shell out to live agent-relay in unit tests unless a deterministic fake is used.
-
-Verification:
-- Request normalizer must accept spec handoff from CLI, MCP, Claude, or workflow artifact input and convert it into the local invocation contract.
-- Entrypoint must tie normalized intake, generation, and local runtime coordination together and return local artifacts/log/run metadata.
-- Local/BYOH execution must remain first-class and explicit.
-- Tests must prove local routing, spec handoff, request normalization, and artifact/log response contracts.
-
-Commit/PR boundary:
-- Keep changes scoped to src/local and tiny shared type imports if needed.
-
-Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/plan.md ending with LOCAL_ENTRYPOINT_PLAN_READY.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/plan.md' },
-    })
-
-    .step('implement-local-entrypoint', {
-      agent: 'impl-primary-codex',
-      dependsOn: ['lead-plan'],
-      task: `Implement the local/BYOH invocation entrypoint.
+Before writing code, first write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/plan.md summarizing the concrete request-normalization contract, entrypoint behavior, file targets, and validation steps you are about to implement.
+End that plan artifact with LOCAL_ENTRYPOINT_PLAN_READY.
+Then implement the code.
 
 Deliverables:
 - entrypoint.ts should accept a local invocation request containing a spec or workflow artifact, execution preference, and optional MCP/CLI source metadata.
@@ -137,16 +106,32 @@ Non-goals:
 - Do not execute destructive commands.
 - Do not require Cloud credentials.
 - Do not hide local environment blockers.
+- Do not shell out to live agent-relay in unit tests unless a deterministic fake is used.
 
 Verification:
 - Keep command execution injectable or mockable.
 - Return artifacts, logs, warnings, and next actions in the local response.
-- Preserve the distinction between local workflow generation and Cloud workflow generation.`,
-      verification: { type: 'file_exists', value: 'packages/local/src/entrypoint.ts' },
+- Preserve the distinction between local workflow generation and Cloud workflow generation.
+- Tests must prove local routing, spec handoff, request normalization, and artifact/log response contracts.
+
+Commit/PR boundary:
+- Keep changes scoped to packages/local/src and tiny shared type imports if needed.`,
+      verification: { type: 'exit_code', value: '0' },
+    })
+    .step('plan-gate', {
+      type: 'deterministic',
+      dependsOn: ['implement-local-entrypoint'],
+      command: [
+        'test -f .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/plan.md',
+        "tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/plan.md | grep -Eq '^LOCAL_ENTRYPOINT_PLAN_READY$'",
+        'echo LOCAL_ENTRYPOINT_PLAN_VERIFIED',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
     .step('post-implementation-file-gate', {
       type: 'deterministic',
-      dependsOn: ['implement-local-entrypoint'],
+      dependsOn: ['implement-local-entrypoint', 'plan-gate'],
       command: [
         'test -f packages/local/src/entrypoint.ts',
         'test -f packages/local/src/request-normalizer.ts',
