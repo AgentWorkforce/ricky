@@ -367,6 +367,46 @@ describe('normalizeRequest', () => {
     expect(result.executionPreference).toBe('both');
   });
 
+  it('reads execution preference from structured spec payloads when top-level mode is absent', async () => {
+    const result = await normalizeRequest({
+      source: 'structured',
+      spec: {
+        description: 'generate a local workflow',
+        executionPreference: 'both',
+      },
+    });
+
+    expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('both');
+  });
+
+  it('lets top-level mode override nested structured execution preference', async () => {
+    const result = await normalizeRequest({
+      source: 'cli',
+      mode: 'local',
+      spec: {
+        description: 'generate a hosted workflow',
+        executionPreference: 'cloud',
+      },
+    });
+
+    expect(result.mode).toBe('local');
+    expect(result.executionPreference).toBe('local');
+  });
+
+  it('maps MCP auto execution preference to both for the local contract', async () => {
+    const result = await normalizeRequest({
+      source: 'mcp',
+      arguments: {
+        goal: 'generate a workflow',
+        executionPreference: 'auto',
+      },
+    });
+
+    expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('both');
+  });
+
   it('defaults mode to local when not specified', async () => {
     const sources: RawHandoff[] = [
       { source: 'free-form', spec: 'x' },
@@ -694,6 +734,29 @@ describe('runLocal', () => {
     expect(result.warnings.some((w) => w.includes('local/BYOH entrypoint'))).toBe(true);
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(true);
     expect(result.nextActions.some((a) => a.includes('Cloud API surface'))).toBe(true);
+  });
+
+  it('rejects nested cloud execution preferences from structured MCP handoffs before execution', async () => {
+    const executor = mockExecutor();
+    const result = await runLocal(
+      {
+        source: 'mcp',
+        toolName: 'ricky.generate',
+        arguments: {
+          goal: 'generate a hosted workflow',
+          executionPreference: 'cloud',
+        },
+      },
+      { executor },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(executor.calls).toHaveLength(0);
+    expect(result.logs).toEqual(['[local] rejected cloud-only request from mcp']);
+    expect(result.warnings).toEqual([
+      'This is the local/BYOH entrypoint. Cloud-only requests should use the Cloud API surface.',
+    ]);
+    expect(result.nextActions).toEqual(['Use the Cloud API surface or re-invoke with mode=local.']);
   });
 
   it('does not route through Cloud by default', async () => {

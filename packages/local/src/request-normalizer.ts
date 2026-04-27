@@ -144,7 +144,7 @@ export async function normalizeRequest(
 ): Promise<LocalInvocationRequest> {
   switch (raw.source) {
     case 'free-form': {
-      const mode = executionModeFor(raw);
+      const mode = executionModeFor(raw, raw.spec);
       return {
         _normalized: true,
         spec: raw.spec,
@@ -157,7 +157,7 @@ export async function normalizeRequest(
     }
 
     case 'structured': {
-      const mode = executionModeFor(raw);
+      const mode = executionModeFor(raw, raw.spec);
       return {
         _normalized: true,
         spec: specInputToText(raw.spec),
@@ -171,7 +171,7 @@ export async function normalizeRequest(
     }
 
     case 'cli': {
-      const mode = executionModeFor(raw);
+      const mode = executionModeFor(raw, raw.spec);
       const structuredSpec = structuredSpecFrom(raw.spec);
       return {
         _normalized: true,
@@ -190,8 +190,8 @@ export async function normalizeRequest(
     }
 
     case 'mcp': {
-      const mode = executionModeFor(raw);
       const spec = raw.spec ?? raw.arguments ?? {};
+      const mode = executionModeFor(raw, spec);
       const structuredSpec = structuredSpecFrom(spec);
       return {
         _normalized: true,
@@ -210,7 +210,7 @@ export async function normalizeRequest(
     }
 
     case 'claude': {
-      const mode = executionModeFor(raw);
+      const mode = executionModeFor(raw, raw.spec);
       const metadata: Record<string, unknown> = { ...(raw.metadata ?? {}) };
       if (raw.conversationId) metadata.conversationId = raw.conversationId;
       if (raw.turnId) metadata.turnId = raw.turnId;
@@ -244,8 +244,17 @@ export async function normalizeRequest(
   }
 }
 
-function executionModeFor(raw: BaseHandoff): LocalExecutionMode {
-  return raw.mode ?? raw.executionPreference ?? 'local';
+function executionModeFor(raw: BaseHandoff, spec?: SpecInput): LocalExecutionMode {
+  return raw.mode ?? raw.executionPreference ?? executionModeFromStructuredSpec(spec) ?? 'local';
+}
+
+function executionModeFromStructuredSpec(spec?: SpecInput): LocalExecutionMode | undefined {
+  if (!spec || typeof spec === 'string') return undefined;
+
+  const value = spec.mode ?? spec.executionPreference ?? spec.execution_mode ?? spec.execution_preference;
+  if (value === 'local' || value === 'cloud' || value === 'both') return value;
+  if (value === 'auto') return 'both';
+  return undefined;
 }
 
 function structuredSpecFrom(spec: SpecInput): StructuredSpec | undefined {
