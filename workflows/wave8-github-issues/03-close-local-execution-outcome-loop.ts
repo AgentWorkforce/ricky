@@ -38,7 +38,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop',
-        'command -v gh >/dev/null 2>&1 && gh issue view 3 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/issue-3.json || true',
+        'printf "%s\\n" "Issue #3: close Ricky interactive/local loop from generated artifact to run outcome or classified blocker" "Summary: local mode currently stops at accept spec, generate artifact, return artifact, and next command; product needs an explicit stronger contract." "Acceptance: product decision is explicit, execution success returns concrete outcome/evidence, failed execution returns a classified blocker, tests cover success and blocker paths, user output separates artifact generation from execution result." > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/issue-3.md',
         'sed -n "1,380p" packages/local/src/entrypoint.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/local-entrypoint.before.txt',
         'sed -n "1,320p" packages/runtime/src/local-coordinator.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/local-coordinator.before.txt',
         'sed -n "1,320p" packages/runtime/src/diagnostics/failure-diagnosis.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/failure-diagnosis.before.txt',

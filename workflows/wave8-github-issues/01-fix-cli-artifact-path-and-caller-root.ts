@@ -32,8 +32,8 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root',
-        'command -v gh >/dev/null 2>&1 && gh issue view 1 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-1.json || true',
-        'command -v gh >/dev/null 2>&1 && gh issue view 2 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-2.json || true',
+        'printf "%s\\n" "Issue #1: fix generated workflow artifact path mismatch in interactive/local CLI" "Summary: Ricky prints workflows/generated/... but current CLI path can write under packages/cli/workflows/generated/..." "Acceptance: printed artifact path matches disk, next npx --no-install agent-relay run command points to that file, no packages/cli/workflows/generated write for repo-root contract." > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-1.md',
+        'printf "%s\\n" "Issue #2: preserve caller repo root through CLI to interactive to local generation path" "Summary: real invocation cwd/caller repo root must survive CLI, interactive entrypoint, and local executor handoff." "Acceptance: generated workflow writes use caller repo root, reported paths and run commands are relative to that same repo, tests prove root propagation." > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-2.md',
         'sed -n "1,280p" packages/cli/src/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/cli-main.before.txt',
         'sed -n "1,320p" packages/cli/src/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/interactive-cli.before.txt',
         'sed -n "1,360p" packages/local/src/entrypoint.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/local-entrypoint.before.txt',

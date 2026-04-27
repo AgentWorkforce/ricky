@@ -26,7 +26,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation',
-        'command -v gh >/dev/null 2>&1 && gh issue view 6 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/issue-6.json || true',
+        'printf "%s\\n" "Issue #6: add real-user external-repo proof for Ricky interactive/local CLI generation" "Summary: prove installed or linked CLI usage from a separate repo, with generated workflows written into that repo." "Acceptance: automated external-repo CLI proof, generated file exists where Ricky says it exists, next command works against that same path, proof belongs to product-facing readiness." > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/issue-6.md',
         'cat package.json > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/root-package.json',
         'cat packages/cli/package.json > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/cli-package.json',
         'sed -n "1,300p" packages/cli/src/commands/cli-main.test.ts > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/cli-main-test.before.txt',

@@ -32,8 +32,8 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist',
-        'command -v gh >/dev/null 2>&1 && gh issue view 4 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-4.json || true',
-        'command -v gh >/dev/null 2>&1 && gh issue view 7 --json number,title,body,url > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-7.json || true',
+        'printf "%s\\n" "Issue #4: tighten Ricky onboarding and readiness messaging to match true interactive behavior" "Summary: onboarding/readiness copy must not imply smoother execution depth than current product proves." "Acceptance: first-run and interactive copy do not overclaim, local mode distinguishes artifact return from execution result, recovery guidance is concrete and current." > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-4.md',
+        'printf "%s\\n" "Issue #7: add cofounder interactive/onboarding readiness checklist" "Summary: create a live-testing checklist for first-run onboarding, local mode selection, spec handoff, artifact existence, next command truth, recovery guidance, and execution-vs-generation clarity." "Acceptance: short repo doc exists, tuned for interactive/onboarding rather than internal detail, usable during cofounder testing." > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-7.md',
         'sed -n "1,360p" packages/cli/src/cli/onboarding.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/onboarding.before.txt',
         'sed -n "1,320p" packages/cli/src/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/cli-main.before.txt',
         'sed -n "1,320p" packages/cli/src/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/interactive-cli.before.txt',
