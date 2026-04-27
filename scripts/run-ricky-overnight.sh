@@ -504,16 +504,36 @@ workflow_log_shows_failure() {
 }
 
 runner_output_idle_for_too_long() {
-  local output_file="$1"
+  local last_progress_epoch="$1"
   local now_epoch="$2"
-  local last_modified=""
+
+  (( now_epoch - last_progress_epoch >= IDLE_TIMEOUT_SECONDS ))
+}
+
+runner_output_has_meaningful_progress() {
+  local output_file="$1"
+  local previous_size="$2"
+  local current_size="$3"
+  local chunk=""
 
   [[ -f "$output_file" ]] || return 1
+  (( current_size > previous_size )) || return 1
 
-  last_modified="$(stat -f '%m' "$output_file" 2>/dev/null || echo 0)"
-  [[ "$last_modified" =~ ^[0-9]+$ ]] || last_modified=0
+  chunk="$(tail -c +$((previous_size + 1)) "$output_file" 2>/dev/null || true)"
+  [[ -n "$chunk" ]] || return 1
 
-  (( now_epoch - last_modified >= IDLE_TIMEOUT_SECONDS ))
+  printf '%s' "$chunk" | grep -Ev '^[[:space:]]*$|^\[workflow [0-9:]+\] \[[^]]+\] still running \([0-9]+s\)$' | grep -q .
+}
+
+runner_output_size() {
+  local output_file="$1"
+
+  [[ -f "$output_file" ]] || {
+    echo 0
+    return 0
+  }
+
+  wc -c < "$output_file" | tr -d '[:space:]'
 }
 
 start_runner() {
@@ -535,6 +555,9 @@ run_one() {
   local runner_output=""
   local runner_pid=""
   local runner_exit="0"
+  local last_progress_epoch="$(date +%s)"
+  local last_observed_size="0"
+  local current_output_size="0"
   RUN_RESULT="ran"
   CURRENT_WORKFLOW="$workflow_path"
   persist_checkpoint
@@ -589,6 +612,8 @@ run_one() {
     return 1
   fi
 
+  last_observed_size="$(runner_output_size "$runner_output")"
+
   while is_pid_running "$runner_pid"; do
     if workflow_hit_claude_rate_limit "$runner_output"; then
       log "workflow blocked by Claude rate limit prompt: $workflow_path"
@@ -602,8 +627,14 @@ run_one() {
       return 1
     fi
 
-    if runner_output_idle_for_too_long "$runner_output" "$(date +%s)"; then
-      log "workflow runner went idle without new output for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
+    current_output_size="$(runner_output_size "$runner_output")"
+    if runner_output_has_meaningful_progress "$runner_output" "$last_observed_size" "$current_output_size"; then
+      last_progress_epoch="$(date +%s)"
+    fi
+    last_observed_size="$current_output_size"
+
+    if runner_output_idle_for_too_long "$last_progress_epoch" "$(date +%s)"; then
+      log "workflow runner went idle without meaningful progress for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
       kill_process_group "$RUN_PGID"
       wait "$runner_pid" 2>/dev/null || true
       echo "$workflow_path" >> "$FAILED_FILE"
