@@ -21,6 +21,7 @@ export type {
 export { createLocalExecutor, createProcessCommandRunner, DEFAULT_LOCAL_ROUTE, getDefaultExecutor, runLocal } from './entrypoint';
 export type {
   ArtifactWriter,
+  CoordinatorLauncher,
   LocalEntrypointInput,
   LocalEntrypointOptions,
   LocalExecutor,

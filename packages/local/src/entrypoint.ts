@@ -23,6 +23,7 @@ import type {
   CommandRunnerOptions,
   CoordinatorResult,
   ExecutionRoute,
+  RunRequest,
 } from '@ricky/runtime/types';
 
 // ---------------------------------------------------------------------------
@@ -75,11 +76,21 @@ export interface ArtifactWriter {
   writeArtifact(path: string, content: string, cwd: string): Promise<void>;
 }
 
+/**
+ * Structural interface for the coordinator dependency.
+ * Captures only the `launch` method that the local executor actually uses,
+ * so external adapters can satisfy the contract without extending the
+ * concrete `LocalCoordinator` class.
+ */
+export interface CoordinatorLauncher {
+  launch(request: RunRequest): Promise<CoordinatorResult>;
+}
+
 export interface LocalExecutorOptions {
   cwd?: string;
   timeoutMs?: number;
   commandRunner?: CommandRunner;
-  coordinator?: LocalCoordinator;
+  coordinator?: CoordinatorLauncher;
   artifactWriter?: ArtifactWriter;
   /** Override the default execution route for the local runtime. */
   route?: ExecutionRoute;

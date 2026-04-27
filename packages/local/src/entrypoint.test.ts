@@ -48,6 +48,18 @@ function mockArtifactReader(content = '# Mock Workflow Spec') {
   };
 }
 
+/** A deterministic artifact reader that records which path was consumed. */
+function recordingArtifactReader(content = '# Mock Workflow Spec') {
+  const reads: string[] = [];
+  return {
+    reads,
+    async readArtifact(path: string): Promise<string> {
+      reads.push(path);
+      return content;
+    },
+  };
+}
+
 /** A failing artifact reader for error-path tests. */
 function failingArtifactReader(message = 'file not found') {
   return {
@@ -112,6 +124,17 @@ function memoryLocalExecutorOptions(
       async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
         writes.push({ path, content, cwd });
       },
+    },
+  };
+}
+
+function throwingCommandRunner(message: string): CommandRunner & { invocations: RecordedInvocation[] } {
+  const invocations: RecordedInvocation[] = [];
+  return {
+    invocations,
+    run(command: string, args: string[], runOptions: CommandRunnerOptions): CommandInvocation {
+      invocations.push({ command, args: [...args], cwd: runOptions.cwd });
+      throw new Error(message);
     },
   };
 }
@@ -634,6 +657,34 @@ describe('runLocal', () => {
     expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
   });
 
+  it('reads workflow artifact input and routes the artifact path to the local runtime without Cloud fallback', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['artifact run ok'] });
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const artifactPath = 'workflows/wave4-local-byoh/local-artifact.workflow.ts';
+    const result = await runLocal(
+      { source: 'workflow-artifact', artifactPath, metadata: { handoff: 'file-gate' } },
+      { localExecutor, artifactReader },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(artifactReader.reads).toEqual([artifactPath]);
+    expect(localExecutor.writes).toHaveLength(0);
+    expect(localExecutor.runner.invocations).toHaveLength(1);
+    expect(localExecutor.runner.invocations[0].args).toEqual([...(DEFAULT_LOCAL_ROUTE.baseArgs ?? []), artifactPath]);
+    expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from workflow-artifact',
+        '[local] mode: local',
+        '[local] spec path: workflows/wave4-local-byoh/local-artifact.workflow.ts',
+        '[local] spec intake route: execute',
+        '[stdout] artifact run ok',
+      ]),
+    );
+    expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
+    expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
+  });
+
   it('default executor warns on cloud mode', async () => {
     const result = await runLocal({ source: 'cli', spec: 'hello', mode: 'cloud' });
 
@@ -729,6 +780,39 @@ describe('runLocal', () => {
     expect(result.ok).toBe(false);
     expect(result.logs.some((l) => l.includes('[stderr] agent-relay: command not found'))).toBe(true);
     expect(result.warnings.some((w) => w.includes('exited with code 127'))).toBe(true);
+    expect(result.nextActions.some((a) => a.includes('environment blocker'))).toBe(true);
+  });
+
+  it('surfaces local runtime launch environment warnings without rerouting through Cloud', async () => {
+    const runner = throwingCommandRunner('spawn agent-relay ENOENT');
+    const result = await runLocal(
+      { source: 'cli', spec: 'run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts' },
+      {
+        localExecutor: {
+          cwd: '/repo',
+          commandRunner: runner,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(runner.invocations).toHaveLength(1);
+    expect(runner.invocations[0].command).toBe(DEFAULT_LOCAL_ROUTE.command);
+    expect(runner.invocations[0].args).toEqual([
+      ...(DEFAULT_LOCAL_ROUTE.baseArgs ?? []),
+      'workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
+    ]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: execute',
+        '[local] runtime status: failed',
+        '[local] runtime command: npx --no-install agent-relay run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
+      ]),
+    );
+    expect(result.warnings).toContain('spawn agent-relay ENOENT');
+    expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
     expect(result.nextActions.some((a) => a.includes('environment blocker'))).toBe(true);
   });
 });
