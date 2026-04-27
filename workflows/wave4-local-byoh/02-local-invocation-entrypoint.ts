@@ -325,6 +325,7 @@ Write .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-rev
       command: [
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'if [[ -z "$changed" ]]; then echo LOCAL_ENTRYPOINT_REGRESSION_GATE_PASS_NOOP; exit 0; fi',
         'printf "%s\\n" "$changed" | grep -Eq "^packages/local/src/"',
         '! printf "%s\\n" "$changed" | grep -Ev "^(packages/local/src/|\\.workflow-artifacts/)"',
         'echo LOCAL_ENTRYPOINT_REGRESSION_GATE_PASS',
