@@ -8,6 +8,7 @@ POLL_SECONDS="${RICKY_OVERNIGHT_POLL_SECONDS:-15}"
 PASSES="${RICKY_OVERNIGHT_PASSES:-3}"
 QUEUE_MODE="${RICKY_OVERNIGHT_QUEUE_MODE:-flight-safe}"
 MAX_WORKFLOWS_PER_INVOCATION="${RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION:-4}"
+IDLE_TIMEOUT_SECONDS="${RICKY_OVERNIGHT_IDLE_TIMEOUT_SECONDS:-900}"
 STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
 RESUME_FLAG="${1:-}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -348,6 +349,19 @@ workflow_log_shows_failure() {
   grep -Eq '^\[workflow\] FAILED:| ✗ .*— FAILED:|OWNER_DECISION: FAIL|FINAL_DECISION: FAIL' "$output_file"
 }
 
+runner_output_idle_for_too_long() {
+  local output_file="$1"
+  local now_epoch="$2"
+  local last_modified=""
+
+  [[ -f "$output_file" ]] || return 1
+
+  last_modified="$(stat -f '%m' "$output_file" 2>/dev/null || echo 0)"
+  [[ "$last_modified" =~ ^[0-9]+$ ]] || last_modified=0
+
+  (( now_epoch - last_modified >= IDLE_TIMEOUT_SECONDS ))
+}
+
 run_one() {
   local workflow_path="$1"
   local runner_output=""
@@ -401,6 +415,27 @@ run_one() {
       echo "$workflow_path" >> "$FAILED_FILE"
       inspect_repo_changes
       mark_status "blocked" "claude rate limit prompt: $workflow_path"
+      CURRENT_WORKFLOW=""
+      persist_checkpoint
+      return 1
+    fi
+
+    if runner_output_idle_for_too_long "$runner_output" "$(date +%s)"; then
+      log "workflow runner went idle without new output for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
+      kill "$runner_pid" 2>/dev/null || true
+      wait "$runner_pid" 2>/dev/null || true
+      echo "$workflow_path" >> "$FAILED_FILE"
+      inspect_repo_changes
+
+      if repo_has_meaningful_delta; then
+        log "idle workflow produced repo changes; validating before capture"
+        commit_if_clean_delta "$workflow_path"
+        CURRENT_WORKFLOW=""
+        persist_checkpoint
+        return 0
+      fi
+
+      mark_status "blocked" "runner idle with no repo delta: $workflow_path"
       CURRENT_WORKFLOW=""
       persist_checkpoint
       return 1
