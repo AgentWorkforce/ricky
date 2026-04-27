@@ -1,7 +1,7 @@
 # CLI Proof Artifact — Command Journey & Fixture Coverage
 
-Generated deterministically from onboarding-proof.ts, cli-main.test.ts, and interactive-cli.test.ts.
-No live provider or live relay dependency.
+Generated deterministically from onboarding-proof.ts, cli-main.test.ts, interactive-cli.test.ts, and external-cli-proof.test.ts.
+No live provider or live relay dependency. The external CLI proof uses a temporary external repo and a deterministic local `agent-relay` fixture.
 
 ## Journey Proof Cases
 
@@ -13,6 +13,7 @@ No live provider or live relay dependency.
 | welcome   | `renderWelcome()`                            | First-run vs returning user text   | N/A — deterministic render                      |
 | status    | `renderCompactHeader(mode, providers)`       | Mode + provider connection status  | N/A — deterministic render                      |
 | generate  | `--spec "generate a workflow for ..."` | Generated workflow artifact        | No invented `npx ricky generate` command        |
+| external-linked-cli | linked `node_modules/.bin/ricky --mode local --spec "..."` from a separate repo | Generated `workflows/generated/*.ts` artifact in that repo | Printed next command is executed against the same artifact through fixture `agent-relay` |
 
 ## Fixture Proof Cases
 
@@ -32,15 +33,31 @@ No live provider or live relay dependency.
 - **Spec defaults to local**: `--spec "text"` without `--mode` defaults mode to `local`.
 - **`--file` alias**: `--file` is accepted as alias for `--spec-file`.
 - **Explore maps to local**: Onboarding choice `explore` resolves to `local` mode at runtime.
+- **External linked CLI**: `packages/cli/bin/ricky` is exposed through the package `bin.ricky` seam, symlinked into an external repo's `node_modules/.bin`, and invoked from that repo.
+- **Artifact path contract**: The CLI prints `Artifact: workflows/generated/<file>.ts`, and the proof asserts that path exists relative to the external repo.
+- **Next command contract**: The CLI prints `Next: Run the generated workflow locally: npx --no-install agent-relay run <artifact>`, and the proof executes that command in the external repo against a deterministic fixture runner.
 
 ## Test Coverage Summary
 
 | File                              | Tests Before | Tests After | New Tests |
 |-----------------------------------|-------------|-------------|-----------|
-| cli-main.test.ts                  | 24          | 32          | +8        |
-| interactive-cli.test.ts           | 15          | 27          | +12       |
+| cli-main.test.ts                  | 24          | 48          | +24       |
+| interactive-cli.test.ts           | 15          | 34          | +19       |
 | onboarding-proof.test.ts          | 13          | 26          | +13       |
-| **Total**                         | **52**      | **85**      | **+33**   |
+| onboarding.test.ts                | 25          | 25          | +0        |
+| external-cli-proof.test.ts        | 0           | 1           | +1        |
+| **CLI package test run**          | **77**      | **134**     | **+57**   |
+
+## External Linked CLI Proof
+
+`packages/cli/src/cli/proof/external-cli-proof.ts` is the issue #6 readiness proof. It:
+
+1. Creates an external repository with `mkdtemp`.
+2. Reads `@ricky/cli` package metadata and links the monorepo `bin.ricky` target into the external repo at `node_modules/.bin/ricky`.
+3. Installs a deterministic `node_modules/.bin/agent-relay` fixture in that external repo.
+4. Invokes linked Ricky from the external repo with `--mode local --spec`.
+5. Asserts the printed `Artifact:` path exists under the external repo's `workflows/generated/` directory.
+6. Parses the printed `Next:` command and executes it from the same external repo, proving it targets the same artifact path.
 
 ## Proof Case Registry (onboarding-proof.ts)
 
