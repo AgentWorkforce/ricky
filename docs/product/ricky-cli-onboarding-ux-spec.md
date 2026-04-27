@@ -51,6 +51,8 @@ The `generate` command must build a `CliHandoff` (as defined in `packages/local/
 
 Until these are implemented, development-mode invocations use `npm start -- ...` with the current parser. User-facing copy in this spec uses `npx ricky` to represent the target surface. When the package gains a `bin` entry or is published, the `npx ricky` invocations become live.
 
+**Copy honesty rule**: Implementation copy (e.g., in `mode-selector.ts` and `onboarding.ts`) is intentionally more conservative than spec copy — it references `npm start -- --help` instead of `npx ricky help`, and says "user-facing generate/debug command layer is not exposed yet" where the spec documents the target generate command. This is correct behavior. When target commands land in `parseArgs()`, implementation copy should be updated in the same PR to match the spec's target surface wording.
+
 ### Parser Delta Punch List
 
 `packages/cli/src/commands/cli-main.ts` must extend `ParsedArgs` from the current `run | help | version` shape to a discriminated union that can represent onboarding, status, and all three spec input modes:
@@ -843,6 +845,8 @@ Implementation must not:
 Tests must use injected input, output, config stores, provider status, and executors. They must not depend on the developer machine's actual Cloud auth, global config, or terminal width.
 
 The table describes the preferred test organization, but the implementation may consolidate files if the same behavioral coverage remains explicit and easy to locate. A consolidated test file is acceptable only when test names preserve the module or flow being covered.
+
+**Current state note**: As of this writing, all CLI onboarding tests live in `packages/cli/src/cli/onboarding.test.ts` (consolidated). The `ascii-art.test.ts` and `mode-selector.test.ts` rows above describe the coverage expected, not a required file split. Additionally, `packages/cli/src/cli/proof/onboarding-proof.ts` contains 11 named proof cases that exercise the real implementation end-to-end and serve as supplementary verification beyond the unit test suite.
 
 ## Acceptance Criteria
 
