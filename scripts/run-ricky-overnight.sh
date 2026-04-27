@@ -42,6 +42,7 @@ RUN_RESULT=""
 STATUS_REASON=""
 CURRENT_WORKFLOW=""
 RUN_PID="$$"
+RUN_PGID=""
 STATUS_MARKED="false"
 CLAUDE_RATE_LIMIT_PATTERNS=(
   "You've hit your limit"
@@ -50,8 +51,21 @@ CLAUDE_RATE_LIMIT_PATTERNS=(
   "Stop and wait for limit to reset"
 )
 
+kill_process_group() {
+  local pgid="$1"
+
+  [[ -n "$pgid" ]] || return 0
+  kill -TERM -- "-$pgid" 2>/dev/null || true
+  sleep 1
+  kill -0 -- "-$pgid" 2>/dev/null && kill -KILL -- "-$pgid" 2>/dev/null || true
+}
+
 on_exit() {
   local exit_code="$?"
+
+  if [[ -n "$RUN_PGID" ]]; then
+    kill_process_group "$RUN_PGID"
+  fi
 
   if [[ "$STATUS_MARKED" == "true" ]]; then
     return "$exit_code"
@@ -213,6 +227,12 @@ is_pid_running() {
   [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
 }
 
+is_process_group_running() {
+  local pgid="$1"
+
+  [[ -n "$pgid" ]] && kill -0 -- "-$pgid" 2>/dev/null
+}
+
 persist_checkpoint() {
   cat > "$CHECKPOINT_FILE" <<EOF
 queue_mode=$QUEUE_MODE
@@ -223,6 +243,7 @@ artifact_dir=$ARTIFACT_DIR
 initial_git_head=$INITIAL_GIT_HEAD
 current_workflow=$CURRENT_WORKFLOW
 run_pid=$RUN_PID
+run_pgid=$RUN_PGID
 updated_at=$(date '+%Y-%m-%dT%H:%M:%S%z')
 EOF
   cp "$CHECKPOINT_FILE" "$STATE_FILE"
@@ -244,11 +265,12 @@ restore_checkpoint() {
   local previous_artifact_dir="${artifact_dir:-}"
   local previous_status_file=""
   local previous_pid="${run_pid:-}"
+  local previous_pgid="${run_pgid:-}"
   if [[ -n "$previous_artifact_dir" ]]; then
     previous_status_file="$previous_artifact_dir/status.txt"
   fi
   if [[ -n "$previous_status_file" && -f "$previous_status_file" ]] && grep -qx 'running' "$previous_status_file"; then
-    if ! is_pid_running "$previous_pid"; then
+    if ! is_pid_running "$previous_pid" && ! is_process_group_running "$previous_pgid"; then
       printf '%s\n' 'stale' > "$previous_status_file"
       log "marked stale prior overnight artifact: $previous_artifact_dir"
     fi
@@ -407,15 +429,16 @@ run_one() {
   runner_output="$ARTIFACT_DIR/runner-$(basename "$workflow_path" .ts).log"
   : > "$runner_output"
 
-  "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+  setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
   runner_pid=$!
   RUN_PID="$runner_pid"
+  RUN_PGID="$runner_pid"
   persist_checkpoint
 
   while is_pid_running "$runner_pid"; do
     if workflow_hit_claude_rate_limit "$runner_output"; then
       log "workflow blocked by Claude rate limit prompt: $workflow_path"
-      kill "$runner_pid" 2>/dev/null || true
+      kill_process_group "$RUN_PGID"
       wait "$runner_pid" 2>/dev/null || true
       echo "$workflow_path" >> "$FAILED_FILE"
       inspect_repo_changes
@@ -427,7 +450,7 @@ run_one() {
 
     if runner_output_idle_for_too_long "$runner_output" "$(date +%s)"; then
       log "workflow runner went idle without new output for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
-      kill "$runner_pid" 2>/dev/null || true
+      kill_process_group "$RUN_PGID"
       wait "$runner_pid" 2>/dev/null || true
       echo "$workflow_path" >> "$FAILED_FILE"
       inspect_repo_changes
@@ -453,6 +476,7 @@ run_one() {
     runner_exit=$?
   fi
   RUN_PID="$$"
+  RUN_PGID=""
   persist_checkpoint
 
   if workflow_hit_claude_rate_limit "$runner_output"; then
