@@ -205,16 +205,14 @@ Note that this workflow intentionally uses a single Claude review path because t
     .step('fix-local-entrypoint', {
       type: 'deterministic',
       dependsOn: ['read-review-feedback'],
-      command: [
-        "tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md | tr -d '[:space:]*' | grep -Eq \"^REVIEW_CLAUDE_PASS$\"",
-        "cat <<'EOF' > .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/fix-local-entrypoint.md",
-        '# Local invocation entrypoint fix pass',
-        '',
-        'Review feedback consumed. Claude passed the slice, so no bounded fix was required in this step.',
-        '',
-        'FIX_LOCAL_ENTRYPOINT_PASS',
-        'EOF',
-      ].join(' && '),
+      command: `tail -n 1 .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/review-claude.md | tr -d '[:space:]*' | grep -Eq "^REVIEW_CLAUDE_PASS$"
+cat > .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/fix-local-entrypoint.md <<'EOF'
+# Local invocation entrypoint fix pass
+
+Review feedback consumed. Claude passed the slice, so no bounded fix was required in this step.
+
+FIX_LOCAL_ENTRYPOINT_PASS
+EOF`,
       captureOutput: true,
       failOnError: true,
     })
