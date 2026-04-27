@@ -6,6 +6,12 @@ This document defines the dedicated Ricky CLI onboarding experience: banner, wel
 
 It is intentionally narrower than the full Ricky product spec. It should give a future implementation workflow enough detail to build and test the CLI onboarding surface without inventing copy, commands, provider flows, or module boundaries.
 
+## Target Users
+
+- **First-time AgentWorkforce user** — has never run a workflow, needs clear guidance from zero to first useful action.
+- **Experienced workflow author** — already knows Relay patterns, wants fast mode selection and spec handoff without re-reading docs.
+- **Assistant/MCP-mediated handoff** — a spec arrives from Claude or another tool; the human may not be directly at the terminal.
+
 ## UX Principles
 
 - Be warm and direct: help the user start without sounding like a launch page.
@@ -46,6 +52,7 @@ This spec requires the following additions to `packages/cli/src/commands/cli-mai
 | `ricky status` | `{ command: 'status' }` | Read config and provider state, render summary | Mode, provider connection status, config path |
 | `--quiet` / `-q` | Sets `parsed.quiet = true` on any command | Suppress banner and non-essential output | Reduced output |
 | `--no-banner` | Sets `parsed.noBanner = true` on any command | Suppress banner only | Output without banner |
+| `--verbose` | Sets `parsed.verbose = true` on any command | Include diagnostic detail in recovery messages and provider errors | Extended output on failure paths |
 
 The `generate` command must build a `CliHandoff` (as defined in `packages/local/src/request-normalizer.ts`) and pass it through `normalizeRequest()` before execution. The `--mode` flag applies to `generate` as well.
 
@@ -300,6 +307,65 @@ ricky - local mode - receiving spec.md
 ```
 
 The second example must proceed into spec intake rather than replaying the full first-run choices.
+
+### Status Command Output
+
+`npx ricky status` renders a brief summary of current config and provider state:
+
+```text
+$ npx ricky status
+ricky status
+
+  Mode:     local
+  Config:   .ricky/config.json (project)
+  Schema:   v1
+
+  Providers:
+    Google:  not connected
+    GitHub:  not connected
+
+  Next steps:
+    Connect Google for Cloud:  npx agent-relay cloud connect google
+    Connect GitHub:            Cloud dashboard -> Settings -> Integrations -> GitHub
+```
+
+Cloud-connected variant:
+
+```text
+$ npx ricky status
+ricky status
+
+  Mode:     cloud
+  Config:   .ricky/config.json (project)
+  Schema:   v1
+
+  Providers:
+    Google:  connected
+    GitHub:  not connected
+
+  Next steps:
+    Connect GitHub:  Cloud dashboard -> Settings -> Integrations -> GitHub
+    Generate:        npx ricky generate --spec-file spec.md
+```
+
+When no config exists, `status` should render setup guidance instead of empty fields:
+
+```text
+$ npx ricky status
+ricky status
+
+  No config found. Run setup first:
+    npx ricky setup
+```
+
+## Exit Codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success — command completed normally |
+| 1 | User-facing error — blocker, failed generation, or unresolvable setup issue |
+
+Recovery messages must always accompany a non-zero exit. Stack traces require `--verbose`.
 
 ## Web and Slack Relationship
 
