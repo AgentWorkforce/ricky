@@ -8,6 +8,7 @@ export type {
   FreeFormSpecHandoff,
   HandoffSource,
   LocalExecutionMode,
+  LocalExecutionPreference,
   LocalInvocationRequest,
   McpHandoff,
   RawHandoff,
@@ -20,6 +21,7 @@ export type {
 export { createLocalExecutor, createProcessCommandRunner, DEFAULT_LOCAL_ROUTE, getDefaultExecutor, runLocal } from './entrypoint';
 export type {
   ArtifactWriter,
+  LocalEntrypointInput,
   LocalEntrypointOptions,
   LocalExecutor,
   LocalExecutorOptions,

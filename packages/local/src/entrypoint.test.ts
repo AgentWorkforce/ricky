@@ -283,6 +283,15 @@ describe('normalizeRequest', () => {
     const result = await normalizeRequest(raw);
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('both');
+  });
+
+  it('accepts executionPreference as an explicit alias for mode', async () => {
+    const raw: CliHandoff = { source: 'cli', spec: 'test', executionPreference: 'both' };
+    const result = await normalizeRequest(raw);
+
+    expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('both');
   });
 
   it('defaults mode to local when not specified', async () => {
@@ -298,6 +307,7 @@ describe('normalizeRequest', () => {
     for (const raw of sources) {
       const result = await normalizeRequest(raw, mockArtifactReader());
       expect(result.mode).toBe('local');
+      expect(result.executionPreference).toBe('local');
     }
   });
 });
@@ -441,6 +451,52 @@ describe('runLocal', () => {
     expect(executor.calls[0].source).toBe('workflow-artifact');
     expect(executor.calls[0].spec).toBe('# WF Spec');
     expect(executor.calls[0].specPath).toBe('/wf.md');
+  });
+
+  it('accepts an already-normalized local invocation request without re-reading artifacts', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    const result = await runLocal(
+      {
+        _normalized: true,
+        source: 'workflow-artifact',
+        spec: 'import { workflow } from "@agent-relay/sdk/workflows";',
+        mode: 'local',
+        specPath: 'workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
+        metadata: { caller: 'direct-local' },
+      },
+      {
+        localExecutor,
+        artifactReader: failingArtifactReader('should not read a normalized request'),
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(localExecutor.writes).toHaveLength(0);
+    expect(localExecutor.runner.invocations[0].args).toContain('workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts');
+    expect(result.logs.some((l) => l.includes('[local] spec intake route: execute'))).toBe(true);
+  });
+
+  it('does not skip normalization for raw cli handoffs that include mode and metadata', async () => {
+    const executor = mockExecutor();
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: 'build workflow',
+        mode: 'local',
+        metadata: { caller: 'cli' },
+        specFile: '/tmp/spec.md',
+        cliMetadata: { argv: ['ricky', 'run'] },
+      },
+      { executor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0].specPath).toBe('/tmp/spec.md');
+    expect(executor.calls[0].metadata).toMatchObject({
+      caller: 'cli',
+      argv: ['ricky', 'run'],
+    });
   });
 
   it('returns error response when artifact read fails', async () => {

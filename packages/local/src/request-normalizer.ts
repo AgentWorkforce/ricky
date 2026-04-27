@@ -12,11 +12,15 @@
 
 export type HandoffSource = 'free-form' | 'structured' | 'cli' | 'mcp' | 'claude' | 'workflow-artifact';
 export type LocalExecutionMode = 'local' | 'cloud' | 'both';
+export type LocalExecutionPreference = LocalExecutionMode;
 export type StructuredSpec = Record<string, unknown>;
 export type SpecInput = string | StructuredSpec;
 
 export interface BaseHandoff {
+  /** Preferred execution target. `mode` is kept as the stable shorthand. */
   mode?: LocalExecutionMode;
+  /** Alias for callers that model the choice as an execution preference. */
+  executionPreference?: LocalExecutionPreference;
   metadata?: Record<string, unknown>;
   requestId?: string;
 }
@@ -77,6 +81,13 @@ export type RawHandoff =
 // ---------------------------------------------------------------------------
 
 export interface LocalInvocationRequest {
+  /**
+   * Discriminator field that distinguishes a normalized request from a raw
+   * handoff at runtime. Raw handoffs never carry this field, so
+   * `isLocalInvocationRequest()` can rely on it instead of heuristic
+   * structural checks that overlap with raw handoff shapes.
+   */
+  _normalized: true;
   /** The spec content (inline or resolved from artifact path). */
   spec: string;
   /** Structured spec payload when the source supplied one. */
@@ -85,6 +96,8 @@ export interface LocalInvocationRequest {
   source: HandoffSource;
   /** Execution mode — defaults to 'local' for BYOH. */
   mode: LocalExecutionMode;
+  /** Same value as mode, exposed for callers that need an explicit preference field. */
+  executionPreference?: LocalExecutionPreference;
   /** Optional file path when the spec came from a file or artifact. */
   specPath?: string;
   /** Opaque metadata from the originating surface. */
@@ -122,33 +135,42 @@ export async function normalizeRequest(
 ): Promise<LocalInvocationRequest> {
   switch (raw.source) {
     case 'free-form': {
+      const mode = executionModeFor(raw);
       return {
+        _normalized: true,
         spec: raw.spec,
         source: 'free-form',
-        mode: raw.mode ?? 'local',
+        mode,
+        executionPreference: mode,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
     }
 
     case 'structured': {
+      const mode = executionModeFor(raw);
       return {
+        _normalized: true,
         spec: specInputToText(raw.spec),
         structuredSpec: raw.spec,
         source: 'structured',
-        mode: raw.mode ?? 'local',
+        mode,
+        executionPreference: mode,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
     }
 
     case 'cli': {
+      const mode = executionModeFor(raw);
       const structuredSpec = structuredSpecFrom(raw.spec);
       return {
+        _normalized: true,
         spec: specInputToText(raw.spec),
         structuredSpec,
         source: 'cli',
-        mode: raw.mode ?? 'local',
+        mode,
+        executionPreference: mode,
         specPath: raw.specFile,
         metadata: {
           ...(raw.metadata ?? {}),
@@ -159,13 +181,16 @@ export async function normalizeRequest(
     }
 
     case 'mcp': {
+      const mode = executionModeFor(raw);
       const spec = raw.spec ?? raw.arguments ?? {};
       const structuredSpec = structuredSpecFrom(spec);
       return {
+        _normalized: true,
         spec: specInputToText(spec),
         structuredSpec,
         source: 'mcp',
-        mode: raw.mode ?? 'local',
+        mode,
+        executionPreference: mode,
         metadata: {
           ...(raw.metadata ?? {}),
           ...(raw.mcpMetadata ?? {}),
@@ -176,32 +201,42 @@ export async function normalizeRequest(
     }
 
     case 'claude': {
+      const mode = executionModeFor(raw);
       const metadata: Record<string, unknown> = { ...(raw.metadata ?? {}) };
       if (raw.conversationId) metadata.conversationId = raw.conversationId;
       if (raw.turnId) metadata.turnId = raw.turnId;
       const structuredSpec = structuredSpecFrom(raw.spec);
       return {
+        _normalized: true,
         spec: specInputToText(raw.spec),
         structuredSpec,
         source: 'claude',
-        mode: raw.mode ?? 'local',
+        mode,
+        executionPreference: mode,
         metadata,
         requestId: raw.requestId,
       };
     }
 
     case 'workflow-artifact': {
+      const mode = executionModeFor(raw);
       const spec = await reader.readArtifact(raw.artifactPath);
       return {
+        _normalized: true,
         spec,
         source: 'workflow-artifact',
-        mode: raw.mode ?? 'local',
+        mode,
+        executionPreference: mode,
         specPath: raw.artifactPath,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
     }
   }
+}
+
+function executionModeFor(raw: BaseHandoff): LocalExecutionMode {
+  return raw.mode ?? raw.executionPreference ?? 'local';
 }
 
 function structuredSpecFrom(spec: SpecInput): StructuredSpec | undefined {

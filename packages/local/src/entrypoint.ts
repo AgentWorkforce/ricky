@@ -301,6 +301,8 @@ export interface LocalEntrypointOptions {
   localExecutor?: LocalExecutorOptions;
 }
 
+export type LocalEntrypointInput = RawHandoff | LocalInvocationRequest;
+
 // ---------------------------------------------------------------------------
 // Entrypoint
 // ---------------------------------------------------------------------------
@@ -314,7 +316,7 @@ export interface LocalEntrypointOptions {
  * 4. Returns the unified local response contract.
  */
 export async function runLocal(
-  handoff: RawHandoff,
+  handoff: LocalEntrypointInput,
   options: LocalEntrypointOptions = {},
 ): Promise<LocalResponse> {
   const { executor = options.localExecutor ? createLocalExecutor(options.localExecutor) : getDefaultExecutor(), artifactReader } = options;
@@ -322,7 +324,9 @@ export async function runLocal(
   // Normalize
   let request: LocalInvocationRequest;
   try {
-    request = await normalizeRequest(handoff, artifactReader);
+    request = isLocalInvocationRequest(handoff)
+      ? { ...handoff, executionPreference: handoff.executionPreference ?? handoff.mode }
+      : await normalizeRequest(handoff, artifactReader);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -351,6 +355,15 @@ export async function runLocal(
   }
 
   return response;
+}
+
+function isLocalInvocationRequest(input: LocalEntrypointInput): input is LocalInvocationRequest {
+  return (
+    typeof input === 'object' &&
+    input !== null &&
+    '_normalized' in input &&
+    input._normalized === true
+  );
 }
 
 function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
