@@ -13,7 +13,13 @@ import type {
   WorkflowArtifactHandoff,
 } from './index';
 import { DEFAULT_LOCAL_ROUTE, normalizeRequest, runLocal } from './index';
-import type { CommandInvocation, CommandRunner, CommandRunnerOptions } from '@ricky/runtime/types';
+import type {
+  CommandInvocation,
+  CommandRunner,
+  CommandRunnerOptions,
+  CoordinatorResult,
+  RunRequest,
+} from '@ricky/runtime/types';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -136,6 +142,50 @@ function throwingCommandRunner(message: string): CommandRunner & { invocations: 
       invocations.push({ command, args: [...args], cwd: runOptions.cwd });
       throw new Error(message);
     },
+  };
+}
+
+function coordinatorResult(request: RunRequest, overrides: Partial<CoordinatorResult> = {}): CoordinatorResult {
+  const stdout = overrides.stdout ?? ['coordinator ok'];
+  const stderr = overrides.stderr ?? [];
+  const baseArgs = request.route?.baseArgs ?? ['run'];
+  const status = overrides.status ?? 'passed';
+  const startedAt = '2026-01-01T00:00:00.000Z';
+  const completedAt = '2026-01-01T00:00:01.000Z';
+
+  return {
+    runId: overrides.runId ?? 'run-local-test',
+    workflowFile: request.workflowFile,
+    cwd: request.cwd,
+    status,
+    exitCode: overrides.exitCode ?? (status === 'passed' ? 0 : 1),
+    startedAt,
+    completedAt,
+    endedAt: completedAt,
+    durationMs: 1000,
+    stdout,
+    stderr,
+    stdoutSnippet: {
+      lines: stdout,
+      totalLines: stdout.length,
+      maxLines: stdout.length,
+      truncated: false,
+    },
+    stderrSnippet: {
+      lines: stderr,
+      totalLines: stderr.length,
+      maxLines: stderr.length,
+      truncated: false,
+    },
+    events: [],
+    retry: { attempt: 1 },
+    invocation: {
+      command: request.route?.command ?? 'agent-relay',
+      args: [...baseArgs, request.workflowFile, ...(request.extraArgs ?? [])],
+      cwd: request.cwd,
+    },
+    metadata: request.metadata,
+    error: overrides.error,
   };
 }
 
@@ -545,8 +595,11 @@ describe('runLocal', () => {
       { executor },
     );
 
+    expect(result.ok).toBe(false);
+    expect(executor.calls).toHaveLength(0);
     expect(result.warnings.some((w) => w.includes('local/BYOH entrypoint'))).toBe(true);
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(true);
+    expect(result.nextActions.some((a) => a.includes('Cloud API surface'))).toBe(true);
   });
 
   it('does not route through Cloud by default', async () => {
@@ -683,6 +736,102 @@ describe('runLocal', () => {
     );
     expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
+  });
+
+  it('routes workflow artifact inputs to an injected local coordinator with normalized metadata', async () => {
+    const artifactPath = 'workflows/wave4-local-byoh/ready-local.workflow.ts';
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'workflow-artifact',
+        artifactPath,
+        metadata: { gate: 'post-implementation-file-gate' },
+        requestId: 'req-local-artifact',
+      },
+      {
+        artifactReader,
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                stdout: ['coordinator accepted local artifact'],
+                stderr: ['coordinator emitted local warning'],
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(artifactReader.reads).toEqual([artifactPath]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile: artifactPath,
+      cwd: '/workspace/ricky',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        source: 'workflow-artifact',
+        route: 'execute',
+      },
+    });
+    expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from workflow-artifact',
+        '[local] mode: local',
+        '[local] spec intake route: execute',
+        '[local] runtime status: passed',
+        '[local] runtime command: npx --no-install agent-relay run workflows/wave4-local-byoh/ready-local.workflow.ts',
+        '[stdout] coordinator accepted local artifact',
+        '[stderr] coordinator emitted local warning',
+      ]),
+    );
+    expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
+    expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
+  });
+
+  it('surfaces injected local coordinator environment failures without Cloud fallback', async () => {
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      { source: 'cli', spec: 'run workflows/wave4-local-byoh/missing-runtime.workflow.ts' },
+      {
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                status: 'failed',
+                exitCode: 127,
+                stderr: ['agent-relay: command not found'],
+                error: 'local runtime environment missing agent-relay',
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(launches).toHaveLength(1);
+    expect(launches[0].workflowFile).toBe('workflows/wave4-local-byoh/missing-runtime.workflow.ts');
+    expect(launches[0].route).toEqual(DEFAULT_LOCAL_ROUTE);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: execute',
+        '[local] runtime status: failed',
+        '[stderr] agent-relay: command not found',
+      ]),
+    );
+    expect(result.warnings).toContain('local runtime environment missing agent-relay');
+    expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
+    expect(result.nextActions.some((a) => a.includes('environment blocker'))).toBe(true);
   });
 
   it('default executor warns on cloud mode', async () => {

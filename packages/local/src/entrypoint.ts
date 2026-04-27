@@ -349,23 +349,21 @@ export async function runLocal(
     };
   }
 
-  // Validate: local/BYOH entrypoint should not silently route to Cloud
-  const warnings: string[] = [];
+  // Validate: local/BYOH entrypoint should not silently route to Cloud.
   if (request.mode === 'cloud') {
-    warnings.push(
-      'This is the local/BYOH entrypoint. Cloud-only requests should use the Cloud API surface.',
-    );
+    return {
+      ok: false,
+      artifacts: [],
+      logs: [`[local] rejected cloud-only request from ${request.source}`],
+      warnings: [
+        'This is the local/BYOH entrypoint. Cloud-only requests should use the Cloud API surface.',
+      ],
+      nextActions: ['Use the Cloud API surface or re-invoke with mode=local.'],
+    };
   }
 
   // Execute
-  const response = await executor.execute(request);
-
-  // Merge any entrypoint-level warnings
-  if (warnings.length > 0) {
-    response.warnings.unshift(...warnings);
-  }
-
-  return response;
+  return executor.execute(request);
 }
 
 function isLocalInvocationRequest(input: LocalEntrypointInput): input is LocalInvocationRequest {

@@ -339,12 +339,12 @@ export function getLocalProofCases(): LocalProofCase[] {
     },
     {
       name: 'warning-response-behavior',
-      description: 'Executor warnings and entrypoint-level warnings are both surfaced.',
+      description: 'Executor warnings are surfaced, and Cloud-only local requests return entrypoint warnings.',
       async evaluate() {
         const executor = mockExecutor({ warnings: ['check permissions'] });
         const response = await runLocal({ source: 'cli', spec: 'build' }, { executor });
 
-        // Also test entrypoint-level warning injection for cloud mode
+        // Also test entrypoint-level warning for cloud mode before runtime execution.
         const cloudExecutor = mockExecutor({ warnings: ['executor warning'] });
         const cloudResponse = await runLocal(
           { source: 'cli', spec: 'test', mode: 'cloud' },
@@ -354,8 +354,9 @@ export function getLocalProofCases(): LocalProofCase[] {
         const checks = [
           response.warnings.length === 1,
           response.warnings[0] === 'check permissions',
+          cloudResponse.ok === false,
           cloudResponse.warnings.some((w) => w.includes('local/BYOH entrypoint')),
-          cloudResponse.warnings.some((w) => w === 'executor warning'),
+          cloudExecutor.calls.length === 0,
         ];
 
         return result('warning-response-behavior', checks, [
@@ -363,6 +364,7 @@ export function getLocalProofCases(): LocalProofCase[] {
           `local warning: ${response.warnings[0]}`,
           `cloud warning count: ${cloudResponse.warnings.length}`,
           `cloud warnings include entrypoint warning: ${cloudResponse.warnings.some((w) => w.includes('local/BYOH'))}`,
+          `cloud executor reached: ${cloudExecutor.calls.length > 0}`,
         ]);
       },
     },
@@ -501,12 +503,12 @@ export function getLocalProofCases(): LocalProofCase[] {
     },
     {
       name: 'cloud-mode-rejection',
-      description: 'Cloud mode on the local entrypoint surfaces a warning and the default executor rejects it.',
+      description: 'Cloud mode on the local entrypoint is rejected before runtime execution.',
       async evaluate() {
         // Default executor path — rejects cloud mode with ok=false
         const defaultResponse = await runLocal({ source: 'cli', spec: 'test', mode: 'cloud' });
 
-        // Injected executor path — entrypoint still warns
+        // Injected executor path — entrypoint rejects before reaching runtime seam
         const executor = mockExecutor();
         const injectedResponse = await runLocal(
           { source: 'cli', spec: 'test', mode: 'cloud' },
@@ -517,14 +519,18 @@ export function getLocalProofCases(): LocalProofCase[] {
           defaultResponse.ok === false,
           defaultResponse.warnings.some((w) => w.includes('local/BYOH entrypoint')),
           defaultResponse.nextActions.some((a) => a.includes('Cloud API') || a.includes('re-invoke')),
+          injectedResponse.ok === false,
           injectedResponse.warnings.some((w) => w.includes('local/BYOH entrypoint')),
+          executor.calls.length === 0,
         ];
 
         return result('cloud-mode-rejection', checks, [
           `default executor ok: ${defaultResponse.ok}`,
           `default warns about local entrypoint: ${defaultResponse.warnings.some((w) => w.includes('local/BYOH'))}`,
           `default next-actions suggest Cloud API: ${defaultResponse.nextActions.some((a) => a.includes('Cloud API') || a.includes('re-invoke'))}`,
+          `injected executor ok: ${injectedResponse.ok}`,
           `injected executor warns about local entrypoint: ${injectedResponse.warnings.some((w) => w.includes('local/BYOH'))}`,
+          `injected executor reached: ${executor.calls.length > 0}`,
         ]);
       },
     },
