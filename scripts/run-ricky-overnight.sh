@@ -178,6 +178,11 @@ workflow_is_already_satisfied() {
         && grep -Eqi "(failure|recovery|unblock)" docs/product/ricky-next-wave-backlog-and-proof-plan.md \
         && grep -Eqi "(priority|sequence|dependency)" docs/product/ricky-next-wave-backlog-and-proof-plan.md
       ;;
+    workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts)
+      git cat-file -e HEAD:docs/product/ricky-cli-onboarding-ux-spec.md 2>/dev/null \
+        && test -f .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md \
+        && grep -q 'CLI_UX_SPEC_PLAN_READY' .workflow-artifacts/wave4-local-byoh/cli-onboarding-ux-spec/plan.md
+      ;;
     workflows/wave5-scale-and-ops/03-align-ricky-package-conventions.ts)
       test -f package.json \
         && grep -q '"typecheck"' package.json \
