@@ -243,7 +243,7 @@ describe('runInteractiveCli', () => {
     expect(result.awaitingInput).toBe(true);
     expect(result.localResult).toBeUndefined();
     expect(result.guidance.join('\n')).toMatch(/No spec provided/i);
-    expect(result.guidance.join('\n')).toMatch(/npm start -- --mode local --spec/i);
+    expect(result.guidance.join('\n')).toMatch(/ricky --mode local --spec/i);
     expect(result.guidance.join('\n')).toMatch(/--spec-file/i);
     expect(result.guidance.join('\n')).toMatch(/--stdin/i);
     expect(localExecutor.execute).not.toHaveBeenCalled();
@@ -876,8 +876,8 @@ describe('runInteractiveCli', () => {
 
       expect(result.ok).toBe(true);
       expect(result.awaitingInput).toBe(true);
-      expect(guidance).toContain('npm start -- --mode local --spec');
-      expect(guidance).toContain('npm start -- --mode local --spec-file');
+      expect(guidance).toContain('ricky --mode local --spec');
+      expect(guidance).toContain('ricky --mode local --spec-file');
       expect(guidance).toContain('--stdin');
       expect(guidance).not.toContain('npx ricky generate');
       expect(guidance).not.toContain('spec-stdin');

@@ -157,27 +157,27 @@ export function renderHandoffGuidance(): string {
     '  Add --run to also execute the generated artifact through local agent-relay.',
     '',
     '  Generate only (default):',
-    '  $ npm start -- --mode local --spec "generate a workflow for package checks"',
+    '  $ ricky --mode local --spec "generate a workflow for package checks"',
     '',
     '  Generate + execute:',
-    '  $ npm start -- --mode local --spec "generate a workflow for package checks" --run',
+    '  $ ricky --mode local --spec "generate a workflow for package checks" --run',
     '',
     '  From file:',
-    '  $ npm start -- --mode local --spec-file ./path/to/spec.md',
+    '  $ ricky --mode local --spec-file ./path/to/spec.md',
     '',
     '  From stdin:',
-    '  $ printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
+    '  $ printf "%s\\n" "run workflows/release.workflow.ts" | ricky --mode local --stdin',
     '',
     '  Run an existing artifact (requires npm-linked CLI):',
     '  $ ricky run workflows/generated/<file>.ts',
-    '  Or without linking: npm start -- run workflows/generated/<file>.ts',
+    '  Or without linking: ricky run workflows/generated/<file>.ts',
   ].join('\n');
 }
 
 export function renderInterruptedSetupRecovery(): string {
   return [
     '  It looks like setup was interrupted.',
-    '  Rerun `npm start`, or use `npm start -- --mode local` to skip mode selection.',
+    '  Rerun `ricky`, or use `ricky --mode local` to skip mode selection.',
   ].join('\n');
 }
 
@@ -185,7 +185,7 @@ export function renderNonInteractiveSetupError(): string {
   return [
     '  Error: Ricky has not been configured yet.',
     '',
-    '  Run `npm start` interactively to complete first-run setup,',
+    '  Run `ricky` interactively to complete first-run setup,',
     '  or set RICKY_MODE=local to skip setup and use local mode.',
   ].join('\n');
 }
@@ -195,21 +195,21 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
     return [
       'Recovery:',
       '  Setup interrupted?',
-      '    Rerun: npm start',
-      '    Or skip to local: npm start -- --mode local',
+      '    Rerun: ricky',
+      '    Or skip to local: ricky --mode local',
       '',
       '  Generation failed (no artifact was written)?',
       '    Rephrase the spec and retry:',
-      '    $ npm start -- --mode local --spec "<rephrased spec>"',
-      '    $ npm start -- --mode local --spec-file ./path/to/spec.md',
-      '    $ printf "%s\\n" "<rephrased spec>" | npm start -- --mode local --stdin',
+      '    $ ricky --mode local --spec "<rephrased spec>"',
+      '    $ ricky --mode local --spec-file ./path/to/spec.md',
+      '    $ printf "%s\\n" "<rephrased spec>" | ricky --mode local --stdin',
       '',
       '  Execution failed (artifact was generated but --run failed)?',
       '    Ricky prints a blocker code (e.g. MISSING_BINARY, MISSING_ENV_VAR)',
       '    with shell-ready recovery steps. Run those steps, then retry with --run.',
       '',
       '  Cloud blocked?',
-      '    Continue locally: npm start -- --mode local',
+      '    Continue locally: ricky --mode local',
     ].join('\n');
   }
 
@@ -219,7 +219,7 @@ export function renderRecoveryGuidance(blockedReason?: string | null): string {
     '  Fix the issue above, then retry the same command.',
     '  If Ricky printed a blocker code (e.g. MISSING_BINARY, MISSING_ENV_VAR),',
     '  run the shell commands it listed, then retry.',
-    '  To skip Cloud and continue locally: npm start -- --mode local',
+    '  To skip Cloud and continue locally: ricky --mode local',
   ].join('\n');
 }
 
@@ -235,7 +235,7 @@ export function renderProviderConnectFailureRecovery(provider = 'google'): strin
     '  - Expired or revoked credentials',
     '',
     '  Try again: npx agent-relay cloud connect google',
-    '  Or continue in local mode: npm start -- --mode local',
+    '  Or continue in local mode: ricky --mode local',
   ].join('\n');
 }
 
@@ -247,22 +247,22 @@ export function renderWorkflowGenerationFailureRecovery(): string {
     '  Next steps:',
     '  - If using Cloud: check provider connection, then retry Cloud mode.',
     '  - If the spec was ambiguous: rephrase it (state the trigger, action, and target).',
-    '  - To retry locally: npm start -- --mode local --spec "<clarified spec>"',
-    '  - To use a file: npm start -- --mode local --spec-file ./path/to/spec.md',
-    '  - To pipe stdin: printf "%s\\n" "<clarified spec>" | npm start -- --mode local --stdin',
+    '  - To retry locally: ricky --mode local --spec "<clarified spec>"',
+    '  - To use a file: ricky --mode local --spec-file ./path/to/spec.md',
+    '  - To pipe stdin: printf "%s\\n" "<clarified spec>" | ricky --mode local --stdin',
   ].join('\n');
 }
 
 export function renderSuggestedNextAction(mode: RickyMode): string {
   if (mode === 'cloud') {
-    return 'Next: connect Google with `npx agent-relay cloud connect google` or review `npm start -- --help`.';
+    return 'Next: connect Google with `npx agent-relay cloud connect google` or review `ricky --help`.';
   }
 
   if (mode === 'both') {
-    return 'Next: choose your mode again with `npm start`, or connect Cloud with `npx agent-relay cloud connect google`.';
+    return 'Next: choose your mode again with `ricky`, or connect Cloud with `npx agent-relay cloud connect google`.';
   }
 
-  return 'Next: run a local handoff with `npm start -- --mode local --spec "<workflow spec>"`, `--spec-file`, or `--stdin`.';
+  return 'Next: run a local handoff with `ricky --mode local --spec "<workflow spec>"`, `--spec-file`, or `--stdin`.';
 }
 
 export function renderOnboarding(context: OnboardingContext = {}): string {

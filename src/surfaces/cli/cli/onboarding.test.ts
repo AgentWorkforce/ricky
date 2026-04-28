@@ -77,9 +77,9 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('Give Ricky a spec');
     expect(output).toContain('Generation does not execute anything');
-    expect(output).toContain('npm start -- --mode local --spec "generate a workflow for package checks"');
-    expect(output).toContain('npm start -- --mode local --spec-file ./path/to/spec.md');
-    expect(output).toContain('npm start -- --mode local --stdin');
+    expect(output).toContain('ricky --mode local --spec "generate a workflow for package checks"');
+    expect(output).toContain('ricky --mode local --spec-file ./path/to/spec.md');
+    expect(output).toContain('ricky --mode local --stdin');
     expect(output).toContain('requires npm-linked CLI');
     expect(output).not.toContain('npx ricky generate --spec');
     expect(output).not.toContain('npx ricky generate --spec-file');
@@ -99,10 +99,10 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('--spec');
     expect(output).toContain('--spec-file');
     expect(output).toContain('--stdin');
-    expect(output).toContain('npm start -- --mode local --spec "<rephrased spec>"');
+    expect(output).toContain('ricky --mode local --spec "<rephrased spec>"');
     expect(output).toContain('shell-ready');
-    expect(output).toContain('npm start -- --mode local --spec-file ./path/to/spec.md');
-    expect(output).toContain('npm start -- --mode local --stdin');
+    expect(output).toContain('ricky --mode local --spec-file ./path/to/spec.md');
+    expect(output).toContain('ricky --mode local --stdin');
     expect(output).not.toContain('npx ricky generate');
     expect(output).not.toContain('spec-stdin');
   });
@@ -124,7 +124,7 @@ describe('Ricky CLI onboarding', () => {
 
   it('keeps local next action honest and Cloud next action provider-aware', () => {
     expect(renderSuggestedNextAction('local')).toBe(
-      'Next: run a local handoff with `npm start -- --mode local --spec "<workflow spec>"`, `--spec-file`, or `--stdin`.',
+      'Next: run a local handoff with `ricky --mode local --spec "<workflow spec>"`, `--spec-file`, or `--stdin`.',
     );
     expect(renderSuggestedNextAction('cloud')).toContain('connect Google with `npx agent-relay cloud connect google`');
   });

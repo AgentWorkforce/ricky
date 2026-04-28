@@ -129,12 +129,12 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '  No Cloud credentials required.',
         '',
         '  Next steps:',
-        '  - Generate only:  npm start -- --mode local --spec "generate a workflow for package checks"',
-        '  - Generate + run: npm start -- --mode local --spec "..." --run',
-        '  - From file:      npm start -- --mode local --spec-file ./path/to/spec.md',
-        '  - From stdin:     printf "%s\\n" "run workflows/release.workflow.ts" | npm start -- --mode local --stdin',
+        '  - Generate only:  ricky --mode local --spec "generate a workflow for package checks"',
+        '  - Generate + run: ricky --mode local --spec "..." --run',
+        '  - From file:      ricky --mode local --spec-file ./path/to/spec.md',
+        '  - From stdin:     printf "%s\\n" "run workflows/release.workflow.ts" | ricky --mode local --stdin',
         '  - Run existing:   ricky run workflows/generated/<file>.ts  (requires npm-linked CLI)',
-        '  - CLI help:       npm start -- --help',
+        '  - CLI help:       ricky --help',
         '',
         '  Ready to hand over a spec.',
       ].join('\n');
@@ -162,9 +162,9 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '  The GitHub app is installed through the Cloud dashboard / Nango-backed connection flow.',
         '',
         '  After connecting, verify with:',
-        '  $ npm start -- --mode cloud',
+        '  $ ricky --mode cloud',
         '',
-        '  Need help? See: npm start -- --help',
+        '  Need help? See: ricky --help',
       ].join('\n');
     case 'both':
       return [
@@ -178,11 +178,11 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '  - GitHub:  Cloud dashboard -> Integrations -> GitHub',
         '',
         '  Next steps:',
-        '  - Generate only:  npm start -- --mode local --spec "generate a workflow for package checks"',
-        '  - Generate + run: npm start -- --mode local --spec "..." --run',
-        '  - From file:      npm start -- --mode local --spec-file ./path/to/spec.md',
+        '  - Generate only:  ricky --mode local --spec "generate a workflow for package checks"',
+        '  - Generate + run: ricky --mode local --spec "..." --run',
+        '  - From file:      ricky --mode local --spec-file ./path/to/spec.md',
         '  - Cloud setup:    npx agent-relay cloud connect google',
-        '  - CLI help:       npm start -- --help',
+        '  - CLI help:       ricky --help',
       ].join('\n');
     case 'explore':
       return [
@@ -198,7 +198,7 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '',
         '  Anything not listed above is not part of the current CLI surface.',
         '',
-        '  CLI help:    npm start -- --help',
+        '  CLI help:    ricky --help',
         '  Cloud setup: npx agent-relay cloud connect google',
       ].join('\n');
   }

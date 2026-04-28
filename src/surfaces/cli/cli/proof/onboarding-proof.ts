@@ -395,7 +395,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             parsed.spec === undefined,
             helpParsed.command === 'help',
             versionParsed.command === 'version',
-            helpText.includes('npm start --'),
+            helpText.includes('ricky'),
             !helpText.includes('npx ricky generate'),
             !helpText.includes('npx ricky debug'),
           ],
@@ -403,7 +403,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             `default parse: command=${parsed.command}`,
             `help parse: command=${helpParsed.command}`,
             `version parse: command=${versionParsed.command}`,
-            `help mentions npm start: ${helpText.includes('npm start --')}`,
+            `help mentions ricky: ${helpText.includes('ricky')}`,
             `no invented commands: ${!helpText.includes('npx ricky generate')}`,
           ],
         );

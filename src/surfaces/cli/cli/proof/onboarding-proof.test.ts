@@ -81,7 +81,7 @@ describe('Ricky CLI onboarding proof', () => {
 
   describe('journey proof cases', () => {
     it.each([
-      ['default-journey', ['command=run', 'npm start']],
+      ['default-journey', ['command=run', 'ricky']],
       ['local-journey', ['mode=local', 'spec=build a workflow']],
       ['setup-journey', ['all 4 choices']],
       ['welcome-journey', ['Welcome to Ricky', 'Ricky is ready']],

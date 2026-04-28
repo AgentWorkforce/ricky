@@ -100,11 +100,11 @@ describe('renderHelp', () => {
   it('shows the current local handoff journey without obsolete generate guidance', () => {
     const helpText = renderHelp().join('\n');
 
-    expect(helpText).toContain('npm start -- --mode local --spec <text>');
-    expect(helpText).toContain('npm start -- --mode local --spec-file <path>');
-    expect(helpText).toContain('npm start -- --mode local --stdin');
+    expect(helpText).toContain('ricky --mode local --spec <text>');
+    expect(helpText).toContain('ricky --mode local --spec-file <path>');
+    expect(helpText).toContain('ricky --mode local --stdin');
     expect(helpText).toContain(
-      'npm start -- --mode local --spec "generate a workflow for package checks"',
+      'ricky --mode local --spec "generate a workflow for package checks"',
     );
     expect(helpText).not.toContain('npx ricky generate');
     expect(helpText).not.toMatch(/rerun.*later/i);
@@ -425,7 +425,7 @@ describe('cliMain', () => {
     );
   });
 
-  it('runs npm start -- --mode local with an inline spec through local execution', async () => {
+  it('runs ricky --mode local with an inline spec through local execution', async () => {
     const result = await cliMain({
       argv: ['--mode', 'local', '--spec', 'build a workflow'],
       onboard: vi.fn().mockResolvedValue({
@@ -676,7 +676,7 @@ describe('cliMain', () => {
     expect(output).toContain('Next: Inspect the generated workflow artifact and choose whether to run it locally.');
   });
 
-  it('keeps npm start -- --mode local blocked until a real spec or file is provided', async () => {
+  it('keeps ricky --mode local blocked until a real spec or file is provided', async () => {
     const result = await cliMain({
       argv: ['--mode', 'local'],
       onboard: vi.fn().mockResolvedValue({
@@ -699,8 +699,8 @@ describe('cliMain', () => {
     const output = result.output.join('\n');
     expect(result.exitCode).toBe(0);
     expect(output).toContain('No spec provided');
-    expect(output).toContain('npm start -- --mode local --spec');
-    expect(output).toContain('npm start -- --mode local --spec-file');
+    expect(output).toContain('ricky --mode local --spec');
+    expect(output).toContain('ricky --mode local --spec-file');
     expect(result.interactiveResult?.awaitingInput).toBe(true);
     expect(result.interactiveResult?.localResult).toBeUndefined();
   });
