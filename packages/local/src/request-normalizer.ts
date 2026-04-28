@@ -7,6 +7,7 @@
  */
 
 import { isAbsolute, resolve } from 'node:path';
+import type { RunRetryMetadata } from '../runtime/types.js';
 
 // ---------------------------------------------------------------------------
 // Source types — the intake surfaces that can hand off to Ricky locally
@@ -46,6 +47,12 @@ export interface BaseHandoff {
   executionPreference?: LocalExecutionPreference;
   metadata?: Record<string, unknown>;
   requestId?: string;
+  /** Opt-in local repair loop. Undefined means one attempt with current behavior. */
+  autoFix?: { maxAttempts: number };
+  /** Retry metadata supplied by an orchestrator wrapping local execution. */
+  retry?: Partial<RunRetryMetadata>;
+  /** Optional LLM refinement request for generated workflow artifacts. */
+  refine?: false | { model?: string };
 }
 
 /** Free-form spec string from a direct local caller. */
@@ -136,6 +143,12 @@ export interface LocalInvocationRequest {
   sourceMetadata?: LocalSourceMetadata;
   /** Stable request id when the caller supplied one. */
   requestId?: string;
+  /** Opt-in local repair loop. Undefined means one attempt with current behavior. */
+  autoFix?: { maxAttempts: number };
+  /** Retry metadata supplied by an orchestrator wrapping local execution. */
+  retry?: Partial<RunRetryMetadata>;
+  /** Optional LLM refinement request for generated workflow artifacts. */
+  refine?: false | { model?: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +190,7 @@ export async function normalizeRequest(
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
+        ...runtimeOptionsFor(raw),
       };
     }
 
@@ -192,6 +206,7 @@ export async function normalizeRequest(
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
+        ...runtimeOptionsFor(raw),
       };
     }
 
@@ -213,6 +228,7 @@ export async function normalizeRequest(
         },
         sourceMetadata: sourceMetadataForCli(raw),
         requestId: raw.requestId,
+        ...runtimeOptionsFor(raw),
       };
     }
 
@@ -235,6 +251,7 @@ export async function normalizeRequest(
         },
         sourceMetadata: sourceMetadataForMcp(raw),
         requestId: raw.requestId,
+        ...runtimeOptionsFor(raw),
       };
     }
 
@@ -255,6 +272,7 @@ export async function normalizeRequest(
         metadata,
         sourceMetadata: sourceMetadataForClaude(raw),
         requestId: raw.requestId,
+        ...runtimeOptionsFor(raw),
       };
     }
 
@@ -272,9 +290,18 @@ export async function normalizeRequest(
         specPath: raw.artifactPath,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
+        ...runtimeOptionsFor(raw),
       };
     }
   }
+}
+
+function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine'> {
+  return {
+    ...(raw.autoFix ? { autoFix: raw.autoFix } : {}),
+    ...(raw.retry ? { retry: raw.retry } : {}),
+    ...(raw.refine ? { refine: raw.refine } : {}),
+  };
 }
 
 function artifactReadPathFor(raw: WorkflowArtifactHandoff): string {

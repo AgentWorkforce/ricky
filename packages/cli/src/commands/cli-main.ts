@@ -14,8 +14,9 @@
 import type { InteractiveCliDeps, InteractiveCliResult } from '../entrypoint/interactive-cli.js';
 import type { RickyMode } from '../cli/mode-selector.js';
 import type { RawHandoff } from '@ricky/local/request-normalizer';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isRickyMode } from '../cli/mode-selector.js';
 import { runInteractiveCli } from '../entrypoint/interactive-cli.js';
@@ -33,6 +34,8 @@ export interface ParsedArgs {
   stdin?: boolean;
   runRequested?: boolean;
   json?: boolean;
+  autoFix?: number;
+  refine?: false | { model?: string };
   errors?: string[];
 }
 
@@ -62,7 +65,11 @@ export interface CliMainDeps extends InteractiveCliDeps {
   version?: string;
   /** File reader override for testing spec-file handoffs. */
   readFileText?: (path: string) => Promise<string>;
+  /** Package.json reader override for deterministic version tests. */
+  readPackageJsonText?: (path: string) => string;
 }
+
+let cachedPackageVersion: string | undefined;
 
 // ---------------------------------------------------------------------------
 // Argument parsing — deterministic, no external deps
@@ -95,6 +102,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const stdin = argv.includes('--stdin');
   const runRequested = argv.includes('--run') || argv.includes('--generate-and-run') || artifact !== undefined;
   const json = argv.includes('--json');
+  const autoFix = parseAutoFix(argv);
+  const refine = parseRefine(argv);
 
   const errors: string[] = [];
   for (const flag of ['--spec', '--spec-file', '--file', '--artifact']) {
@@ -114,8 +123,26 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (stdin) parsed.stdin = true;
   if (runRequested) parsed.runRequested = true;
   if (json) parsed.json = true;
+  if (autoFix !== undefined && autoFix > 0) parsed.autoFix = autoFix;
+  if (refine) parsed.refine = refine;
   if (errors.length > 0) parsed.errors = errors;
   return parsed;
+}
+
+function parseRefine(argv: string[]): false | { model?: string } {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg !== '--refine' && arg !== '--with-llm' && !arg.startsWith('--refine=') && !arg.startsWith('--with-llm=')) {
+      continue;
+    }
+    if (arg.includes('=')) {
+      const value = arg.slice(arg.indexOf('=') + 1).trim();
+      return value ? { model: value } : {};
+    }
+    const next = argv[index + 1];
+    return next && !next.startsWith('--') ? { model: next } : {};
+  }
+  return false;
 }
 
 function readFlagValue(argv: string[], flag: string): string | undefined {
@@ -134,9 +161,71 @@ function readFlagValue(argv: string[], flag: string): string | undefined {
 
 function readRunArtifactPositional(argv: string[]): string | undefined {
   if (argv[0] !== 'run') return undefined;
-  const candidate = argv[1];
-  if (!candidate || candidate.startsWith('--')) return undefined;
-  return candidate;
+  for (let index = 1; index < argv.length; index += 1) {
+    const candidate = argv[index];
+    const previous = argv[index - 1];
+    if (!candidate || candidate.startsWith('--')) continue;
+    if ((previous === '--auto-fix' || previous === '--repair') && isAutoFixValue(candidate)) continue;
+    if (candidate === 'help' || candidate === 'version') continue;
+    return candidate;
+  }
+  return undefined;
+}
+
+function parseAutoFix(argv: string[]): number | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg !== '--auto-fix' && arg !== '--repair' && !arg.startsWith('--auto-fix=') && !arg.startsWith('--repair=')) {
+      continue;
+    }
+
+    let rawValue: string | undefined;
+    if (arg.includes('=')) {
+      rawValue = arg.slice(arg.indexOf('=') + 1);
+    } else {
+      const next = argv[index + 1];
+      rawValue = next && !next.startsWith('--') ? next : undefined;
+    }
+
+    if (rawValue === undefined || rawValue === '') return 3;
+    const parsed = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+    return Math.min(10, Math.max(1, parsed));
+  }
+  return undefined;
+}
+
+function readPackageVersion(readPackageJsonText?: (path: string) => string): string | undefined {
+  if (!readPackageJsonText && cachedPackageVersion !== undefined) {
+    return cachedPackageVersion;
+  }
+
+  const readText = readPackageJsonText ?? ((path: string) => readFileSync(path, 'utf8'));
+  let currentDir = dirname(fileURLToPath(import.meta.url));
+
+  while (true) {
+    try {
+      const packageJson = JSON.parse(readText(join(currentDir, 'package.json'))) as {
+        name?: unknown;
+        version?: unknown;
+      };
+      if (packageJson.name === '@agentworkforce/ricky') {
+        const version = typeof packageJson.version === 'string' ? packageJson.version : undefined;
+        if (!readPackageJsonText) {
+          cachedPackageVersion = version;
+        }
+        return version;
+      }
+    } catch {
+      // Keep walking upward; unreadable or invalid package.json files are not fatal.
+    }
+
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) {
+      return undefined;
+    }
+    currentDir = parentDir;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +259,10 @@ export function renderHelp(): string[] {
     '  --spec-file <path>  Read spec from a file',
     '  --artifact <path>   Execute an existing artifact (implies --run)',
     '  --run               Execute the generated artifact after generation',
+    '  --refine[=model]    Refine generated task text and gates with an LLM pass',
+    '  --with-llm[=model]  Alias for --refine',
+    '  --auto-fix[=N]      Opt into local diagnose/repair/resume loop (default 3, max 10)',
+    '  --repair[=N]        Alias for --auto-fix',
     '  --json              Print results as JSON',
     '  --stdin             Read spec from stdin',
     '  --help, -h          Show help',
@@ -237,6 +330,8 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       invocationRoot,
       mode: handoffMode,
       stageMode: 'run',
+      ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
+      ...(parsed.refine ? { refine: parsed.refine } : {}),
       metadata: { handoff: 'artifact' },
     };
   }
@@ -253,6 +348,8 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...(parsed.specFile ? { specFile: parsed.specFile } : {}),
       mode: handoffMode,
       stageMode,
+      ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
+      ...(parsed.refine ? { refine: parsed.refine } : {}),
       cliMetadata: { handoff: 'inline-spec' },
     };
   }
@@ -268,6 +365,8 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       invocationRoot,
       mode: handoffMode,
       stageMode,
+      ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
+      ...(parsed.refine ? { refine: parsed.refine } : {}),
       cliMetadata: { handoff: 'spec-file' },
     };
   }
@@ -284,6 +383,8 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       invocationRoot,
       mode: handoffMode,
       stageMode,
+      ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
+      ...(parsed.refine ? { refine: parsed.refine } : {}),
       cliMetadata: { handoff: 'stdin' },
     };
   }
@@ -333,7 +434,7 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
   }
 
   if (parsed.command === 'version') {
-    const version = deps.version ?? '0.0.0';
+    const version = deps.version ?? readPackageVersion(deps.readPackageJsonText) ?? '0.0.0';
     return { exitCode: 0, output: [`ricky ${version}`] };
   }
 
@@ -392,6 +493,9 @@ function renderLocalJson(localResult: NonNullable<InteractiveCliResult['localRes
     ...(localResult.generation ? [localResult.generation] : []),
     ...(localResult.execution ? [localResult.execution] : []),
   ];
+  if (localResult.auto_fix) {
+    return JSON.stringify({ stages, auto_fix: localResult.auto_fix }, null, 2);
+  }
   return JSON.stringify(stages.length > 0 ? stages : localResult, null, 2);
 }
 
@@ -473,6 +577,32 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     }
   }
 
+  if (localResult.auto_fix) {
+    lines.push('--- auto-fix ---');
+    for (const attempt of localResult.auto_fix.attempts) {
+      const status = String(attempt.status ?? 'unknown');
+      const label = `attempt ${String(attempt.attempt)}/${localResult.auto_fix.max_attempts}:`;
+      const blocker = attempt.blocker_code ? ` (${String(attempt.blocker_code)})` : '';
+      lines.push(label);
+      lines.push(`  status: ${status}${blocker}`);
+      if (attempt.applied_fix && typeof attempt.applied_fix === 'object') {
+        const fix = attempt.applied_fix as { steps?: unknown; exit_code?: unknown };
+        if (Array.isArray(fix.steps)) lines.push(`  applied fix: ${fix.steps.join(' && ')}`);
+        if (fix.exit_code !== undefined) lines.push(`  fix outcome: ${fix.exit_code === 0 ? 'ok' : `exit ${String(fix.exit_code)}`}`);
+      }
+      if (attempt.warning) lines.push(`  warning: ${String(attempt.warning)}`);
+    }
+    const finalAttempt = localResult.auto_fix.attempts.at(-1);
+    const finalBlocker = finalAttempt?.blocker_code ? ` Final blocker: ${String(finalAttempt.blocker_code)}.` : '';
+    const final = autoFixFinalMessage(
+      localResult.auto_fix.final_status,
+      localResult.auto_fix.attempts.length,
+      localResult.auto_fix.max_attempts,
+      finalBlocker,
+    );
+    lines.push(final);
+  }
+
   const shouldRenderNextActions =
     !localResult.generation ||
     localResult.generation.status !== 'ok' ||
@@ -484,6 +614,20 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     }
   }
   return lines;
+}
+
+function isAutoFixValue(value: string): boolean {
+  return /^-?\d+$/.test(value);
+}
+
+function autoFixFinalMessage(finalStatus: string, attempts: number, maxAttempts: number, finalBlocker: string): string {
+  if (finalStatus === 'ok') {
+    return `Auto-fix loop succeeded on attempt ${attempts}/${maxAttempts}.`;
+  }
+  if (attempts >= maxAttempts) {
+    return `Auto-fix loop exhausted ${maxAttempts} attempts.${finalBlocker}`;
+  }
+  return `Auto-fix loop stopped with status ${finalStatus}.${finalBlocker}`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

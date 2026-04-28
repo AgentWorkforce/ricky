@@ -1,6 +1,9 @@
 export { generate, buildPlannedChecks, validateGeneratedArtifact } from './pipeline.js';
+export { refineWithLlm } from './refine-with-llm.js';
 export { selectPattern } from './pattern-selector.js';
 export { loadSkills } from './skill-loader.js';
+export { loadSkillRegistry, matchSkills, resetSkillRegistryCache } from './skill-matcher.js';
+export { selectToolsForSteps } from './tool-selector.js';
 export { renderWorkflow } from './template-renderer.js';
 export type {
   DeterministicGate,
@@ -14,10 +17,16 @@ export type {
   PatternDecision,
   PlannedCheck,
   PlannedCheckStage,
+  RefinementMetadata,
   RenderedArtifact,
+  SkillMatch,
+  SkillMatchEvidence,
   SkillContext,
   SkillDescriptor,
   TemplateDescriptor,
+  ToolRunner,
+  ToolSelection,
+  ToolSelectionContext,
   WorkflowExecutionRoute,
   WorkflowExecutionTarget,
   WorkflowTask,

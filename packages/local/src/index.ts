@@ -22,6 +22,8 @@ export type {
 
 export { assembleRickyTurnContext, toRickyTurnContextInput } from './assistant-turn-context-adapter.js';
 export type { AssembleRickyTurnContextOptions } from './assistant-turn-context-adapter.js';
+export { runWithAutoFix } from './auto-fix-loop.js';
+export type { AutoFixAttemptSummary, RunWithAutoFixOptions } from './auto-fix-loop.js';
 export { createLocalExecutor, createProcessCommandRunner, DEFAULT_LOCAL_ROUTE, getDefaultExecutor, resetDefaultExecutor, runLocal } from './entrypoint.js';
 export type {
   ArtifactWriter,

@@ -12,24 +12,30 @@ import type {
   RenderedArtifact,
   SkillApplicationEvidence,
   SkillContext,
+  ToolSelection,
+  ToolSelectionContext,
+  ToolRunner,
   WorkflowTask,
 } from './types.js';
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
+import { selectToolsForSteps } from './tool-selector.js';
 
 interface RenderWorkflowInput {
   spec: NormalizedWorkflowSpec;
   pattern: PatternDecision;
   skills: SkillContext;
   artifactPath?: string;
+  toolSelection?: ToolSelectionContext;
 }
 
 interface TeamMemberSpec {
   name: string;
-  cli: 'claude' | 'codex';
+  cli: ToolRunner;
   role: string;
   interactive?: boolean;
   preset?: 'reviewer' | 'worker';
   retries: number;
+  model?: string;
 }
 
 export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
@@ -42,6 +48,8 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
   const isCodeWorkflow = isCodeWritingWorkflow(input.spec);
   const team = buildTeam(input.pattern.pattern, isCodeWorkflow);
   const tasks = buildTasks(input.spec, isCodeWorkflow);
+  const toolSelection = input.toolSelection ?? selectToolsForSteps(input.spec, tasks, input.skills);
+  applyToolSelection(team, toolSelection.selections);
   const gates = buildGates(input.spec, artifactsDir, artifactPath, isCodeWorkflow, input.skills);
   const skillApplicationEvidence = buildRenderingSkillEvidence(input.skills, tasks, gates);
   const content = renderSource({
@@ -56,6 +64,7 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
     tasks,
     gates,
     isCodeWorkflow,
+    toolSelection,
   });
 
   return {
@@ -70,6 +79,9 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
     tasks,
     gates,
     skillApplicationEvidence,
+    skillMatches: input.skills.matches,
+    toolSelections: toolSelection.selections,
+    artifactsDir,
   };
 }
 
@@ -85,6 +97,7 @@ function renderSource(input: {
   tasks: WorkflowTask[];
   gates: DeterministicGate[];
   isCodeWorkflow: boolean;
+  toolSelection: ToolSelectionContext;
 }): string {
   const onError = input.pattern.riskLevel === 'low' ? "'fail-fast'" : `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS} }`;
   const lines: string[] = [
@@ -101,33 +114,33 @@ function renderSource(input: {
     '',
     ...input.team.map(renderAgentLine),
     '',
-    renderPrepareContextStep(input.spec, input.artifactsDir, input.pattern, input.skills, input.skillApplicationEvidence),
+    renderPrepareContextStep(input.spec, input.artifactsDir, input.pattern, input.skills, input.skillApplicationEvidence, input.toolSelection),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!),
     '',
     renderLeadPlanStep(input.spec, input.artifactsDir),
     '',
-    renderImplementationStep(input.spec, input.isCodeWorkflow, input.artifactsDir),
+    renderImplementationStep(input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'implement-artifact')),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-implementation-file-gate')!),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'initial-soft-validation')!),
     '',
-    renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.spec, input.artifactsDir),
+    renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-claude')),
     '',
-    renderReviewStep('review-codex', 'reviewer-codex', ['initial-soft-validation'], input.spec, input.artifactsDir),
+    renderReviewStep('review-codex', 'reviewer-codex', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-codex')),
     '',
     renderReadReviewStep(input.artifactsDir),
     '',
-    renderFixLoopStep(input.spec, input.isCodeWorkflow, input.artifactsDir),
+    renderFixLoopStep(input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop')),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-verification-gate')!),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-validation')!),
     '',
-    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.spec, input.artifactsDir, true),
+    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-claude'), true),
     '',
-    renderReviewStep('final-review-codex', 'reviewer-codex', ['post-fix-validation'], input.spec, input.artifactsDir, true),
+    renderReviewStep('final-review-codex', 'reviewer-codex', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-codex'), true),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'final-review-pass-gate')!),
     '',
@@ -137,7 +150,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'regression-gate')!),
     '',
-    renderFinalSignoffStep(input.artifactsDir),
+    renderFinalSignoffStep(input.artifactsDir, selectionFor(input.toolSelection, 'final-signoff')),
     '',
     '    .run({ cwd: process.cwd() });',
     '',
@@ -251,15 +264,23 @@ function buildGates(
 
 function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillContext): string {
   const quotedPath = shellQuote(skillBoundaryPath);
+  const artifactsDir = skillBoundaryPath.replace(/\/skill-application-boundary\.json$/, '');
   const commands = [
     `test -f ${quotedPath}`,
+    `test -f ${shellQuote(`${artifactsDir}/skill-matches.json`)}`,
+    `test -f ${shellQuote(`${artifactsDir}/tool-selection.json`)}`,
     `grep -F ${shellQuote('generation_time_only')} ${quotedPath}`,
     `grep -F ${shellQuote('"runtimeEmbodiment":false')} ${quotedPath}`,
-    `grep -F ${shellQuote('"stage":"generation_selection"')} ${quotedPath}`,
-    `grep -F ${shellQuote('"stage":"generation_loading"')} ${quotedPath}`,
-    `grep -F ${shellQuote('"effect":"metadata"')} ${quotedPath}`,
     ...skills.applicableSkillNames.map((skillName) => `grep -F ${shellQuote(skillName)} ${quotedPath}`),
   ];
+
+  if (skills.applicableSkillNames.length > 0) {
+    commands.push(
+      `grep -F ${shellQuote('"stage":"generation_selection"')} ${quotedPath}`,
+      `grep -F ${shellQuote('"stage":"generation_loading"')} ${quotedPath}`,
+      `grep -F ${shellQuote('"effect":"metadata"')} ${quotedPath}`,
+    );
+  }
 
   if (skills.applicableSkillNames.includes('writing-agent-relay-workflows')) {
     commands.push(
@@ -278,9 +299,39 @@ function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillC
   return commands.join(' && ');
 }
 
+function applyToolSelection(team: TeamMemberSpec[], selections: ToolSelection[]): void {
+  for (const member of team) {
+    const selection = selections.find((candidate) => candidate.agent === member.name);
+    if (!selection) continue;
+    if (selection.runner !== '@agent-relay/sdk') member.cli = selection.runner;
+    if (selection.model) member.model = selection.model;
+  }
+}
+
+function selectionFor(context: ToolSelectionContext, stepId: string): ToolSelection | undefined {
+  return context.selections.find((selection) => selection.stepId === stepId);
+}
+
+function renderSelectionFields(selection?: ToolSelection): string {
+  void selection;
+  // The installed Agent Relay SDK exposes runner/model at the agent definition
+  // layer, not on StepOptions. Per-step decisions remain auditable in
+  // tool-selection.json while generated workflow TypeScript stays valid.
+  return '';
+}
+
+function renderToolSelectionSummary(selection?: ToolSelection): string {
+  if (!selection) return '';
+  return [
+    '',
+    `Tool selection: runner=${selection.runner}${selection.model ? ` model=${selection.model}` : ''}; concurrency=${selection.concurrency}; rule=${selection.rule}.`,
+  ].join('\n');
+}
+
 function renderAgentLine(member: TeamMemberSpec): string {
   const options = [`cli: ${literal(member.cli)}`, `role: ${literal(member.role)}`, `retries: ${member.retries}`];
   if (member.preset) options.splice(1, 0, `preset: ${literal(member.preset)}`);
+  if (member.model) options.push(`model: ${literal(member.model)}`);
   return `    .agent(${literal(member.name)}, { ${options.join(', ')} })`;
 }
 
@@ -290,6 +341,7 @@ function renderPrepareContextStep(
   pattern: PatternDecision,
   skills: SkillContext,
   skillApplicationEvidence: SkillApplicationEvidence[],
+  toolSelection: ToolSelectionContext,
 ): string {
   const skillBoundary = {
     behavior: 'generation_time_only',
@@ -298,13 +350,29 @@ function renderPrepareContextStep(
     loadedSkills: skills.applicableSkillNames,
     applicationEvidence: skillApplicationEvidence,
   };
+  const loadedSkillsReport = skills.matches.length > 0
+    ? skills.matches.map((match) => {
+        const evidence = match.evidence.map((item) => `${item.source}:${item.trigger}`).join(', ') || 'no trigger evidence';
+        return `${match.id} confidence=${match.confidence} reason=${match.reason} evidence=${evidence}`;
+      }).join('\n')
+    : 'No skills matched the normalized spec.';
+  const skillContextCommands = skills.matches
+    .filter((match) => match.path)
+    .flatMap((match) => [
+      `printf '%s\\n' ${shellQuote(`\n# ${match.id}\nsource=${match.path}\nreason=${match.reason}\n`)} >> ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
+      `cat ${shellQuote(match.path)} >> ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
+    ]);
   const commands = [
     `mkdir -p ${shellQuote(artifactsDir)}`,
     `printf '%s\\n' ${shellQuote(spec.description)} > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
     `printf '%s\\n' ${shellQuote(`pattern=${pattern.pattern}; reason=${pattern.reason}`)} > ${shellQuote(`${artifactsDir}/pattern-decision.txt`)}`,
-    `printf '%s\\n' ${shellQuote(skills.applicableSkillNames.join(','))} > ${shellQuote(`${artifactsDir}/loaded-skills.txt`)}`,
+    `printf '%s\\n' ${shellQuote(loadedSkillsReport)} > ${shellQuote(`${artifactsDir}/loaded-skills.txt`)}`,
+    `printf '%s\\n' ${shellQuote(JSON.stringify(skills.matches))} > ${shellQuote(`${artifactsDir}/skill-matches.json`)}`,
+    `printf '%s\\n' ${shellQuote(JSON.stringify(toolSelection.selections))} > ${shellQuote(`${artifactsDir}/tool-selection.json`)}`,
     `printf '%s\\n' ${shellQuote(JSON.stringify(skillBoundary))} > ${shellQuote(`${artifactsDir}/skill-application-boundary.json`)}`,
     `printf '%s\\n' ${shellQuote(skillBoundary.boundary)} > ${shellQuote(`${artifactsDir}/skill-runtime-boundary.txt`)}`,
+    `: > ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
+    ...skillContextCommands,
     ...(spec.targetContext ? [`cat ${shellQuote(spec.targetContext)} > ${shellQuote(`${artifactsDir}/target-context.txt`)}`] : []),
     'echo GENERATED_WORKFLOW_CONTEXT_READY',
   ];
@@ -340,12 +408,19 @@ Write ${artifactsDir}/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`)},
     })`;
 }
 
-function renderImplementationStep(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean, artifactsDir: string): string {
+function renderImplementationStep(
+  spec: NormalizedWorkflowSpec,
+  isCodeWorkflow: boolean,
+  artifactsDir: string,
+  selection?: ToolSelection,
+): string {
   const agent = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
+  const selectionLines = renderSelectionFields(selection);
   const noTargetInstructions = `No explicit file targets were supplied. Write all created file paths (one per line) to ${artifactsDir}/output-manifest.txt. Keep changes bounded.`;
   return `    .step('implement-artifact', {
       agent: ${literal(agent)},
       dependsOn: ['lead-plan'],
+${selectionLines}
       task: ${templateLiteral(`${isCodeWorkflow ? 'Implement the requested code-writing workflow slice.' : 'Author the requested workflow artifact.'}
 
 Scope:
@@ -356,6 +431,9 @@ ${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : [noTargetInstructi
 
 Acceptance gates:
 ${formatList(spec.acceptanceGates.map((gate) => gate.gate))}
+${renderToolSelectionSummary(selection)}
+
+Before editing, read ${artifactsDir}/matched-skills.md when it exists and use it only as generation-time context for this task.
 
 Keep execution routing explicit for local, cloud, and MCP callers. Materialize outputs to disk, then stop for deterministic gates.`)},
     })`;
@@ -367,13 +445,16 @@ function renderReviewStep(
   dependsOn: string[],
   spec: NormalizedWorkflowSpec,
   artifactsDir: string,
+  selection?: ToolSelection,
   final = false,
 ): string {
   const marker = final ? (agent.includes('claude') ? 'FINAL_REVIEW_CLAUDE_PASS' : 'FINAL_REVIEW_CODEX_PASS') : 'REVIEW_COMPLETE';
   const reviewPath = `${artifactsDir}/${stepName}.md`;
+  const selectionLines = renderSelectionFields(selection);
   return `    .step(${literal(stepName)}, {
       agent: ${literal(agent)},
       dependsOn: ${arrayLiteral(dependsOn)},
+${selectionLines}
       task: ${templateLiteral(`${final ? 'Re-review the fixed state only.' : 'Review the generated work.'}
 
 Assess:
@@ -384,6 +465,7 @@ Assess:
 
 Spec:
 ${spec.description}
+${renderToolSelectionSummary(selection)}
 
 Write ${reviewPath} ending with ${marker}.`)},
       verification: { type: 'file_exists', value: ${literal(reviewPath)} },
@@ -403,10 +485,17 @@ function renderReadReviewStep(artifactsDir: string): string {
   );
 }
 
-function renderFixLoopStep(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean, artifactsDir: string): string {
+function renderFixLoopStep(
+  spec: NormalizedWorkflowSpec,
+  isCodeWorkflow: boolean,
+  artifactsDir: string,
+  selection?: ToolSelection,
+): string {
+  const selectionLines = renderSelectionFields(selection);
   return `    .step('fix-loop', {
       agent: 'validator-claude',
       dependsOn: ['read-review-feedback'],
+${selectionLines}
       task: ${templateLiteral(`Run the 80-to-100 fix loop.
 
 Inputs:
@@ -415,15 +504,18 @@ Inputs:
 
 Fix only concrete review or validation findings. Preserve the declared target boundary:
 ${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : ['No explicit targets supplied'])}
+${renderToolSelectionSummary(selection)}
 
 Re-run ${isCodeWorkflow ? 'typecheck and tests' : 'document sanity checks'} before handing off to post-fix validation.`)},
     })`;
 }
 
-function renderFinalSignoffStep(artifactsDir: string): string {
+function renderFinalSignoffStep(artifactsDir: string, selection?: ToolSelection): string {
+  const selectionLines = renderSelectionFields(selection);
   return `    .step('final-signoff', {
       agent: 'validator-claude',
       dependsOn: ['regression-gate'],
+${selectionLines}
       task: ${templateLiteral(`Write ${artifactsDir}/signoff.md.
 
 Include:
@@ -433,6 +525,7 @@ Include:
 - review verdicts
 - skill application boundary from ${artifactsDir}/skill-application-boundary.json
 - remaining risks or environmental blockers
+${renderToolSelectionSummary(selection)}
 
 End with GENERATED_WORKFLOW_READY.`)},
       verification: { type: 'file_exists', value: ${literal(`${artifactsDir}/signoff.md`)} },
@@ -513,7 +606,7 @@ function describeImplementation(spec: NormalizedWorkflowSpec): string {
 }
 
 function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
-  const explicitTestGate = spec.acceptanceGates.find((gate) => /\b(vitest|npm test|test)\b/i.test(gate.gate));
+  const explicitTestGate = spec.acceptanceGates.find((gate) => /\b(vitest|npm test)\b/i.test(gate.gate));
   if (explicitTestGate) return mapAcceptanceGateToCommand(explicitTestGate.gate);
 
   const testTargets = spec.targetFiles.filter((file) => /\.(test|spec)\.(ts|tsx|js|jsx)$/i.test(file));
@@ -522,12 +615,20 @@ function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
 }
 
 function mapAcceptanceGateToCommand(gateText: string): string {
+  const inlineCommand = extractInlineShellCommand(gateText);
+  if (inlineCommand) return inlineCommand;
+
   if (/\btsc|typecheck\b/i.test(gateText)) return 'npx tsc --noEmit';
   if (/\bvitest\b/i.test(gateText)) return gateText.trim();
   if (/\bnpm test\b/i.test(gateText)) return 'npm test';
   if (/\bfile exists|file_exists\b/i.test(gateText)) return `test -f ${shellQuote(gateText.replace(/.*(?:file exists|file_exists)\s*:?\s*/i, '').trim() || '.')}`;
-  if (/\bgrep\b/i.test(gateText)) return gateText.trim();
+  if (/^\s*(?:grep|node|npx|npm|test)\b/i.test(gateText)) return gateText.trim();
   return `printf '%s\\n' ${shellQuote(`Manual acceptance gate: ${gateText}`)}`;
+}
+
+function extractInlineShellCommand(text: string): string | null {
+  const candidates = [...text.matchAll(/`([^`\n]+)`/g)].map((match) => match[1].trim());
+  return candidates.find((candidate) => /^(?:node|npx|npm|grep|test)\b/i.test(candidate)) ?? null;
 }
 
 function isCodeWritingWorkflow(spec: NormalizedWorkflowSpec): boolean {

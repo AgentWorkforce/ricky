@@ -34,7 +34,7 @@ describe('runLocal turn-context adapter resilience', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(writes).toHaveLength(1);
+    expect(writes.filter((write) => /^workflows\/generated\/.+\.ts$/.test(write.path))).toHaveLength(1);
     expect(result.logs).toEqual(
       expect.arrayContaining([
         '[local] turn context adapter skipped: shared adapter unavailable',
