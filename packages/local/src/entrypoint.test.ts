@@ -2532,6 +2532,144 @@ describe('runLocal', () => {
     expect(artifact.type).toBe('text/typescript');
   });
 
+  // ---------------------------------------------------------------------------
+  // Regression proof: issues #1 and #2 — createLocalExecutor via runLocal
+  // with localExecutor options ensures artifact content under supplied cwd
+  // ---------------------------------------------------------------------------
+
+  describe('regression: issues #1 and #2 — runLocal localExecutor cwd forwarding', () => {
+    it('runLocal with localExecutor.cwd creates the executor with that cwd for artifact writing', async () => {
+      const { mkdtemp, rm, access, readFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const tempDir = await mkdtemp(join(tmpdir(), 'ricky-runlocal-cwd-'));
+
+      try {
+        const result = await runLocal(
+          { source: 'cli', spec: 'generate a workflow for runLocal cwd forwarding test' },
+          {
+            localExecutor: {
+              cwd: tempDir,
+              returnGeneratedArtifactOnly: true,
+            },
+          },
+        );
+
+        expect(result.ok).toBe(true);
+        const artifactPath = result.artifacts[0].path;
+        expect(artifactPath).toMatch(/^workflows\/generated\//);
+
+        // Artifact physically exists under the supplied cwd
+        const fullPath = join(tempDir, artifactPath);
+        await expect(access(fullPath)).resolves.toBeUndefined();
+
+        // Content was written with workflow boilerplate
+        const content = await readFile(fullPath, 'utf8');
+        expect(content).toContain('workflow(');
+        expect(content).toBe(result.artifacts[0].content);
+
+        // Generation stage artifact.path matches
+        expect(result.generation).toBeDefined();
+        expect(result.generation!.artifact!.path).toBe(artifactPath);
+
+        // Generation stage next.run_command uses the same relative path
+        expect(result.generation!.next!.run_command).toBe(
+          `npx --no-install agent-relay run ${artifactPath}`,
+        );
+
+        // Next action also uses the same relative path
+        expect(result.nextActions).toContain(
+          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+        );
+
+        // Artifact is NOT in packages/cli/workflows/generated
+        const artifactName = artifactPath.split('/').pop()!;
+        const cliPath = join(process.cwd(), 'packages/cli/workflows/generated', artifactName);
+        await expect(access(cliPath)).rejects.toThrow();
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('runLocal with handoff.invocationRoot overrides localExecutor.cwd for artifact location', async () => {
+      const { mkdtemp, rm, access } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const invRoot = await mkdtemp(join(tmpdir(), 'ricky-invroot-override-'));
+      const optionsCwd = await mkdtemp(join(tmpdir(), 'ricky-opts-cwd-'));
+
+      try {
+        const result = await runLocal(
+          {
+            source: 'cli',
+            spec: 'generate a workflow for invocationRoot override test',
+            invocationRoot: invRoot,
+          },
+          {
+            localExecutor: {
+              cwd: optionsCwd,
+              returnGeneratedArtifactOnly: true,
+            },
+          },
+        );
+
+        expect(result.ok).toBe(true);
+        const artifactPath = result.artifacts[0].path;
+
+        // Artifact exists under invocationRoot, not under options.cwd
+        await expect(access(join(invRoot, artifactPath))).resolves.toBeUndefined();
+        await expect(access(join(optionsCwd, artifactPath))).rejects.toThrow();
+
+        // No artifact in packages/cli/workflows/generated
+        const artifactName = artifactPath.split('/').pop()!;
+        const cliPath = join(process.cwd(), 'packages/cli/workflows/generated', artifactName);
+        await expect(access(cliPath)).rejects.toThrow();
+      } finally {
+        await rm(invRoot, { recursive: true, force: true });
+        await rm(optionsCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('createLocalExecutor writes artifact content into cwd with injected writer proving the path', async () => {
+      const writes: Array<{ path: string; content: string; cwd: string }> = [];
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a workflow for writer cwd proof',
+        },
+        {
+          localExecutor: {
+            cwd: '/deterministic-temp-root',
+            artifactWriter: {
+              async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+                writes.push({ path, content, cwd });
+              },
+            },
+            returnGeneratedArtifactOnly: true,
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(writes).toHaveLength(1);
+
+      // Writer was called with the supplied cwd
+      expect(writes[0].cwd).toBe('/deterministic-temp-root');
+
+      // Artifact path is relative (workflows/generated/...)
+      expect(writes[0].path).toMatch(/^workflows\/generated\//);
+      expect(writes[0].content).toContain('workflow(');
+
+      // The returned artifact path matches the written path
+      expect(result.artifacts[0].path).toBe(writes[0].path);
+
+      // The next command references the same path
+      expect(result.nextActions).toContain(
+        `Run the generated workflow locally: npx --no-install agent-relay run ${writes[0].path}`,
+      );
+    });
+  });
+
   it('surfaces local runtime launch environment warnings without rerouting through Cloud', async () => {
     const runner = throwingCommandRunner('spawn agent-relay ENOENT');
     const result = await runLocal(
