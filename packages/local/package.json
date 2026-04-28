@@ -13,6 +13,7 @@
     "test": "vitest run --root ../.. packages/local/src"
   },
   "dependencies": {
+    "@agent-assistant/turn-context": "^0.3.11",
     "@ricky/product": "file:../product",
     "@ricky/runtime": "file:../runtime",
     "@ricky/shared": "file:../shared"
