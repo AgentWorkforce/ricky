@@ -18,6 +18,7 @@ import { generate } from '../product/generation/index.js';
 import type { GenerationResult, RenderedArtifact } from '../product/generation/index.js';
 import { intake } from '../product/spec-intake/index.js';
 import type { ExecutionPreference, InputSurface, RawSpecPayload, RouteTarget } from '../product/spec-intake/index.js';
+import { defaultRepoDetector, type RepoDetector } from '../product/spec-intake/detect-current-repo.js';
 import { LocalCoordinator } from '../runtime/local-coordinator.js';
 import type {
   CommandInvocation,
@@ -589,8 +590,14 @@ function isLocalInvocationRequest(input: LocalEntrypointInput): input is LocalIn
   );
 }
 
-function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
+function toRawSpecPayload(
+  request: LocalInvocationRequest,
+  repoDetector: RepoDetector = defaultRepoDetector,
+): RawSpecPayload {
   const receivedAt = new Date().toISOString();
+  const cwd = request.invocationRoot ?? process.cwd();
+  const detectedRepo = repoDetector.detect(cwd);
+  const repoDefault = detectedRepo ? { targetRepo: detectedRepo } : {};
   const base = {
     surface: sourceToSurface(request.source),
     receivedAt,
@@ -608,7 +615,7 @@ function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
       ...base,
       kind: 'mcp',
       toolName: typeof request.metadata.toolName === 'string' ? request.metadata.toolName : 'ricky.generate',
-      arguments: request.structuredSpec ?? { spec: request.spec },
+      arguments: { ...repoDefault, ...(request.structuredSpec ?? { spec: request.spec }) },
     };
   }
 
@@ -620,6 +627,7 @@ function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
         intent: 'execute',
         workflowFile: request.specPath,
         description: request.spec.trim() || `execute ready artifact ${request.specPath}`,
+        ...repoDefault,
       },
     };
   }
@@ -628,7 +636,25 @@ function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
     return {
       ...base,
       kind: 'structured_json',
-      data: request.structuredSpec,
+      data: { ...repoDefault, ...request.structuredSpec },
+    };
+  }
+
+  // Explicit CLI description handoff — the user handed over prose, not a
+  // workflow path. Bypass the keyword-based intent classifier (which
+  // over-fires on words like "run" / "execute" that appear naturally in
+  // feature specs) and route straight to generate. Only applies when the
+  // spec text contains no workflow file reference; otherwise the spec is
+  // a "run X" request and the natural-language classifier handles it.
+  if (request.source === 'cli' && !mentionsWorkflowFile(request.spec)) {
+    return {
+      ...base,
+      kind: 'structured_json',
+      data: {
+        intent: 'generate',
+        description: request.spec,
+        ...repoDefault,
+      },
     };
   }
 
@@ -637,6 +663,12 @@ function toRawSpecPayload(request: LocalInvocationRequest): RawSpecPayload {
     kind: 'natural_language',
     text: request.spec,
   };
+}
+
+const WORKFLOW_FILE_PATTERN = /\bworkflows\/[\w./-]+\.ts\b|\b[\w./-]+\.workflow\.ts\b/i;
+
+function mentionsWorkflowFile(text: string): boolean {
+  return WORKFLOW_FILE_PATTERN.test(text);
 }
 
 /**
