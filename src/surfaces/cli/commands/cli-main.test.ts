@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import type { InteractiveCliResult } from '../entrypoint/interactive-cli.js';
 import type { OnboardingResult } from '../cli/onboarding.js';
@@ -76,6 +78,48 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses --auto-fix attempts and treats zero as disabled', () => {
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--auto-fix'])).toEqual({
+      command: 'run',
+      artifact: 'workflows/generated/example.ts',
+      runRequested: true,
+      autoFix: 3,
+    });
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--auto-fix=5'])).toMatchObject({
+      autoFix: 5,
+    });
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--repair=50'])).toMatchObject({
+      autoFix: 10,
+    });
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--auto-fix=0'])).toEqual({
+      command: 'run',
+      artifact: 'workflows/generated/example.ts',
+      runRequested: true,
+    });
+    expect(parseArgs(['run', '--auto-fix', '5', 'workflows/generated/example.ts'])).toMatchObject({
+      artifact: 'workflows/generated/example.ts',
+      autoFix: 5,
+    });
+  });
+
+  it('parses --refine and --with-llm model hints', () => {
+    expect(parseArgs(['--spec', 'build a workflow', '--refine'])).toEqual({
+      command: 'run',
+      spec: 'build a workflow',
+      refine: {},
+    });
+    expect(parseArgs(['--spec-file', './spec.md', '--refine=sonnet'])).toEqual({
+      command: 'run',
+      specFile: './spec.md',
+      refine: { model: 'sonnet' },
+    });
+    expect(parseArgs(['--stdin', '--with-llm', 'opus'])).toEqual({
+      command: 'run',
+      stdin: true,
+      refine: { model: 'opus' },
+    });
+  });
+
   it('reports missing values for spec flags', () => {
     expect(parseArgs(['--spec'])).toEqual({
       command: 'run',
@@ -94,6 +138,7 @@ describe('renderHelp', () => {
     expect(lines.length).toBeGreaterThan(0);
     expect(lines[0]).toMatch(/ricky/);
     expect(lines.some((l) => l.includes('--mode'))).toBe(true);
+    expect(lines.some((l) => l.includes('--auto-fix'))).toBe(true);
     expect(lines.some((l) => l.includes('--help'))).toBe(true);
   });
 
@@ -228,13 +273,30 @@ describe('cliMain', () => {
   });
 
   it('returns version output with exit code 0 for --version', async () => {
-    const result = await cliMain({ argv: ['--version'], version: '1.2.3' });
+    const result = await cliMain({ argv: ['--version'], version: '9.9.9' });
     expect(result.exitCode).toBe(0);
-    expect(result.output).toEqual(['ricky 1.2.3']);
+    expect(result.output).toEqual(['ricky 9.9.9']);
   });
 
-  it('defaults version to 0.0.0 when not provided', async () => {
-    const result = await cliMain({ argv: ['version'] });
+  it('reads version from the package.json when not provided', async () => {
+    const packageJsonPath = fileURLToPath(new URL('../../../../package.json', import.meta.url));
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version: string };
+
+    const result = await cliMain({ argv: ['--version'] });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toEqual([`ricky ${packageJson.version}`]);
+  });
+
+  it('falls back to 0.0.0 when package.json lookup fails', async () => {
+    const result = await cliMain({
+      argv: ['version'],
+      readPackageJsonText: vi.fn(() => {
+        throw new Error('package lookup failed');
+      }),
+    });
+
+    expect(result.exitCode).toBe(0);
     expect(result.output).toEqual(['ricky 0.0.0']);
   });
 
@@ -353,6 +415,46 @@ describe('cliMain', () => {
           artifactPath: 'workflows/generated/example.ts',
           invocationRoot: '/repo-root',
           stageMode: 'run',
+        }),
+      }),
+    );
+  });
+
+  it('threads --auto-fix through artifact execution handoff', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['run', 'workflows/generated/example.ts', '--auto-fix=5'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handoff: expect.objectContaining({
+          source: 'workflow-artifact',
+          autoFix: { maxAttempts: 5 },
+        }),
+      }),
+    );
+  });
+
+  it('threads --auto-fix through spec-file generate-and-run handoff', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['--mode', 'local', '--spec-file', './spec.md', '--run', '--auto-fix'],
+      cwd: '/repo-root',
+      readFileText: vi.fn().mockResolvedValue('build a workflow'),
+      runInteractive: runner,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handoff: expect.objectContaining({
+          source: 'cli',
+          stageMode: 'run',
+          autoFix: { maxAttempts: 3 },
         }),
       }),
     );

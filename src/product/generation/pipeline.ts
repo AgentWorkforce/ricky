@@ -12,6 +12,7 @@ import type {
   WorkflowExecutionRoute,
 } from './types.js';
 import { selectPattern } from './pattern-selector.js';
+import { refineWithLlm } from './refine-with-llm.js';
 import { loadSkills } from './skill-loader.js';
 import { renderWorkflow } from './template-renderer.js';
 
@@ -24,21 +25,37 @@ export function generate(input: GenerationInput): GenerationResult {
     skills: skillContext,
     artifactPath: input.artifactPath,
   });
-  const validation = validateGeneratedArtifact(artifact, patternDecision, skillContext);
-  const plannedChecks = buildPlannedChecks(artifact, input.dryRunEnabled !== false);
+  let finalArtifact = artifact;
+  let refinement = null;
+  if (input.refine) {
+    const refined = refineWithLlm(input.spec, artifact, {
+      model: input.refine.model,
+      validate: (candidate) => validateGeneratedArtifact(candidate, patternDecision, skillContext),
+    });
+    finalArtifact = refined.artifact;
+    refinement = refined.metadata;
+  }
+  const validation = validateGeneratedArtifact(finalArtifact, patternDecision, skillContext);
+  const plannedChecks = buildPlannedChecks(finalArtifact, input.dryRunEnabled !== false);
 
   return {
     success: validation.valid,
-    artifact,
+    artifact: finalArtifact,
     patternDecision,
     skillContext,
+    toolSelection: {
+      selections: finalArtifact.toolSelections,
+      defaultRunner: '@agent-relay/sdk',
+      issues: [],
+    },
+    refinement,
     validation,
-    dryRunCommand: input.dryRunEnabled === false ? null : dryRunCommand(artifact.artifactPath),
+    dryRunCommand: input.dryRunEnabled === false ? null : dryRunCommand(finalArtifact.artifactPath),
     deterministicValidationCommands: plannedChecks
       .filter((check) => check.stage !== 'dry_run')
       .map((check) => check.command),
     plannedChecks,
-    executionRoute: resolveExecutionRoute(input.spec, artifact),
+    executionRoute: resolveExecutionRoute(input.spec, finalArtifact),
     generatedAt: new Date().toISOString(),
   };
 }

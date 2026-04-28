@@ -355,6 +355,24 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('output-manifest.txt');
   });
 
+  it('maps prose acceptance gates with inline shell commands without emitting prose as shell', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Improve generated workflow quality for version gates.',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+        acceptanceGates: [
+          "test for this layer: the version workflow verifies `node dist/bin/ricky.js --version | grep -Eq '^ricky [0-9]+\\.[0-9]+\\.[0-9]+$'` instead of a generic source-shape grep.",
+        ],
+      }),
+      artifactPath: 'workflows/generated/inline-command-gate.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const initialValidation = result.artifact!.gates.find((gate) => gate.name === 'initial-soft-validation')!;
+    expect(initialValidation.command).toContain("node dist/bin/ricky.js --version | grep -Eq '^ricky [0-9]+\\.[0-9]+\\.[0-9]+$'");
+    expect(initialValidation.command).not.toContain('test for this layer');
+  });
+
   it('selects pipeline pattern for low-risk simple spec', () => {
     const result = generate({
       spec: spec({

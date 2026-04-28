@@ -21,6 +21,8 @@ export interface RunRetryMetadata {
   retryOfRunId?: string;
   /** Most recent failed/timed-out run id, if different from retryOfRunId. */
   previousRunId?: string;
+  /** Step id/name to resume from when the underlying runtime supports it. */
+  startFromStep?: string;
   /** Human-readable reason the retry was scheduled. */
   reason?: string;
   /** Delay applied before this attempt, in milliseconds. */
