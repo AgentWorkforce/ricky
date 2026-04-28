@@ -46,6 +46,10 @@ RUN_PID="$$"
 RUN_PGID=""
 RUNNER_START_PID=""
 STATUS_MARKED="false"
+RESTORED_ARTIFACT_DIR=""
+RESTORED_QUEUE_FILE=""
+RESTORED_CURRENT_INDEX=""
+RESTORED_CURRENT_PASS=""
 CLAUDE_RATE_LIMIT_PATTERNS=(
   "You've hit your limit"
   "/rate-limit-options"
@@ -392,12 +396,44 @@ restore_checkpoint() {
   fi
   CURRENT_PASS="${restored_current_pass:-1}"
   CURRENT_INDEX="${restored_current_index:-0}"
+  RESTORED_CURRENT_PASS="$CURRENT_PASS"
+  RESTORED_CURRENT_INDEX="$CURRENT_INDEX"
+  RESTORED_ARTIFACT_DIR="${previous_artifact_dir:-}"
+  RESTORED_QUEUE_FILE=""
+  if [[ -n "$RESTORED_ARTIFACT_DIR" ]]; then
+    RESTORED_QUEUE_FILE="$RESTORED_ARTIFACT_DIR/queue.txt"
+  fi
   # `workflows_run` is an invocation-local chunk counter. Restoring it across
   # `--resume` causes a fresh invocation to immediately checkpoint again once it
   # reaches the prior chunk limit, without running the next queued workflow.
   WORKFLOWS_RUN=0
   CURRENT_WORKFLOW="${restored_current_workflow:-}"
   INITIAL_GIT_HEAD="${restored_initial_git_head:-}"
+}
+
+resume_remaining_queue_from_checkpoint() {
+  if [[ "$RESUME_FLAG" != "--resume" ]]; then
+    return 0
+  fi
+
+  if [[ -z "$RESTORED_QUEUE_FILE" || ! -f "$RESTORED_QUEUE_FILE" ]]; then
+    return 0
+  fi
+
+  local restored_index="${RESTORED_CURRENT_INDEX:-0}"
+  if [[ ! "$restored_index" =~ ^[0-9]+$ ]] || (( restored_index < 0 )); then
+    restored_index=0
+  fi
+
+  local start_line="$((restored_index + 1))"
+  local resumed_queue="$ARTIFACT_DIR/queue.resumed.tmp"
+  tail -n +"$start_line" "$RESTORED_QUEUE_FILE" > "$resumed_queue"
+  mv "$resumed_queue" "$QUEUE_FILE"
+
+  CURRENT_PASS="${RESTORED_CURRENT_PASS:-1}"
+  CURRENT_INDEX=0
+
+  log "resumed remaining queue from prior artifact: $RESTORED_QUEUE_FILE (starting at saved index $restored_index)"
 }
 
 write_summary() {
@@ -740,6 +776,7 @@ INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 restore_checkpoint
 write_queue
 filter_queue_for_repo_state
+resume_remaining_queue_from_checkpoint
 if [[ -z "$INITIAL_GIT_HEAD" ]]; then
   INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 fi
