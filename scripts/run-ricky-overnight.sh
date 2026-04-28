@@ -72,6 +72,49 @@ normalize_positive_integer() {
 
 MAX_WORKFLOWS_PER_INVOCATION="$(normalize_positive_integer "$MAX_WORKFLOWS_PER_INVOCATION" "$DEFAULT_MAX_WORKFLOWS_PER_INVOCATION")"
 
+artifact_runner_logs_show_success() {
+  local artifact_dir="$1"
+  local runner_log=""
+
+  [[ -d "$artifact_dir" ]] || return 1
+
+  for runner_log in "$artifact_dir"/runner-*.log; do
+    [[ -f "$runner_log" ]] || continue
+    if grep -Eq 'Workflow "[^"]+" — COMPLETED|\[agent-relay\] runScriptFile: runner .* completed exit=0' "$runner_log"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+mark_artifact_stale_or_complete() {
+  local artifact_dir="$1"
+  local status_file="$artifact_dir/status.txt"
+  local summary_file="$artifact_dir/summary.md"
+  local resolved_status="stale"
+  local resolved_reason="process exited unexpectedly"
+
+  [[ -d "$artifact_dir" ]] || return 0
+
+  if artifact_runner_logs_show_success "$artifact_dir"; then
+    resolved_status="complete"
+    resolved_reason="runner completed before harness status flush"
+  fi
+
+  printf '%s\n' "$resolved_status" > "$status_file"
+
+  if [[ ! -f "$summary_file" ]]; then
+    cat > "$summary_file" <<EOF
+# Ricky overnight run
+
+- status: $resolved_status
+- reason: $resolved_reason
+- artifact_dir: $artifact_dir
+EOF
+  fi
+}
+
 kill_process_group() {
   local pgid="$1"
 
@@ -93,10 +136,17 @@ on_exit() {
   fi
 
   if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
-    STATUS_REASON="process exited unexpectedly"
-    echo "stale" > "$STATUS_FILE"
-    persist_checkpoint
-    write_summary "stale"
+    if artifact_runner_logs_show_success "$ARTIFACT_DIR"; then
+      STATUS_REASON="runner completed before harness status flush"
+      echo "complete" > "$STATUS_FILE"
+      persist_checkpoint
+      write_summary "complete"
+    else
+      STATUS_REASON="process exited unexpectedly"
+      echo "stale" > "$STATUS_FILE"
+      persist_checkpoint
+      write_summary "stale"
+    fi
   fi
 
   return "$exit_code"
@@ -447,8 +497,8 @@ restore_checkpoint() {
   fi
   if [[ -n "$previous_status_file" && -f "$previous_status_file" ]] && grep -qx 'running' "$previous_status_file"; then
     if ! is_pid_running "$previous_pid" && ! is_process_group_running "$previous_pgid"; then
-      printf '%s\n' 'stale' > "$previous_status_file"
-      log "marked stale prior overnight artifact: $previous_artifact_dir"
+      mark_artifact_stale_or_complete "$previous_artifact_dir"
+      log "reconciled prior overnight artifact with no live process: $previous_artifact_dir"
     fi
   fi
 
