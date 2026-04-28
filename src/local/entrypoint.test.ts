@@ -904,7 +904,8 @@ describe('runLocal', () => {
     expect(result.logs[0]).toContain('normalization failed');
     expect(result.logs[0]).toContain('ENOENT');
     expect(result.warnings[0]).toContain("source 'workflow-artifact'");
-    expect(result.nextActions[0]).toContain('retry');
+    expect(result.warnings[0]).toContain('ENOENT');
+    expect(result.nextActions[0]).toContain('artifact path exists');
     expect(executor.calls).toHaveLength(0);
   });
 
@@ -918,7 +919,8 @@ describe('runLocal', () => {
     expect(result.ok).toBe(false);
     expect(executor.calls).toHaveLength(0);
     expect(result.logs[0]).toContain('normalization failed');
-    expect(result.warnings).toEqual(["Failed to normalize handoff from source 'cli'."]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatch(/^Failed to normalize handoff from source 'cli': /);
     expect(result.nextActions).toEqual(['Check the spec content or artifact path and retry.']);
   });
 
@@ -3130,6 +3132,74 @@ describe('runLocal', () => {
         },
       });
       expect(blocked.nextActions).toEqual(blocked.execution?.blocker?.recovery.steps);
+    });
+  });
+
+  describe('CLI sane defaults — explicit description handoff', () => {
+    it('routes a CLI description spec to generate even when the body is dense with run/execute words', async () => {
+      const localExecutor = memoryLocalExecutorOptions();
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: [
+            'Add a feature so the CLI version flag reads from package.json.',
+            'Currently `ricky --version` prints 0.0.0 instead of the installed version.',
+            'When users run the CLI it should reflect the package version they installed.',
+            'Cover three contexts: installed from npm, local dev via npm start, and tests.',
+          ].join('\n'),
+          stageMode: 'generate',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.logs).toContain('[local] spec intake route: generate');
+      expect(result.artifacts.length).toBeGreaterThan(0);
+      expect(result.warnings).not.toContain(
+        expect.stringContaining('Execution requires a recognized workflow artifact'),
+      );
+    });
+
+    it('does not override intent when the CLI spec text references a workflow file', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['ran'] });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'run workflows/foo.workflow.ts',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.logs).toContain('[local] spec intake route: execute');
+    });
+
+    it('does not override intent when the CLI spec text references a .js workflow file', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['ran'] });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'run workflows/deploy.js',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.logs).toContain('[local] spec intake route: execute');
+    });
+
+    it('does not override intent when the CLI spec text references a .workflow.yaml file', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['ran'] });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'run ops/release.workflow.yaml',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.logs).toContain('[local] spec intake route: execute');
     });
   });
 });
