@@ -44,6 +44,7 @@ STATUS_REASON=""
 CURRENT_WORKFLOW=""
 RUN_PID="$$"
 RUN_PGID=""
+SCRIPT_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
 RUNNER_START_PID=""
 STATUS_MARKED="false"
 RESTORED_ARTIFACT_DIR=""
@@ -635,6 +636,10 @@ run_one() {
   RUN_PGID=""
   if command -v ps >/dev/null 2>&1; then
     RUN_PGID="$(ps -o pgid= -p "$runner_pid" 2>/dev/null | tr -d '[:space:]')"
+    if [[ -n "$SCRIPT_PGID" && "$RUN_PGID" == "$SCRIPT_PGID" ]]; then
+      log "runner shares shell process group; disabling process-group tracking for stale detection"
+      RUN_PGID=""
+    fi
   fi
   persist_checkpoint
 
