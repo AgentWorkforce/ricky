@@ -209,7 +209,6 @@ function resolveLocalInvocationRoot(deps: InteractiveCliDeps): string {
 }
 
 function withInvocationRoot(handoff: RawHandoff, invocationRoot: string): RawHandoff {
-  if (handoff.invocationRoot) return handoff;
   return { ...handoff, invocationRoot };
 }
 

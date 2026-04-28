@@ -205,6 +205,20 @@ describe('normalizeRequest', () => {
     expect(result.metadata).toEqual({});
   });
 
+  it('normalizes a relative invocationRoot to an absolute local request root', async () => {
+    const { isAbsolute } = await import('node:path');
+    const raw: CliHandoff = {
+      source: 'cli',
+      spec: 'build a pipeline',
+      invocationRoot: './relative-repo-root',
+    };
+    const result = await normalizeRequest(raw);
+
+    expect(result.invocationRoot).toMatch(/relative-repo-root$/);
+    expect(result.invocationRoot).not.toBe('./relative-repo-root');
+    expect(isAbsolute(result.invocationRoot!)).toBe(true);
+  });
+
   it('normalizes a CLI handoff with spec file path', async () => {
     const raw: CliHandoff = {
       source: 'cli',

@@ -199,6 +199,38 @@ describe('runInteractiveCli', () => {
     }
   });
 
+  it('resolves an existing handoff invocationRoot before passing it to an injected local executor', async () => {
+    const { isAbsolute } = await import('node:path');
+    const localResponse: LocalResponse = {
+      ok: true,
+      artifacts: [{ path: 'workflows/generated/from-relative-root.ts', type: 'text/typescript' }],
+      logs: [],
+      warnings: [],
+      nextActions: [],
+    };
+    const execute = vi.fn().mockResolvedValue(localResponse);
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      handoff: {
+        source: 'cli',
+        spec: 'Build a workflow',
+        mode: 'local',
+        invocationRoot: './relative-caller-repo',
+      },
+      localExecutor: { execute },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        invocationRoot: expect.stringMatching(/relative-caller-repo$/),
+      }),
+    );
+    expect(execute.mock.calls[0][0].invocationRoot).not.toBe('./relative-caller-repo');
+    expect(isAbsolute(execute.mock.calls[0][0].invocationRoot!)).toBe(true);
+  });
+
   it('stops cleanly after onboarding when no handoff was provided', async () => {
     const localExecutor = { execute: vi.fn() };
 
