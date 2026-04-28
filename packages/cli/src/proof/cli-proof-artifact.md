@@ -35,18 +35,18 @@ No live provider or live relay dependency. The external CLI proof uses a tempora
 - **Explore maps to local**: Onboarding choice `explore` resolves to `local` mode at runtime.
 - **External linked CLI**: `packages/cli/bin/ricky` is exposed through the package `bin.ricky` seam, symlinked into an external repo's `node_modules/.bin`, and invoked from that repo.
 - **Artifact path contract**: The CLI prints `Artifact: workflows/generated/<file>.ts`, and the proof asserts that path exists relative to the external repo.
-- **Next command contract**: The CLI prints `Next: Run the generated workflow locally: npx --no-install agent-relay run <artifact>`, and the proof executes that command in the external repo against a deterministic fixture runner.
+- **Next command contract**: The CLI prints `To execute this artifact: npx --no-install agent-relay run <artifact>`, and the proof executes that command in the external repo against a deterministic fixture runner.
 
 ## Test Coverage Summary
 
 | File                              | Tests Before | Tests After | New Tests |
 |-----------------------------------|-------------|-------------|-----------|
 | cli-main.test.ts                  | 24          | 48          | +24       |
-| interactive-cli.test.ts           | 15          | 34          | +19       |
+| interactive-cli.test.ts           | 15          | 36          | +21       |
 | onboarding-proof.test.ts          | 13          | 26          | +13       |
 | onboarding.test.ts                | 25          | 25          | +0        |
 | external-cli-proof.test.ts        | 0           | 1           | +1        |
-| **CLI package test run**          | **77**      | **134**     | **+57**   |
+| **CLI package test run**          | **77**      | **136**     | **+59**   |
 
 ## External Linked CLI Proof
 
@@ -56,8 +56,8 @@ No live provider or live relay dependency. The external CLI proof uses a tempora
 2. Reads `@ricky/cli` package metadata and links the monorepo `bin.ricky` target into the external repo at `node_modules/.bin/ricky`.
 3. Installs a deterministic `node_modules/.bin/agent-relay` fixture in that external repo.
 4. Invokes linked Ricky from the external repo with `--mode local --spec`.
-5. Asserts the printed `Artifact:` path exists under the external repo's `workflows/generated/` directory.
-6. Parses the printed `Next:` command and executes it from the same external repo, proving it targets the same artifact path.
+5. Asserts the printed `Artifact:` path is repo-relative under `workflows/generated/` and exists inside the external repo.
+6. Parses the printed `To execute this artifact:` command and executes it from the same external repo, proving it targets the same artifact path.
 
 ## Proof Case Registry (onboarding-proof.ts)
 
