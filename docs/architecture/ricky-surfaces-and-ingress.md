@@ -332,7 +332,44 @@ The orchestrator (`src/entrypoint/interactive-cli.ts`) makes this routing decisi
 
 ---
 
-## 11. Key rules for implementers
+## 11. Artifact return expectations
+
+Each surface has different expectations for how Ricky returns workflow artifacts, outcomes, and follow-up actions. The domain layer produces a unified result; the surface layer adapts delivery to the medium.
+
+### Per-surface return contracts
+
+| Surface | Primary return format | Artifact delivery | Follow-up actions |
+|---|---|---|---|
+| CLI | Structured terminal output | Files written to disk in the local project | Printed next-step instructions |
+| Slack | Threaded message with summary | File uploads or links to artifacts | Interactive buttons or suggested commands |
+| Cloud API | JSON response body | `CloudArtifact[]` array with type, path, and content | `CloudFollowUpAction[]` with action type and description |
+| MCP/Claude | Structured tool response | Inline artifact content or file paths | Suggested next tool invocations |
+| Web | JSON response to browser | Download links or inline previews | UI-rendered action buttons |
+| Local/BYOH | `LocalResponse` struct | Files on disk at specified paths | Terminal-printed guidance |
+
+### What every return must include
+
+Regardless of surface, every Ricky result must include:
+
+1. **Success/failure signal** - whether the requested action completed
+2. **Artifacts produced** - what files, data, or outputs were created
+3. **Warnings** - any assumptions made or edge cases encountered
+4. **Follow-up actions** - what the user should or could do next
+
+### Artifact content rules
+
+- Generated workflow files are returned as complete, self-contained TypeScript files
+- Evidence summaries are returned as structured data, not raw log dumps
+- Diagnostic results include both the classification and the recommended action
+- Analytics digests are returned in both structured (typed) and human-readable (markdown) formats when the surface supports it
+
+### Rule for implementers
+
+The domain layer produces a surface-agnostic result. Surface adapters transform this result into the appropriate delivery format. No domain logic should be conditional on the surface type. If a surface needs a different artifact shape, the surface adapter handles the transformation.
+
+---
+
+## 12. Key rules for implementers
 
 1. **Never assume one privileged surface.** Code that works only from CLI or only from Slack is a bug.
 2. **All surfaces converge on the same domain model.** Surface-specific input shapes are translated in the normalizer, nowhere else.

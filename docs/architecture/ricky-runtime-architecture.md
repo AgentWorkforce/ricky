@@ -187,7 +187,123 @@ See `docs/architecture/ricky-failure-taxonomy-and-unblockers.md` for the full ta
 
 ---
 
-## 6. Batch and overnight execution
+## 6. Evidence flow
+
+Evidence is the structured record of what happened during a workflow run. Ricky treats evidence as a first-class data flow, not an afterthought appended to logs.
+
+### Evidence capture path
+
+```
+workflow step executes
+  -> step outcome (pass/fail/timeout/skip)
+  -> verification results captured
+  -> logs and artifacts recorded
+  -> retry history appended if applicable
+  -> duration metrics stamped
+  -> WorkflowStepEvidence assembled
+```
+
+After all steps complete (or the run terminates early):
+
+```
+per-step evidence array
+  -> aggregate run status computed
+  -> final signoff path recorded (if present)
+  -> WorkflowRunEvidence assembled
+  -> returned to orchestrator for surface delivery or further specialist processing
+```
+
+### Evidence consumers
+
+| Consumer | What it reads | Why |
+|---|---|---|
+| Diagnostic engine | Step-level failure messages and metadata | Classify blockers |
+| Debugger specialist | Full run evidence | Recommend fixes |
+| Validator specialist | Verification results and gate outcomes | Enforce 80->100 proof |
+| Analytics specialist | Aggregated run evidence over time | Detect patterns and regressions |
+| Restart specialist | Run evidence + environment state | Evaluate rerun safety |
+| Surface layer | Run evidence summary | Present outcomes to the user |
+
+### Evidence normalization rule
+
+Local execution produces evidence directly as `WorkflowRunEvidence`. Cloud execution produces evidence in whatever format the Cloud runtime uses, but the Cloud executor normalizes it back into `WorkflowRunEvidence` before returning it to the orchestrator. There is one canonical evidence shape for all paths.
+
+---
+
+## 7. Validation loops
+
+Ricky uses a structured validation loop pattern inherited from the 80->100 workflow proof standard. This pattern applies to workflow generation, debugging, and any specialist that produces artifacts.
+
+### Standard three-step loop
+
+```
+Step 1: Soft validation (failOnError: false)
+  -> run typecheck, test, dry-run, or structural check
+  -> capture output including failures
+
+Step 2: Fix pass
+  -> read captured failures
+  -> apply bounded fixes
+  -> re-stage artifacts
+
+Step 3: Hard validation (failOnError: true)
+  -> re-run the same validation commands
+  -> fail the workflow if validation does not pass
+```
+
+### Where validation loops appear
+
+- **Workflow generation:** after producing a workflow artifact, the author specialist validates it with dry-run and structural checks before returning it
+- **Debugging:** after applying a fix, the debugger specialist re-validates to confirm the original failure is resolved
+- **Meta-workflows:** after generating multiple workflow artifacts, each is validated individually
+- **CI-equivalent gates:** typecheck (`npx tsc --noEmit`), test (`npx vitest run`), and structural grep checks
+
+### Validation loop rules
+
+1. A validation loop must capture output from the soft run, not just exit codes
+2. Fixes must be scoped to the captured failures, not wholesale rewrites
+3. The hard gate must run the same commands as the soft run
+4. If the hard gate fails, the workflow must report the failure honestly rather than silently downgrading the bar
+5. Validation commands must be truthful — if the repo does not support a command, use a targeted alternative (see failure taxonomy: `validation_strategy.repo_mismatch`)
+
+---
+
+## 8. Cloud deployment relationship
+
+Ricky is a product deployed through `AgentWorkforce/cloud`, but it is not defined by Cloud. The `ricky` repo is the source of truth for product logic; Cloud provides the hosting infrastructure.
+
+### Deployment shape
+
+Ricky's Cloud deployment follows the same pattern as Sage:
+- Stage-aware Cloudflare worker deployment managed by `cloud/infra/`
+- Ricky-specific worker/service for API endpoints
+- Workspace-scoped auth and secrets
+- Cloud specialist-worker integration where specialist orchestration benefits from hosted infrastructure
+
+### What Cloud hosts
+
+| Capability | Cloud role |
+|---|---|
+| Generation API endpoint | Receives authenticated requests, invokes Ricky generation pipeline, returns artifacts |
+| Execution coordination | Launches workflow runs in Cloud runtime, tracks outcomes |
+| Proactive analytics jobs | Scheduled cataloging of workflow health, failure rates, and improvement opportunities |
+| Provider auth | Google and GitHub connection flows via existing Cloud/Nango infrastructure |
+| Artifact storage | Optionally stores generated artifacts for download |
+
+### What Cloud does not own
+
+- Ricky product logic (owned by `ricky` repo)
+- Workflow generation pipeline (owned by Ricky domain core)
+- Failure classification and specialist behavior (owned by Ricky runtime and specialists)
+- Local/BYOH execution (runs entirely on the user's machine)
+
+### Deployment boundary rule
+
+Cloud-specific deployment glue (worker entry points, infrastructure config, stage routing) lives in `cloud`. Reusable assistant abstractions live in Agent Assistant packages. Product-specific domain logic lives in `ricky`. When in doubt, prefer placing logic in `ricky` unless it is genuinely deployment infrastructure.
+
+---
+
+## 9. Batch and overnight execution
 
 Non-interactive execution paths delegate to shell scripts:
 
@@ -200,7 +316,7 @@ The overnight wrapper is intentionally restart-safe rather than monolithic. It c
 
 ---
 
-## 7. Key architectural rules for implementers
+## 10. Key architectural rules for implementers
 
 ### No ambient dependencies
 

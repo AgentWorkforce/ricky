@@ -268,7 +268,83 @@ interface RuntimeRestart {
 
 ---
 
-## 8. Boundary rules
+## 8. Planned specialist: Workflow Coordinator
+
+### Domain
+
+Manages the lifecycle of workflow execution across local and cloud environments — launch, monitor, collect outcomes, and hand off to other specialists when intervention is needed.
+
+### Ownership
+
+| Owns | Does not own |
+|---|---|
+| Execution environment selection (local vs cloud) | Workflow generation (uses author specialist) |
+| Workflow launch coordination | Failure classification (uses diagnostic engine) |
+| Progress monitoring and status polling | Fix application (uses debugger specialist) |
+| Outcome collection and evidence assembly | Validation of generated artifacts (uses validator) |
+| Handoff to debugger or restart on failure | Analytics aggregation |
+
+### Expected file locations
+
+- `src/product/specialists/coordinator/` - launcher, monitor, coordinator, types
+
+### Key constraints
+
+- Must not embed domain logic about how to fix or restart workflows — delegates to debugger and restart specialists
+- Must support both synchronous (wait for result) and asynchronous (return run ID, poll later) coordination
+- Must assemble `WorkflowRunEvidence` from whatever the execution environment produces
+- Must respect mode selection (local, cloud, both) from the normalized request
+
+### Interfaces
+
+```typescript
+interface WorkflowCoordinator {
+  launch(request: CoordinationRequest): Promise<LaunchResult>;
+  monitor(runId: string): Promise<MonitorStatus>;
+  collectOutcome(runId: string): Promise<WorkflowRunEvidence>;
+}
+```
+
+---
+
+## 9. Escalation boundaries
+
+Not every failure can be resolved autonomously. Ricky must know when to escalate to a human operator instead of retrying or applying speculative fixes.
+
+### Escalation triggers
+
+| Condition | Escalation action |
+|---|---|
+| Structural failure after fix attempt | Surface the diagnosis and failed fix to the user; do not retry |
+| Environment blocker that persists after cleanup | Report the blocker class and suggest manual remediation |
+| Multiple restart attempts without progress | Stop retrying and present the full failure chain |
+| Specialist boundary ambiguity | Ask the user which action to take rather than guessing |
+| Safety-sensitive restart (destructive or externally visible) | Require explicit user approval before proceeding |
+| Unknown failure class | Surface raw evidence with honest "unclassified" label |
+
+### Escalation rules
+
+1. **Never hide failures behind retries.** If a retry does not resolve the issue, the next action is escalation, not another retry.
+2. **Preserve full context when escalating.** The user or operator must see: what was attempted, what failed, the classified blocker (or "unclassified"), and what Ricky recommends.
+3. **Distinguish escalation from failure.** Escalation means Ricky has reached a boundary, not that Ricky has failed. The summary should say what Ricky knows and what it recommends, not just that something went wrong.
+4. **Proactive surfaces use escalation for urgency.** When proactive monitoring detects a failure, the escalation severity determines whether Ricky sends a notification immediately or batches it into a digest.
+
+### Escalation severity levels
+
+| Level | Meaning | Delivery |
+|---|---|---|
+| `info` | Notable but not blocking | Batched into periodic digest |
+| `warning` | Degraded but functional | Delivered at next convenient surface interaction |
+| `critical` | Blocking or data-risk | Immediate proactive notification |
+| `unclassified` | Cannot determine severity | Treated as `warning` with honest "unclassified" label |
+
+### Rule for implementers
+
+Escalation is a first-class outcome, not an error path. Every specialist must define its escalation conditions in its interface contract. The product orchestration layer collects escalation signals and routes them to the appropriate surface for delivery.
+
+---
+
+## 10. Boundary rules
 
 ### Specialists do not import each other
 
@@ -311,7 +387,7 @@ Only add a specialist when the domain is clearly separable and the alternative (
 
 ---
 
-## 9. Key rules for implementers
+## 11. Key rules for implementers
 
 1. **Start with the diagnostic engine as reference.** It demonstrates the correct pattern: typed input, deterministic core, typed output, injectable dependencies, isolated tests.
 
