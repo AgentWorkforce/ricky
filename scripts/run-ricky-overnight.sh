@@ -412,7 +412,7 @@ workflow_is_already_satisfied() {
       ;;
     workflows/wave10-agent-assistant-adoption/00-execute-agent-assistant-adoption-program.ts)
       artifact_signoff_has_marker \
-        .workflow-artifacts/wave10-agent-assistant-adoption/execute-agent-assistant-adoption-program/signoff.md \
+        .workflow-artifacts/wave10-agent-assistant-adoption/executor/signoff.md \
         'WAVE10_AGENT_ASSISTANT_EXECUTOR_COMPLETE'
       ;;
     *)
@@ -958,8 +958,8 @@ if [[ -s "$FAILED_FILE" ]]; then
 else
   mark_status "complete" "queue finished"
 fi
-if [[ -f "$STATE_FILE" ]]; then
-  rm -f "$STATE_FILE"
+if [[ -f "$STATE_FILE" || -f "$CHECKPOINT_FILE" ]]; then
+  rm -f "$STATE_FILE" "$CHECKPOINT_FILE"
   write_summary "$(cat "$STATUS_FILE")"
 fi
 log "overnight queue finished"
