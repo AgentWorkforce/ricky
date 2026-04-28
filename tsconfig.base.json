@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node", "vitest/globals"],
+    "baseUrl": ".",
+    "paths": {
+      "@ricky/shared": ["packages/shared/src/index.ts"],
+      "@ricky/shared/*": ["packages/shared/src/*"],
+      "@ricky/runtime": ["packages/runtime/src/index.ts"],
+      "@ricky/runtime/*": ["packages/runtime/src/*"],
+      "@ricky/product": ["packages/product/src/index.ts"],
+      "@ricky/product/*": ["packages/product/src/*"],
+      "@ricky/cloud": ["packages/cloud/src/index.ts"],
+      "@ricky/cloud/*": ["packages/cloud/src/*"],
+      "@ricky/local": ["packages/local/src/index.ts"],
+      "@ricky/local/*": ["packages/local/src/*"],
+      "@ricky/cli": ["packages/cli/src/index.ts"],
+      "@ricky/cli/*": ["packages/cli/src/*"]
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@ricky/cli",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ricky": "./dist/bin/ricky.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "development": "./src/*.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "files": ["src", "dist"],
+  "scripts": {
+    "start": "tsx --conditions=development src/commands/cli-main.ts",
+    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
+    "build": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. packages/cli/src"
+  },
+  "dependencies": {
+    "@ricky/cloud": "0.1.1",
+    "@ricky/local": "0.1.1",
+    "@ricky/runtime": "0.1.1"
+  }
+}

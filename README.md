@@ -81,6 +81,9 @@ Ricky uses npm workspaces as its workspace package manager. The root package is 
 
 ```sh
 npm install          # install root and workspace dependencies
+npm run typecheck    # typecheck every workspace package and root workflow assets
+npm test             # run package tests plus root proof tests
+npm start            # launch the CLI through @ricky/cli
 ```
 
 npm scripts:
@@ -106,7 +109,7 @@ Workspace packages:
 - `@ricky/local` — local/BYOH request normalization and execution composition
 - `@ricky/cli` — onboarding, command surface, and interactive CLI entrypoints
 
-The root keeps workflow program assets, bootstrap scripts, shared validation config, and repo-level proof tests.
+The root keeps workflow program assets, bootstrap scripts, shared validation config, npm workspace lock/config state, and repo-level proof tests.
 
 ## Product direction
 
@@ -118,6 +121,6 @@ The product goal is:
 - Ricky can receive that handoff via CLI or MCP, normalize it, and route it correctly through local/BYOH or Cloud execution
 - Ricky should feel fully connected across CLI and Cloud, not like separate disconnected tools
 
-## Initial repo shape
+## Repo shape
 
-This repo starts spec-first. No implementation should begin until the spec is reviewed and the first architecture slice is approved.
+Ricky now uses the workspace package split described in `docs/architecture/ricky-package-split-migration-spec.md`. Product source should live in the owning `packages/*/src` tree rather than in a parallel root `src/` tree.

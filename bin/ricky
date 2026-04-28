@@ -31,11 +31,11 @@ SCRIPT_PATH=$(resolve_real_path "$0")
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 TSX_LOADER="$REPO_ROOT/node_modules/tsx/dist/loader.mjs"
-CLI_MAIN="$REPO_ROOT/src/surfaces/cli/commands/cli-main.ts"
+CLI_MAIN="$REPO_ROOT/packages/cli/src/commands/cli-main.ts"
 
 if [ ! -f "$TSX_LOADER" ]; then
   echo "Ricky CLI linker blocker: missing tsx loader at $TSX_LOADER. Run npm install in the Ricky monorepo before invoking the linked CLI." >&2
   exit 1
 fi
 
-exec node --import "$TSX_LOADER" "$CLI_MAIN" "$@"
+exec node --conditions=development --import "$TSX_LOADER" "$CLI_MAIN" "$@"

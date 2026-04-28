@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "noEmit": false,
+    "types": ["node"]
+  },
+  "exclude": ["**/*.test.ts", "src/**/proof/**"],
+  "references": [
+    { "path": "../runtime/tsconfig.build.json" },
+    { "path": "../cloud/tsconfig.build.json" },
+    { "path": "../local/tsconfig.build.json" }
+  ]
+}
