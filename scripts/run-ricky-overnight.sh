@@ -442,6 +442,11 @@ resume_remaining_queue_from_checkpoint() {
     return 0
   fi
 
+  if (( $(queue_count) == 0 )); then
+    log "skipping checkpoint queue resume because the freshly prepared queue is empty"
+    return 0
+  fi
+
   if [[ -z "$RESTORED_QUEUE_FILE" || ! -f "$RESTORED_QUEUE_FILE" ]]; then
     return 0
   fi
@@ -455,6 +460,7 @@ resume_remaining_queue_from_checkpoint() {
   local resumed_queue="$ARTIFACT_DIR/queue.resumed.tmp"
   tail -n +"$start_line" "$RESTORED_QUEUE_FILE" > "$resumed_queue"
   mv "$resumed_queue" "$QUEUE_FILE"
+  filter_queue_for_repo_state
 
   CURRENT_PASS="${RESTORED_CURRENT_PASS:-1}"
   CURRENT_INDEX=0
