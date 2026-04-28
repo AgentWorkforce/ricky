@@ -1,5 +1,5 @@
 {
-  "name": "ricky",
+  "name": "@agentworkforce/ricky",
   "private": true,
   "version": "0.0.0",
   "license": "UNLICENSED",
@@ -8,23 +8,19 @@
   "engines": {
     "node": ">=20"
   },
-  "workspaces": [
-    "packages/shared",
-    "packages/runtime",
-    "packages/product",
-    "packages/cloud",
-    "packages/local",
-    "packages/cli"
-  ],
   "type": "module",
+  "bin": {
+    "ricky": "./bin/ricky"
+  },
   "scripts": {
-    "start": "npm run start --workspace @ricky/cli --",
-    "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit",
-    "test": "npm run test --workspaces --if-present && vitest run test/package-proof/package-layout-proof.test.ts test/smoke.test.ts",
+    "start": "tsx src/surfaces/cli/commands/cli-main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "batch": "bash scripts/run-ricky-batch.sh",
     "overnight": "bash scripts/run-ricky-overnight.sh"
   },
   "dependencies": {
+    "@agent-assistant/turn-context": "^0.3.11",
     "@agent-relay/sdk": "^5.0.0"
   },
   "devDependencies": {

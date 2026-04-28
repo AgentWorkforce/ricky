@@ -61,3 +61,6 @@ The first major Ricky workflow initiative is a meta-workflow that generates a la
 - `02-adopt-request-turn-context-adapter.ts` implements issue #11.
 - `03-prove-live-product-path.ts` proves issue #13 and closes #11/#13.
 - `04-close-agent-assistant-handoff-issue.ts` closes issue #14 after all signoffs are present.
+
+`wave11-flat-layout-collapse/` collapses the npm-workspaces multi-package layout into a single sage-style `src/` tree:
+- `01-collapse-packages-into-src.ts` is a TDD-driven migration: a flat-layout proof test is authored first and runs RED, the workflow then moves `packages/{shared,runtime,product,cloud,local,cli}` into `src/{shared,runtime,product,cloud,local,surfaces/cli}`, rewrites `@ricky/*` aliases to relative paths via a recorded codemod, consolidates package.json/tsconfig.json/vitest.config.ts, deletes the old `test/package-proof/`, and drives typecheck + full test suite + the new flat-layout proof to GREEN before sign-off. Layer boundaries are enforced by folder convention only — no path aliases.
