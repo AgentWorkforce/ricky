@@ -305,6 +305,31 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave7-analytics-proof/prove-proof-loop-analytics-feedback/signoff.md \
         'ANALYTICS_FEEDBACK_COMPLETE'
       ;;
+    workflows/wave8-github-issues/01-fix-cli-artifact-path-and-caller-root.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/signoff.md \
+        'PATH_ROOT_ISSUES_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/02-prove-external-repo-cli-generation.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/signoff.md \
+        'EXTERNAL_REPO_CLI_PROOF_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/03-close-local-execution-outcome-loop.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/signoff.md \
+        'LOCAL_EXECUTION_OUTCOME_LOOP_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/signoff.md \
+        'READINESS_COPY_AND_CHECKLIST_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/05-prove-skill-embedding-boundary.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/signoff.md \
+        'SKILL_EMBEDDING_BOUNDARY_COMPLETE'
+      ;;
     *)
       return 1
       ;;
