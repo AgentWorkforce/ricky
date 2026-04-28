@@ -128,6 +128,10 @@ workflows/wave8-github-issues/02-prove-external-repo-cli-generation.ts
 workflows/wave8-github-issues/03-close-local-execution-outcome-loop.ts
 workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist.ts
 workflows/wave8-github-issues/05-prove-skill-embedding-boundary.ts
+workflows/wave8-github-issues/06-close-local-run-product-loop.ts
+workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts
+workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts
+workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts
 EOF
       ;;
     expanded|*)
@@ -145,6 +149,10 @@ workflows/wave8-github-issues/02-prove-external-repo-cli-generation.ts
 workflows/wave8-github-issues/03-close-local-execution-outcome-loop.ts
 workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist.ts
 workflows/wave8-github-issues/05-prove-skill-embedding-boundary.ts
+workflows/wave8-github-issues/06-close-local-run-product-loop.ts
+workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts
+workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts
+workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts
 workflows/wave0-foundation/04-initial-architecture-docs.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
 workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
@@ -329,6 +337,26 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/signoff.md \
         'SKILL_EMBEDDING_BOUNDARY_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/06-close-local-run-product-loop.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/close-local-run-product-loop/signoff.md \
+        'RICKY_WAVE8_LOCAL_RUN_PRODUCT_LOOP_SIGNOFF'
+      ;;
+    workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave9-agent-assistant/audit-ricky-agent-assistant-usage/signoff.md \
+        'RICKY_AGENT_ASSISTANT_AUDIT_COMPLETE'
+      ;;
+    workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave9-agent-assistant/define-ricky-agent-assistant-boundary/signoff.md \
+        'RICKY_AGENT_ASSISTANT_BOUNDARY_COMPLETE'
+      ;;
+    workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave9-agent-assistant/evaluate-local-execution-contract-for-reuse/signoff.md \
+        'RICKY_LOCAL_CONTRACT_REUSE_EVALUATION_COMPLETE'
       ;;
     *)
       return 1

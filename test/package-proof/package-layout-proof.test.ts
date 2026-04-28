@@ -146,6 +146,14 @@ describe('Ricky workspace package layout and npm script parity proof', () => {
     expect(script).toContain('- configured_duration_hours: $DURATION_HOURS');
     expect(script).toContain('checkpointed');
     expect(script).toContain('workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts)');
+    expect(script).toContain('workflows/wave8-github-issues/06-close-local-run-product-loop.ts');
+    expect(script).toContain('workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts');
+    expect(script).toContain('workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts');
+    expect(script).toContain('workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts');
+    expect(script).toContain('RICKY_WAVE8_LOCAL_RUN_PRODUCT_LOOP_SIGNOFF');
+    expect(script).toContain('RICKY_AGENT_ASSISTANT_AUDIT_COMPLETE');
+    expect(script).toContain('RICKY_AGENT_ASSISTANT_BOUNDARY_COMPLETE');
+    expect(script).toContain('RICKY_LOCAL_CONTRACT_REUSE_EVALUATION_COMPLETE');
     expect(script).toContain("git cat-file -e HEAD:test/package-proof/package-layout-proof.ts 2>/dev/null");
     expect(script).toContain('npm run typecheck >/dev/null');
     expect(script).toContain('npm test >/dev/null');
