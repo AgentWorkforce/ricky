@@ -50,6 +50,17 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('Cloud mode generates workflow artifacts through AgentWorkforce Cloud.');
   });
 
+  it('keeps local/BYOH as the default first-run contract without subordinating it to Cloud', () => {
+    const output = renderOnboarding({ isFirstRun: true, isTTY: true, env: {} });
+
+    expect(output).toContain('  > [1] Local / BYOH  — generate workflow artifacts for your local repo');
+    expect(output).toContain('    [2] Cloud         — generate workflow artifacts through AgentWorkforce Cloud');
+    expect(output).toContain('  Choice [1]:');
+    expect(output.indexOf('  > [1] Local / BYOH')).toBeLessThan(output.indexOf('    [2] Cloud'));
+    expect(output.indexOf('Local / BYOH mode selected.')).toBeLessThan(output.indexOf('Cloud provider guidance:'));
+    expect(output).toContain('No Cloud credentials required.');
+  });
+
   it('keeps artifact-only onboarding copy from promising automatic execution', () => {
     const output = [
       renderWelcome({ isFirstRun: true }),
