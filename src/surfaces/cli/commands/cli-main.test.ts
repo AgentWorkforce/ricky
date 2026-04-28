@@ -12,8 +12,12 @@ import { cliMain, parseArgs, renderHelp } from './cli-main.js';
 // ---------------------------------------------------------------------------
 
 describe('parseArgs', () => {
-  it('defaults to run command with no args', () => {
-    expect(parseArgs([])).toEqual({ command: 'run' });
+  // Default-on behavior: every run-command parse carries autoFix=3 and refine={}
+  // unless the user explicitly opts out with --no-auto-fix / --no-refine.
+  const RUN_DEFAULTS = { autoFix: 3, refine: {} as Record<string, unknown> };
+
+  it('defaults to run command with auto-fix and refine enabled', () => {
+    expect(parseArgs([])).toEqual({ command: 'run', ...RUN_DEFAULTS });
   });
 
   it('parses help flag', () => {
@@ -29,17 +33,17 @@ describe('parseArgs', () => {
   });
 
   it('parses --mode flag with valid mode', () => {
-    expect(parseArgs(['--mode', 'local'])).toEqual({ command: 'run', mode: 'local' });
-    expect(parseArgs(['--mode', 'cloud'])).toEqual({ command: 'run', mode: 'cloud' });
-    expect(parseArgs(['--mode', 'both'])).toEqual({ command: 'run', mode: 'both' });
+    expect(parseArgs(['--mode', 'local'])).toEqual({ command: 'run', mode: 'local', ...RUN_DEFAULTS });
+    expect(parseArgs(['--mode', 'cloud'])).toEqual({ command: 'run', mode: 'cloud', ...RUN_DEFAULTS });
+    expect(parseArgs(['--mode', 'both'])).toEqual({ command: 'run', mode: 'both', ...RUN_DEFAULTS });
   });
 
   it('ignores --mode with invalid value', () => {
-    expect(parseArgs(['--mode', 'invalid'])).toEqual({ command: 'run' });
+    expect(parseArgs(['--mode', 'invalid'])).toEqual({ command: 'run', ...RUN_DEFAULTS });
   });
 
   it('ignores --mode with no value', () => {
-    expect(parseArgs(['--mode'])).toEqual({ command: 'run' });
+    expect(parseArgs(['--mode'])).toEqual({ command: 'run', ...RUN_DEFAULTS });
   });
 
   it('parses local spec handoff flags', () => {
@@ -47,14 +51,17 @@ describe('parseArgs', () => {
       command: 'run',
       mode: 'local',
       spec: 'build a workflow',
+      ...RUN_DEFAULTS,
     });
     expect(parseArgs(['--spec-file', './spec.md'])).toEqual({
       command: 'run',
       specFile: './spec.md',
+      ...RUN_DEFAULTS,
     });
     expect(parseArgs(['--stdin'])).toEqual({
       command: 'run',
       stdin: true,
+      ...RUN_DEFAULTS,
     });
   });
 
@@ -64,22 +71,25 @@ describe('parseArgs', () => {
       mode: 'local',
       spec: 'build a workflow',
       runRequested: true,
+      ...RUN_DEFAULTS,
     });
     expect(parseArgs(['run', 'workflows/generated/example.ts'])).toEqual({
       command: 'run',
       artifact: 'workflows/generated/example.ts',
       runRequested: true,
+      ...RUN_DEFAULTS,
     });
     expect(parseArgs(['run', '--artifact', 'workflows/generated/example.ts', '--json'])).toEqual({
       command: 'run',
       artifact: 'workflows/generated/example.ts',
       runRequested: true,
       json: true,
+      ...RUN_DEFAULTS,
     });
   });
 
   it('parses --auto-fix attempts and treats zero as disabled', () => {
-    expect(parseArgs(['run', 'workflows/generated/example.ts', '--auto-fix'])).toEqual({
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--auto-fix'])).toMatchObject({
       command: 'run',
       artifact: 'workflows/generated/example.ts',
       runRequested: true,
@@ -91,7 +101,7 @@ describe('parseArgs', () => {
     expect(parseArgs(['run', 'workflows/generated/example.ts', '--repair=50'])).toMatchObject({
       autoFix: 10,
     });
-    expect(parseArgs(['run', 'workflows/generated/example.ts', '--auto-fix=0'])).toEqual({
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--auto-fix=0'])).toMatchObject({
       command: 'run',
       artifact: 'workflows/generated/example.ts',
       runRequested: true,
@@ -103,25 +113,41 @@ describe('parseArgs', () => {
   });
 
   it('parses --refine and --with-llm model hints', () => {
-    expect(parseArgs(['--spec', 'build a workflow', '--refine'])).toEqual({
+    expect(parseArgs(['--spec', 'build a workflow', '--refine'])).toMatchObject({
       command: 'run',
       spec: 'build a workflow',
       refine: {},
     });
-    expect(parseArgs(['--spec-file', './spec.md', '--refine=sonnet'])).toEqual({
+    expect(parseArgs(['--spec-file', './spec.md', '--refine=sonnet'])).toMatchObject({
       command: 'run',
       specFile: './spec.md',
       refine: { model: 'sonnet' },
     });
-    expect(parseArgs(['--stdin', '--with-llm', 'opus'])).toEqual({
+    expect(parseArgs(['--stdin', '--with-llm', 'opus'])).toMatchObject({
       command: 'run',
       stdin: true,
       refine: { model: 'opus' },
     });
   });
 
+  it('disables auto-fix when --no-auto-fix or --no-repair is passed', () => {
+    const opted = parseArgs(['run', 'workflows/generated/example.ts', '--no-auto-fix']);
+    expect(opted).not.toHaveProperty('autoFix');
+    expect(opted).toMatchObject({ refine: {} });
+    const repairOpt = parseArgs(['run', 'workflows/generated/example.ts', '--no-repair']);
+    expect(repairOpt).not.toHaveProperty('autoFix');
+  });
+
+  it('disables refine when --no-refine or --no-with-llm is passed', () => {
+    const opted = parseArgs(['--spec', 'build a workflow', '--no-refine']);
+    expect(opted).not.toHaveProperty('refine');
+    expect(opted).toMatchObject({ autoFix: 3 });
+    const noLlm = parseArgs(['--spec', 'build a workflow', '--no-with-llm']);
+    expect(noLlm).not.toHaveProperty('refine');
+  });
+
   it('reports missing values for spec flags', () => {
-    expect(parseArgs(['--spec'])).toEqual({
+    expect(parseArgs(['--spec'])).toMatchObject({
       command: 'run',
       errors: ['--spec requires a value.'],
     });

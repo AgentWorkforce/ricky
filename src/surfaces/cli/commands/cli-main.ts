@@ -130,6 +130,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function parseRefine(argv: string[]): false | { model?: string } {
+  // Explicit opt-out wins over everything.
+  if (argv.includes('--no-refine') || argv.includes('--no-with-llm')) return false;
+
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg !== '--refine' && arg !== '--with-llm' && !arg.startsWith('--refine=') && !arg.startsWith('--with-llm=')) {
@@ -142,7 +145,9 @@ function parseRefine(argv: string[]): false | { model?: string } {
     const next = argv[index + 1];
     return next && !next.startsWith('--') ? { model: next } : {};
   }
-  return false;
+  // Default-on: refinement runs with the default model and falls back to the
+  // deterministic artifact when API creds / timeouts / token budgets fail.
+  return {};
 }
 
 function readFlagValue(argv: string[], flag: string): string | undefined {
@@ -173,6 +178,9 @@ function readRunArtifactPositional(argv: string[]): string | undefined {
 }
 
 function parseAutoFix(argv: string[]): number | undefined {
+  // Explicit opt-out wins over everything.
+  if (argv.includes('--no-auto-fix') || argv.includes('--no-repair')) return undefined;
+
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg !== '--auto-fix' && arg !== '--repair' && !arg.startsWith('--auto-fix=') && !arg.startsWith('--repair=')) {
@@ -192,7 +200,9 @@ function parseAutoFix(argv: string[]): number | undefined {
     if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
     return Math.min(10, Math.max(1, parsed));
   }
-  return undefined;
+  // Default-on: 3 attempts of diagnose/repair/resume on directly-fixable
+  // blockers (MISSING_BINARY, NETWORK_TRANSIENT). Disable with --no-auto-fix.
+  return 3;
 }
 
 function readPackageVersion(readPackageJsonText?: (path: string) => string): string | undefined {
@@ -259,9 +269,11 @@ export function renderHelp(): string[] {
     '  --spec-file <path>  Read spec from a file',
     '  --artifact <path>   Execute an existing artifact (implies --run)',
     '  --run               Execute the generated artifact after generation',
-    '  --refine[=model]    Refine generated task text and gates with an LLM pass',
+    '  --refine[=model]    Refine generated task text and gates with an LLM pass (default on)',
+    '  --no-refine         Disable refinement; emit only the deterministic artifact',
     '  --with-llm[=model]  Alias for --refine',
-    '  --auto-fix[=N]      Opt into local diagnose/repair/resume loop (default 3, max 10)',
+    '  --auto-fix[=N]      Local diagnose/repair/resume loop (default 3 attempts, max 10)',
+    '  --no-auto-fix       Disable the repair loop; first failure surfaces immediately',
     '  --repair[=N]        Alias for --auto-fix',
     '  --json              Print results as JSON',
     '  --stdin             Read spec from stdin',
