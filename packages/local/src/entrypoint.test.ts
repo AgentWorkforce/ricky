@@ -2867,6 +2867,64 @@ describe('runLocal', () => {
       expect(localExecutor.runner.invocations).toHaveLength(0);
     });
 
+    it('keeps the generation-only response on the existing LocalResponse surface', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['runtime should stay idle'] });
+      const result = await runLocal(
+        {
+          source: 'free-form',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'generate',
+          requestId: 'req-issue-11-response-surface',
+          metadata: { issue: 11, response: 'generation-only' },
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(true);
+      expectNoTurnContextFallback(result.logs);
+      expect(result).toMatchObject({
+        ok: true,
+        artifacts: [
+          {
+            path: result.generation?.artifact?.path,
+            type: 'text/typescript',
+            content: expect.stringContaining('workflow('),
+          },
+        ],
+        logs: expect.arrayContaining([
+          '[local] received spec from free-form',
+          '[local] mode: local',
+          '[local] stage mode: generate',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime launch skipped: returning generated artifact only',
+        ]),
+        warnings: expect.any(Array),
+        nextActions: [
+          `Run the generated workflow locally: npx --no-install agent-relay run ${result.generation?.artifact?.path}`,
+          'Inspect the generated workflow artifact and choose whether to run it locally.',
+        ],
+        generation: {
+          stage: 'generate',
+          status: 'ok',
+          artifact: {
+            path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+            workflow_id: expect.any(String),
+            spec_digest: expect.any(String),
+          },
+          next: {
+            run_command: `npx --no-install agent-relay run ${result.generation?.artifact?.path}`,
+            run_mode_hint: `ricky run --artifact ${result.generation?.artifact?.path}`,
+          },
+        },
+        exitCode: 0,
+      });
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+      expect(result.execution).toBeUndefined();
+      expect(localExecutor.writes).toHaveLength(1);
+      expect(localExecutor.runner.invocations).toHaveLength(0);
+    });
+
     it('preserves artifact-run stage semantics through the adapter-backed live local path', async () => {
       const artifactPath = 'workflows/issue-11/ready.workflow.ts';
       const launches: RunRequest[] = [];
