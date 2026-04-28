@@ -2751,7 +2751,7 @@ describe('runLocal', () => {
       });
 
       try {
-        const { runLocal: runLocalWithObservedAdapter } = await import('./entrypoint');
+        const { runLocal: runLocalWithObservedAdapter } = await import('./entrypoint.js');
         const localExecutor = memoryLocalExecutorOptions({ stdout: ['runtime should stay idle'] });
         const result = await runLocalWithObservedAdapter(
           {
