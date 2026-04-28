@@ -132,6 +132,7 @@ workflows/wave8-github-issues/06-close-local-run-product-loop.ts
 workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts
 workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts
 workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts
+workflows/wave10-agent-assistant-adoption/00-execute-agent-assistant-adoption-program.ts
 EOF
       ;;
     expanded|*)
@@ -153,6 +154,7 @@ workflows/wave8-github-issues/06-close-local-run-product-loop.ts
 workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts
 workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts
 workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts
+workflows/wave10-agent-assistant-adoption/00-execute-agent-assistant-adoption-program.ts
 workflows/wave0-foundation/04-initial-architecture-docs.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
 workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
@@ -357,6 +359,11 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave9-agent-assistant/evaluate-local-execution-contract-for-reuse/signoff.md \
         'RICKY_LOCAL_CONTRACT_REUSE_EVALUATION_COMPLETE'
+      ;;
+    workflows/wave10-agent-assistant-adoption/00-execute-agent-assistant-adoption-program.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/execute-agent-assistant-adoption-program/signoff.md \
+        'WAVE10_AGENT_ASSISTANT_EXECUTOR_COMPLETE'
       ;;
     *)
       return 1
