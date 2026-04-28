@@ -335,6 +335,29 @@ describe('cliMain', () => {
     );
   });
 
+  it('keeps relative artifact run targets user-facing while passing invocationRoot for reads', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['run', 'workflows/generated/example.ts'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/repo-root',
+        mode: 'local',
+        handoff: expect.objectContaining({
+          source: 'workflow-artifact',
+          artifactPath: 'workflows/generated/example.ts',
+          invocationRoot: '/repo-root',
+          stageMode: 'run',
+        }),
+      }),
+    );
+  });
+
   it('prefers INIT_CWD over an injected package cwd when capturing the caller repo root', async () => {
     const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
     const originalInitCwd = process.env.INIT_CWD;

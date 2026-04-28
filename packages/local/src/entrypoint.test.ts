@@ -369,6 +369,20 @@ describe('normalizeRequest', () => {
     expect(result.mode).toBe('local');
   });
 
+  it('reads relative workflow artifacts from invocationRoot while preserving the relative run target', async () => {
+    const raw: WorkflowArtifactHandoff = {
+      source: 'workflow-artifact',
+      artifactPath: 'workflows/generated/example.ts',
+      invocationRoot: '/repo-root',
+    };
+    const reader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const result = await normalizeRequest(raw, reader);
+
+    expect(reader.reads).toEqual(['/repo-root/workflows/generated/example.ts']);
+    expect(result.specPath).toBe('workflows/generated/example.ts');
+    expect(result.invocationRoot).toBe('/repo-root');
+  });
+
   it('respects explicit mode override instead of defaulting to local', async () => {
     const raw: CliHandoff = { source: 'cli', spec: 'test', mode: 'both' };
     const result = await normalizeRequest(raw);

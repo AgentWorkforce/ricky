@@ -6,6 +6,8 @@
  * request contract.
  */
 
+import { isAbsolute, resolve } from 'node:path';
+
 // ---------------------------------------------------------------------------
 // Source types — the intake surfaces that can hand off to Ricky locally
 // ---------------------------------------------------------------------------
@@ -258,7 +260,8 @@ export async function normalizeRequest(
 
     case 'workflow-artifact': {
       const mode = executionModeFor(raw);
-      const spec = await reader.readArtifact(raw.artifactPath);
+      const artifactReadPath = artifactReadPathFor(raw);
+      const spec = await reader.readArtifact(artifactReadPath);
       return {
         _normalized: true,
         spec,
@@ -272,6 +275,11 @@ export async function normalizeRequest(
       };
     }
   }
+}
+
+function artifactReadPathFor(raw: WorkflowArtifactHandoff): string {
+  if (isAbsolute(raw.artifactPath) || !raw.invocationRoot) return raw.artifactPath;
+  return resolve(raw.invocationRoot, raw.artifactPath);
 }
 
 function executionModeFor(raw: BaseHandoff, spec?: SpecInput): LocalExecutionMode {
