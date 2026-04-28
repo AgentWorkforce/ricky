@@ -127,13 +127,16 @@ async function executeLocalPath(
     };
   }
 
-  const localResult = await runLocal(deps.handoff, {
+  const invocationRoot = resolveLocalInvocationRoot(deps);
+  const handoff = withInvocationRoot(deps.handoff, invocationRoot);
+
+  const localResult = await runLocal(handoff, {
     executor: deps.localExecutor,
     localExecutor: deps.localExecutor
       ? undefined
       : {
-          cwd: resolveLocalInvocationRoot(deps),
-          returnGeneratedArtifactOnly: deps.handoff.stageMode !== 'run',
+          cwd: invocationRoot,
+          returnGeneratedArtifactOnly: handoff.stageMode !== 'run',
         },
   });
 
@@ -203,6 +206,11 @@ function resolveLocalInvocationRoot(deps: InteractiveCliDeps): string {
   if (deps.cwd) return resolve(deps.cwd);
   if (process.env.INIT_CWD) return resolve(process.env.INIT_CWD);
   return resolve(process.cwd());
+}
+
+function withInvocationRoot(handoff: RawHandoff, invocationRoot: string): RawHandoff {
+  if (handoff.invocationRoot) return handoff;
+  return { ...handoff, invocationRoot };
 }
 
 // ---------------------------------------------------------------------------

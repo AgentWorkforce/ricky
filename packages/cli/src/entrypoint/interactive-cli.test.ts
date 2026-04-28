@@ -57,6 +57,33 @@ describe('runInteractiveCli', () => {
     expect(result.awaitingInput).toBe(false);
   });
 
+  it('passes deps.cwd as invocationRoot to an injected local executor when the handoff omits it', async () => {
+    const localResponse: LocalResponse = {
+      ok: true,
+      artifacts: [{ path: 'workflows/generated/from-injected-executor.ts', type: 'text/typescript' }],
+      logs: [],
+      warnings: [],
+      nextActions: [],
+    };
+    const execute = vi.fn().mockResolvedValue(localResponse);
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      cwd: '/caller-repo',
+      handoff: { source: 'cli', spec: 'Build a workflow', mode: 'local' },
+      localExecutor: { execute },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'cli',
+        spec: 'Build a workflow',
+        invocationRoot: '/caller-repo',
+      }),
+    );
+  });
+
   it('uses INIT_CWD for the default local executor so generated workflows land in the caller repo', async () => {
     const { mkdtemp, rm, access } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
