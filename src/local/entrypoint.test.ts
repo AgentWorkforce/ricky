@@ -3173,5 +3173,33 @@ describe('runLocal', () => {
 
       expect(result.logs).toContain('[local] spec intake route: execute');
     });
+
+    it('does not override intent when the CLI spec text references a .js workflow file', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['ran'] });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'run workflows/deploy.js',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.logs).toContain('[local] spec intake route: execute');
+    });
+
+    it('does not override intent when the CLI spec text references a .workflow.yaml file', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['ran'] });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'run ops/release.workflow.yaml',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.logs).toContain('[local] spec intake route: execute');
+    });
   });
 });

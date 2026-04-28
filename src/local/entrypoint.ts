@@ -672,7 +672,7 @@ function toRawSpecPayload(
   };
 }
 
-const WORKFLOW_FILE_PATTERN = /\bworkflows\/[\w./-]+\.ts\b|\b[\w./-]+\.workflow\.ts\b/i;
+const WORKFLOW_FILE_PATTERN = /\bworkflows\/[\w./-]+\.(?:ts|js)\b|\b[\w./-]+\.workflow\.(?:ts|js|yaml|yml)\b/i;
 
 function mentionsWorkflowFile(text: string): boolean {
   return WORKFLOW_FILE_PATTERN.test(text);
