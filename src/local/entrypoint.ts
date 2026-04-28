@@ -546,12 +546,19 @@ export async function runLocal(
       : await normalizeRequest(handoff, artifactReader);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const isMissingFile = /\bENOENT\b/.test(message) || /no such file/i.test(message);
     return {
       ok: false,
       artifacts: [],
       logs: [`[local] normalization failed: ${message}`],
-      warnings: [`Failed to normalize handoff from source '${handoff.source}'.`],
-      nextActions: ['Check the spec content or artifact path and retry.'],
+      warnings: [
+        `Failed to normalize handoff from source '${handoff.source}': ${message}`,
+      ],
+      nextActions: [
+        isMissingFile
+          ? 'Confirm the artifact path exists and rerun the command.'
+          : 'Check the spec content or artifact path and retry.',
+      ],
     };
   }
 

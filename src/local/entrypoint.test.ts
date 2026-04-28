@@ -904,7 +904,8 @@ describe('runLocal', () => {
     expect(result.logs[0]).toContain('normalization failed');
     expect(result.logs[0]).toContain('ENOENT');
     expect(result.warnings[0]).toContain("source 'workflow-artifact'");
-    expect(result.nextActions[0]).toContain('retry');
+    expect(result.warnings[0]).toContain('ENOENT');
+    expect(result.nextActions[0]).toContain('artifact path exists');
     expect(executor.calls).toHaveLength(0);
   });
 
@@ -918,7 +919,8 @@ describe('runLocal', () => {
     expect(result.ok).toBe(false);
     expect(executor.calls).toHaveLength(0);
     expect(result.logs[0]).toContain('normalization failed');
-    expect(result.warnings).toEqual(["Failed to normalize handoff from source 'cli'."]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatch(/^Failed to normalize handoff from source 'cli': /);
     expect(result.nextActions).toEqual(['Check the spec content or artifact path and retry.']);
   });
 
