@@ -2333,6 +2333,91 @@ describe('runLocal', () => {
         await rm(tempDir, { recursive: true, force: true });
       }
     });
+
+    it('writes artifact to request.invocationRoot with real filesystem and generation stage path matches', async () => {
+      const { mkdtemp, rm, access, readFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const tempDir = await mkdtemp(join(tmpdir(), 'ricky-invroot-fs-'));
+
+      try {
+        const result = await runLocal(
+          { source: 'cli', spec: 'generate a workflow for invocationRoot fs test', invocationRoot: tempDir },
+          {
+            localExecutor: {
+              cwd: '/should-not-be-used',
+              returnGeneratedArtifactOnly: true,
+            },
+          },
+        );
+
+        expect(result.ok).toBe(true);
+        const artifactPath = result.artifacts[0].path;
+        expect(artifactPath).toMatch(/^workflows\/generated\//);
+
+        // Artifact physically exists under invocationRoot, not under options.cwd
+        const fullPath = join(tempDir, artifactPath);
+        await expect(access(fullPath)).resolves.toBeUndefined();
+
+        // Content was actually written
+        const content = await readFile(fullPath, 'utf8');
+        expect(content).toContain('workflow(');
+        expect(content).toBe(result.artifacts[0].content);
+
+        // Generation stage artifact.path matches the real artifact
+        expect(result.generation).toBeDefined();
+        expect(result.generation!.artifact!.path).toBe(artifactPath);
+
+        // Generation stage next.run_command points to same artifact
+        expect(result.generation!.next!.run_command).toBe(
+          `npx --no-install agent-relay run ${artifactPath}`,
+        );
+
+        // Next action also points to same artifact
+        expect(result.nextActions).toContain(
+          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+        );
+
+        // Artifact does NOT exist in packages/cli/workflows/generated
+        const artifactName = artifactPath.split('/').pop()!;
+        const cliPath = join(process.cwd(), 'packages/cli/workflows/generated', artifactName);
+        await expect(access(cliPath)).rejects.toThrow();
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('invocationRoot takes precedence over options.cwd with real filesystem proof', async () => {
+      const { mkdtemp, rm, access } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const invocationDir = await mkdtemp(join(tmpdir(), 'ricky-invroot-wins-'));
+      const cwdDir = await mkdtemp(join(tmpdir(), 'ricky-cwd-loses-'));
+
+      try {
+        const result = await runLocal(
+          { source: 'cli', spec: 'generate a workflow for precedence test', invocationRoot: invocationDir },
+          {
+            localExecutor: {
+              cwd: cwdDir,
+              returnGeneratedArtifactOnly: true,
+            },
+          },
+        );
+
+        expect(result.ok).toBe(true);
+        const artifactPath = result.artifacts[0].path;
+
+        // Artifact exists under invocationRoot
+        await expect(access(join(invocationDir, artifactPath))).resolves.toBeUndefined();
+
+        // Artifact does NOT exist under options.cwd
+        await expect(access(join(cwdDir, artifactPath))).rejects.toThrow();
+      } finally {
+        await rm(invocationDir, { recursive: true, force: true });
+        await rm(cwdDir, { recursive: true, force: true });
+      }
+    });
   });
 
   it('uses the local executor path by default for BYOH requests without Cloud warnings', async () => {
