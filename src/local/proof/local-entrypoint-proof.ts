@@ -633,7 +633,7 @@ export function getLocalProofCases(): LocalProofCase[] {
           response.logs[0].includes('normalization failed'),
           response.logs[0].includes('ENOENT'),
           response.warnings[0].includes("source 'workflow-artifact'"),
-          response.nextActions[0].includes('retry'),
+          response.nextActions[0].includes('artifact path exists') && response.nextActions[0].includes('rerun'),
           executor.calls.length === 0,
         ];
 
