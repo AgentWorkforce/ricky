@@ -88,6 +88,22 @@ artifact_runner_logs_show_success() {
   return 1
 }
 
+artifact_runner_logs_show_failure() {
+  local artifact_dir="$1"
+  local runner_log=""
+
+  [[ -d "$artifact_dir" ]] || return 1
+
+  for runner_log in "$artifact_dir"/runner-*.log; do
+    [[ -f "$runner_log" ]] || continue
+    if grep -Eq '✗ .* — FAILED|\[workflow\] FAILED:|Command failed with exit code [1-9][0-9]*' "$runner_log"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 mark_artifact_stale_or_complete() {
   local artifact_dir="$1"
   local status_file="$artifact_dir/status.txt"
@@ -97,22 +113,64 @@ mark_artifact_stale_or_complete() {
 
   [[ -d "$artifact_dir" ]] || return 0
 
-  if artifact_runner_logs_show_success "$artifact_dir"; then
+  if artifact_runner_logs_show_failure "$artifact_dir"; then
+    resolved_status="failed"
+    resolved_reason="runner failed before harness status flush"
+  elif artifact_runner_logs_show_success "$artifact_dir"; then
     resolved_status="complete"
     resolved_reason="runner completed before harness status flush"
   fi
 
   printf '%s\n' "$resolved_status" > "$status_file"
 
-  if [[ ! -f "$summary_file" ]]; then
-    cat > "$summary_file" <<EOF
+  cat > "$summary_file" <<EOF
 # Ricky overnight run
 
 - status: $resolved_status
 - reason: $resolved_reason
 - artifact_dir: $artifact_dir
 EOF
+}
+
+reconcile_stale_state_dir() {
+  local checkpoint_file="$1"
+  local artifact_dir=""
+  local run_pid=""
+  local run_pgid=""
+  local status_file=""
+  local key raw_value value
+
+  [[ -f "$checkpoint_file" ]] || return 0
+
+  while IFS='=' read -r key raw_value; do
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    value="$(printf '%b' "${raw_value//\\/\\\\}")"
+    eval "value=$raw_value" 2>/dev/null || value="$raw_value"
+    case "$key" in
+      artifact_dir) artifact_dir="$value" ;;
+      run_pid) run_pid="$value" ;;
+      run_pgid) run_pgid="$value" ;;
+    esac
+  done < "$checkpoint_file"
+
+  [[ -n "$artifact_dir" ]] || return 0
+  status_file="$artifact_dir/status.txt"
+
+  if [[ -f "$status_file" ]] && grep -qx 'running' "$status_file"; then
+    if ! is_pid_running "$run_pid" && ! is_process_group_running "$run_pgid"; then
+      mark_artifact_stale_or_complete "$artifact_dir"
+      log "reconciled stale overnight state from $checkpoint_file -> $artifact_dir"
+      rm -f "$checkpoint_file" "$(dirname "$checkpoint_file")/latest-run.txt"
+    fi
   fi
+}
+
+reconcile_stale_state_dirs() {
+  local state_dir=""
+  for state_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*; do
+    [[ -d "$state_dir" ]] || continue
+    reconcile_stale_state_dir "$state_dir/checkpoint.env"
+  done
 }
 
 kill_process_group() {
@@ -907,6 +965,7 @@ fi
 
 cd "$REPO_ROOT"
 quarantine_repo_runtime_state
+reconcile_stale_state_dirs
 
 echo "running" > "$STATUS_FILE"
 git rev-parse HEAD > "$LAST_COMMIT_FILE"
