@@ -124,6 +124,21 @@ kill_process_group() {
   kill -0 -- "-$pgid" 2>/dev/null && kill -KILL -- "-$pgid" 2>/dev/null || true
 }
 
+quarantine_repo_runtime_state() {
+  local quarantine_root="$ARTIFACT_DIR/runtime-state-quarantine"
+  local candidate=""
+  local stamp="$(date +%Y%m%d-%H%M%S)"
+  local destination=""
+
+  for candidate in .agent-relay .relay .trajectories; do
+    [[ -e "$candidate" ]] || continue
+    mkdir -p "$quarantine_root"
+    destination="$quarantine_root/${candidate#.}-$stamp"
+    mv "$candidate" "$destination"
+    log "quarantined repo runtime state: $candidate -> $destination"
+  done
+}
+
 on_exit() {
   local exit_code="$?"
 
@@ -891,6 +906,7 @@ if [[ ! -x "$RUNNER" ]]; then
 fi
 
 cd "$REPO_ROOT"
+quarantine_repo_runtime_state
 
 echo "running" > "$STATUS_FILE"
 git rev-parse HEAD > "$LAST_COMMIT_FILE"

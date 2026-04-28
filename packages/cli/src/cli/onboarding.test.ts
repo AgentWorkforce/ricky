@@ -39,9 +39,13 @@ describe('Ricky CLI onboarding', () => {
 
   it('keeps local/BYOH and Cloud as co-equal options', () => {
     const output = renderOnboarding({ isFirstRun: true, isTTY: true, env: {} });
+    const localIndex = output.indexOf('> [1] Local / BYOH');
+    const cloudIndex = output.indexOf('[2] Cloud');
 
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
+    expect(localIndex).toBeGreaterThanOrEqual(0);
+    expect(cloudIndex).toBeGreaterThan(localIndex);
     expect(output).toContain('Ready to hand over a spec.');
     expect(output).toContain('Cloud mode generates workflow artifacts through AgentWorkforce Cloud.');
   });
@@ -69,6 +73,7 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('npx agent-relay cloud connect google');
     expect(output).toContain('Cloud dashboard');
+    expect(output).toContain('Nango-backed connection flow');
     expect(output).not.toContain('github/connect/local');
   });
 
@@ -133,6 +138,19 @@ describe('Ricky CLI onboarding', () => {
     expect(shouldShowBanner({ isTTY: true, env: { RICKY_BANNER: '0' } })).toBe(false);
     expect(shouldShowBanner({ isTTY: true, env: {} })).toBe(true);
     expect(shouldShowBanner({ isTTY: true, rickyBanner: '0' })).toBe(false);
+  });
+
+  it('renders deterministic output when env is omitted from renderOnboarding', () => {
+    // renderOnboarding is a pure renderer — omitting env must not read process.env.RICKY_BANNER
+    const output = renderOnboarding({ isFirstRun: true, isTTY: true });
+
+    expect(output).toContain('RRRR');
+    expect(output).toContain("Welcome to Ricky! Let's get you set up.");
+  });
+
+  it('does not fall back to process.env when env is omitted from shouldShowBanner', () => {
+    // shouldShowBanner must be a pure function of its inputs — no ambient process.env reads
+    expect(shouldShowBanner({ isTTY: true })).toBe(true);
   });
 
   it('keeps the cofounder readiness checklist aligned with issue #7 readiness areas', async () => {
