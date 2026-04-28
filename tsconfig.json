@@ -1,4 +1,15 @@
 {
-  "extends": "./tsconfig.base.json",
-  "include": ["packages/**/*.ts", "workflows/**/*.ts", "vitest.config.ts", "test/**/*.ts"]
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src", "test", "workflows", "scripts"]
 }
