@@ -153,7 +153,7 @@ function packageBinTarget(pkg: { bin?: unknown }): string {
   return '';
 }
 
-function conditionalExportTarget(pkg: { exports?: unknown }, subpath: '.' | './*', condition: string): string {
+function conditionalExportTarget(pkg: { exports?: unknown }, subpath: string, condition: string): string {
   if (!pkg.exports || typeof pkg.exports !== 'object') {
     return '';
   }
@@ -286,6 +286,16 @@ export function getWorkspaceLayoutProofCases(): WorkspaceLayoutProofCase[] {
           const subpathDevelopmentTarget = conditionalExportTarget(pkg, './*', 'development');
           const cliBinTarget = packageBinTarget(pkg);
 
+          const hasWildcardSubpathExports =
+            subpathImportTarget === './dist/*.js' && subpathDevelopmentTarget === './src/*.ts';
+          const hasExplicitCliSubpathExports =
+            name === 'cli' &&
+            ['cli', 'commands', 'entrypoint'].every((subpath) => {
+              const importTarget = conditionalExportTarget(pkg, `./${subpath}`, 'import');
+              const developmentTarget = conditionalExportTarget(pkg, `./${subpath}`, 'development');
+              return importTarget === `./dist/${subpath}/index.js` && developmentTarget === `./src/${subpath}/index.ts`;
+            });
+
           return {
             name,
             exists,
@@ -294,8 +304,8 @@ export function getWorkspaceLayoutProofCases(): WorkspaceLayoutProofCase[] {
             typesUseDist: pkg.types === './dist/index.d.ts',
             rootExportUsesDist: rootImportTarget === './dist/index.js',
             rootExportHasSourceMode: rootDevelopmentTarget === './src/index.ts',
-            subpathExportUsesDist: subpathImportTarget === './dist/*.js',
-            subpathExportHasSourceMode: subpathDevelopmentTarget === './src/*.ts',
+            subpathExportUsesDist: hasWildcardSubpathExports || hasExplicitCliSubpathExports,
+            subpathExportHasSourceMode: hasWildcardSubpathExports || hasExplicitCliSubpathExports,
             cliBinUsesDist: name !== 'cli' || cliBinTarget === './dist/bin/ricky.js',
             hasTypecheck: typeof pkg.scripts?.typecheck === 'string',
             hasTest: typeof pkg.scripts?.test === 'string',
