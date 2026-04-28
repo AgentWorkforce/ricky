@@ -7,6 +7,7 @@
  */
 
 import type { ArtifactReader, LocalInvocationRequest, LocalStageMode, RawHandoff } from './request-normalizer';
+import { assembleRickyTurnContext } from './assistant-turn-context-adapter';
 import { normalizeRequest } from './request-normalizer';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -278,6 +279,8 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       const includeStageContract = true;
       const specDigest = digestSpec(request.spec);
       let generationStage: LocalGenerationStageResult | undefined;
+
+      await assembleRickyTurnContext(request);
 
       logs.push(`[local] received spec from ${request.source}`);
       logs.push(`[local] mode: ${request.mode}`);

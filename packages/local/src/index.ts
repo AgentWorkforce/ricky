@@ -20,6 +20,8 @@ export type {
   WorkflowArtifactHandoff,
 } from './request-normalizer';
 
+export { assembleRickyTurnContext, toRickyTurnContextInput } from './assistant-turn-context-adapter';
+export type { AssembleRickyTurnContextOptions } from './assistant-turn-context-adapter';
 export { createLocalExecutor, createProcessCommandRunner, DEFAULT_LOCAL_ROUTE, getDefaultExecutor, resetDefaultExecutor, runLocal } from './entrypoint';
 export type {
   ArtifactWriter,
