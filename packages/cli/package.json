@@ -14,10 +14,20 @@
       "development": "./src/index.ts",
       "import": "./dist/index.js"
     },
-    "./*": {
-      "types": "./src/*.ts",
-      "development": "./src/*.ts",
-      "import": "./dist/*.js"
+    "./cli": {
+      "types": "./src/cli/index.ts",
+      "development": "./src/cli/index.ts",
+      "import": "./dist/cli/index.js"
+    },
+    "./commands": {
+      "types": "./src/commands/index.ts",
+      "development": "./src/commands/index.ts",
+      "import": "./dist/commands/index.js"
+    },
+    "./entrypoint": {
+      "types": "./src/entrypoint/index.ts",
+      "development": "./src/entrypoint/index.ts",
+      "import": "./dist/entrypoint/index.js"
     }
   },
   "files": ["src", "dist"],

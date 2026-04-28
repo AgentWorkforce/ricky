@@ -335,9 +335,9 @@ Write .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/final-revi
       dependsOn: ['final-hard-validation'],
       command: [
         'npx tsc --noEmit',
-        'changed="$(git diff --name-only -- packages/cli/src/cli workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome)"',
-        'printf "%s\\n" "$changed" | grep -Eq "^(packages/cli/src/cli/|workflows/wave4-local-byoh/01-cli-onboarding-and-welcome\\.ts|\\.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/)"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(packages/cli/src/cli/|workflows/wave4-local-byoh/01-cli-onboarding-and-welcome\\.ts|\\.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/)"',
+        'changed="$(git diff --name-only -- packages/cli/src/cli packages/cli/package.json workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^(packages/cli/src/cli/|packages/cli/package\\.json|workflows/wave4-local-byoh/01-cli-onboarding-and-welcome\\.ts|\\.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/)"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(packages/cli/src/cli/|packages/cli/package\\.json|workflows/wave4-local-byoh/01-cli-onboarding-and-welcome\\.ts|\\.workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/)"',
         'echo CLI_ONBOARDING_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
