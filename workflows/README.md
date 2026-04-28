@@ -54,3 +54,6 @@ The first major Ricky workflow initiative is a meta-workflow that generates a la
 - `03-close-local-execution-outcome-loop.ts` covers issue #3.
 - `04-tighten-onboarding-readiness-copy-and-checklist.ts` covers issues #4 and #7.
 - `05-prove-skill-embedding-boundary.ts` covers issue #5.
+
+`wave11-flat-layout-collapse/` collapses the npm-workspaces multi-package layout into a single sage-style `src/` tree:
+- `01-collapse-packages-into-src.ts` is a TDD-driven migration: a flat-layout proof test is authored first and runs RED, the workflow then moves `packages/{shared,runtime,product,cloud,local,cli}` into `src/{shared,runtime,product,cloud,local,surfaces/cli}`, rewrites `@ricky/*` aliases to relative paths via a recorded codemod, consolidates package.json/tsconfig.json/vitest.config.ts, deletes the old `test/package-proof/`, and drives typecheck + full test suite + the new flat-layout proof to GREEN before sign-off. Layer boundaries are enforced by folder convention only — no path aliases.
