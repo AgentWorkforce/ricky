@@ -1,23 +1,40 @@
 {
   "name": "@agentworkforce/ricky",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "UNLICENSED",
   "description": "Workflow reliability, coordination, and authoring product for AgentWorkforce",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AgentWorkforce/ricky.git"
+  },
   "packageManager": "npm@11.11.0",
   "engines": {
     "node": ">=20"
   },
   "type": "module",
-  "bin": {
-    "ricky": "./bin/ricky"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
+  "bin": {
+    "ricky": "./dist/bin/ricky.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "start": "tsx src/surfaces/cli/commands/cli-main.ts",
+    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "batch": "bash scripts/run-ricky-batch.sh",
-    "overnight": "bash scripts/run-ricky-overnight.sh"
+    "overnight": "bash scripts/run-ricky-overnight.sh",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@agent-assistant/turn-context": "^0.3.11",
@@ -28,5 +45,9 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
   }
 }
