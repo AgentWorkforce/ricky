@@ -205,6 +205,7 @@ workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts
 workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts
 workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts
 workflows/wave10-agent-assistant-adoption/00-execute-agent-assistant-adoption-program.ts
+workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts
 workflows/wave0-foundation/04-initial-architecture-docs.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
 workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
