@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   CliHandoff,
@@ -187,6 +187,10 @@ function coordinatorResult(request: RunRequest, overrides: Partial<CoordinatorRe
     metadata: request.metadata,
     error: overrides.error,
   };
+}
+
+function expectNoTurnContextFallback(logs: string[]): void {
+  expect(logs.some((line) => line.startsWith('[local] turn context adapter skipped:'))).toBe(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -2721,6 +2725,89 @@ describe('runLocal', () => {
   });
 
   describe('regression: issue #11 adapter-backed local path', () => {
+    it('assembles the real turn-context-backed adapter in the live local path with normalized metadata intact', async () => {
+      const assembledInputs: Array<Record<string, unknown>> = [];
+      const structuredSpec = {
+        description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+        targetRepo: 'AgentWorkforce/ricky',
+        targetFiles: ['packages/local/src/entrypoint.ts'],
+      };
+
+      vi.resetModules();
+      vi.doMock('@agent-assistant/turn-context', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@agent-assistant/turn-context')>();
+        return {
+          ...actual,
+          createTurnContextAssembler: () => {
+            const assembler = actual.createTurnContextAssembler();
+            return {
+              assemble(input: Parameters<typeof assembler.assemble>[0]) {
+                assembledInputs.push(input as unknown as Record<string, unknown>);
+                return assembler.assemble(input);
+              },
+            };
+          },
+        };
+      });
+
+      try {
+        const { runLocal: runLocalWithObservedAdapter } = await import('./entrypoint');
+        const localExecutor = memoryLocalExecutorOptions({ stdout: ['runtime should stay idle'] });
+        const result = await runLocalWithObservedAdapter(
+          {
+            source: 'cli',
+            spec: structuredSpec,
+            specFile: 'specs/issue-11.live-path.json',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-live-adapter',
+            invocationRoot: '/workspace/issue-11-live',
+            metadata: { issue: 11, proof: 'live-adapter' },
+            cliMetadata: { argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.live-path.json'] },
+          },
+          { localExecutor },
+        );
+
+        expect(result.ok).toBe(true);
+        expectNoTurnContextFallback(result.logs);
+        expect(localExecutor.runner.invocations).toHaveLength(0);
+        expect(assembledInputs).toHaveLength(1);
+
+        const adapterInput = assembledInputs[0];
+        const metadata = adapterInput.metadata as { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> };
+        expect(adapterInput).toMatchObject({
+          assistantId: 'ricky',
+          turnId: 'req-issue-11-live-adapter',
+        });
+        expect(metadata.adapter).toMatchObject({
+          name: 'ricky-local-turn-context-adapter',
+          package: '@agent-assistant/turn-context',
+        });
+        expect(metadata.ricky).toMatchObject({
+          requestId: 'req-issue-11-live-adapter',
+          source: 'cli',
+          invocationRoot: '/workspace/issue-11-live',
+          mode: 'local',
+          stageMode: 'generate',
+          specPath: 'specs/issue-11.live-path.json',
+          metadata: {
+            issue: 11,
+            proof: 'live-adapter',
+            argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.live-path.json'],
+          },
+        });
+        expect(metadata.ricky?.structuredSpec).toEqual(structuredSpec);
+        expect(metadata.ricky?.sourceMetadata).toEqual({
+          cli: {
+            argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.live-path.json'],
+            specFile: 'specs/issue-11.live-path.json',
+          },
+        });
+      } finally {
+        vi.doUnmock('@agent-assistant/turn-context');
+        vi.resetModules();
+      }
+    });
+
     it('keeps generation-only LocalResponse fields while the real local executor assembles turn context', async () => {
       const localExecutor = memoryLocalExecutorOptions({ stdout: ['runtime should stay idle'] });
       const result = await runLocal(
@@ -2739,6 +2826,7 @@ describe('runLocal', () => {
       );
 
       expect(result.ok).toBe(true);
+      expectNoTurnContextFallback(result.logs);
       expect(result.exitCode).toBe(0);
       expect(result.artifacts).toHaveLength(1);
       expect(result.artifacts[0]).toMatchObject({
@@ -2810,6 +2898,7 @@ describe('runLocal', () => {
       );
 
       expect(result.ok).toBe(true);
+      expectNoTurnContextFallback(result.logs);
       expect(result.exitCode).toBe(0);
       expect(launches).toHaveLength(1);
       expect(launches[0]).toMatchObject({
@@ -2884,6 +2973,7 @@ describe('runLocal', () => {
       );
 
       expect(success.ok).toBe(true);
+      expectNoTurnContextFallback(success.logs);
       expect(success.exitCode).toBe(0);
       expect(success.generation).toMatchObject({ stage: 'generate', status: 'ok' });
       expect(success.execution).toMatchObject({
@@ -2931,6 +3021,7 @@ describe('runLocal', () => {
       );
 
       expect(blocked.ok).toBe(false);
+      expectNoTurnContextFallback(blocked.logs);
       expect(blocked.exitCode).toBe(2);
       expect(blocked.generation).toMatchObject({
         stage: 'generate',
