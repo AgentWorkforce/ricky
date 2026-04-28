@@ -51,7 +51,7 @@ async function main() {
     .step('install-turn-context-dependency', {
       type: 'deterministic',
       dependsOn: ['preflight'],
-      command: 'npm install @agent-assistant/turn-context@^0.3.10 --save --workspace @ricky/local',
+      command: 'npm install --workspace @ricky/local',
       captureOutput: true,
       failOnError: true,
     })
@@ -68,7 +68,7 @@ Owned write scope:
 - packages/local/src/entrypoint.ts
 - packages/local/package.json
 - docs/product/ricky-agent-assistant-adoption-proof.md
-- package-lock.json only for the @agent-assistant/turn-context dependency already installed by the workflow
+- package-lock.json only for workspace dependency sync needed to materialize the declared @agent-assistant/turn-context dependency
 
 Acceptance contract:
 - Ricky uses the real @agent-assistant/turn-context package at runtime, not just copied local types.

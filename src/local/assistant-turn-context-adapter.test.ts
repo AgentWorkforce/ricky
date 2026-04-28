@@ -317,6 +317,21 @@ describe('Ricky turn-context adapter', () => {
           }),
         ]),
       );
+      expect(assembly.harnessProjection.instructions.developerPrompt, testCase.name).toContain(
+        `Current mode: ricky-local:${testCase.expected.mode}:${testCase.expected.stageMode}`,
+      );
+      expect(assembly.harnessProjection.context.blocks, testCase.name).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-summary',
+            content: expect.stringContaining(`source: ${testCase.expected.source}`),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-spec-text',
+            content: testCase.expected.spec,
+          }),
+        ]),
+      );
       expect(assembly.provenance.usedEnrichmentIds, testCase.name).toEqual(
         expect.arrayContaining([
           'ricky-request-summary',

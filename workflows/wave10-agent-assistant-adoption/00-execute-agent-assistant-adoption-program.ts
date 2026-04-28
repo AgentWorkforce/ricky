@@ -23,7 +23,7 @@ async function main() {
         'test -f workflows/wave10-agent-assistant-adoption/03-prove-live-product-path.ts',
         'test -f workflows/wave10-agent-assistant-adoption/04-close-agent-assistant-handoff-issue.ts',
         'npx tsc --noEmit',
-        'gh auth status >/dev/null 2>&1 || (echo "ERROR: gh CLI must be authenticated because child workflows close GitHub issues" && exit 1)',
+        'gh auth status >/dev/null 2>&1 || { echo "ERROR: gh CLI must be authenticated because child workflows close GitHub issues"; exit 1; }',
         'printf "mode=%s\\n" "$MODE" > "$DIR/execution-mode.txt"',
         'echo EXECUTOR_PREFLIGHT_OK',
       ].join(' && '),
