@@ -335,6 +335,29 @@ describe('cliMain', () => {
     );
   });
 
+  it('keeps relative artifact run targets user-facing while passing invocationRoot for reads', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['run', 'workflows/generated/example.ts'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/repo-root',
+        mode: 'local',
+        handoff: expect.objectContaining({
+          source: 'workflow-artifact',
+          artifactPath: 'workflows/generated/example.ts',
+          invocationRoot: '/repo-root',
+          stageMode: 'run',
+        }),
+      }),
+    );
+  });
+
   it('prefers INIT_CWD over an injected package cwd when capturing the caller repo root', async () => {
     const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
     const originalInitCwd = process.env.INIT_CWD;
@@ -919,6 +942,65 @@ describe('cliMain', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('regression: issues #1 and #2 — cliMain invocation root for all handoff types', () => {
+    it('cliMain with inline spec resolves invocationRoot from cwd and passes it through to the interactive runner', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec', 'test invocation root inline'],
+        cwd: '/inline-repo-root',
+        runInteractive: runner,
+      });
+
+      const deps = runner.mock.calls[0][0];
+      expect(deps.cwd).toBe('/inline-repo-root');
+      expect(deps.handoff.invocationRoot).toBe('/inline-repo-root');
+      expect(deps.handoff.source).toBe('cli');
+      expect(deps.handoff.cliMetadata).toEqual({ handoff: 'inline-spec' });
+    });
+
+    it('cliMain with spec-file resolves the file path against invocationRoot and passes both through', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const readFileText = vi.fn().mockResolvedValue('spec from file content');
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec-file', './specs/my-workflow.md'],
+        cwd: '/specfile-repo-root',
+        runInteractive: runner,
+        readFileText,
+      });
+
+      // readFileText is called with the spec-file resolved against the invocationRoot
+      expect(readFileText).toHaveBeenCalledWith('/specfile-repo-root/specs/my-workflow.md');
+
+      const deps = runner.mock.calls[0][0];
+      expect(deps.cwd).toBe('/specfile-repo-root');
+      expect(deps.handoff.invocationRoot).toBe('/specfile-repo-root');
+      expect(deps.handoff.spec).toBe('spec from file content');
+      expect(deps.handoff.specFile).toBe('/specfile-repo-root/specs/my-workflow.md');
+      expect(deps.handoff.cliMetadata).toEqual({ handoff: 'spec-file' });
+    });
+
+    it('cliMain with stdin passes invocationRoot from cwd through to the interactive runner', async () => {
+      const { Readable } = await import('node:stream');
+      const input = Readable.from(['stdin workflow spec']);
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+      await cliMain({
+        argv: ['--mode', 'local', '--stdin'],
+        cwd: '/stdin-repo-root',
+        runInteractive: runner,
+        input,
+      });
+
+      const deps = runner.mock.calls[0][0];
+      expect(deps.cwd).toBe('/stdin-repo-root');
+      expect(deps.handoff.invocationRoot).toBe('/stdin-repo-root');
+      expect(deps.handoff.spec).toBe('stdin workflow spec');
+      expect(deps.handoff.cliMetadata).toEqual({ handoff: 'stdin' });
     });
   });
 

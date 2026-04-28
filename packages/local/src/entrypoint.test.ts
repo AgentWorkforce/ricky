@@ -205,6 +205,20 @@ describe('normalizeRequest', () => {
     expect(result.metadata).toEqual({});
   });
 
+  it('normalizes a relative invocationRoot to an absolute local request root', async () => {
+    const { isAbsolute } = await import('node:path');
+    const raw: CliHandoff = {
+      source: 'cli',
+      spec: 'build a pipeline',
+      invocationRoot: './relative-repo-root',
+    };
+    const result = await normalizeRequest(raw);
+
+    expect(result.invocationRoot).toMatch(/relative-repo-root$/);
+    expect(result.invocationRoot).not.toBe('./relative-repo-root');
+    expect(isAbsolute(result.invocationRoot!)).toBe(true);
+  });
+
   it('normalizes a CLI handoff with spec file path', async () => {
     const raw: CliHandoff = {
       source: 'cli',
@@ -367,6 +381,20 @@ describe('normalizeRequest', () => {
     expect(result.spec).toBe('# Real Workflow');
     expect(result.specPath).toBe('/artifacts/wf.md');
     expect(result.mode).toBe('local');
+  });
+
+  it('reads relative workflow artifacts from invocationRoot while preserving the relative run target', async () => {
+    const raw: WorkflowArtifactHandoff = {
+      source: 'workflow-artifact',
+      artifactPath: 'workflows/generated/example.ts',
+      invocationRoot: '/repo-root',
+    };
+    const reader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const result = await normalizeRequest(raw, reader);
+
+    expect(reader.reads).toEqual(['/repo-root/workflows/generated/example.ts']);
+    expect(result.specPath).toBe('workflows/generated/example.ts');
+    expect(result.invocationRoot).toBe('/repo-root');
   });
 
   it('respects explicit mode override instead of defaulting to local', async () => {
@@ -2518,6 +2546,144 @@ describe('runLocal', () => {
     expect(artifact.type).toBe('text/typescript');
   });
 
+  // ---------------------------------------------------------------------------
+  // Regression proof: issues #1 and #2 — createLocalExecutor via runLocal
+  // with localExecutor options ensures artifact content under supplied cwd
+  // ---------------------------------------------------------------------------
+
+  describe('regression: issues #1 and #2 — runLocal localExecutor cwd forwarding', () => {
+    it('runLocal with localExecutor.cwd creates the executor with that cwd for artifact writing', async () => {
+      const { mkdtemp, rm, access, readFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const tempDir = await mkdtemp(join(tmpdir(), 'ricky-runlocal-cwd-'));
+
+      try {
+        const result = await runLocal(
+          { source: 'cli', spec: 'generate a workflow for runLocal cwd forwarding test' },
+          {
+            localExecutor: {
+              cwd: tempDir,
+              returnGeneratedArtifactOnly: true,
+            },
+          },
+        );
+
+        expect(result.ok).toBe(true);
+        const artifactPath = result.artifacts[0].path;
+        expect(artifactPath).toMatch(/^workflows\/generated\//);
+
+        // Artifact physically exists under the supplied cwd
+        const fullPath = join(tempDir, artifactPath);
+        await expect(access(fullPath)).resolves.toBeUndefined();
+
+        // Content was written with workflow boilerplate
+        const content = await readFile(fullPath, 'utf8');
+        expect(content).toContain('workflow(');
+        expect(content).toBe(result.artifacts[0].content);
+
+        // Generation stage artifact.path matches
+        expect(result.generation).toBeDefined();
+        expect(result.generation!.artifact!.path).toBe(artifactPath);
+
+        // Generation stage next.run_command uses the same relative path
+        expect(result.generation!.next!.run_command).toBe(
+          `npx --no-install agent-relay run ${artifactPath}`,
+        );
+
+        // Next action also uses the same relative path
+        expect(result.nextActions).toContain(
+          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+        );
+
+        // Artifact is NOT in packages/cli/workflows/generated
+        const artifactName = artifactPath.split('/').pop()!;
+        const cliPath = join(process.cwd(), 'packages/cli/workflows/generated', artifactName);
+        await expect(access(cliPath)).rejects.toThrow();
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('runLocal with handoff.invocationRoot overrides localExecutor.cwd for artifact location', async () => {
+      const { mkdtemp, rm, access } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const invRoot = await mkdtemp(join(tmpdir(), 'ricky-invroot-override-'));
+      const optionsCwd = await mkdtemp(join(tmpdir(), 'ricky-opts-cwd-'));
+
+      try {
+        const result = await runLocal(
+          {
+            source: 'cli',
+            spec: 'generate a workflow for invocationRoot override test',
+            invocationRoot: invRoot,
+          },
+          {
+            localExecutor: {
+              cwd: optionsCwd,
+              returnGeneratedArtifactOnly: true,
+            },
+          },
+        );
+
+        expect(result.ok).toBe(true);
+        const artifactPath = result.artifacts[0].path;
+
+        // Artifact exists under invocationRoot, not under options.cwd
+        await expect(access(join(invRoot, artifactPath))).resolves.toBeUndefined();
+        await expect(access(join(optionsCwd, artifactPath))).rejects.toThrow();
+
+        // No artifact in packages/cli/workflows/generated
+        const artifactName = artifactPath.split('/').pop()!;
+        const cliPath = join(process.cwd(), 'packages/cli/workflows/generated', artifactName);
+        await expect(access(cliPath)).rejects.toThrow();
+      } finally {
+        await rm(invRoot, { recursive: true, force: true });
+        await rm(optionsCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('createLocalExecutor writes artifact content into cwd with injected writer proving the path', async () => {
+      const writes: Array<{ path: string; content: string; cwd: string }> = [];
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a workflow for writer cwd proof',
+        },
+        {
+          localExecutor: {
+            cwd: '/deterministic-temp-root',
+            artifactWriter: {
+              async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+                writes.push({ path, content, cwd });
+              },
+            },
+            returnGeneratedArtifactOnly: true,
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(writes).toHaveLength(1);
+
+      // Writer was called with the supplied cwd
+      expect(writes[0].cwd).toBe('/deterministic-temp-root');
+
+      // Artifact path is relative (workflows/generated/...)
+      expect(writes[0].path).toMatch(/^workflows\/generated\//);
+      expect(writes[0].content).toContain('workflow(');
+
+      // The returned artifact path matches the written path
+      expect(result.artifacts[0].path).toBe(writes[0].path);
+
+      // The next command references the same path
+      expect(result.nextActions).toContain(
+        `Run the generated workflow locally: npx --no-install agent-relay run ${writes[0].path}`,
+      );
+    });
+  });
+
   it('surfaces local runtime launch environment warnings without rerouting through Cloud', async () => {
     const runner = throwingCommandRunner('spawn agent-relay ENOENT');
     const result = await runLocal(
@@ -2552,5 +2718,269 @@ describe('runLocal', () => {
       'npm install',
       "npx --no-install 'agent-relay' run 'workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts'",
     ]);
+  });
+
+  describe('regression: issue #11 adapter-backed local path', () => {
+    it('keeps generation-only LocalResponse fields while the real local executor assembles turn context', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['runtime should stay idle'] });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: {
+            description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            targetRepo: 'AgentWorkforce/ricky',
+            targetFiles: ['packages/local/src/entrypoint.ts'],
+          },
+          stageMode: 'generate',
+          requestId: 'req-issue-11-generate',
+          metadata: { issue: 11 },
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.artifacts).toHaveLength(1);
+      expect(result.artifacts[0]).toMatchObject({
+        path: result.generation?.artifact?.path,
+        type: 'text/typescript',
+        content: expect.stringContaining('workflow('),
+      });
+      expect(result.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from cli',
+          '[local] mode: local',
+          '[local] stage mode: generate',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime launch skipped: returning generated artifact only',
+        ]),
+      );
+      expect(result.warnings).toEqual([]);
+      expect(result.nextActions).toEqual([
+        `Run the generated workflow locally: npx --no-install agent-relay run ${result.generation?.artifact?.path}`,
+        'Inspect the generated workflow artifact and choose whether to run it locally.',
+      ]);
+      expect(result.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+          workflow_id: expect.any(String),
+          spec_digest: expect.any(String),
+        },
+        next: {
+          run_command: `npx --no-install agent-relay run ${result.generation?.artifact?.path}`,
+          run_mode_hint: `ricky run --artifact ${result.generation?.artifact?.path}`,
+        },
+      });
+      expect(result.execution).toBeUndefined();
+      expect(localExecutor.writes).toHaveLength(1);
+      expect(localExecutor.runner.invocations).toHaveLength(0);
+    });
+
+    it('preserves artifact-run stage semantics through the adapter-backed live local path', async () => {
+      const artifactPath = 'workflows/issue-11/ready.workflow.ts';
+      const launches: RunRequest[] = [];
+      const result = await runLocal(
+        {
+          source: 'workflow-artifact',
+          artifactPath,
+          requestId: 'req-issue-11-artifact',
+          invocationRoot: '/workspace/issue-11',
+          metadata: { issue: 11, path: 'artifact-run' },
+        },
+        {
+          artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          localExecutor: {
+            cwd: '/fallback-cwd',
+            artifactWriter: {
+              async writeArtifact(): Promise<void> {
+                throw new Error('artifact-run should not generate a replacement workflow');
+              },
+            },
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                launches.push(request);
+                return coordinatorResult(request, { stdout: ['artifact stage executed'] });
+              },
+            },
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(launches).toHaveLength(1);
+      expect(launches[0]).toMatchObject({
+        workflowFile: artifactPath,
+        cwd: '/workspace/issue-11',
+        metadata: {
+          requestId: 'req-issue-11-artifact',
+          source: 'workflow-artifact',
+          route: 'execute',
+        },
+      });
+      expect(result.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from workflow-artifact',
+          '[local] mode: local',
+          '[local] stage mode: run',
+          `[local] spec path: ${artifactPath}`,
+          '[local] spec intake route: execute',
+          '[local] runtime status: passed',
+          '[stdout] artifact stage executed',
+        ]),
+      );
+      expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+      expect(result.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: artifactPath,
+          workflow_id: 'req-issue-11-artifact',
+          spec_digest: expect.any(String),
+        },
+      });
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'success',
+        execution: {
+          workflow_id: 'req-issue-11-artifact',
+          artifact_path: artifactPath,
+          workflow_file: artifactPath,
+          cwd: '/workspace/issue-11',
+          steps_completed: 1,
+          steps_total: 1,
+        },
+        evidence: {
+          outcome_summary: expect.stringContaining('completed successfully'),
+          side_effects: {
+            commands_invoked: [`npx --no-install agent-relay run ${artifactPath}`],
+          },
+          assertions: [
+            {
+              name: 'runtime_exit_code',
+              status: 'pass',
+              detail: 'Runtime exited with code 0.',
+            },
+          ],
+        },
+      });
+    });
+
+    it('preserves generate-and-run stage semantics and Ricky blocker evidence fields', async () => {
+      const successExecutor = memoryLocalExecutorOptions({ stdout: ['generate-and-run completed'] });
+      const success = await runLocal(
+        {
+          source: 'mcp',
+          arguments: {
+            goal: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'generate-and-run',
+          },
+          requestId: 'req-issue-11-generate-and-run',
+        },
+        { localExecutor: successExecutor },
+      );
+
+      expect(success.ok).toBe(true);
+      expect(success.exitCode).toBe(0);
+      expect(success.generation).toMatchObject({ stage: 'generate', status: 'ok' });
+      expect(success.execution).toMatchObject({
+        stage: 'execute',
+        status: 'success',
+        evidence: {
+          logs: {
+            tail: ['generate-and-run completed'],
+            truncated: false,
+          },
+          workflow_steps: [
+            {
+              id: 'runtime-launch',
+              name: 'Local runtime execution',
+              status: 'pass',
+              duration_ms: expect.any(Number),
+            },
+          ],
+        },
+      });
+      expect(success.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from mcp',
+          '[local] stage mode: run',
+          '[local] spec intake route: generate',
+          '[local] runtime status: passed',
+        ]),
+      );
+      expect(successExecutor.runner.invocations).toHaveLength(1);
+
+      const blocked = await runLocal(
+        {
+          source: 'cli',
+          spec: 'run workflows/issue-11/missing-runtime.workflow.ts',
+          stageMode: 'run',
+          requestId: 'req-issue-11-blocker',
+        },
+        {
+          localExecutor: memoryLocalExecutorOptions({
+            exitCode: 127,
+            stdout: [],
+            stderr: ['agent-relay: command not found'],
+          }),
+        },
+      );
+
+      expect(blocked.ok).toBe(false);
+      expect(blocked.exitCode).toBe(2);
+      expect(blocked.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: 'workflows/issue-11/missing-runtime.workflow.ts',
+          workflow_id: 'req-issue-11-blocker',
+          spec_digest: expect.any(String),
+        },
+      });
+      expect(blocked.execution).toMatchObject({
+        stage: 'execute',
+        status: 'blocker',
+        blocker: {
+          code: 'MISSING_BINARY',
+          category: 'dependency',
+          detected_during: 'launch',
+          recovery: {
+            actionable: true,
+            steps: [
+              'npm install',
+              "npx --no-install 'agent-relay' run 'workflows/issue-11/missing-runtime.workflow.ts'",
+            ],
+          },
+          context: {
+            missing: ['agent-relay'],
+            found: ['cwd=/repo'],
+          },
+        },
+        evidence: {
+          outcome_summary: expect.stringContaining('blocked during local runtime execution'),
+          failed_step: { id: 'runtime-launch', name: 'Local runtime execution' },
+          exit_code: 127,
+          logs: {
+            tail: ['agent-relay: command not found'],
+            truncated: false,
+          },
+          side_effects: {
+            commands_invoked: ['npx --no-install agent-relay run workflows/issue-11/missing-runtime.workflow.ts'],
+          },
+          assertions: [
+            {
+              name: 'runtime_exit_code',
+              status: 'fail',
+              detail: 'Runtime exit code: 127.',
+            },
+          ],
+        },
+      });
+      expect(blocked.nextActions).toEqual(blocked.execution?.blocker?.recovery.steps);
+    });
   });
 });

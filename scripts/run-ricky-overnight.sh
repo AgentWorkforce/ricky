@@ -44,8 +44,13 @@ STATUS_REASON=""
 CURRENT_WORKFLOW=""
 RUN_PID="$$"
 RUN_PGID=""
+SCRIPT_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
 RUNNER_START_PID=""
 STATUS_MARKED="false"
+RESTORED_ARTIFACT_DIR=""
+RESTORED_QUEUE_FILE=""
+RESTORED_CURRENT_INDEX=""
+RESTORED_CURRENT_PASS=""
 CLAUDE_RATE_LIMIT_PATTERNS=(
   "You've hit your limit"
   "/rate-limit-options"
@@ -123,6 +128,10 @@ workflows/wave8-github-issues/02-prove-external-repo-cli-generation.ts
 workflows/wave8-github-issues/03-close-local-execution-outcome-loop.ts
 workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist.ts
 workflows/wave8-github-issues/05-prove-skill-embedding-boundary.ts
+workflows/wave8-github-issues/06-close-local-run-product-loop.ts
+workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts
+workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts
+workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts
 EOF
       ;;
     expanded|*)
@@ -140,6 +149,10 @@ workflows/wave8-github-issues/02-prove-external-repo-cli-generation.ts
 workflows/wave8-github-issues/03-close-local-execution-outcome-loop.ts
 workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist.ts
 workflows/wave8-github-issues/05-prove-skill-embedding-boundary.ts
+workflows/wave8-github-issues/06-close-local-run-product-loop.ts
+workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts
+workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts
+workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts
 workflows/wave0-foundation/04-initial-architecture-docs.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
 workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
@@ -300,6 +313,51 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave7-analytics-proof/prove-proof-loop-analytics-feedback/signoff.md \
         'ANALYTICS_FEEDBACK_COMPLETE'
       ;;
+    workflows/wave8-github-issues/01-fix-cli-artifact-path-and-caller-root.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/signoff.md \
+        'PATH_ROOT_ISSUES_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/02-prove-external-repo-cli-generation.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/signoff.md \
+        'EXTERNAL_REPO_CLI_PROOF_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/03-close-local-execution-outcome-loop.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/signoff.md \
+        'LOCAL_EXECUTION_OUTCOME_LOOP_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/signoff.md \
+        'READINESS_COPY_AND_CHECKLIST_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/05-prove-skill-embedding-boundary.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/signoff.md \
+        'SKILL_EMBEDDING_BOUNDARY_COMPLETE'
+      ;;
+    workflows/wave8-github-issues/06-close-local-run-product-loop.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave8-github-issues/close-local-run-product-loop/signoff.md \
+        'RICKY_WAVE8_LOCAL_RUN_PRODUCT_LOOP_SIGNOFF'
+      ;;
+    workflows/wave9-agent-assistant/01-audit-ricky-agent-assistant-usage.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave9-agent-assistant/audit-ricky-agent-assistant-usage/signoff.md \
+        'RICKY_AGENT_ASSISTANT_AUDIT_COMPLETE'
+      ;;
+    workflows/wave9-agent-assistant/02-define-ricky-agent-assistant-boundary.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave9-agent-assistant/define-ricky-agent-assistant-boundary/signoff.md \
+        'RICKY_AGENT_ASSISTANT_BOUNDARY_COMPLETE'
+      ;;
+    workflows/wave9-agent-assistant/03-evaluate-local-execution-contract-for-reuse.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave9-agent-assistant/evaluate-local-execution-contract-for-reuse/signoff.md \
+        'RICKY_LOCAL_CONTRACT_REUSE_EVALUATION_COMPLETE'
+      ;;
     *)
       return 1
       ;;
@@ -392,12 +450,50 @@ restore_checkpoint() {
   fi
   CURRENT_PASS="${restored_current_pass:-1}"
   CURRENT_INDEX="${restored_current_index:-0}"
+  RESTORED_CURRENT_PASS="$CURRENT_PASS"
+  RESTORED_CURRENT_INDEX="$CURRENT_INDEX"
+  RESTORED_ARTIFACT_DIR="${previous_artifact_dir:-}"
+  RESTORED_QUEUE_FILE=""
+  if [[ -n "$RESTORED_ARTIFACT_DIR" ]]; then
+    RESTORED_QUEUE_FILE="$RESTORED_ARTIFACT_DIR/queue.txt"
+  fi
   # `workflows_run` is an invocation-local chunk counter. Restoring it across
   # `--resume` causes a fresh invocation to immediately checkpoint again once it
   # reaches the prior chunk limit, without running the next queued workflow.
   WORKFLOWS_RUN=0
   CURRENT_WORKFLOW="${restored_current_workflow:-}"
   INITIAL_GIT_HEAD="${restored_initial_git_head:-}"
+}
+
+resume_remaining_queue_from_checkpoint() {
+  if [[ "$RESUME_FLAG" != "--resume" ]]; then
+    return 0
+  fi
+
+  if (( $(queue_count) == 0 )); then
+    log "skipping checkpoint queue resume because the freshly prepared queue is empty"
+    return 0
+  fi
+
+  if [[ -z "$RESTORED_QUEUE_FILE" || ! -f "$RESTORED_QUEUE_FILE" ]]; then
+    return 0
+  fi
+
+  local restored_index="${RESTORED_CURRENT_INDEX:-0}"
+  if [[ ! "$restored_index" =~ ^[0-9]+$ ]] || (( restored_index < 0 )); then
+    restored_index=0
+  fi
+
+  local start_line="$((restored_index + 1))"
+  local resumed_queue="$ARTIFACT_DIR/queue.resumed.tmp"
+  tail -n +"$start_line" "$RESTORED_QUEUE_FILE" > "$resumed_queue"
+  mv "$resumed_queue" "$QUEUE_FILE"
+  filter_queue_for_repo_state
+
+  CURRENT_PASS="${RESTORED_CURRENT_PASS:-1}"
+  CURRENT_INDEX=0
+
+  log "resumed remaining queue from prior artifact: $RESTORED_QUEUE_FILE (starting at saved index $restored_index)"
 }
 
 write_summary() {
@@ -599,6 +695,10 @@ run_one() {
   RUN_PGID=""
   if command -v ps >/dev/null 2>&1; then
     RUN_PGID="$(ps -o pgid= -p "$runner_pid" 2>/dev/null | tr -d '[:space:]')"
+    if [[ -n "$SCRIPT_PGID" && "$RUN_PGID" == "$SCRIPT_PGID" ]]; then
+      log "runner shares shell process group; disabling process-group tracking for stale detection"
+      RUN_PGID=""
+    fi
   fi
   persist_checkpoint
 
@@ -740,6 +840,7 @@ INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 restore_checkpoint
 write_queue
 filter_queue_for_repo_state
+resume_remaining_queue_from_checkpoint
 if [[ -z "$INITIAL_GIT_HEAD" ]]; then
   INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 fi

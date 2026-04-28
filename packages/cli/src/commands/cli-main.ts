@@ -233,7 +233,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
   if (parsed.artifact !== undefined) {
     return {
       source: 'workflow-artifact',
-      artifactPath: resolveSpecFilePath(parsed.artifact, invocationRoot),
+      artifactPath: parsed.artifact,
       invocationRoot,
       mode: handoffMode,
       stageMode: 'run',

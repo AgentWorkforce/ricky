@@ -6,6 +6,8 @@
  * request contract.
  */
 
+import { isAbsolute, resolve } from 'node:path';
+
 // ---------------------------------------------------------------------------
 // Source types — the intake surfaces that can hand off to Ricky locally
 // ---------------------------------------------------------------------------
@@ -172,7 +174,7 @@ export async function normalizeRequest(
         source: 'free-form',
         mode,
         stageMode: stageModeFor(raw, raw.spec),
-        invocationRoot: raw.invocationRoot,
+        invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
@@ -187,7 +189,7 @@ export async function normalizeRequest(
         source: 'structured',
         mode,
         stageMode: stageModeFor(raw, raw.spec),
-        invocationRoot: raw.invocationRoot,
+        invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
@@ -203,7 +205,7 @@ export async function normalizeRequest(
         source: 'cli',
         mode,
         stageMode: stageModeFor(raw, raw.spec),
-        invocationRoot: raw.invocationRoot,
+        invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         specPath: raw.specFile,
         metadata: {
           ...(raw.metadata ?? {}),
@@ -225,7 +227,7 @@ export async function normalizeRequest(
         source: 'mcp',
         mode,
         stageMode: stageModeFor(raw, spec),
-        invocationRoot: raw.invocationRoot,
+        invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: {
           ...(raw.metadata ?? {}),
           ...(raw.mcpMetadata ?? {}),
@@ -249,7 +251,7 @@ export async function normalizeRequest(
         source: 'claude',
         mode,
         stageMode: stageModeFor(raw, raw.spec),
-        invocationRoot: raw.invocationRoot,
+        invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata,
         sourceMetadata: sourceMetadataForClaude(raw),
         requestId: raw.requestId,
@@ -258,20 +260,30 @@ export async function normalizeRequest(
 
     case 'workflow-artifact': {
       const mode = executionModeFor(raw);
-      const spec = await reader.readArtifact(raw.artifactPath);
+      const artifactReadPath = artifactReadPathFor(raw);
+      const spec = await reader.readArtifact(artifactReadPath);
       return {
         _normalized: true,
         spec,
         source: 'workflow-artifact',
         mode,
         stageMode: stageModeFor(raw) ?? 'run',
-        invocationRoot: raw.invocationRoot,
+        invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         specPath: raw.artifactPath,
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
       };
     }
   }
+}
+
+function artifactReadPathFor(raw: WorkflowArtifactHandoff): string {
+  if (isAbsolute(raw.artifactPath) || !raw.invocationRoot) return raw.artifactPath;
+  return resolve(normalizeInvocationRoot(raw.invocationRoot)!, raw.artifactPath);
+}
+
+function normalizeInvocationRoot(invocationRoot: string | undefined): string | undefined {
+  return invocationRoot ? resolve(invocationRoot) : undefined;
 }
 
 function executionModeFor(raw: BaseHandoff, spec?: SpecInput): LocalExecutionMode {

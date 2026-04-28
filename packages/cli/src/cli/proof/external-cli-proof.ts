@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -101,6 +101,13 @@ export async function runExternalCliProof(
     const artifactPath = parseLabeledValue(cliOutput, 'Artifact');
     const nextCommandText = parseLabeledValue(cliOutput, 'To execute this artifact');
     const nextCommand = nextCommandText.trim();
+
+    if (isAbsolute(artifactPath) || !artifactPath.startsWith('workflows/generated/')) {
+      throw new Error(
+        `Printed artifact path must be relative to the external repo under workflows/generated/.\nartifact=${artifactPath}`,
+      );
+    }
+
     const artifactFullPath = join(repoDir, artifactPath);
 
     await access(artifactFullPath, constants.F_OK);
@@ -211,14 +218,6 @@ function parseLabeledValue(output: string, label: string): string {
     throw new Error(`Could not find "${label}:" in CLI output.\n${output}`);
   }
   return match[1].trim();
-}
-
-function parseNextCommand(nextLine: string): string {
-  const prefix = 'Run the generated workflow locally: ';
-  if (!nextLine.startsWith(prefix)) {
-    throw new Error(`Unexpected next action format.\n${nextLine}`);
-  }
-  return nextLine.slice(prefix.length).trim();
 }
 
 function escapeRegExp(value: string): string {

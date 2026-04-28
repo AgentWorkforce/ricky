@@ -10,18 +10,18 @@ The goal is to make the next implementation and proof workflows specific enough 
 
 ## Current First-Wave Status
 
-As of 2026-04-27, Ricky has a real npm workspace split across six private packages:
+As of 2026-04-28, Ricky has a real npm workspace split across six private packages:
 
 | Package | Current scope | Current proof |
 |---|---|---|
 | `@ricky/shared` | Shared models, config, constants | Covered through downstream package tests |
-| `@ricky/runtime` | Local coordinator, evidence capture, failure classifier, diagnosis engine, unblocker proof | 119 package tests |
-| `@ricky/product` | Spec intake, generation pipeline, debugger specialist, validator specialist, workflow health analytics | 70 package tests |
+| `@ricky/runtime` | Local coordinator, evidence capture, failure classifier, diagnosis engine, unblocker proof | 134 package tests |
+| `@ricky/product` | Spec intake, generation pipeline, debugger specialist, validator specialist, workflow health analytics | 75 package tests |
 | `@ricky/cloud` | Cloud auth validation, workspace scoping, provider guidance, generate endpoint, cloud proof | 88 package tests |
-| `@ricky/local` | Local/BYOH request normalization, entrypoint, local proof | 49 package tests |
-| `@ricky/cli` | Banner/welcome primitives, mode selection, onboarding proof, interactive entrypoint, current command surface | 63 package tests |
+| `@ricky/local` | Local/BYOH request normalization, entrypoint, local proof | 98 package tests |
+| `@ricky/cli` | Banner/welcome primitives, mode selection, onboarding proof, interactive entrypoint, current command surface, linked external-repo CLI proof | 136 package tests |
 
-The root proof suite adds 21 smoke and package-layout tests. `npm test` passes across all workspaces and root proof tests, for 410 passing tests total. The repo currently contains 35 TypeScript workflow files, including 31 product-build workflows, 2 runtime debug canaries, the meta workflow, and the Wave 6 closure workflow.
+The root proof suite adds 21 smoke and package-layout tests. `npm test` passes across all workspaces and root proof tests, for 552 passing tests total. The repo currently contains 51 TypeScript workflow files, including 31 first-wave product-build workflows, 2 runtime debug canaries, the meta workflow, the Wave 6 closure workflow, and later Wave 7-9 proof/issue workflows.
 
 ### Signoff State
 

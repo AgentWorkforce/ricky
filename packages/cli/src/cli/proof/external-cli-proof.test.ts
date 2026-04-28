@@ -22,6 +22,7 @@ describe('Ricky external CLI proof', () => {
 
     expect(result.linkedCliPath).toMatch(/node_modules\/\.bin\/ricky$/);
     expect(result.artifactPath).toMatch(/^workflows\/generated\/.+\.ts$/);
+    expect(result.artifactPath).not.toMatch(/^\//);
     await expect(access(result.artifactFullPath)).resolves.toBeUndefined();
 
     const artifactContent = await readFile(result.artifactFullPath, 'utf8');

@@ -100,10 +100,9 @@ Prefer deterministic temp directories and injected readers/runners. Do not requi
       type: 'deterministic',
       dependsOn: ['implement-root-tests'],
       command: [
-        'git diff --name-only > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/changed-files.txt',
-        'grep -Eq "packages/(cli|local)/src/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/changed-files.txt',
+        '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/changed-files.txt',
+        'if grep -Eq "packages/(cli|local)/src/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/changed-files.txt; then echo POST_IMPLEMENTATION_FILE_GATE_OK; elif grep -Fq "REPRO_CURRENTLY_PASSING" .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/repro-output.txt && git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"; then echo POST_IMPLEMENTATION_ALREADY_SATISFIED; else echo "EXPECTED_CHANGED_FILES_OR_TRUTHFUL_NOOP" >&2; exit 1; fi',
         'grep -R "INIT_CWD\\|cwd\\|Artifact:\\|npx --no-install agent-relay run" packages/cli/src packages/local/src >/dev/null',
-        'echo POST_IMPLEMENTATION_FILE_GATE_OK',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,

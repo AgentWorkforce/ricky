@@ -57,6 +57,33 @@ describe('runInteractiveCli', () => {
     expect(result.awaitingInput).toBe(false);
   });
 
+  it('passes deps.cwd as invocationRoot to an injected local executor when the handoff omits it', async () => {
+    const localResponse: LocalResponse = {
+      ok: true,
+      artifacts: [{ path: 'workflows/generated/from-injected-executor.ts', type: 'text/typescript' }],
+      logs: [],
+      warnings: [],
+      nextActions: [],
+    };
+    const execute = vi.fn().mockResolvedValue(localResponse);
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      cwd: '/caller-repo',
+      handoff: { source: 'cli', spec: 'Build a workflow', mode: 'local' },
+      localExecutor: { execute },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'cli',
+        spec: 'Build a workflow',
+        invocationRoot: '/caller-repo',
+      }),
+    );
+  });
+
   it('uses INIT_CWD for the default local executor so generated workflows land in the caller repo', async () => {
     const { mkdtemp, rm, access } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
@@ -170,6 +197,38 @@ describe('runInteractiveCli', () => {
     } finally {
       await rm(tempRepo, { recursive: true, force: true });
     }
+  });
+
+  it('resolves an existing handoff invocationRoot before passing it to an injected local executor', async () => {
+    const { isAbsolute } = await import('node:path');
+    const localResponse: LocalResponse = {
+      ok: true,
+      artifacts: [{ path: 'workflows/generated/from-relative-root.ts', type: 'text/typescript' }],
+      logs: [],
+      warnings: [],
+      nextActions: [],
+    };
+    const execute = vi.fn().mockResolvedValue(localResponse);
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      handoff: {
+        source: 'cli',
+        spec: 'Build a workflow',
+        mode: 'local',
+        invocationRoot: './relative-caller-repo',
+      },
+      localExecutor: { execute },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        invocationRoot: expect.stringMatching(/relative-caller-repo$/),
+      }),
+    );
+    expect(execute.mock.calls[0][0].invocationRoot).not.toBe('./relative-caller-repo');
+    expect(isAbsolute(execute.mock.calls[0][0].invocationRoot!)).toBe(true);
   });
 
   it('stops cleanly after onboarding when no handoff was provided', async () => {
@@ -978,6 +1037,87 @@ describe('runInteractiveCli', () => {
         // Artifact is NOT in packages/cli/workflows/generated
         const cliWorkflowsPath = join(process.cwd(), 'packages/cli/workflows/generated');
         await expect(access(join(cliWorkflowsPath, artifactName))).rejects.toThrow();
+      } finally {
+        await rm(tempRepo, { recursive: true, force: true });
+      }
+    });
+
+    it('default local executor from stdin handoff writes into caller repo root via cwd', async () => {
+      const { mkdtemp, rm, access, readFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const tempRepo = await mkdtemp(join(tmpdir(), 'ricky-stdin-default-executor-'));
+
+      try {
+        const result = await runInteractiveCli({
+          onboard: vi.fn().mockResolvedValue(onboarding('local')),
+          cwd: tempRepo,
+          handoff: {
+            source: 'cli',
+            spec: 'generate a workflow for stdin default executor test',
+            mode: 'local',
+            cliMetadata: { handoff: 'stdin' },
+          },
+        });
+
+        expect(result.ok).toBe(true);
+        expect(result.localResult?.artifacts[0].path).toMatch(/^workflows\/generated\//);
+
+        const artifactPath = result.localResult!.artifacts[0].path;
+        await expect(access(join(tempRepo, artifactPath))).resolves.toBeUndefined();
+
+        const content = await readFile(join(tempRepo, artifactPath), 'utf8');
+        expect(content).toContain('workflow(');
+
+        expect(result.localResult?.nextActions).toContain(
+          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+        );
+
+        // Artifact is NOT in packages/cli/workflows/generated
+        const artifactName = artifactPath.split('/').pop()!;
+        const cliPath = join(process.cwd(), 'packages/cli/workflows/generated', artifactName);
+        await expect(access(cliPath)).rejects.toThrow();
+      } finally {
+        await rm(tempRepo, { recursive: true, force: true });
+      }
+    });
+
+    it('default local executor from spec-file handoff writes into caller repo root via cwd', async () => {
+      const { mkdtemp, rm, access, readFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const tempRepo = await mkdtemp(join(tmpdir(), 'ricky-specfile-default-executor-'));
+
+      try {
+        const result = await runInteractiveCli({
+          onboard: vi.fn().mockResolvedValue(onboarding('local')),
+          cwd: tempRepo,
+          handoff: {
+            source: 'cli',
+            spec: 'generate a workflow for spec-file default executor test',
+            specFile: './my-spec.md',
+            mode: 'local',
+            cliMetadata: { handoff: 'spec-file' },
+          },
+        });
+
+        expect(result.ok).toBe(true);
+        expect(result.localResult?.artifacts[0].path).toMatch(/^workflows\/generated\//);
+
+        const artifactPath = result.localResult!.artifacts[0].path;
+        await expect(access(join(tempRepo, artifactPath))).resolves.toBeUndefined();
+
+        const content = await readFile(join(tempRepo, artifactPath), 'utf8');
+        expect(content).toContain('workflow(');
+
+        expect(result.localResult?.nextActions).toContain(
+          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+        );
+
+        // Artifact is NOT in packages/cli/workflows/generated
+        const artifactName = artifactPath.split('/').pop()!;
+        const cliPath = join(process.cwd(), 'packages/cli/workflows/generated', artifactName);
+        await expect(access(cliPath)).rejects.toThrow();
       } finally {
         await rm(tempRepo, { recursive: true, force: true });
       }
