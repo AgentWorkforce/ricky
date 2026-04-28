@@ -3,6 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {
+  CLOUD_MODE,
+  FIRST_CLASS_RICKY_MODES,
+  LOCAL_BYOH_MODE,
+  RICKY_ASCII_ART_WELCOME,
   chooseBannerVariant,
   renderBanner,
   renderCloudGuidance,
@@ -23,6 +27,7 @@ describe('Ricky CLI onboarding', () => {
   it('renders first-run onboarding with the full banner by default', () => {
     const output = renderOnboarding({ isFirstRun: true, isTTY: true, env: {} });
 
+    expect(RICKY_ASCII_ART_WELCOME).toContain('RICKY');
     expect(output).toContain('RRRR');
     expect(output).toContain("Welcome to Ricky! Let's get you set up.");
     expect(output).toContain('Ricky generates workflow artifacts for your repo.');
@@ -42,6 +47,11 @@ describe('Ricky CLI onboarding', () => {
     const localIndex = output.indexOf('> [1] Local / BYOH');
     const cloudIndex = output.indexOf('[2] Cloud');
 
+    expect(FIRST_CLASS_RICKY_MODES).toEqual([LOCAL_BYOH_MODE, CLOUD_MODE]);
+    expect(LOCAL_BYOH_MODE.description).toContain('without Cloud credentials');
+    expect(CLOUD_MODE.description).toContain('AgentWorkforce Cloud');
+    expect(LOCAL_BYOH_MODE.nextAction).toContain('ricky --mode local --spec');
+    expect(CLOUD_MODE.nextAction).toContain('npx agent-relay cloud connect google');
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
     expect(localIndex).toBeGreaterThanOrEqual(0);
@@ -400,6 +410,49 @@ describe('runOnboarding', () => {
     expect(result.mode).toBe('cloud');
     expect(store.written).not.toBeNull();
     expect(store.written!.mode).toBe('cloud');
+  });
+
+  it('honors NO_COLOR from resolved env (injected or ambient process.env)', async () => {
+    const store = mockConfigStore({
+      mode: 'local',
+      firstRunComplete: false,
+      providers: { google: { connected: false }, github: { connected: false } },
+    });
+    const output = new PassThrough();
+
+    // When NO_COLOR is set in the injected env, banner output must contain no ANSI escapes
+    const result = await runOnboarding({
+      input: inputStream('1'),
+      output,
+      isTTY: true,
+      env: { NO_COLOR: '1' },
+      configStore: store,
+    });
+
+    expect(result.bannerShown).toBe(true);
+    // ANSI escape sequences start with \x1b[
+    expect(result.output).not.toMatch(/\x1b\[/);
+  });
+
+  it('renders colored banner when NO_COLOR is absent from resolved env', async () => {
+    const store = mockConfigStore({
+      mode: 'local',
+      firstRunComplete: false,
+      providers: { google: { connected: false }, github: { connected: false } },
+    });
+    const output = new PassThrough();
+
+    const result = await runOnboarding({
+      input: inputStream('1'),
+      output,
+      isTTY: true,
+      env: {},
+      configStore: store,
+    });
+
+    expect(result.bannerShown).toBe(true);
+    // With isTTY true and no NO_COLOR, ANSI escape sequences should be present
+    expect(result.output).toMatch(/\x1b\[/);
   });
 
   it('respects options.mode override precedence over RICKY_MODE env', async () => {

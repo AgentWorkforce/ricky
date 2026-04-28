@@ -9,6 +9,8 @@ export const RICKY_BANNER = String.raw`        __             RRRR
     /_/  \_\
 workflow reliability for AgentWorkforce`;
 
+export const RICKY_ASCII_ART_WELCOME = RICKY_BANNER;
+
 export const RICKY_COMPACT_BANNER = 'ricky · workflow reliability for AgentWorkforce';
 
 const ANSI_CYAN = '\x1b[36m';

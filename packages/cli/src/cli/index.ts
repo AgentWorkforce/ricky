@@ -1,4 +1,5 @@
 export {
+  RICKY_ASCII_ART_WELCOME,
   RICKY_BANNER,
   RICKY_COMPACT_BANNER,
   chooseBannerVariant,
@@ -12,8 +13,12 @@ export { FIRST_RUN_WELCOME, RETURNING_USER_WELCOME, renderWelcome } from './welc
 export type { WelcomeOptions } from './welcome.js';
 
 export {
+  CLOUD_MODE,
   DEFAULT_PROVIDER_STATUS,
+  FIRST_CLASS_RICKY_MODES,
+  LOCAL_BYOH_MODE,
   MODE_OPTIONS,
+  RICKY_MODE_DEFINITIONS,
   isRickyMode,
   parseModeChoice,
   renderCompactHeader,
@@ -22,7 +27,14 @@ export {
   renderModeSelector,
   toRickyMode,
 } from './mode-selector.js';
-export type { ModeOption, OnboardingChoice, ProviderStatus, RickyConfig, RickyMode } from './mode-selector.js';
+export type {
+  ModeOption,
+  OnboardingChoice,
+  ProviderStatus,
+  RickyConfig,
+  RickyMode,
+  RickyModeDefinition,
+} from './mode-selector.js';
 
 export {
   renderCloudGuidance,

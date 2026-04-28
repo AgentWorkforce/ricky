@@ -19,27 +19,59 @@ export interface ModeOption {
   description: string;
 }
 
+export interface RickyModeDefinition {
+  value: RickyMode;
+  title: string;
+  description: string;
+  nextAction: string;
+}
+
 export const DEFAULT_PROVIDER_STATUS: ProviderStatus = {
   google: { connected: false },
   github: { connected: false },
 };
 
+export const RICKY_MODE_DEFINITIONS = {
+  local: {
+    value: 'local',
+    title: 'Local / BYOH',
+    description: 'Generate workflow artifacts for this repo without Cloud credentials.',
+    nextAction: 'Run `ricky --mode local --spec "<workflow spec>"`, use `--spec-file`, or pipe `--stdin`.',
+  },
+  cloud: {
+    value: 'cloud',
+    title: 'Cloud',
+    description: 'Generate workflow artifacts through AgentWorkforce Cloud after provider setup.',
+    nextAction: 'Connect Google with `npx agent-relay cloud connect google`, then run `ricky --mode cloud`.',
+  },
+  both: {
+    value: 'both',
+    title: 'Local + Cloud',
+    description: 'Start locally now and keep Cloud available after provider setup.',
+    nextAction: 'Run locally now, or connect Cloud with `npx agent-relay cloud connect google`.',
+  },
+} satisfies Record<RickyMode, RickyModeDefinition>;
+
+export const LOCAL_BYOH_MODE = RICKY_MODE_DEFINITIONS.local;
+export const CLOUD_MODE = RICKY_MODE_DEFINITIONS.cloud;
+export const FIRST_CLASS_RICKY_MODES = [LOCAL_BYOH_MODE, CLOUD_MODE] as const;
+
 export const MODE_OPTIONS: ModeOption[] = [
   {
     choice: '1',
-    value: 'local',
-    title: 'Local / BYOH',
+    value: LOCAL_BYOH_MODE.value,
+    title: LOCAL_BYOH_MODE.title,
     description: 'generate workflow artifacts for your local repo',
   },
   {
     choice: '2',
-    value: 'cloud',
-    title: 'Cloud',
+    value: CLOUD_MODE.value,
+    title: CLOUD_MODE.title,
     description: 'generate workflow artifacts through AgentWorkforce Cloud',
   },
   {
     choice: '3',
-    value: 'both',
+    value: RICKY_MODE_DEFINITIONS.both.value,
     title: 'Both',
     description: 'set up local generation now, connect Cloud later',
   },

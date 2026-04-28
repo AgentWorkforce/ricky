@@ -31,7 +31,7 @@ export interface OnboardingContext {
   mode?: RickyMode;
   choice?: OnboardingChoice;
   providerStatus?: ProviderStatus;
-  env?: { RICKY_BANNER?: string };
+  env?: { RICKY_BANNER?: string; NO_COLOR?: string };
 }
 
 export interface RickyConfigStore {
@@ -340,7 +340,7 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
     sections.push(
       renderBanner({
         variant: chooseBannerVariant(options.columns),
-        color: shouldUseColor({ isTTY, noColor: options.env?.NO_COLOR !== undefined }),
+        color: shouldUseColor({ isTTY, noColor: resolvedEnv.NO_COLOR !== undefined }),
       }),
     );
   }
