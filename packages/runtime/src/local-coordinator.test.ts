@@ -523,6 +523,39 @@ describe('LocalCoordinator', () => {
     });
   });
 
+  it('threads retry resume metadata into agent-relay args', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-retry',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      retry: {
+        attempt: 2,
+        maxAttempts: 3,
+        previousRunId: 'run-previous',
+        startFromStep: 'failed-step',
+      },
+    });
+
+    invocations[0].complete(0);
+    const result = await resultPromise;
+
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'workflow.yaml', '--start-from', 'failed-step', '--previous-run-id', 'run-previous'],
+      { cwd: '/repo', env: undefined },
+    );
+    expect(result.retry).toMatchObject({
+      attempt: 2,
+      maxAttempts: 3,
+      previousRunId: 'run-previous',
+      startFromStep: 'failed-step',
+    });
+  });
+
   it('uses injected command runner instead of invoking agent-relay directly', async () => {
     const { runner, run, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);

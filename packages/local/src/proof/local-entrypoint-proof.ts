@@ -153,6 +153,10 @@ function memoryLocalExecutorOptions(
   };
 }
 
+function workflowArtifactWrites(writes: Array<{ path: string; content: string; cwd: string }>): Array<{ path: string; content: string; cwd: string }> {
+  return writes.filter((write) => /^workflows\/generated\/.+\.ts$/.test(write.path));
+}
+
 // ---------------------------------------------------------------------------
 // Evidence helpers
 // ---------------------------------------------------------------------------
@@ -253,6 +257,7 @@ export function getLocalProofCases(): LocalProofCase[] {
         const responseArtifact = response.artifacts[0];
         const logsText = response.logs.join('\n');
         const nextActionsText = response.nextActions.join(' | ');
+        const workflowWrites = workflowArtifactWrites(localExecutor.writes);
 
         const assertions: ProofAssertion[] = [
           {
@@ -289,7 +294,7 @@ export function getLocalProofCases(): LocalProofCase[] {
               responseArtifact?.path === artifact?.artifactPath &&
               responseArtifact?.type === 'text/typescript' &&
               responseArtifact?.content?.includes('workflow(') === true &&
-              localExecutor.writes.length === 1 &&
+              workflowWrites.length === 1 &&
               nextActionsText.includes('Run the generated workflow locally'),
           },
           {
@@ -297,7 +302,7 @@ export function getLocalProofCases(): LocalProofCase[] {
             passed:
               !logsText.includes('Cloud API surface') &&
               logsText.includes('[local] runtime launch skipped') &&
-              localExecutor.writes[0]?.cwd === '/repo',
+              workflowWrites[0]?.cwd === '/repo',
           },
         ];
 
@@ -309,7 +314,7 @@ export function getLocalProofCases(): LocalProofCase[] {
             `normalized spec: ${normalized.spec}`,
             `generated artifact metadata: path=${artifact?.artifactPath} workflowId=${artifact?.workflowId} channel=${artifact?.channel} pattern=${artifact?.pattern} tasks=${artifact?.taskCount} gates=${artifact?.gateCount}`,
             `validator result: valid=${validator?.valid} errors=${validator?.errors.length} warnings=${validator?.warnings.length} deterministicGates=${validator?.hasDeterministicGates} reviewStage=${validator?.hasReviewStage}`,
-            `user response: ok=${response.ok} artifactCount=${response.artifacts.length} writeCount=${localExecutor.writes.length}`,
+            `user response: ok=${response.ok} artifactCount=${response.artifacts.length} writeCount=${workflowWrites.length}`,
             `user response artifact: path=${responseArtifact?.path} type=${responseArtifact?.type} contentIncludesWorkflow=${responseArtifact?.content?.includes('workflow(') === true}`,
             `user next actions: ${nextActionsText}`,
             `no Cloud credentials required: ${!logsText.includes('Cloud API surface')}`,
@@ -545,6 +550,7 @@ export function getLocalProofCases(): LocalProofCase[] {
 
         const logsText = response.logs.join('\n');
         const artifact = response.artifacts[0];
+        const workflowWrites = workflowArtifactWrites(localExecutor.writes);
         const checks = [
           response.ok === true,
           containsAll(logsText, [
@@ -553,13 +559,13 @@ export function getLocalProofCases(): LocalProofCase[] {
             '[local] workflow generation: passed',
             '[local] runtime status: passed',
           ]),
-          localExecutor.writes.length === 1,
+          workflowWrites.length === 1,
           artifact?.content?.includes('workflow(') === true,
         ];
 
         return result('local-runtime-coordination', checks, [
           `ok: ${response.ok}`,
-          `artifact writes: ${localExecutor.writes.length}`,
+          `artifact writes: ${workflowWrites.length}`,
           `artifact path: ${artifact?.path}`,
           `artifact content has workflow(): ${artifact?.content?.includes('workflow(') === true}`,
           `logs: ${response.logs.join(' | ')}`,
@@ -587,6 +593,7 @@ export function getLocalProofCases(): LocalProofCase[] {
           { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },
           { localExecutor },
         );
+        const workflowWrites = workflowArtifactWrites(localExecutor.writes);
 
         const gaps = [
           'Real agent-relay subprocess lifecycle is not exercised — commandRunner is a deterministic fake.',
@@ -601,7 +608,7 @@ export function getLocalProofCases(): LocalProofCase[] {
           executor.calls.length === 1,
           // Real executor path uses injectable adapters, not real side-effects
           realPathResponse.ok === true,
-          localExecutor.writes.length === 1,
+          workflowWrites.length === 1,
           // The contract is proven; the runtime is not
         ];
 
@@ -609,7 +616,7 @@ export function getLocalProofCases(): LocalProofCase[] {
           `injectable executor seam: ${executor.calls.length === 1}`,
           `stubbed executor log: ${response.logs[0]}`,
           `real path through injectable adapters: ${realPathResponse.ok}`,
-          `artifact writes via adapter: ${localExecutor.writes.length}`,
+          `artifact writes via adapter: ${workflowWrites.length}`,
           `HONEST GAP: ${gaps[0]}`,
           `HONEST GAP: ${gaps[1]}`,
           `HONEST GAP: ${gaps[2]}`,

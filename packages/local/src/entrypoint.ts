@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
+import { runWithAutoFix } from './auto-fix-loop.js';
 import { generate } from '@ricky/product/generation/index';
 import type { GenerationResult, RenderedArtifact } from '@ricky/product/generation/index';
 import { intake } from '@ricky/product/spec-intake/index';
@@ -58,6 +59,11 @@ export interface LocalGenerationStageResult {
     run_mode_hint: string;
   };
   error?: string;
+  decisions?: {
+    skill_matches?: unknown;
+    tool_selection?: unknown;
+    refinement?: unknown;
+  };
 }
 
 export type LocalBlockerCode =
@@ -67,7 +73,8 @@ export type LocalBlockerCode =
   | 'UNSUPPORTED_RUNTIME'
   | 'CREDENTIALS_REJECTED'
   | 'WORKDIR_DIRTY'
-  | 'NETWORK_UNREACHABLE';
+  | 'NETWORK_UNREACHABLE'
+  | 'NETWORK_TRANSIENT';
 
 export type LocalBlockerCategory =
   | 'environment'
@@ -128,6 +135,7 @@ export interface LocalExecutionStageResult {
     duration_ms: number;
     steps_completed: number;
     steps_total: number;
+    run_id?: string;
   };
   evidence?: LocalExecutionEvidence;
   blocker?: LocalClassifiedBlocker;
@@ -150,6 +158,12 @@ export interface LocalResponse {
   execution?: LocalExecutionStageResult;
   /** Process-oriented exit code: 0 success, 2 blocker, 1 error. */
   exitCode?: 0 | 1 | 2;
+  /** Auto-fix loop metadata when --auto-fix/--repair was requested. */
+  auto_fix?: {
+    max_attempts: number;
+    attempts: Array<Record<string, unknown>>;
+    final_status: 'ok' | 'blocker' | 'error';
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +348,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         generationResult = generate({
           spec: normalizedSpec,
           dryRunEnabled: true,
+          refine: request.refine,
         });
         artifact = generationResult.artifact;
 
@@ -352,13 +367,14 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         if (!generationResult.success || !artifact) {
           warnings.push(...generationResult.validation.errors);
           nextActions.push('Fix the generated workflow validation errors before local execution.');
-          generationStage = createGenerationStage('error', artifact, specDigest, generationResult.validation.errors[0]);
+          generationStage = createGenerationStage('error', artifact, specDigest, generationResult.validation.errors[0], generationResult);
           return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
         }
 
         await artifactWriter.writeArtifact(artifact.artifactPath, artifact.content, cwd);
+        await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
         logs.push(`[local] wrote workflow artifact: ${artifact.artifactPath}`);
-        generationStage = createGenerationStage('ok', artifact, specDigest);
+        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult);
       }
 
       const runTarget = artifact?.artifactPath ?? workflowFile;
@@ -420,11 +436,15 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         };
       }
 
+      const runtimeRunIdFile = runtimeRunIdFilePath(cwd, workflowId);
+      await ensureParentDir(runtimeRunIdFile);
       const runResult = await coordinator.launch({
         workflowFile: runTarget,
         cwd,
         timeoutMs: options.timeoutMs,
         route,
+        env: { AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
+        retry: request.retry,
         metadata: {
           requestId: intakeResult.requestId,
           source: request.source,
@@ -439,11 +459,13 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         type: 'text/typescript',
         ...(artifact ? { content: artifact.content } : {}),
       });
+      const runtimeRunId = await resolveRuntimeRunId(runtimeRunIdFile, runResult.stderr);
       const execution = await createExecutionStageFromCoordinatorResult(
         runResult,
         workflowId,
         artifact?.content,
         artifact?.artifactPath,
+        runtimeRunId,
       );
 
       if (runResult.status !== 'passed') {
@@ -556,7 +578,7 @@ export async function runLocal(
       ],
       nextActions: [
         isMissingFile
-          ? 'Confirm the artifact path exists and rerun the command.'
+          ? 'Confirm the artifact path exists and retry the command.'
           : 'Check the spec content or artifact path and retry.',
       ],
     };
@@ -582,6 +604,17 @@ export async function runLocal(
       ],
       nextActions: ['Use the Cloud API surface or re-invoke with mode=local.'],
     };
+  }
+
+  if (request.autoFix && request.autoFix.maxAttempts > 0) {
+    return runWithAutoFix(request, {
+      maxAttempts: request.autoFix.maxAttempts,
+      runSingleAttempt: (attemptRequest) =>
+        resolvedExecutor.execute({
+          ...attemptRequest,
+          autoFix: undefined,
+        }),
+    });
   }
 
   // Execute
@@ -613,6 +646,7 @@ function toRawSpecPayload(
       ...request.metadata,
       mode: request.mode,
       specPath: request.specPath,
+      refine: request.refine,
       sourceMetadata: request.sourceMetadata,
     },
   };
@@ -622,7 +656,7 @@ function toRawSpecPayload(
       ...base,
       kind: 'mcp',
       toolName: typeof request.metadata.toolName === 'string' ? request.metadata.toolName : 'ricky.generate',
-      arguments: { ...repoDefault, ...(request.structuredSpec ?? { spec: request.spec }) },
+      arguments: { ...repoDefault, ...(request.structuredSpec ?? { spec: request.spec }), ...(request.refine ? { refine: request.refine } : {}) },
     };
   }
 
@@ -643,7 +677,7 @@ function toRawSpecPayload(
     return {
       ...base,
       kind: 'structured_json',
-      data: { ...repoDefault, ...request.structuredSpec },
+      data: { ...repoDefault, ...request.structuredSpec, ...(request.refine ? { refine: request.refine } : {}) },
     };
   }
 
@@ -660,6 +694,7 @@ function toRawSpecPayload(
       data: {
         intent: 'generate',
         description: request.spec,
+        ...(request.refine ? { refine: request.refine } : {}),
         ...repoDefault,
       },
     };
@@ -757,6 +792,7 @@ function createGenerationStage(
   artifact: RenderedArtifact | null,
   specDigest: string,
   error?: string,
+  generationResult?: GenerationResult,
 ): LocalGenerationStageResult {
   return {
     stage: 'generate',
@@ -779,7 +815,30 @@ function createGenerationStage(
         }
       : {}),
     ...(error ? { error } : {}),
+    ...(generationResult
+      ? {
+          decisions: {
+            skill_matches: generationResult.skillContext.matches,
+            tool_selection: generationResult.toolSelection.selections,
+            ...(generationResult.refinement ? { refinement: generationResult.refinement } : {}),
+          },
+        }
+      : {}),
   };
+}
+
+async function writeGenerationMetadataArtifacts(
+  generationResult: GenerationResult,
+  artifactWriter: ArtifactWriter,
+  cwd: string,
+): Promise<void> {
+  const artifact = generationResult.artifact;
+  if (!artifact) return;
+  await artifactWriter.writeArtifact(`${artifact.artifactsDir}/skill-matches.json`, `${JSON.stringify(generationResult.skillContext.matches, null, 2)}\n`, cwd);
+  await artifactWriter.writeArtifact(`${artifact.artifactsDir}/tool-selection.json`, `${JSON.stringify(generationResult.toolSelection.selections, null, 2)}\n`, cwd);
+  if (generationResult.refinement) {
+    await artifactWriter.writeArtifact(`${artifact.artifactsDir}/refinement.json`, `${JSON.stringify(generationResult.refinement, null, 2)}\n`, cwd);
+  }
 }
 
 function createArtifactReferenceGenerationStage(
@@ -982,6 +1041,7 @@ async function createExecutionStageFromCoordinatorResult(
   workflowId: string,
   generatedContent: string | undefined,
   generatedArtifactPath: string | undefined,
+  runtimeRunId: string | undefined,
 ): Promise<LocalExecutionStageResult> {
   const status: LocalExecutionStatus = result.status === 'passed' ? 'success' : 'blocker';
   const logs = await writeRuntimeLogs(result);
@@ -1021,6 +1081,7 @@ async function createExecutionStageFromCoordinatorResult(
       duration_ms: result.durationMs,
       steps_completed: status === 'success' ? 1 : 0,
       steps_total: 1,
+      ...(runtimeRunId ? { run_id: runtimeRunId } : {}),
     },
     ...(classifiedBlocker ? { blocker: classifiedBlocker } : {}),
     evidence: {
@@ -1055,6 +1116,37 @@ async function createExecutionStageFromCoordinatorResult(
         : {}),
     },
   };
+}
+
+function runtimeRunIdFilePath(cwd: string, workflowId: string): string {
+  return resolve(cwd, '.workflow-artifacts', 'ricky-local-runs', `${workflowId}-run-id.txt`);
+}
+
+async function ensureParentDir(path: string): Promise<void> {
+  const { mkdir } = await import('node:fs/promises');
+  try {
+    await mkdir(dirname(path), { recursive: true });
+  } catch {
+    // Runtime execution can still proceed; stderr parsing remains a run-id fallback.
+  }
+}
+
+async function resolveRuntimeRunId(runIdFilePath: string, stderr: string[]): Promise<string | undefined> {
+  const { readFile } = await import('node:fs/promises');
+  try {
+    const fromFile = (await readFile(runIdFilePath, 'utf8')).trim();
+    if (fromFile) return fromFile;
+  } catch {
+    // Fall through to stderr parsing.
+  }
+
+  const stderrText = stderr.join('\n');
+  return parseRunId(stderrText);
+}
+
+function parseRunId(text: string): string | undefined {
+  const match = text.match(/\bRun ID:\s*([^\s]+)/i);
+  return match?.[1];
 }
 
 function classifyCoordinatorBlocker(

@@ -310,10 +310,17 @@ function buildInvocationSummary(request: RunRequest): CommandInvocationSummary {
   const baseArgs = request.route?.baseArgs ?? [...DEFAULT_BASE_ARGS];
   return {
     command,
-    args: [...baseArgs, request.workflowFile, ...(request.extraArgs ?? [])],
+    args: [...baseArgs, request.workflowFile, ...retryResumeArgs(request.retry), ...(request.extraArgs ?? [])],
     cwd: request.cwd,
     env: request.env,
   };
+}
+
+function retryResumeArgs(retry: RunRequest['retry']): string[] {
+  const args: string[] = [];
+  if (retry?.startFromStep) args.push('--start-from', retry.startFromStep);
+  if (retry?.previousRunId) args.push('--previous-run-id', retry.previousRunId);
+  return args;
 }
 
 function normalizeRetry(retry: RunRequest['retry']): RunRetryMetadata {
@@ -322,6 +329,7 @@ function normalizeRetry(retry: RunRequest['retry']): RunRetryMetadata {
     maxAttempts: retry?.maxAttempts,
     retryOfRunId: retry?.retryOfRunId,
     previousRunId: retry?.previousRunId,
+    startFromStep: retry?.startFromStep,
     reason: retry?.reason,
     backoffMs: retry?.backoffMs,
   };

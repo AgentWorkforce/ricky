@@ -1,35 +1,6 @@
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { GenerationIssue, SkillApplicationEvidence, SkillContext, SkillDescriptor, TemplateDescriptor } from './types.js';
-
-interface SkillRegistryEntry {
-  name: string;
-  path: string;
-  prerequisites: string[];
-  isApplicable: (spec: NormalizedWorkflowSpec) => boolean;
-}
-
-const AVAILABLE_PREREQUISITES = new Set(['@agent-relay/sdk', 'embedded-relay-typescript-template']);
-
-const SKILL_REGISTRY: SkillRegistryEntry[] = [
-  {
-    name: 'writing-agent-relay-workflows',
-    path: 'skills/skills/writing-agent-relay-workflows/SKILL.md',
-    prerequisites: ['@agent-relay/sdk'],
-    isApplicable: () => true,
-  },
-  {
-    name: 'choosing-swarm-patterns',
-    path: 'skills/skills/choosing-swarm-patterns/SKILL.md',
-    prerequisites: [],
-    isApplicable: (spec) => spec.targetFiles.length !== 1 || spec.acceptanceGates.length > 0,
-  },
-  {
-    name: 'relay-80-100-workflow',
-    path: 'skills/skills/relay-80-100-workflow/SKILL.md',
-    prerequisites: ['@agent-relay/sdk'],
-    isApplicable: (spec) => requiresStrictValidation(spec),
-  },
-];
+import { loadSkillRegistry, matchSkills } from './skill-matcher.js';
 
 const TEMPLATE_REGISTRY: TemplateDescriptor[] = [
   {
@@ -41,10 +12,13 @@ const TEMPLATE_REGISTRY: TemplateDescriptor[] = [
 ];
 
 export function loadSkills(spec: NormalizedWorkflowSpec, skillOverrides?: string[], templateOverride?: string): SkillContext {
-  const requestedNames = skillOverrides && skillOverrides.length > 0 ? skillOverrides : SKILL_REGISTRY.map((entry) => entry.name);
-  const skills = requestedNames.map((name) => resolveSkill(name, spec, Boolean(skillOverrides?.length)));
+  const registry = loadSkillRegistry();
+  const matches = skillOverrides && skillOverrides.length > 0
+    ? skillOverrides.map((name) => overrideMatch(name, registry))
+    : matchSkills(spec, { registry });
+  const skills = matches.map((match) => resolveSkill(match, Boolean(skillOverrides?.length)));
   const templates = resolveTemplates(templateOverride);
-  const issues = buildIssues(skills, templates);
+  const issues = buildIssues(skills, templates, registry.length);
   const loadWarnings = issues.filter((issue) => issue.severity !== 'info').map((issue) => issue.message);
   const applicationEvidence = buildGenerationTimeEvidence(skills);
 
@@ -54,34 +28,63 @@ export function loadSkills(spec: NormalizedWorkflowSpec, skillOverrides?: string
     loadWarnings,
     applicableSkillNames: skills.filter((skill) => skill.loaded).map((skill) => skill.name),
     applicationEvidence,
+    matches,
     issues,
   };
 }
 
-function resolveSkill(name: string, spec: NormalizedWorkflowSpec, forcedByOverride: boolean): SkillDescriptor {
-  const entry = SKILL_REGISTRY.find((candidate) => candidate.name === name);
-  if (!entry) {
+function overrideMatch(name: string, registry: ReturnType<typeof loadSkillRegistry>): ReturnType<typeof matchSkills>[number] {
+  const descriptor = registry.find((candidate) => candidate.id === name || candidate.name === name);
+  if (!descriptor) {
     return {
+      id: name,
       name,
+      path: '',
+      confidence: 1,
+      reason: 'Skill explicitly requested by override but was not found in the registry.',
+      evidence: [{ trigger: name, source: 'override', detail: 'Skill override requested by caller.' }],
+    };
+  }
+  return {
+    id: descriptor.id,
+    name: descriptor.name,
+    path: descriptor.path,
+    confidence: 1,
+    reason: 'Skill explicitly requested by override.',
+    evidence: [{ trigger: name, source: 'override', detail: 'Skill override requested by caller.' }],
+    updatedAt: descriptor.updatedAt,
+    preferredRunner: descriptor.preferredRunner,
+    preferredModel: descriptor.preferredModel,
+  };
+}
+
+function resolveSkill(match: ReturnType<typeof matchSkills>[number], forcedByOverride: boolean): SkillDescriptor {
+  if (!match.path) {
+    return {
+      name: match.name,
       path: '',
       loaded: false,
       applicable: forcedByOverride,
       prerequisitesMet: false,
-      missingPrerequisites: [`Unknown skill: ${name}`],
+      missingPrerequisites: [`Unknown skill: ${match.name}`],
+      confidence: match.confidence,
+      matchReason: match.reason,
+      preferredRunner: match.preferredRunner,
+      preferredModel: match.preferredModel,
     };
   }
 
-  const applicable = forcedByOverride || entry.isApplicable(spec);
-  const missingPrerequisites = entry.prerequisites.filter((prerequisite) => !AVAILABLE_PREREQUISITES.has(prerequisite));
-  const prerequisitesMet = missingPrerequisites.length === 0;
-
   return {
-    name: entry.name,
-    path: entry.path,
-    loaded: applicable && prerequisitesMet,
-    applicable,
-    prerequisitesMet,
-    missingPrerequisites,
+    name: match.name,
+    path: match.path,
+    loaded: true,
+    applicable: true,
+    prerequisitesMet: true,
+    missingPrerequisites: [],
+    confidence: match.confidence,
+    matchReason: match.reason,
+    preferredRunner: match.preferredRunner,
+    preferredModel: match.preferredModel,
   };
 }
 
@@ -101,7 +104,20 @@ function resolveTemplates(templateOverride?: string): TemplateDescriptor[] {
   ];
 }
 
-function buildIssues(skills: SkillDescriptor[], templates: TemplateDescriptor[]): GenerationIssue[] {
+function buildIssues(skills: SkillDescriptor[], templates: TemplateDescriptor[], registrySize: number): GenerationIssue[] {
+  const registryIssues: GenerationIssue[] = registrySize === 0
+    ? [
+        {
+          severity: 'warning',
+          stage: 'skill_loading',
+          code: 'SKILL_REGISTRY_EMPTY',
+          message: 'No installed workflow-generation skills were found in the skill registry.',
+          field: 'skillRegistry',
+          fixHint: 'Install project or user skills to enable skill-aware workflow generation.',
+          blocking: false,
+        },
+      ]
+    : [];
   const skillIssues = skills.flatMap((skill): GenerationIssue[] => {
     if (skill.loaded || !skill.applicable) return [];
 
@@ -135,7 +151,7 @@ function buildIssues(skills: SkillDescriptor[], templates: TemplateDescriptor[])
     ];
   });
 
-  return [...skillIssues, ...templateIssues];
+  return [...registryIssues, ...skillIssues, ...templateIssues];
 }
 
 function buildGenerationTimeEvidence(skills: SkillDescriptor[]): SkillApplicationEvidence[] {
@@ -149,7 +165,7 @@ function buildGenerationTimeEvidence(skills: SkillDescriptor[]): SkillApplicatio
         effect: 'workflow_contract',
         behavior: 'generation_time_only',
         runtimeEmbodiment: false,
-        evidence: `Selected ${skill.name} during workflow generation because it was applicable to the normalized spec.`,
+        evidence: `Selected ${skill.name} during workflow generation. ${skill.matchReason ?? 'Registry matcher marked it applicable to the normalized spec.'}`,
       },
       {
         skillName: skill.name,
@@ -161,20 +177,4 @@ function buildGenerationTimeEvidence(skills: SkillDescriptor[]): SkillApplicatio
       },
     ];
   });
-}
-
-function requiresStrictValidation(spec: NormalizedWorkflowSpec): boolean {
-  const text = [
-    spec.description,
-    ...spec.constraints.map((constraint) => constraint.constraint),
-    ...spec.acceptanceGates.map((gate) => gate.gate),
-    ...spec.evidenceRequirements.map((requirement) => requirement.requirement),
-  ]
-    .join('\n')
-    .toLowerCase();
-
-  return (
-    spec.targetFiles.some((file) => !/\.(md|mdx|txt|adoc)$/i.test(file)) ||
-    /\b(80.?to.?100|strict|proof|deterministic|typecheck|test|production|critical)\b/.test(text)
-  );
 }

@@ -9,9 +9,11 @@ export type GenerationIssueSeverity = 'error' | 'warning' | 'info';
 export type GenerationIssueStage =
   | 'pattern_selection'
   | 'skill_loading'
+  | 'tool_selection'
   | 'template_resolution'
   | 'rendering'
   | 'validation'
+  | 'refinement'
   | 'routing';
 
 export type PlannedCheckStage = 'dry_run' | 'pre_review' | 'post_fix' | 'final' | 'regression';
@@ -39,6 +41,7 @@ export interface GenerationInput {
   templateOverride?: string;
   dryRunEnabled?: boolean;
   artifactPath?: string;
+  refine?: false | { model?: string };
 }
 
 export interface PatternDecision {
@@ -56,6 +59,28 @@ export interface SkillDescriptor {
   applicable: boolean;
   prerequisitesMet: boolean;
   missingPrerequisites: string[];
+  confidence?: number;
+  matchReason?: string;
+  preferredRunner?: ToolRunner;
+  preferredModel?: string;
+}
+
+export interface SkillMatchEvidence {
+  trigger: string;
+  source: 'description' | 'keyword' | 'filename' | 'fallback' | 'override';
+  detail: string;
+}
+
+export interface SkillMatch {
+  id: string;
+  name: string;
+  path: string;
+  confidence: number;
+  reason: string;
+  evidence: SkillMatchEvidence[];
+  updatedAt?: string;
+  preferredRunner?: ToolRunner;
+  preferredModel?: string;
 }
 
 export interface TemplateDescriptor {
@@ -80,6 +105,24 @@ export interface SkillContext {
   loadWarnings: string[];
   applicableSkillNames: string[];
   applicationEvidence: SkillApplicationEvidence[];
+  matches: SkillMatch[];
+  issues: GenerationIssue[];
+}
+
+export type ToolRunner = 'claude' | 'codex' | 'cursor' | 'opencode' | '@agent-relay/sdk';
+
+export interface ToolSelection {
+  stepId: string;
+  agent: string;
+  runner: ToolRunner;
+  model?: string;
+  concurrency: number;
+  rule: string;
+}
+
+export interface ToolSelectionContext {
+  selections: ToolSelection[];
+  defaultRunner: ToolRunner;
   issues: GenerationIssue[];
 }
 
@@ -120,6 +163,20 @@ export interface RenderedArtifact {
   tasks: WorkflowTask[];
   gates: DeterministicGate[];
   skillApplicationEvidence: SkillApplicationEvidence[];
+  skillMatches: SkillMatch[];
+  toolSelections: ToolSelection[];
+  artifactsDir: string;
+}
+
+export interface RefinementMetadata {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  edited_regions: string[];
+  diff_size: number;
+  validator_passed: boolean;
+  applied: boolean;
+  warning?: string;
 }
 
 export interface GenerationValidationResult {
@@ -145,6 +202,8 @@ export interface GenerationResult {
   artifact: RenderedArtifact | null;
   patternDecision: PatternDecision;
   skillContext: SkillContext;
+  toolSelection: ToolSelectionContext;
+  refinement: RefinementMetadata | null;
   validation: GenerationValidationResult;
   dryRunCommand: string | null;
   deterministicValidationCommands: string[];

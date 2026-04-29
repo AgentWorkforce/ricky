@@ -81,6 +81,16 @@ interface RecordedInvocation {
   cwd: string;
 }
 
+interface RecordedWrite {
+  path: string;
+  content: string;
+  cwd: string;
+}
+
+function workflowArtifactWrites<T extends RecordedWrite>(writes: T[]): T[] {
+  return writes.filter((write) => /^workflows\/generated\/.+\.ts$/.test(write.path));
+}
+
 function immediateCommandRunner(
   options: { exitCode?: number; stdout?: string[]; stderr?: string[] } = {},
 ): CommandRunner & { invocations: RecordedInvocation[] } {
@@ -116,10 +126,10 @@ function immediateCommandRunner(
 function memoryLocalExecutorOptions(
   runnerOptions?: { exitCode?: number; stdout?: string[]; stderr?: string[] },
 ): LocalExecutorOptions & {
-  writes: Array<{ path: string; content: string; cwd: string }>;
+  writes: RecordedWrite[];
   runner: CommandRunner & { invocations: RecordedInvocation[] };
 } {
-  const writes: Array<{ path: string; content: string; cwd: string }> = [];
+  const writes: RecordedWrite[] = [];
   const runner = immediateCommandRunner(runnerOptions);
   return {
     cwd: '/repo',
@@ -1130,7 +1140,7 @@ describe('runLocal', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(localExecutor.writes).toHaveLength(1);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
     expect(localExecutor.runner.invocations).toHaveLength(1);
     expect(localExecutor.runner.invocations[0]).toMatchObject({
       command: DEFAULT_LOCAL_ROUTE.command,
@@ -1162,7 +1172,7 @@ describe('runLocal', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(localExecutor.writes).toHaveLength(1);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
     expect(localExecutor.runner.invocations).toHaveLength(0);
     expect(result.logs).toEqual(
       expect.arrayContaining([
@@ -1188,7 +1198,7 @@ describe('runLocal', () => {
     expect(result.exitCode).toBe(0);
     expect(result.generation).toMatchObject({ stage: 'generate', status: 'ok' });
     expect(result.execution).toBeUndefined();
-    expect(localExecutor.writes).toHaveLength(1);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
     expect(localExecutor.runner.invocations).toHaveLength(0);
   });
 
@@ -1512,7 +1522,7 @@ describe('runLocal', () => {
 
     expect(result.ok).toBe(true);
     expect(localExecutor.runner.invocations).toHaveLength(0);
-    expect(localExecutor.writes).toHaveLength(1);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
     expect(written.path).toMatch(/^workflows\/generated\/.+\.ts$/);
     expect(written.content).toContain('workflow(');
     expect(written.content).toContain('.channel("wf-ricky-');
@@ -1606,7 +1616,7 @@ describe('runLocal', () => {
       });
 
       expect(result.ok, testCase.name).toBe(true);
-      expect(writes, testCase.name).toHaveLength(1);
+      expect(workflowArtifactWrites(writes), testCase.name).toHaveLength(1);
       expect(writes[0].cwd, testCase.name).toBe('/workspace/ricky');
       expect(writes[0].content, testCase.name).toContain('workflow(');
       expect(launches, testCase.name).toHaveLength(1);
@@ -1836,7 +1846,7 @@ describe('runLocal', () => {
     expect(result.logs.some((l) => l.includes('[local] spec intake route: generate'))).toBe(true);
     expect(result.logs.some((l) => l.includes('[local] workflow generation: passed'))).toBe(true);
     expect(result.logs.some((l) => l.includes('[local] runtime status: passed'))).toBe(true);
-    expect(localExecutor.writes).toHaveLength(1);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
     expect(result.artifacts[0].content).toContain('workflow(');
   });
 
@@ -1876,7 +1886,7 @@ describe('runLocal', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(writes).toHaveLength(1);
+    expect(workflowArtifactWrites(writes)).toHaveLength(1);
     expect(writes[0].cwd).toBe('/workspace/ricky');
     expect(writes[0].content).toContain('workflow(');
     expect(launches).toHaveLength(1);
@@ -2239,7 +2249,7 @@ describe('runLocal', () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(writes).toHaveLength(1);
+      expect(workflowArtifactWrites(writes)).toHaveLength(1);
       expect(writes[0].cwd).toBe('/custom-cwd');
       expect(writes[0].path).toMatch(/^workflows\/generated\//);
       expect(writes[0].content).toContain('workflow(');
@@ -2267,7 +2277,7 @@ describe('runLocal', () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(writes).toHaveLength(1);
+      expect(workflowArtifactWrites(writes)).toHaveLength(1);
       expect(writes[0].cwd).toBe('/caller-repo');
       expect(writes[0].path).toMatch(/^workflows\/generated\//);
     });
@@ -2474,7 +2484,7 @@ describe('runLocal', () => {
       { localExecutor },
     );
 
-    expect(localExecutor.writes).toHaveLength(1);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
     expect(localExecutor.writes[0].cwd).toBe('/repo');
   });
 
@@ -2671,7 +2681,7 @@ describe('runLocal', () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(writes).toHaveLength(1);
+      expect(workflowArtifactWrites(writes)).toHaveLength(1);
 
       // Writer was called with the supplied cwd
       expect(writes[0].cwd).toBe('/deterministic-temp-root');
@@ -2865,7 +2875,7 @@ describe('runLocal', () => {
         },
       });
       expect(result.execution).toBeUndefined();
-      expect(localExecutor.writes).toHaveLength(1);
+      expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
       expect(localExecutor.runner.invocations).toHaveLength(0);
     });
 
@@ -2923,7 +2933,7 @@ describe('runLocal', () => {
       });
       expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
       expect(result.execution).toBeUndefined();
-      expect(localExecutor.writes).toHaveLength(1);
+      expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
       expect(localExecutor.runner.invocations).toHaveLength(0);
     });
 
