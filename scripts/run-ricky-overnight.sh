@@ -266,7 +266,6 @@ EOF
       ;;
     expanded|*)
       cat > "$QUEUE_FILE" <<'EOF'
-workflows/wave5-scale-and-ops/05-split-ricky-into-workspace-packages.ts
 workflows/wave6-proof/01-close-first-wave-signoff-and-blockers.ts
 workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance.ts
 workflows/wave7-cli-proof/02-prove-cli-onboarding-command-journeys.ts
@@ -494,6 +493,23 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave10-agent-assistant-adoption/executor/signoff.md \
         'WAVE10_AGENT_ASSISTANT_EXECUTOR_COMPLETE'
+      ;;
+    workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts)
+      git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.ts 2>/dev/null \
+        && git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/shared/index.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/runtime/index.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/index.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/cloud/index.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/index.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/index.ts 2>/dev/null \
+        && ! git cat-file -e HEAD:packages/shared/package.json 2>/dev/null \
+        && ! git cat-file -e HEAD:packages/runtime/package.json 2>/dev/null \
+        && ! git cat-file -e HEAD:packages/product/package.json 2>/dev/null \
+        && ! git cat-file -e HEAD:packages/cloud/package.json 2>/dev/null \
+        && ! git cat-file -e HEAD:packages/local/package.json 2>/dev/null \
+        && ! git cat-file -e HEAD:packages/cli/package.json 2>/dev/null \
+        && ! grep -q '"workspaces"' package.json
       ;;
     *)
       return 1
