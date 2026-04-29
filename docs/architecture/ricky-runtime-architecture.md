@@ -37,6 +37,10 @@ Ricky owns the domain logic above these packages:
 
 Ricky should never duplicate what Agent Assistant already provides. If a capability exists as an Agent Assistant package, Ricky composes it rather than reimplementing it.
 
+### Agent Assistant version tracking
+
+Ricky tracks upstream Agent Assistant changes via workspace protocol. Pin the major version of each `@agent-assistant/*` dependency; float minor and patch versions. When Agent Assistant ships a breaking major change, Ricky updates in a dedicated branch with its own validation pass — never auto-float majors.
+
 ---
 
 ## 2. Execution model
@@ -316,6 +320,96 @@ The overnight wrapper is intentionally restart-safe rather than monolithic. It c
 
 ---
 
+## 9a. Error propagation model
+
+Ricky distinguishes three error categories. Every error in the system is one of these.
+
+### Error hierarchy
+
+| Error type | Class | Carries | When |
+|---|---|---|---|
+| Domain error | `RickyDomainError` | blocker class (`BlockerCode`), cause chain | A workflow-level failure that the diagnostic engine can classify |
+| Infrastructure error | `RickyInfraError` | `retriable: boolean`, cause chain | Network, file I/O, permission, or process-spawn failures |
+| User-facing error | `RickyUserError` | user-visible message, cause chain | Input validation failures, auth failures, or surface-level problems |
+
+### Propagation paths
+
+```
+executor / specialist
+  -> throws RickyDomainError | RickyInfraError
+     -> orchestrator catches
+        -> if domain error: attach blocker class, route to diagnostic engine
+        -> if infra error and retriable: retry once, then escalate
+        -> if infra error and not retriable: escalate immediately
+     -> surface adapter translates to surface-appropriate error shape
+        -> CLI: stderr + non-zero exit code
+        -> Slack: thread reply with error summary
+        -> Cloud API: JSON { ok: false, error: { code, message } }
+```
+
+### Rules
+
+1. All errors carry a structured `cause` chain for debugging. Never discard the original error.
+2. Domain errors always carry a `BlockerCode` so the diagnostic engine can route them.
+3. Infrastructure errors carry a `retriable` flag. The orchestrator decides whether to retry; specialists and executors never retry on their own.
+4. User-facing errors carry a human-readable message safe to display. Domain and infra errors are translated into user-facing messages by the surface adapter, never shown raw.
+5. No error type uses string-matching for control flow. Error routing is based on `instanceof` or discriminated union tags.
+
+---
+
+## 9b. Configuration loading sequence
+
+Configuration is loaded once at the entry point and threaded through as a parameter. There is no mid-execution config reload.
+
+### Loading order (highest priority wins)
+
+```
+1. CLI argv flags (--mode, --spec, etc.)
+2. Project-level config:   .ricky/config.json
+3. Global config:          ~/.config/ricky/config.json
+4. Built-in defaults:      src/shared/constants.ts
+```
+
+### Rules
+
+1. `--mode` from CLI argv always overrides mode from config files.
+2. Project config overrides global config on a per-key basis (shallow merge, not deep merge).
+3. Config is loaded by the entry point (`src/commands/cli-main.ts`) and passed as a typed `RickyConfig` parameter to the orchestrator. No module reads config files directly.
+4. Config loading happens before onboarding. The onboarding flow reads the loaded config to decide first-run vs returning user behavior.
+5. Config files are plain JSON with no environment-variable interpolation. Secrets belong in environment variables read at the entry point, not in config files.
+
+---
+
+## 9c. Concurrency model
+
+Ricky's per-invocation execution is single-threaded by default. Internal parallelism is opt-in and must be explicit.
+
+### Default: sequential
+
+Most orchestration flows (onboarding -> mode selection -> execution -> diagnosis) run sequentially. This is deliberate: each phase depends on the previous phase's output.
+
+### Opt-in parallelism
+
+When independent operations can safely run in parallel, use explicit `Promise.all`:
+
+```typescript
+// Correct: independent validation gates run in parallel
+const [typecheck, lint, structuralCheck] = await Promise.all([
+  runTypecheck(config),
+  runLint(config),
+  runStructuralCheck(workflow),
+]);
+```
+
+### Rules
+
+1. No shared mutable state between parallel operations. Each parallel branch receives its own copy of any mutable data.
+2. Parallelism must be visible in the function signature or call site. No background workers, no implicit concurrency.
+3. Error handling in parallel branches uses `Promise.allSettled` when partial results are useful, `Promise.all` when any failure should abort.
+4. Wave 1 runtime implementers should default to sequential unless profiling shows a clear benefit from parallelism. Premature parallelism adds debugging complexity without measurable gain at current scale.
+
+---
+
 ## 10. Key architectural rules for implementers
 
 ### No ambient dependencies
@@ -338,6 +432,13 @@ Every function that performs I/O or side effects must accept its dependencies as
 ### Deterministic over interactive
 
 For structural tasks (file enumeration, plan synthesis, bounded file writes), prefer deterministic scripts or templates over live agent delegation. This is a learned lesson from runtime experience documented in `docs/architecture/ricky-runtime-notes.md`.
+
+### Logging and observability
+
+- Use structured JSON logs written to stderr. Never use `console.log` in production code.
+- Three log levels: `info`, `warn`, `error`. Use `info` for operational milestones (phase transitions, specialist invocations). Use `warn` for recoverable issues (retry triggered, fallback path taken). Use `error` for unrecoverable failures.
+- Every log entry must include a `component` field for filtering (e.g., `component: "orchestrator"`, `component: "diagnostic-engine"`, `component: "local-executor"`).
+- Runtime telemetry (invocation duration, specialist routing decisions, blocker class distribution) is captured as structured log entries that the analytics specialist can consume. There is no separate telemetry pipeline in v1.
 
 ### Layer boundaries
 

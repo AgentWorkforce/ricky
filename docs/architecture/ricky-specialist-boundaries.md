@@ -21,6 +21,48 @@ Ricky specialists are orchestrated through `@agent-assistant/specialists`, not t
 
 Without clear specialist boundaries, Ricky drifts into a monolithic agent where every request touches every module. The specialist model keeps domains separable, testable, and independently deployable to Cloud specialist-worker infrastructure when needed.
 
+### 1a. Specialist lifecycle and registration
+
+Specialists are stateless, per-request handlers. There is no singleton state, no warm cache between requests, and no persistent specialist instances.
+
+**Discovery:** The orchestration layer discovers available specialists through a registration manifest at `src/product/specialists/manifest.ts`. This manifest exports a list of specialist descriptors — each declaring its name, domain, and factory function.
+
+**Instantiation:** Each specialist exports a factory function that accepts injectable dependencies and returns the specialist interface. The orchestration layer creates a fresh specialist instance per request.
+
+```typescript
+// Example specialist factory
+export function createWorkflowDebugger(deps: {
+  diagnosticEngine: DiagnosticEngine;
+  evidenceReader: EvidenceReader;
+}): WorkflowDebugger {
+  return {
+    diagnose: (evidence) => /* ... */,
+    recommendFix: (diagnosis) => /* ... */,
+    applyFix: (recommendation) => /* ... */,
+  };
+}
+```
+
+**Registration manifest shape:**
+
+```typescript
+// src/product/specialists/manifest.ts
+export const specialists = [
+  { name: 'workflow-author',    domain: 'generation',  factory: createWorkflowAuthor },
+  { name: 'workflow-debugger',  domain: 'debugging',   factory: createWorkflowDebugger },
+  { name: 'workflow-validator', domain: 'validation',  factory: createWorkflowValidator },
+  { name: 'workflow-analytics', domain: 'analytics',   factory: createWorkflowAnalytics },
+  { name: 'runtime-restart',   domain: 'restart',     factory: createRuntimeRestart },
+  { name: 'workflow-coordinator', domain: 'coordination', factory: createWorkflowCoordinator },
+] as const;
+```
+
+**Rules:**
+1. No specialist holds state between requests. Every invocation starts with a fresh instance.
+2. Dependencies are injected at creation time, never imported at module level.
+3. The manifest is the single source of truth for which specialists exist. The orchestration layer does not hard-code specialist names.
+4. Adding a new specialist means adding a factory function and a manifest entry — no changes to the orchestration layer's routing logic beyond adding the new domain to the routing rules.
+
 ---
 
 ## 2. Current implemented boundary: Diagnostic engine
@@ -307,6 +349,42 @@ interface WorkflowCoordinator {
 
 ---
 
+## 8a. Proactive monitoring boundary
+
+Proactive failure detection is an orchestration-layer concern, not a specialist. It uses `@agent-assistant/proactive` from Agent Assistant.
+
+### What proactive monitoring owns
+
+- **Detection:** Watching for workflow failure signals, degraded health indicators, and anomalous runtime patterns (retry storms, timeout spikes, duration regression)
+- **Timing:** Deciding when to check and how often to poll
+- **Delivery:** Routing detected signals to the appropriate surface for notification
+
+### What proactive monitoring does not own
+
+- **Classification:** The diagnostic engine classifies failures. Proactive monitoring detects that a failure occurred; it does not determine what kind of failure it is.
+- **Remediation:** Specialists own response logic. Proactive monitoring routes signals to the coordinator, which delegates to the debugger or restart specialist as needed.
+- **Threshold definition:** Analytics feeds proactive thresholds. For example, "alert when failure rate exceeds 3x baseline" is an analytics-derived threshold consumed by the proactive system.
+
+### Flow
+
+```
+Cloud runtime / evidence store
+  -> proactive polling detects failure or anomaly
+  -> signal routed to coordinator specialist
+  -> coordinator delegates to debugger or restart
+  -> outcome captured as evidence
+  -> surface adapter delivers notification (Slack, etc.)
+```
+
+### Rules
+
+1. Proactive monitoring is a runtime infrastructure concern, not a product specialist. It lives at the orchestration layer alongside `@agent-assistant/proactive`.
+2. Proactive signals are typed (failure, degradation, anomaly) and carry enough context for the coordinator to route without re-querying the evidence store.
+3. The proactive system does not apply fixes directly. It detects and routes; specialists respond.
+4. Escalation severity (info, warning, critical) determines delivery timing. See §9 Escalation boundaries for severity definitions.
+
+---
+
 ## 9. Escalation boundaries
 
 Not every failure can be resolved autonomously. Ricky must know when to escalate to a human operator instead of retrying or applying speculative fixes.
@@ -341,6 +419,31 @@ Not every failure can be resolved autonomously. Ricky must know when to escalate
 ### Rule for implementers
 
 Escalation is a first-class outcome, not an error path. Every specialist must define its escalation conditions in its interface contract. The product orchestration layer collects escalation signals and routes them to the appropriate surface for delivery.
+
+---
+
+## 9a. Request routing and conflict resolution
+
+When a request could match multiple specialists, the orchestration layer uses a priority ladder to determine routing. This eliminates ambiguity and prevents specialists from competing for the same request.
+
+### Priority ladder
+
+| Priority | Condition | Routes to |
+|---|---|---|
+| 1 | Request contains a workflow spec (natural language or structured) | Workflow Author |
+| 2 | Request references a failed or stalled workflow run | Workflow Debugger (via Coordinator) |
+| 3 | Request explicitly asks for rerun, restart, or retry | Runtime Restart (via Coordinator) |
+| 4 | Request asks for analysis, trends, health, or improvement suggestions | Workflow Analytics |
+| 5 | Request asks to launch, monitor, or check status of a running workflow | Workflow Coordinator |
+| 6 | Ambiguous — request does not clearly match any specialist | Escalate to user with options |
+
+### Evaluation rules
+
+1. The orchestration layer evaluates the priority ladder top-to-bottom and routes to the first matching specialist.
+2. A request may trigger multiple specialists in sequence (e.g., Author generates a workflow, then Coordinator launches it, then Validator proves it). This sequencing is the orchestration layer's responsibility, not the specialist's.
+3. If a request matches priority 6 (ambiguous), the orchestration layer presents the user with a clear set of options rather than guessing. The options correspond to the specialist domains: generate, debug, restart, analyze, coordinate.
+4. The Coordinator specialist is the delegation hub for multi-specialist flows. When a debug request requires a restart after fix, the orchestration layer routes through Coordinator, which sequences Debugger -> Validator -> Restart.
+5. The priority ladder is defined in the orchestration layer, not in individual specialists. Specialists do not self-select or compete for requests.
 
 ---
 
@@ -384,6 +487,27 @@ Adding a new specialist is not free. Each specialist adds:
 - A new set of shared model types
 
 Only add a specialist when the domain is clearly separable and the alternative (putting the logic in an existing specialist) would create unclear ownership. Convenience is not sufficient justification.
+
+### Shared model evolution rules
+
+Types in `src/shared/models/` are the communication substrate between specialists. Evolving them safely requires discipline:
+
+1. **Adding types is free.** New types, new fields with optional modifiers, new union variants — all safe to add without coordination.
+2. **Removing or renaming types requires a deprecation cycle.** Add a `@deprecated` JSDoc comment with the removal target version. The deprecated type must remain importable for at least one release cycle before deletion.
+3. **Never break existing specialist imports.** If a shared type is imported by any specialist, removing it without deprecation is a boundary violation.
+4. **Type changes that affect multiple specialists must be reviewed.** If changing a shared type would require updating more than one specialist's implementation, the change needs explicit review before merge.
+
+### Integration testing across specialist boundaries
+
+Specialists are tested in isolation with fixtures (see §11 rule 4). The orchestration layer needs its own integration tests to verify routing and sequencing.
+
+**Orchestration-layer integration tests:**
+- Use stub specialist implementations that return canned responses from fixture data in `src/shared/models/`
+- Test routing decisions: given a normalized request, does the orchestration layer invoke the correct specialist?
+- Test sequencing: for multi-specialist flows (e.g., debug -> validate -> restart), does the orchestration layer call specialists in the correct order with the correct intermediate data?
+- Do not test specialist internals. Stub specialists return predetermined results; the tests verify that the orchestration layer handles those results correctly.
+
+**Test location:** `src/product/orchestration.test.ts` (or equivalent when the orchestration layer is implemented).
 
 ---
 
