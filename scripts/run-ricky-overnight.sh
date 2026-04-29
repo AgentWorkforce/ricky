@@ -34,7 +34,13 @@ mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 START_EPOCH="$(date +%s)"
-END_EPOCH="$((START_EPOCH + DURATION_HOURS * 3600))"
+END_EPOCH="$(awk -v start="$START_EPOCH" -v hours="$DURATION_HOURS" 'BEGIN {
+  if (hours !~ /^[0-9]+([.][0-9]+)?$/) {
+    hours = 7
+  }
+
+  printf "%d", start + (hours * 3600)
+}')"
 INITIAL_GIT_HEAD=""
 CURRENT_PASS=1
 CURRENT_INDEX=0
