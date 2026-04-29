@@ -373,11 +373,17 @@ function renderPrepareContextStep(
     `printf '%s\\n' ${shellQuote(skillBoundary.boundary)} > ${shellQuote(`${artifactsDir}/skill-runtime-boundary.txt`)}`,
     `: > ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
     ...skillContextCommands,
-    ...(spec.targetContext ? [`cat ${shellQuote(spec.targetContext)} > ${shellQuote(`${artifactsDir}/target-context.txt`)}`] : []),
+    ...(spec.targetContext ? [renderTargetContextCommand(spec.targetContext, `${artifactsDir}/target-context.txt`)] : []),
     'echo GENERATED_WORKFLOW_CONTEXT_READY',
   ];
 
   return renderDeterministicStep('prepare-context', [], commands.join(' && '), true);
+}
+
+function renderTargetContextCommand(targetContext: string, outputPath: string): string {
+  const quotedContext = shellQuote(targetContext);
+  const quotedOutput = shellQuote(outputPath);
+  return `if test -f ${quotedContext}; then cat ${quotedContext} > ${quotedOutput}; else printf '%s\\n' ${quotedContext} > ${quotedOutput}; fi`;
 }
 
 function renderLeadPlanStep(spec: NormalizedWorkflowSpec, artifactsDir: string): string {
