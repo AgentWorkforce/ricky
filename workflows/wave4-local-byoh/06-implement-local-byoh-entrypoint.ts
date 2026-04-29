@@ -250,7 +250,7 @@ This is bounded product implementation work. Write the files to disk, then exit 
       command: [
         'changed="$(git diff --name-only -- packages/local/src workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint)"',
         'printf "%s\n" "$changed" | grep -Eq "^(packages/local/src/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"',
-        '! printf "%s\n" "$changed" | grep -Ev "^(packages/local/src/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"',
+        'if [ -n "$changed" ]; then ! printf "%s\n" "$changed" | grep -Ev "^(packages/local/src/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"; else true; fi',
         'echo LOCAL_BYOH_ENTRYPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
