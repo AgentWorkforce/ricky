@@ -220,6 +220,14 @@ reconcile_stale_state_dirs() {
   done
 }
 
+clear_all_state_checkpoints() {
+  local state_dir=""
+  for state_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*; do
+    [[ -d "$state_dir" ]] || continue
+    rm -f "$state_dir/checkpoint.env" "$state_dir/latest-run.txt"
+  done
+}
+
 kill_process_group() {
   local pgid="$1"
 
@@ -1223,8 +1231,6 @@ if [[ -s "$FAILED_FILE" ]]; then
 else
   mark_status "complete" "queue finished"
 fi
-if [[ -f "$STATE_FILE" || -f "$CHECKPOINT_FILE" ]]; then
-  rm -f "$STATE_FILE" "$CHECKPOINT_FILE"
-  write_summary "$(cat "$STATUS_FILE")"
-fi
+clear_all_state_checkpoints
+write_summary "$(cat "$STATUS_FILE")"
 log "overnight queue finished"
