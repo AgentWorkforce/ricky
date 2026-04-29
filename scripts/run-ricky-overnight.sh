@@ -647,7 +647,7 @@ resolve_resume_checkpoint_file() {
   done
 
   if [[ -n "$newest_file" ]]; then
-    log "resume requested with no $QUEUE_MODE checkpoint; using latest checkpoint $newest_file"
+    log "resume requested with no $QUEUE_MODE checkpoint; using latest checkpoint $newest_file" >&2
     printf '%s\n' "$newest_file"
     return 0
   fi
