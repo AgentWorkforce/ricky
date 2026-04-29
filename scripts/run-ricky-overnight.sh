@@ -182,7 +182,13 @@ reconcile_stale_state_dir() {
       reconciled_status="$(cat "$status_file" 2>/dev/null || true)"
       log "reconciled stale overnight state from $checkpoint_file -> $artifact_dir"
 
-      if [[ "$reconciled_status" == "complete" && -n "$current_workflow" && "$current_index" =~ ^[0-9]+$ ]]; then
+      if [[ "$reconciled_status" == "complete" && "$current_index" =~ ^[0-9]+$ ]]; then
+        # A detached runner can finish successfully after the harness has already
+        # persisted the current queue index but before the outer loop advances it.
+        # When that happens, `current_workflow` may already be blank even though
+        # the saved index still points at the just-finished workflow. Advance the
+        # checkpoint on any reconciled successful artifact so resume does not
+        # replay a workflow that already completed cleanly.
         cat > "$checkpoint_file" <<EOF
 queue_mode=$(printf '%q' "$queue_mode")
 current_pass=$(printf '%q' "$current_pass")
