@@ -791,8 +791,25 @@ start_runner() {
 
   if command -v setsid >/dev/null 2>&1; then
     setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+  elif command -v python3 >/dev/null 2>&1; then
+    log "setsid unavailable; detaching runner via python3 setsid fallback" >&2
+    python3 - "$RUNNER" "$workflow_path" "$runner_output" <<'PY' &
+import os
+import sys
+
+runner, workflow_path, runner_output = sys.argv[1:4]
+os.setsid()
+stream = os.open(runner_output, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+os.dup2(stream, 1)
+os.dup2(stream, 2)
+os.close(stream)
+os.execvp(runner, [runner, 'run', workflow_path])
+PY
+  elif command -v perl >/dev/null 2>&1; then
+    log "setsid unavailable; detaching runner via perl setsid fallback" >&2
+    perl -e 'use POSIX qw(setsid); my ($runner, $workflow, $output) = @ARGV; open my $fh, q{>>}, $output or die "open $output: $!"; setsid() or die "setsid: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!";' "$RUNNER" "$workflow_path" "$runner_output" &
   else
-    log "setsid unavailable; launching runner without detached process-group isolation" >&2
+    log "setsid unavailable and no python3/perl fallback found; launching runner without detached process-group isolation" >&2
     "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
   fi
 
