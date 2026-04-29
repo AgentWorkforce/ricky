@@ -291,9 +291,6 @@ workflows/wave2-product/02-workflow-generation-pipeline.ts
 workflows/wave3-cloud-api/01-cloud-connect-and-auth.ts
 workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts
 workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts
-workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts
-workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts
-workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts
 workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
 EOF
       ;;
@@ -522,6 +519,21 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave10-agent-assistant-adoption/executor/signoff.md \
         'WAVE10_AGENT_ASSISTANT_EXECUTOR_COMPLETE'
+      ;;
+    workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/signoff.md \
+        'CLI_ONBOARDING_WORKFLOW_COMPLETE'
+      ;;
+    workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/signoff.md \
+        'CLI_ONBOARDING_IMPL_COMPLETE'
+      ;;
+    workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/signoff.md \
+        'LOCAL_BYOH_ENTRYPOINT_COMPLETE'
       ;;
     workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts)
       git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.ts 2>/dev/null \
