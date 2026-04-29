@@ -59,6 +59,20 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
     expect(artifact.content).toContain('.agent("validator-claude"');
+    expect(result.toolSelection.selections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepId: 'implement-artifact',
+          agent: 'impl-primary-codex',
+          concurrency: 2,
+        }),
+        expect.objectContaining({
+          stepId: 'fix-loop',
+          agent: 'validator-claude',
+          concurrency: 1,
+        }),
+      ]),
+    );
     expect(gate(artifact, 'initial-soft-validation')).toMatchObject({
       stage: 'pre_review',
       failOnError: false,
@@ -224,6 +238,25 @@ describe('workflow generation pipeline', () => {
     );
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
+    expect(result.toolSelection.selections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepId: 'implement-artifact',
+          agent: 'author-codex',
+          concurrency: 1,
+        }),
+        expect.objectContaining({
+          stepId: 'review-claude',
+          agent: 'reviewer-claude',
+          concurrency: 1,
+        }),
+        expect.objectContaining({
+          stepId: 'review-codex',
+          agent: 'reviewer-codex',
+          concurrency: 1,
+        }),
+      ]),
+    );
     expect(artifact.gates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -264,6 +297,9 @@ describe('workflow generation pipeline', () => {
         prerequisitesMet: false,
       }),
     ]);
+    expect(result.skillContext.loadWarnings).toEqual([
+      expect.stringContaining('missing-optional-skill'),
+    ]);
     expect(result.validation.issues).toEqual([
       expect.objectContaining({
         severity: 'warning',
@@ -298,6 +334,7 @@ describe('workflow generation pipeline', () => {
     expect(artifact.channel).not.toBe('general');
     expect(artifact.content).toContain('workflow(');
     expect(artifact.content).toContain(`.channel("${artifact.channel}")`);
+    expect(artifact.content).toContain('.run({ cwd: process.cwd() })');
     expect(artifact.content).toContain('review-claude');
     expect(artifact.content).toContain('review-codex');
     expect(gate(artifact, 'initial-soft-validation')).toMatchObject({
@@ -356,6 +393,19 @@ describe('workflow generation pipeline', () => {
         expect.objectContaining({ name: 'regression-gate', command: 'npx vitest run' }),
       ]),
     );
+    expect(result.plannedChecks.map((check) => check.name)).toEqual(
+      expect.arrayContaining([
+        'dry-run',
+        'initial-soft-validation',
+        'final-review-pass-gate',
+        'final-hard-validation',
+        'git-diff-gate',
+      ]),
+    );
+    expect(result.plannedChecks.find((check) => check.name === 'dry-run')).toMatchObject({
+      command: result.dryRunCommand,
+      environmentalPrerequisite: expect.stringContaining('@agent-relay/cli'),
+    });
     expect(result.deterministicValidationCommands).not.toContain(result.dryRunCommand);
     expect(result.deterministicValidationCommands).toEqual(
       expect.arrayContaining([
