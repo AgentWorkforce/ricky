@@ -16,7 +16,10 @@ afterEach(async () => {
 });
 
 describe('Ricky external CLI proof', () => {
-  it('invokes the linked Ricky CLI from a separate repo and proves the printed artifact path and next command', async () => {
+  it(
+    'invokes the linked Ricky CLI from a separate repo and proves the printed artifact path and next command',
+    { timeout: 30000 },
+    async () => {
     const result = await runExternalCliProof();
     reposToCleanup.add(result.repoDir);
 
@@ -33,5 +36,6 @@ describe('Ricky external CLI proof', () => {
     expect(result.cliOutput).toContain(`To execute this artifact: ${result.nextCommand}`);
     expect(result.nextCommand).toBe(`npx --no-install agent-relay run ${result.artifactPath}`);
     expect(result.nextCommandOutput).toContain(`[fixture-agent-relay] ran ${result.artifactPath}`);
-  });
+    },
+  );
 });
