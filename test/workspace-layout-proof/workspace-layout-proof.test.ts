@@ -42,7 +42,10 @@ describe('Ricky workspace layout proof', () => {
 
   it.each([
     ['workspace-packages-exist', ['required packages: packages/shared', 'packages/cli', 'all required package src dirs have .ts files: true']],
-    ['workspace-manager-truthful', ['package.json workspaces: ["packages/*"]', 'root private: true', 'package-lock.json exists: true']],
+    [
+      'workspace-manager-truthful',
+      ['package.json name: @agentworkforce/ricky', 'package.json workspaces: ["packages/*"]', 'root publishable: true', 'package-lock.json exists: true'],
+    ],
     ['package-manifests-complete', ['workspace package manifests checked: 6', 'packages/shared/package.json: exists=true']],
     ['typescript-config-covers-workspace', ['tsconfig.base.json exists: true', 'root references packages: true']],
     ['vitest-config-covers-workspace', ['picks up packages/*/src/**/*.test.ts: true', 'picks up test/**/*.test.ts: true']],
