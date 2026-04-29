@@ -1,7 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { resolve } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { NormalizedWorkflowSpec, RawSpecPayload } from '../spec-intake/types.js';
-import { matchSkills, type SkillRegistryDescriptor } from './skill-matcher.js';
+import { loadSkillRegistry, matchSkills, resetSkillRegistryCache, type SkillRegistryDescriptor } from './skill-matcher.js';
+
+const originalCwd = process.cwd();
+const repoRoot = originalCwd.endsWith('/packages/product') ? resolve(originalCwd, '../..') : originalCwd;
+
+afterEach(() => {
+  process.chdir(originalCwd);
+  resetSkillRegistryCache();
+});
 
 describe('skill matcher', () => {
   it('matches a github primitive skill above the default workflow skill', () => {
@@ -44,7 +54,27 @@ describe('skill matcher', () => {
 
     expect(matches).toEqual([]);
   });
+
+  it('discovers project skills when invoked from a workspace package directory', () => {
+    process.chdir(resolve(repoRoot, 'packages/product'));
+    resetSkillRegistryCache();
+
+    const skills = loadSkillRegistry();
+
+    expect(skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'writing-agent-relay-workflows',
+          path: expect.stringMatching(new RegExp(`^${escapeRegExp(repoRoot)}/.*skills/writing-agent-relay-workflows/SKILL\\.md$`)),
+        }),
+      ]),
+    );
+  });
 });
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function registry(entries: Array<Partial<SkillRegistryDescriptor> & { id: string }>): SkillRegistryDescriptor[] {
   return entries.map((entry) => ({

@@ -2,7 +2,7 @@
  * Ricky workspace layout proof surface.
  *
  * Proves the package split contract from docs/architecture/ricky-package-split-migration-spec.md:
- * - root is a publishable npm package and workspace orchestrator
+ * - root is a private npm workspace orchestrator
  * - source lives under packages/{shared,runtime,product,cloud,local,cli}/src
  * - workspace package dependencies point in the intended direction
  */
@@ -239,22 +239,22 @@ export function getWorkspaceLayoutProofCases(): WorkspaceLayoutProofCase[] {
     },
     {
       name: 'workspace-manager-truthful',
-      description: 'The publishable root package declares npm workspaces, package manager, and lockfile state.',
+      description: 'The private root package declares npm workspaces, package manager, and lockfile state.',
       evaluate: () => {
         const workspaces = Array.isArray(rootPkg.workspaces) ? rootPkg.workspaces : [];
         const hasPackagesGlob = workspaces.includes('packages/*');
         const packageName = rootPkg.name === '@agentworkforce/ricky';
-        const publishableRoot = rootPkg.private !== true;
+        const privateRoot = rootPkg.private === true;
         const npmManager = typeof rootPkg.packageManager === 'string' && rootPkg.packageManager.startsWith('npm@');
         const lockfileExists = fileExists('package-lock.json');
 
         return result(
           'workspace-manager-truthful',
-          [packageName, hasPackagesGlob, publishableRoot, npmManager, lockfileExists],
+          [packageName, hasPackagesGlob, privateRoot, npmManager, lockfileExists],
           [
             `package.json name: ${String(rootPkg.name ?? '(missing)')}`,
             `package.json workspaces: ${JSON.stringify(workspaces)}`,
-            `root publishable: ${publishableRoot}`,
+            `root private: ${privateRoot}`,
             `packageManager: ${String(rootPkg.packageManager ?? '(missing)')}`,
             `package-lock.json exists: ${lockfileExists}`,
           ],
@@ -262,7 +262,7 @@ export function getWorkspaceLayoutProofCases(): WorkspaceLayoutProofCase[] {
           [
             ...(packageName ? [] : ['Root package name is not @agentworkforce/ricky']),
             ...(hasPackagesGlob ? [] : ['Root package.json does not include packages/* workspaces']),
-            ...(publishableRoot ? [] : ['Root package is private and cannot be published']),
+            ...(privateRoot ? [] : ['Root package is not private']),
             ...(npmManager ? [] : ['Root packageManager is not npm@...']),
             ...(lockfileExists ? [] : ['Missing package-lock.json']),
           ],

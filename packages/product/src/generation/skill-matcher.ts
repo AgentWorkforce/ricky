@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { SkillMatch, SkillMatchEvidence, ToolRunner } from './types.js';
@@ -78,7 +78,7 @@ export function resetSkillRegistryCache(): void {
 
 function discoverSkillRegistry(): SkillRegistryDescriptor[] {
   const roots = [
-    ...PROJECT_SKILL_DIRS.map((dir) => resolve(process.cwd(), dir)),
+    ...projectSkillRoots(process.cwd()),
     ...USER_SKILL_DIRS.map((dir) => join(homedir(), dir)),
   ];
   const seen = new Set<string>();
@@ -95,6 +95,28 @@ function discoverSkillRegistry(): SkillRegistryDescriptor[] {
   }
 
   return dedupeDescriptors(descriptors);
+}
+
+function projectSkillRoots(startDir: string): string[] {
+  const roots: string[] = [];
+  const seen = new Set<string>();
+  let current = resolve(startDir);
+
+  while (true) {
+    for (const dir of PROJECT_SKILL_DIRS) {
+      const root = resolve(current, dir);
+      if (!seen.has(root)) {
+        seen.add(root);
+        roots.push(root);
+      }
+    }
+
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  return roots;
 }
 
 function findSkillFiles(root: string): string[] {
