@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import {
   CHANNEL_PREFIX,
   DEFAULT_MAX_CONCURRENCY,
@@ -216,10 +217,16 @@ function buildGates(
   skills: SkillContext,
 ): DeterministicGate[] {
   const outputManifest = `${artifactsDir}/output-manifest.txt`;
-  const targetFiles = spec.targetFiles.length > 0 ? spec.targetFiles : [outputManifest];
+  const usingManifest = spec.targetFiles.length === 0;
+  const targetFiles = usingManifest ? [outputManifest] : spec.targetFiles;
   const fileExistsCommand = targetFiles.map((file) => `test -f ${shellQuote(file)}`).join(' && ');
   const grepPattern = isCodeWorkflow ? 'export|function|class|workflow\\(' : '#|##|TODO|Acceptance|Deliverables';
-  const grepCommand = `grep -Eq ${shellQuote(grepPattern)} ${targetFiles.map(shellQuote).join(' ')}`;
+  const grepCommand = usingManifest
+    ? `test -s ${shellQuote(outputManifest)} && while IFS= read -r f; do test -f "$f"; done < ${shellQuote(outputManifest)}`
+    : `grep -Eq ${shellQuote(grepPattern)} ${targetFiles.map(shellQuote).join(' ')}`;
+  const gitDiffCommand = usingManifest
+    ? buildManifestGitDiffCommand(outputManifest, `${artifactsDir}/git-diff.txt`)
+    : `git diff --name-only -- ${targetFiles.map(shellQuote).join(' ')} > ${shellQuote(`${artifactsDir}/git-diff.txt`)} && test -s ${shellQuote(`${artifactsDir}/git-diff.txt`)}`;
   const testCommand = deriveTestCommand(spec);
   const typecheckCommand = 'npx tsc --noEmit';
   const acceptanceCommands = spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate));
@@ -250,16 +257,20 @@ function buildGates(
       'final',
     ),
     gate('final-hard-validation', [typecheckCommand, testCommand].join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
-    gate(
-      'git-diff-gate',
-      `git diff --name-only -- ${targetFiles.map(shellQuote).join(' ')} > ${shellQuote(`${artifactsDir}/git-diff.txt`)} && test -s ${shellQuote(`${artifactsDir}/git-diff.txt`)}`,
-      'artifact_exists',
-      true,
-      ['final-hard-validation'],
-      'final',
-    ),
+    gate('git-diff-gate', gitDiffCommand, 'artifact_exists', true, ['final-hard-validation'], 'final'),
     gate('regression-gate', isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
   ];
+}
+
+function buildManifestGitDiffCommand(outputManifest: string, gitDiffPath: string): string {
+  const quotedManifest = shellQuote(outputManifest);
+  const quotedGitDiffPath = shellQuote(gitDiffPath);
+  return [
+    `test -s ${quotedManifest}`,
+    `: > ${quotedGitDiffPath}`,
+    `while IFS= read -r f; do git diff --name-only -- "$f" >> ${quotedGitDiffPath}; done < ${quotedManifest}`,
+    `test -s ${quotedGitDiffPath}`,
+  ].join(' && ');
 }
 
 function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillContext): string {
@@ -348,7 +359,7 @@ function renderPrepareContextStep(
     runtimeEmbodiment: false,
     boundary: 'Skills influence Ricky generator selection, loading, template rendering, workflow contract, validation gates, and metadata. Generated runtime agents receive only the rendered workflow instructions; they do not load or embody skill files at runtime.',
     loadedSkills: skills.applicableSkillNames,
-    applicationEvidence: skillApplicationEvidence,
+    applicationEvidence: normalizeSkillApplicationEvidenceForArtifact(skillApplicationEvidence),
   };
   const loadedSkillsReport = skills.matches.length > 0
     ? skills.matches.map((match) => {
@@ -358,16 +369,19 @@ function renderPrepareContextStep(
     : 'No skills matched the normalized spec.';
   const skillContextCommands = skills.matches
     .filter((match) => match.path)
-    .flatMap((match) => [
-      `printf '%s\\n' ${shellQuote(`\n# ${match.id}\nsource=${match.path}\nreason=${match.reason}\n`)} >> ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
-      `cat ${shellQuote(match.path)} >> ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
-    ]);
+    .flatMap((match) => {
+      const skillContent = safeReadText(match.path);
+      return [
+        `printf '%s\\n' ${shellQuote(`\n# ${match.id}\nreason=${match.reason}\n`)} >> ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
+        `printf '%s\\n' ${shellQuote(skillContent)} >> ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
+      ];
+    });
   const commands = [
     `mkdir -p ${shellQuote(artifactsDir)}`,
     `printf '%s\\n' ${shellQuote(spec.description)} > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
     `printf '%s\\n' ${shellQuote(`pattern=${pattern.pattern}; reason=${pattern.reason}`)} > ${shellQuote(`${artifactsDir}/pattern-decision.txt`)}`,
     `printf '%s\\n' ${shellQuote(loadedSkillsReport)} > ${shellQuote(`${artifactsDir}/loaded-skills.txt`)}`,
-    `printf '%s\\n' ${shellQuote(JSON.stringify(skills.matches))} > ${shellQuote(`${artifactsDir}/skill-matches.json`)}`,
+    `printf '%s\\n' ${shellQuote(JSON.stringify(normalizeSkillMatchesForArtifact(skills.matches)))} > ${shellQuote(`${artifactsDir}/skill-matches.json`)}`,
     `printf '%s\\n' ${shellQuote(JSON.stringify(toolSelection.selections))} > ${shellQuote(`${artifactsDir}/tool-selection.json`)}`,
     `printf '%s\\n' ${shellQuote(JSON.stringify(skillBoundary))} > ${shellQuote(`${artifactsDir}/skill-application-boundary.json`)}`,
     `printf '%s\\n' ${shellQuote(skillBoundary.boundary)} > ${shellQuote(`${artifactsDir}/skill-runtime-boundary.txt`)}`,
@@ -670,6 +684,33 @@ function arrayLiteral(values: string[]): string {
 
 function templateLiteral(value: string): string {
   return `\`${value.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${')}\``;
+}
+
+function normalizeSkillMatchesForArtifact(
+  matches: { id: string; name: string; confidence: number; reason: string; evidence: { trigger: string; source: string; detail: string }[] }[],
+): { id: string; name: string; confidence: number; reason: string; evidence: { trigger: string; source: string; detail: string }[] }[] {
+  return matches.map(({ id, name, confidence, reason, evidence }) => ({
+    id,
+    name,
+    confidence,
+    reason,
+    evidence,
+  }));
+}
+
+function normalizeSkillApplicationEvidenceForArtifact(evidence: SkillApplicationEvidence[]): SkillApplicationEvidence[] {
+  return evidence.map((entry) => ({
+    ...entry,
+    evidence: entry.evidence.replace(/ from \/[^.\s][^\s]*/g, ' from SKILL_DESCRIPTOR_PATH'),
+  }));
+}
+
+function safeReadText(path: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return 'UNAVAILABLE_SKILL_CONTENT';
+  }
 }
 
 function shellQuote(value: string): string {

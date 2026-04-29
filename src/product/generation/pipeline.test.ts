@@ -397,6 +397,61 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('output-manifest.txt');
   });
 
+  it('no-target code workflow file gate validates manifest contents, not source-shape grep', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a code change without explicit target files.',
+        targetFiles: [],
+      }),
+      artifactPath: 'workflows/generated/no-target-gate.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const fileGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
+
+    // Gate must NOT grep manifest for source-shape tokens (export|function|class|workflow)
+    expect(fileGate.command).not.toMatch(/grep.*export\|function\|class/);
+    // Gate must validate manifest is non-empty and listed files exist
+    expect(fileGate.command).toContain('test -s');
+    expect(fileGate.command).toContain('read -r f');
+    expect(fileGate.command).toContain('test -f "$f"');
+  });
+
+  it('renders deterministic artifact content for the same spec with controlled registry', () => {
+    const inputSpec = spec({
+      description: 'Deterministic rendering proof for controlled registry.',
+      targetFiles: ['src/product/generation/pipeline.ts'],
+      acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+    });
+
+    const result1 = generate({ spec: inputSpec, artifactPath: 'workflows/generated/deterministic-a.ts' });
+    const result2 = generate({ spec: inputSpec, artifactPath: 'workflows/generated/deterministic-a.ts' });
+
+    expect(result1.success).toBe(true);
+    expect(result2.success).toBe(true);
+    expect(result1.artifact!.content).toBe(result2.artifact!.content);
+  });
+
+  it('rendered skill metadata and embedded context avoid absolute paths and updatedAt timestamps', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement strict TypeScript workflow proof with deterministic tests.',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+      }),
+      artifactPath: 'workflows/generated/no-env-data.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const content = result.artifact!.content;
+    const skillMatchesLine = content.split('\n').find((line) => line.includes('skill-matches.json'));
+    expect(skillMatchesLine).toBeDefined();
+    expect(skillMatchesLine).not.toMatch(/"updatedAt"/);
+    expect(skillMatchesLine).not.toMatch(/"path"/);
+    expect(content).not.toContain('/Users/');
+    expect(content).not.toMatch(/source=/);
+  });
+
   it('maps prose acceptance gates with inline shell commands without emitting prose as shell', () => {
     const result = generate({
       spec: spec({
