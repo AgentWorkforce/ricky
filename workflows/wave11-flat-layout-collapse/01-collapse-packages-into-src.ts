@@ -55,7 +55,7 @@ async function main() {
         'test -d packages/local',
         'test -d packages/cli',
         'test ! -d src || { echo "top-level src/ already exists; collapse expects fresh start"; exit 1; }',
-        'find packages -path "*/src/*" -type f \\( -name "*.ts" -o -name "*.tsx" \\) | sort > "$DIR/source-inventory.before.txt"',
+        'find packages -type f \\( -name "*.ts" -o -name "*.tsx" \\) | grep "/src/" | sort > "$DIR/source-inventory.before.txt"',
         'wc -l "$DIR/source-inventory.before.txt" > "$DIR/source-inventory.before.count.txt"',
         'cp package.json "$DIR/root-package.before.json"',
         'cp tsconfig.json "$DIR/root-tsconfig.before.json" 2>/dev/null || true',
@@ -149,7 +149,7 @@ Required content for migration-plan.md:
 - Boundary policy: enforced by folder convention only, no path aliases, no eslint-plugin-boundaries. Match sage.
 
 Required content for file-map.tsv:
-- Every .ts/.tsx file under packages/<layer>/src that needs a new home, one row per file. Generate it with: find packages -path "*/src/*" -type f \\( -name "*.ts" -o -name "*.tsx" \\) | sort and translate the prefix.
+- Every .ts/.tsx file under packages/<layer>/src that needs a new home, one row per file. Generate it with: find packages -type f \( -name "*.ts" -o -name "*.tsx" \) | grep "/src/" | sort and translate the prefix. Do not include dist/ declaration outputs or any non-src build artifacts.
 
 Write ${artifactDir}/migration-plan.md ending with the literal token MIGRATION_PLAN_READY.`,
       verification: { type: 'file_exists', value: `${artifactDir}/migration-plan.md` },
