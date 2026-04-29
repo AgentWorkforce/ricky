@@ -149,6 +149,7 @@ export interface PlannedCheck {
   verificationType: VerificationType;
   failOnError: boolean;
   stage: PlannedCheckStage;
+  environmentalPrerequisite?: string;
 }
 
 export interface RenderedArtifact {

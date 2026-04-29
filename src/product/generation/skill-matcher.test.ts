@@ -55,6 +55,31 @@ describe('skill matcher', () => {
     expect(matches).toEqual([]);
   });
 
+  it('produces stable ordering for equal-confidence skills regardless of updatedAt', () => {
+    const matches = matchSkills(spec('Generate a github primitive webhook handler with relay workflows.'), {
+      registry: registry([
+        { id: 'beta-skill', description: 'Use for github primitive webhook handlers.', updatedAt: '2026-04-30T00:00:00.000Z' },
+        { id: 'alpha-skill', description: 'Use for github primitive webhook handlers.', updatedAt: '2020-01-01T00:00:00.000Z' },
+      ]),
+      defaultSkillId: null,
+    });
+
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+    expect(matches[0].id).toBe('alpha-skill');
+    expect(matches[1].id).toBe('beta-skill');
+
+    const reversed = matchSkills(spec('Generate a github primitive webhook handler with relay workflows.'), {
+      registry: registry([
+        { id: 'alpha-skill', description: 'Use for github primitive webhook handlers.', updatedAt: '2020-01-01T00:00:00.000Z' },
+        { id: 'beta-skill', description: 'Use for github primitive webhook handlers.', updatedAt: '2026-04-30T00:00:00.000Z' },
+      ]),
+      defaultSkillId: null,
+    });
+
+    expect(reversed[0].id).toBe('alpha-skill');
+    expect(reversed[1].id).toBe('beta-skill');
+  });
+
   it('discovers project skills when invoked from a nested source directory', () => {
     process.chdir(resolve(repoRoot, 'src/product'));
     resetSkillRegistryCache();

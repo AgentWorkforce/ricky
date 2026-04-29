@@ -611,6 +611,22 @@ describe('workflow generation pipeline', () => {
     expect(artifact(result).content).toContain('.pattern("dag")');
   });
 
+  it('dry-run planned check exposes environmental prerequisite for agent-relay binary', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow with dry-run prerequisite.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/dry-run-prereq.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const dryRunCheck = result.plannedChecks.find((c) => c.name === 'dry-run');
+    expect(dryRunCheck).toBeDefined();
+    expect(dryRunCheck!.environmentalPrerequisite).toBeDefined();
+    expect(dryRunCheck!.environmentalPrerequisite).toContain('@agent-relay/cli');
+  });
+
   it('returns null dryRunCommand when dryRunEnabled is false', () => {
     const result = generate({
       spec: spec({

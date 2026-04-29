@@ -115,7 +115,7 @@ export function refineWithLlm(
         output_tokens: outputTokens,
         edited_regions: [...new Set(edits.map((edit) => edit.region))],
         diff_size: edits.reduce((total, edit) => total + Math.abs(edit.replace.length - edit.find.length), 0),
-        validator_passed: validation?.valid ?? true,
+        validator_passed: validation?.valid ?? false,
         applied: edits.length > 0,
       },
     };

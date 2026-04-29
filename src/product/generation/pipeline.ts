@@ -73,6 +73,9 @@ export function validateGeneratedArtifact(
   if (!/workflow\(/.test(content)) {
     issues.push(blockingIssue('validation', 'WORKFLOW_BUILDER_MISSING', 'Rendered artifact does not call workflow().'));
   }
+  if (!hasBalancedDelimiters(content)) {
+    issues.push(blockingIssue('validation', 'SYNTAX_STRUCTURE_INVALID', 'Rendered artifact has unbalanced braces, brackets, or parentheses.'));
+  }
   if (!content.includes(`.pattern("${patternDecision.pattern}")`) && !content.includes(`.pattern('${patternDecision.pattern}')`)) {
     issues.push(blockingIssue('validation', 'PATTERN_MISMATCH', `Rendered workflow does not use selected pattern ${patternDecision.pattern}.`));
   }
@@ -196,6 +199,7 @@ export function buildPlannedChecks(artifact: RenderedArtifact, includeDryRun = t
           verificationType: 'exit_code',
           failOnError: true,
           stage: 'dry_run',
+          environmentalPrerequisite: 'Requires @agent-relay/cli or agent-relay binary in PATH. Install via: npm install -g @agent-relay/cli',
         },
       ]
     : [];
@@ -241,6 +245,34 @@ function extractReviewOutputPath(content: string, stepName: string): string | nu
   const pattern = new RegExp(`Write\\s+(\\S+/${stepName}\\.md)`);
   const match = pattern.exec(content);
   return match ? match[1] : null;
+}
+
+function hasBalancedDelimiters(content: string): boolean {
+  const stack: string[] = [];
+  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+  let inString: string | null = null;
+  let escaped = false;
+  let inTemplate = 0;
+
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+
+    if (inString) {
+      if (ch === inString && (inString !== '`' || inTemplate === 0)) inString = null;
+      if (inString === '`' && ch === '$' && content[i + 1] === '{') inTemplate++;
+      if (inString === '`' && ch === '}' && inTemplate > 0) inTemplate--;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue; }
+    if (ch === '(' || ch === '[' || ch === '{') stack.push(ch);
+    if (ch === ')' || ch === ']' || ch === '}') {
+      if (stack.length === 0 || stack[stack.length - 1] !== pairs[ch]) return false;
+      stack.pop();
+    }
+  }
+  return stack.length === 0;
 }
 
 function blockingIssue(stage: GenerationIssue['stage'], code: string, message: string): GenerationIssue {

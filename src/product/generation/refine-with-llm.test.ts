@@ -74,6 +74,22 @@ describe('refine with llm', () => {
     expect(result.metadata.warning).toContain('model unavailable');
   });
 
+  it('reports validator_passed as false when no validator is supplied', () => {
+    const artifact = artifactFixture();
+    const result = refineWithLlm(spec('Generate a workflow.'), artifact, {
+      client: {
+        refine: () => ({
+          text: JSON.stringify({
+            edits: [{ region: 'acceptance_gates', find: artifact.gates[0].command, replace: 'npx tsc --noEmit' }],
+          }),
+        }),
+      },
+    });
+
+    expect(result.metadata.applied).toBe(true);
+    expect(result.metadata.validator_passed).toBe(false);
+  });
+
   it('sharpens version acceptance gates to the stated behavior', () => {
     const artifact = artifactFixture({
       command: "test -f 'dist/bin/ricky.js' && grep -Eq 'export|function|class|workflow\\(' 'dist/bin/ricky.js'",

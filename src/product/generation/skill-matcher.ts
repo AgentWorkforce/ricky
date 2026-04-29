@@ -228,7 +228,7 @@ function fallbackMatch(descriptor: SkillRegistryDescriptor): SkillMatch {
 
 function compareMatches(a: SkillMatch, b: SkillMatch): number {
   if (b.confidence !== a.confidence) return b.confidence - a.confidence;
-  return Date.parse(b.updatedAt ?? '1970-01-01T00:00:00.000Z') - Date.parse(a.updatedAt ?? '1970-01-01T00:00:00.000Z');
+  return a.id.localeCompare(b.id);
 }
 
 function dedupeMatches(matches: SkillMatch[]): SkillMatch[] {
@@ -243,8 +243,7 @@ function dedupeMatches(matches: SkillMatch[]): SkillMatch[] {
 function dedupeDescriptors(descriptors: SkillRegistryDescriptor[]): SkillRegistryDescriptor[] {
   const byId = new Map<string, SkillRegistryDescriptor>();
   for (const descriptor of descriptors) {
-    const existing = byId.get(descriptor.id);
-    if (!existing || Date.parse(descriptor.updatedAt ?? '1970-01-01') > Date.parse(existing.updatedAt ?? '1970-01-01')) {
+    if (!byId.has(descriptor.id)) {
       byId.set(descriptor.id, descriptor);
     }
   }
