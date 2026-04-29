@@ -340,6 +340,35 @@ filter_queue_for_repo_state() {
   log "queue prepared with $(queue_count) actionable workflows (${removed_count} removed)"
 }
 
+fallback_to_expanded_queue_when_flight_safe_exhausted() {
+  local original_queue_mode="$QUEUE_MODE"
+  local expanded_queue_count=0
+
+  if [[ "$QUEUE_MODE" != "flight-safe" ]]; then
+    return 0
+  fi
+
+  if (( $(queue_count) > 0 )); then
+    return 0
+  fi
+
+  log "flight-safe queue is exhausted; probing expanded queue for remaining actionable workflows"
+  QUEUE_MODE="expanded"
+  write_queue
+  filter_queue_for_repo_state
+  expanded_queue_count="$(queue_count)"
+
+  if (( expanded_queue_count > 0 )); then
+    log "promoting overnight queue mode to expanded for this invocation (${expanded_queue_count} actionable workflows remain)"
+    return 0
+  fi
+
+  QUEUE_MODE="$original_queue_mode"
+  write_queue
+  filter_queue_for_repo_state
+  log "expanded queue is also exhausted; keeping queue mode at $QUEUE_MODE"
+}
+
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
@@ -1012,6 +1041,7 @@ INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 restore_checkpoint
 write_queue
 filter_queue_for_repo_state
+fallback_to_expanded_queue_when_flight_safe_exhausted
 resume_remaining_queue_from_checkpoint
 if [[ -z "$INITIAL_GIT_HEAD" ]]; then
   INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
