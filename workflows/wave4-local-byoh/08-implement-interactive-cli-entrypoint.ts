@@ -127,7 +127,7 @@ Requirements:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['implementation-file-gate'],
-      command: 'npm run typecheck && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts packages/cli/src/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -191,7 +191,7 @@ Requirements:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['fix-entrypoint'],
-      command: 'npm run typecheck && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts packages/cli/src/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -239,7 +239,7 @@ Requirements:
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm run typecheck && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts packages/cli/src/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: true,
     })

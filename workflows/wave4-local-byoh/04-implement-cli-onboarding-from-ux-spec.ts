@@ -131,7 +131,7 @@ async function main() {
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['post-test-file-gate'],
-      command: 'npm run typecheck --workspace @ricky/cli && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/cli/onboarding.test.ts src/surfaces/cli/cli/proof/onboarding-proof.test.ts src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/proof/external-cli-proof.test.ts packages/cli/src/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -214,7 +214,7 @@ Rules:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npm run typecheck --workspace @ricky/cli && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/cli/onboarding.test.ts src/surfaces/cli/cli/proof/onboarding-proof.test.ts src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/proof/external-cli-proof.test.ts packages/cli/src/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -265,7 +265,7 @@ Rules:
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm run typecheck --workspace @ricky/cli && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/cli/onboarding.test.ts src/surfaces/cli/cli/proof/onboarding-proof.test.ts src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/proof/external-cli-proof.test.ts packages/cli/src/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: true,
     })

@@ -112,7 +112,7 @@ This is bounded product implementation work. Write the files to disk, then exit 
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['implementation-file-gate'],
-      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
+      command: 'npm run typecheck && npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -192,7 +192,7 @@ This is bounded product implementation work. Write the files to disk, then exit 
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
+      command: 'npm run typecheck && npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -240,7 +240,7 @@ This is bounded product implementation work. Write the files to disk, then exit 
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
+      command: 'npm run typecheck && npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts',
       captureOutput: true,
       failOnError: true,
     })
