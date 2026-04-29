@@ -43,6 +43,99 @@ Ricky tracks upstream Agent Assistant changes via workspace protocol. Pin the ma
 
 ---
 
+## 1a. Relay SDK integration seam
+
+Ricky is workflow-native at the builder/runner/evidence level, not a prompt wrapper around `agent-relay run`. This section defines which Relay SDK surfaces Ricky wraps, which it delegates to, and how the integration is structured.
+
+### Relay SDK surfaces Ricky interacts with
+
+| Relay SDK surface | Ricky interaction | Integration point |
+|---|---|---|
+| `WorkflowBuilder` (`@agent-relay/sdk/workflows/builder`) | Ricky's Workflow Author specialist programmatically constructs workflows using the builder API — setting agents, steps, verification, patterns, retries, and cloud options | `src/product/generation/pipeline.ts` |
+| `WorkflowRunner` (`@agent-relay/sdk/workflows/runner`) | Ricky's Local Coordinator delegates execution to the runner. Ricky does not re-implement parsing, validation, template resolution, retries, pause/resume/abort, budget enforcement, or evidence capture — these are the runner's job | `src/runtime/local-coordinator.ts` |
+| `WorkflowRunEvidence` (runner output) | The runner produces structured run evidence. Ricky's evidence layer captures and normalizes this into `WorkflowRunEvidence` from `src/shared/models/` | `src/runtime/evidence/capture.ts` |
+| Verification primitives | Ricky's Validator specialist uses the runner's verification infrastructure for dry-run, step-level gate evaluation, and proof loops | `src/product/specialists/validator/` |
+| Swarm pattern selection | Ricky wraps pattern choice with product-level heuristics (spec analysis, domain matching) before passing the selected pattern to the builder | `src/product/generation/pattern-selector.ts` |
+
+### What Ricky wraps vs. delegates
+
+**Ricky wraps (adds product value on top):**
+- Pattern selection — the builder accepts any pattern; Ricky adds deliberate selection logic based on spec analysis
+- Skill loading — the builder does not know about skills; Ricky loads and applies workflow-authoring skills before or during generation
+- Evidence normalization — the runner produces raw evidence; Ricky normalizes it into the canonical `WorkflowRunEvidence` shape
+- Failure classification — the runner surfaces errors; Ricky's diagnostic engine classifies them into blocker categories
+- Restart safety — the runner can resume/abort; Ricky adds safety evaluation before deciding whether to resume
+
+**Ricky delegates (does not re-implement):**
+- Workflow parsing, template resolution, and YAML/TS interpretation
+- Step execution, process spawning, and timeout enforcement
+- Retry logic and backoff within a run
+- Pause, resume, and abort semantics
+- Budget tracking and enforcement
+- Raw evidence capture at the step level
+
+### Integration rule for implementers
+
+Ricky code must import Relay SDK types and invoke Relay SDK APIs through a thin adapter layer (`src/runtime/relay-adapter/` when implemented). This adapter is the single module that knows the Relay SDK import paths and version-specific API shape. All other Ricky code imports the adapter, not the SDK directly. This ensures that Relay SDK version upgrades are contained to the adapter layer.
+
+---
+
+## 1b. Skill loading model
+
+Ricky's workflow quality advantage comes partly from loading and applying the right workflow-writing skills automatically. This section describes how skills are discovered, loaded, and applied during generation and repair.
+
+### What skills are
+
+Skills are structured knowledge packages that encode best practices for workflow authoring. The three primary skills Ricky uses:
+
+| Skill | Purpose | When applied |
+|---|---|---|
+| `writing-agent-relay-workflows` | Step sizing, deterministic verification, test-fix-rerun loops, dry-run validation | Every generation and repair pass |
+| `choosing-swarm-patterns` | Pattern selection heuristics, tradeoff analysis between supervisor/dag/pipeline/fan-out/etc. | During pattern selection in the generation pipeline |
+| `relay-80-100-workflow` | End-to-end correctness proof, PGlite for in-memory Postgres testing, mock sandbox patterns, verify gates | During validation specialist proof loops |
+
+### Skill discovery
+
+Skills are discovered at generation time by the skill-loader module (`src/product/generation/skill-loader.ts` when implemented). Discovery is static: the skill-loader has a hardcoded registry of known skill names and their file system paths. There is no dynamic plugin system in v1.
+
+```typescript
+// Expected shape of the skill registry
+const SKILL_REGISTRY = {
+  'writing-agent-relay-workflows': {
+    path: 'skills/skills/writing-agent-relay-workflows/SKILL.md',
+    appliesTo: ['generation', 'repair'],
+  },
+  'choosing-swarm-patterns': {
+    path: 'skills/skills/choosing-swarm-patterns/SKILL.md',
+    appliesTo: ['pattern-selection'],
+  },
+  'relay-80-100-workflow': {
+    path: 'skills/skills/relay-80-100-workflow/SKILL.md',
+    appliesTo: ['validation'],
+  },
+} as const;
+```
+
+### Skill loading sequence
+
+```
+generation or repair request arrives
+  -> skill-loader resolves applicable skills based on the task type
+  -> skill content is read from disk (or from a cached read)
+  -> skill rules are injected into the generation/repair prompt context
+  -> the specialist (author, debugger, or validator) operates with skill awareness
+```
+
+### Skill application rules
+
+1. Skills are read-only inputs, not executable code. They inform the specialist's behavior through prompt context, not through programmatic API calls.
+2. The skill-loader is the only module that reads skill files. Specialists receive skill content through their dependency injection, not by reading the file system directly.
+3. If a skill file is not found at the expected path, the skill-loader logs a warning and proceeds without that skill. Missing skills degrade quality but do not block execution.
+4. Skill content is cached per invocation (same process, same skill file = one read). There is no cross-invocation cache in v1.
+5. When Ricky runs in Cloud mode, skills must be bundled with the deployment artifact or fetched from a known location. The skill-loader abstracts this behind a `SkillSource` interface that has `local` and `remote` implementations.
+
+---
+
 ## 2. Execution model
 
 Ricky uses a **request-response, per-invocation** execution model. There is no persistent event loop, no background worker queue, and no long-lived server process in the core CLI path.
@@ -231,6 +324,54 @@ per-step evidence array
 ### Evidence normalization rule
 
 Local execution produces evidence directly as `WorkflowRunEvidence`. Cloud execution produces evidence in whatever format the Cloud runtime uses, but the Cloud executor normalizes it back into `WorkflowRunEvidence` before returning it to the orchestrator. There is one canonical evidence shape for all paths.
+
+---
+
+## 6a. Evidence normalization contract
+
+Cloud execution environments may produce evidence in formats that differ from Ricky's canonical `WorkflowRunEvidence` shape. This section defines the translation surface and contract for normalizing Cloud-format evidence.
+
+### The problem
+
+The Cloud runtime (Cloudflare worker, Cloud specialist-worker, or future Cloud execution backends) captures run state in its own format — potentially using RelayFile-backed evidence, JSON log streams, or Cloud-specific run metadata schemas. Ricky's product layer must not know about these formats. Every consumer (diagnostic engine, debugger, validator, analytics, surface adapters) reads `WorkflowRunEvidence` exclusively.
+
+### Translation surface
+
+The `CloudEvidenceNormalizer` is a function owned by the Cloud executor adapter (`src/cloud/api/` when implemented). It accepts raw Cloud evidence and returns `WorkflowRunEvidence`.
+
+```typescript
+interface CloudEvidenceNormalizer {
+  normalize(raw: CloudRawEvidence): WorkflowRunEvidence;
+}
+
+// CloudRawEvidence is an opaque type — its shape depends on the
+// Cloud runtime version. The normalizer is the only module that
+// knows the internal structure.
+type CloudRawEvidence = Record<string, unknown>;
+```
+
+### Field mapping contract
+
+| `WorkflowRunEvidence` field | Source in Cloud evidence | Mapping rule |
+|---|---|---|
+| `runId` | Cloud run identifier | Direct mapping; must be globally unique |
+| `workflowId` | Cloud workflow identifier | Direct mapping |
+| `status` | Cloud run status | Map to `RunStatus` enum; unknown statuses map to `'failed'` with a warning |
+| `steps[]` | Cloud step records | Each step maps to `WorkflowStepEvidence`; missing fields default to empty arrays or `undefined` |
+| `startedAt` / `completedAt` | Cloud timestamps | ISO 8601 strings; timezone normalized to UTC |
+| `durationMs` | Computed | `completedAt - startedAt` if both present; `undefined` otherwise |
+| `deterministicGates[]` | Cloud gate results | Map to `DeterministicGateResult[]`; gate names preserved |
+| `artifacts[]` | Cloud artifact references | Map to `WorkflowArtifactReference[]`; paths may be Cloud URLs rather than local paths |
+| `logs[]` | Cloud log references | Map to `WorkflowLogReference[]`; `stream` defaults to `'relay'` if not specified |
+| `finalSignoffPath` | Cloud signoff artifact | URL or path to signoff artifact; `undefined` if not present |
+
+### Rules
+
+1. The normalizer runs inside the Cloud executor, before evidence is returned to the orchestrator. No downstream consumer ever sees `CloudRawEvidence`.
+2. Unknown or missing fields in Cloud evidence must not cause the normalizer to throw. Use defensive defaults: empty arrays for collection fields, `undefined` for optional scalars.
+3. If the Cloud evidence contains fields that have no mapping to `WorkflowRunEvidence`, they are discarded. The normalizer does not preserve Cloud-specific metadata.
+4. The normalizer logs a structured warning for every field that required a lossy default. This supports debugging evidence quality issues without blocking execution.
+5. Evidence normalization is synchronous. It is a pure data transformation with no I/O.
 
 ---
 
@@ -455,3 +596,33 @@ src/analytics/      (future) Workflow health analytics
 ```
 
 No layer should import from a layer above it. Shared models are the only cross-cutting import path.
+
+---
+
+## 10a. Version and compatibility targets
+
+### Runtime targets
+
+| Dependency | Target version | Rationale |
+|---|---|---|
+| Node.js | >=20.x LTS | Required for stable ES2022 support, native fetch, and `node:test` if needed alongside Vitest |
+| TypeScript | >=5.4 | Required for `NoInfer`, satisfies constraints, and stable NodeNext module resolution |
+| Vitest | >=1.x | Test framework used throughout; aligns with the `vitest.config.ts` already in the repo |
+
+### Relay SDK compatibility
+
+| Package | Target | Compatibility rule |
+|---|---|---|
+| `@agent-relay/sdk` | Latest stable at time of Wave 1 implementation | Pin the exact version in `package.json`. Relay SDK changes are validated in a dedicated branch before updating the pin. |
+| Relay CLI (`agent-relay`) | Compatible with the pinned SDK version | Local/BYOH mode requires that the user's installed `agent-relay` CLI is compatible with the SDK version Ricky uses. The CLI onboarding surface should detect and warn on version mismatches. |
+
+### Agent Assistant compatibility
+
+All `@agent-assistant/*` packages follow the version tracking rule in §1: pin major, float minor and patch. The current target is the latest stable release series available when Wave 1 begins.
+
+### Rules
+
+1. Node.js version is enforced via the `engines` field in `package.json`. Do not use Node.js APIs introduced after the target version without checking.
+2. TypeScript version is pinned in `devDependencies`. The `tsconfig.json` target (`ES2022`) and module resolution (`NodeNext`) must remain compatible with the pinned version.
+3. When a Wave begins, the implementer verifies that all version targets are still current. If a new LTS or stable release has shipped, the implementer may update the target with a validation pass — but never mid-wave.
+4. Version mismatches between Ricky's Relay SDK pin and the user's local `agent-relay` CLI installation are classified as `environment.relay_state_contaminated` by the diagnostic engine and surfaced with appropriate unblocker guidance.

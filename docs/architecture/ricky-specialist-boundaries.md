@@ -65,6 +65,48 @@ export const specialists = [
 
 ---
 
+## 1b. Specialist interface evolution
+
+As specialists evolve across waves, their interfaces will change. This section defines rules for managing those changes so that the manifest, orchestration layer, and inter-specialist contracts remain stable.
+
+### What can change without coordination
+
+| Change type | Impact | Allowed freely? |
+|---|---|---|
+| Add a new method to a specialist interface | Existing callers unaffected (they don't call the new method) | Yes |
+| Add a new optional parameter to an existing method | Existing callers unaffected (parameter is optional) | Yes |
+| Add a new field to a return type | Existing consumers ignore unknown fields | Yes |
+| Add a new specialist to the manifest | Orchestration layer gains a new routing option | Yes — add factory + manifest entry |
+
+### What requires a deprecation cycle
+
+| Change type | Risk | Required process |
+|---|---|---|
+| Remove a method from a specialist interface | Callers that invoke the method will break | Mark with `@deprecated` JSDoc. The method must remain functional for at least one wave cycle before removal. |
+| Rename a method | Same as removal + addition | Add the new name, deprecate the old name, remove old after one wave cycle |
+| Change a method's parameter from optional to required | Existing callers that omit the parameter will break | Not allowed within a wave. Ship as a new method or wait for the next major interface revision. |
+| Remove a field from a return type | Consumers that read the field will break | Mark with `@deprecated`. Field continues to be populated for one wave cycle. |
+| Remove a specialist from the manifest | Orchestration routing breaks for that domain | Requires explicit approval. All routing paths to the specialist must be redirected before removal. |
+
+### Interface revision protocol
+
+When a specialist interface needs a breaking change:
+
+1. The implementer opens a dedicated branch with the change.
+2. The branch updates the specialist interface in `types.ts`, the factory function, and the manifest entry.
+3. The branch updates all orchestration-layer call sites that reference the changed interface.
+4. The branch updates all integration tests that exercise the specialist boundary.
+5. The branch is reviewed for boundary clarity before merge.
+
+### Rules
+
+1. Specialist interfaces are versioned implicitly by the wave in which they were introduced. There is no explicit version number on interfaces — the deprecation cycle handles transitions.
+2. The orchestration layer must never type-assert or cast specialist return values. If the return type needs to change, update the interface definition so the compiler catches all downstream consumers.
+3. When a specialist gains a new method, the manifest descriptor does not change. The orchestration layer discovers capabilities through the interface type, not through manifest metadata.
+4. Interface evolution must be tested: the orchestration-layer integration tests (`src/product/orchestration.test.ts`) must cover both the old and new interface shapes during the deprecation overlap period.
+
+---
+
 ## 2. Current implemented boundary: Diagnostic engine
 
 The diagnostic engine in `src/runtime/diagnostics/` is the first specialist-like boundary in Ricky. It serves as the reference pattern for all future specialists.
@@ -275,6 +317,108 @@ interface WorkflowAnalytics {
 
 ---
 
+## 6a. Analytics data model and aggregation
+
+The analytics specialist operates on structured evidence, not raw logs. This section defines the data shapes and aggregation primitives that Wave 5 implementers will build against.
+
+### Input: `WorkflowRunEvidence[]`
+
+The analytics specialist receives an array of `WorkflowRunEvidence` records (defined in `src/shared/models/workflow-evidence.ts`). Each record contains full per-step evidence, verification results, gate outcomes, retry history, and duration metrics. The analytics specialist never reads raw log files or Cloud-specific formats — evidence is always pre-normalized.
+
+### Aggregation primitives
+
+The analytics specialist computes the following aggregation primitives from evidence arrays:
+
+```typescript
+interface WorkflowHealthMetrics {
+  /** Identity */
+  workflowId: string;
+  workflowName: string;
+
+  /** Run counts */
+  totalRuns: number;
+  passedRuns: number;
+  failedRuns: number;
+  timedOutRuns: number;
+  cancelledRuns: number;
+
+  /** Failure analysis */
+  failureRate: number;                    // failedRuns / totalRuns
+  topFailureSteps: StepFailureFrequency[];  // most frequently failing steps
+  topBlockerCodes: BlockerCodeFrequency[];  // most frequent diagnostic classifications
+  failuresByCategory: Record<string, number>; // domain vs infra vs user-facing
+
+  /** Duration analysis */
+  medianDurationMs: number;
+  p95DurationMs: number;
+  durationTrend: 'improving' | 'stable' | 'degrading'; // based on recent window vs historical
+
+  /** Retry analysis */
+  totalRetries: number;
+  retryRate: number;                      // runs with retries / totalRuns
+  retryStormDetected: boolean;            // >3x baseline retry rate in recent window
+
+  /** Verification analysis */
+  gatePassRate: number;                   // passed gates / total gates across all runs
+  weakGates: string[];                    // gate names that fail >30% of the time
+
+  /** Time window */
+  windowStart: string;                    // ISO 8601
+  windowEnd: string;                      // ISO 8601
+}
+
+interface StepFailureFrequency {
+  stepId: string;
+  stepName: string;
+  failureCount: number;
+  commonErrors: string[];                 // deduplicated error messages
+}
+
+interface BlockerCodeFrequency {
+  blockerCode: string;
+  count: number;
+  percentage: number;                     // of total failures
+}
+```
+
+### Digest output shape
+
+The digest generator transforms `WorkflowHealthMetrics` into both structured and human-readable formats:
+
+```typescript
+interface HealthDigest {
+  /** Structured data for programmatic consumption */
+  metrics: WorkflowHealthMetrics;
+
+  /** Human-readable markdown for surface delivery */
+  markdownSummary: string;
+
+  /** Actionable recommendations */
+  recommendations: AnalyticsRecommendation[];
+
+  /** When this digest was generated */
+  generatedAt: string;
+}
+
+interface AnalyticsRecommendation {
+  type: 'pattern_migration' | 'step_split' | 'verification_improvement' | 'timeout_adjustment' | 'retry_policy_change';
+  severity: 'info' | 'warning' | 'critical';
+  description: string;
+  affectedWorkflows: string[];
+  suggestedAction: string;
+}
+```
+
+### Aggregation rules
+
+1. Analytics never modifies evidence. It reads `WorkflowRunEvidence[]` and produces computed metrics. The evidence array is immutable from the analytics specialist's perspective.
+2. Time windows are explicit. Every aggregation operates on a defined `[windowStart, windowEnd]` range. There are no implicit "all-time" aggregations — the caller specifies the window.
+3. Trend detection requires a minimum sample size. `durationTrend` and `retryStormDetected` are only computed when the window contains at least 10 runs. Below that threshold, trend fields return `'stable'` and `false` respectively.
+4. Recommendations are concrete. "Consider splitting step X" is acceptable. "Improve your workflow" is not. Every recommendation must reference specific workflows, steps, or metrics.
+5. The `markdownSummary` field in `HealthDigest` is the only human-readable output. All other fields are typed and machine-readable. Surface adapters use `markdownSummary` for Slack/Web delivery and `metrics` + `recommendations` for programmatic consumption.
+
+---
+
 ## 7. Planned specialist: Runtime Restart
 
 ### Domain
@@ -385,6 +529,87 @@ Cloud runtime / evidence store
 
 ---
 
+## 8b. Multi-specialist sequencing protocol
+
+When a request requires multiple specialists (e.g., generate -> validate, or debug -> fix -> validate -> restart), the orchestration layer sequences them. This section defines the handoff contract shape for intermediate data between specialists in multi-specialist flows.
+
+### The sequencing problem
+
+The Coordinator specialist manages execution lifecycle, but multi-specialist flows pass intermediate data between specialists that the Coordinator did not produce. For example, after the Debugger recommends a fix, the Validator needs the fix artifacts to verify them. The data that flows between them must have a defined shape.
+
+### Intermediate data contract: `SpecialistHandoff`
+
+```typescript
+interface SpecialistHandoff {
+  /** Which specialist produced this handoff */
+  fromSpecialist: string;
+
+  /** Which specialist should consume it */
+  toSpecialist: string;
+
+  /** The domain action that was completed */
+  completedAction: string;
+
+  /** Typed payload — shape depends on the fromSpecialist → toSpecialist pair */
+  payload: SpecialistHandoffPayload;
+
+  /** Evidence snapshot at the point of handoff */
+  evidenceSnapshot: WorkflowRunEvidence;
+
+  /** Timestamp of the handoff */
+  handoffAt: string;
+}
+```
+
+### Known handoff pairs and their payload shapes
+
+| From | To | `completedAction` | `payload` type |
+|---|---|---|---|
+| Author | Validator | `'workflow_generated'` | `{ workflow: GeneratedWorkflow; dryRunResult?: ValidationResult }` |
+| Author | Coordinator | `'workflow_generated'` | `{ workflow: GeneratedWorkflow; mode: WorkflowExecutionMode }` |
+| Debugger | Validator | `'fix_applied'` | `{ fixResult: FixResult; originalDiagnosis: DiagnosisResult }` |
+| Debugger | Restart | `'fix_applied'` | `{ fixResult: FixResult; restartRecommended: boolean }` |
+| Validator | Coordinator | `'validation_passed'` | `{ proofResult: ProofLoopResult }` |
+| Validator | Debugger | `'validation_failed'` | `{ failedChecks: StructuralCheckResult[]; proofResult: ProofLoopResult }` |
+| Coordinator | Debugger | `'execution_failed'` | `{ runEvidence: WorkflowRunEvidence }` |
+| Coordinator | Restart | `'execution_failed'` | `{ runEvidence: WorkflowRunEvidence; failureClassification?: DiagnosisResult }` |
+| Analytics | Coordinator | `'improvements_identified'` | `{ recommendations: AnalyticsRecommendation[] }` |
+
+### Sequencing flow
+
+```
+orchestration layer receives normalized request
+  │
+  ▼
+route to primary specialist (per §9a priority ladder)
+  │
+  ▼
+primary specialist returns result + optional handoff descriptor
+  │
+  ▼
+orchestration layer evaluates: does the result require a follow-up specialist?
+  │
+  ├── no  → assemble final result, return to surface
+  │
+  └── yes → construct SpecialistHandoff, invoke next specialist
+              │
+              ▼
+            repeat until no further handoff is needed
+              │
+              ▼
+            assemble final result from all specialist outputs
+```
+
+### Rules
+
+1. **The orchestration layer owns sequencing.** Specialists return results; they never invoke the next specialist directly. If a specialist needs a follow-up (e.g., Debugger wants Validator to check its fix), it includes a `suggestedNext` field in its result, but the orchestration layer decides whether to honor it.
+2. **Handoffs carry evidence snapshots.** Every `SpecialistHandoff` includes the `WorkflowRunEvidence` as of the handoff moment. This ensures the receiving specialist has full context without re-querying the evidence store.
+3. **Handoff payloads are typed per pair.** The `payload` is a discriminated union keyed on `fromSpecialist` + `toSpecialist`. Adding a new handoff pair means defining the payload type in `src/shared/models/` and updating the orchestration layer's sequencing logic.
+4. **Maximum chain depth is 5.** To prevent infinite specialist loops, the orchestration layer enforces a maximum of 5 handoffs per request. If a flow exceeds this depth, the orchestration layer escalates to the user with the full chain history.
+5. **Every handoff is logged.** The orchestration layer logs each `SpecialistHandoff` (from, to, completedAction, timestamp) as a structured log entry for debugging and analytics.
+
+---
+
 ## 9. Escalation boundaries
 
 Not every failure can be resolved autonomously. Ricky must know when to escalate to a human operator instead of retrying or applying speculative fixes.
@@ -444,6 +669,48 @@ When a request could match multiple specialists, the orchestration layer uses a 
 3. If a request matches priority 6 (ambiguous), the orchestration layer presents the user with a clear set of options rather than guessing. The options correspond to the specialist domains: generate, debug, restart, analyze, coordinate.
 4. The Coordinator specialist is the delegation hub for multi-specialist flows. When a debug request requires a restart after fix, the orchestration layer routes through Coordinator, which sequences Debugger -> Validator -> Restart.
 5. The priority ladder is defined in the orchestration layer, not in individual specialists. Specialists do not self-select or compete for requests.
+
+---
+
+## 9b. Specialist artifact output conventions
+
+Specialists produce disk artifacts during execution: generated workflows, fix patches, review files, analytics digests, evidence snapshots. This section defines where specialists write artifacts and how they name them.
+
+### Artifact output root
+
+All specialist artifacts are written under the `.workflow-artifacts/` directory at the repo root. This convention is inherited from the workflow standards (see `docs/workflows/WORKFLOW_STANDARDS.md` §12.1) and applies uniformly to specialist outputs.
+
+### Per-specialist artifact paths
+
+| Specialist | Artifact output path | Artifact types |
+|---|---|---|
+| Workflow Author | `.workflow-artifacts/generation/<workflow-id>/` | Generated workflow files, dry-run reports, skill selection logs |
+| Workflow Debugger | `.workflow-artifacts/debugging/<run-id>/` | Diagnosis reports, fix patches, fix verification results |
+| Workflow Validator | `.workflow-artifacts/validation/<workflow-id>/` | Structural check reports, proof loop results, gate enforcement logs |
+| Workflow Analytics | `.workflow-artifacts/analytics/<digest-id>/` | Health digests (markdown + structured JSON), recommendation reports |
+| Runtime Restart | `.workflow-artifacts/restart/<run-id>/` | Safety evaluation reports, restart decision logs, post-restart evidence |
+| Workflow Coordinator | `.workflow-artifacts/coordination/<run-id>/` | Launch logs, progress snapshots, final outcome summaries |
+
+### Artifact naming conventions
+
+Within a specialist's output directory:
+
+| Artifact type | Naming pattern | Example |
+|---|---|---|
+| Primary output | `<action>.md` or `<action>.json` | `diagnosis.md`, `health-digest.json` |
+| Structured data | `<action>-data.json` | `diagnosis-data.json`, `metrics.json` |
+| Evidence snapshot | `evidence-snapshot.json` | — |
+| Review / signoff | `review.md`, `signoff.md` | — |
+| Intermediate files | `_<name>.<ext>` (underscore prefix) | `_dry-run-output.txt`, `_fix-diff.patch` |
+
+### Rules
+
+1. **Specialists must write artifacts to their designated path.** A specialist that writes to another specialist's directory or to an ad-hoc location is a boundary violation. The artifact path is constructed by the specialist's factory function based on the request context (workflow ID or run ID).
+2. **Artifact paths are relative to the repo root.** Specialists receive the repo root path through dependency injection and construct their output paths relative to it. No hardcoded absolute paths.
+3. **Intermediate files use an underscore prefix.** Files prefixed with `_` are considered transient and may be cleaned up after the specialist completes. Files without the prefix are durable outputs that consumers (surfaces, analytics, audit) may read.
+4. **Every specialist must produce a structured JSON artifact alongside any markdown output.** The markdown is for human consumption; the JSON is for programmatic consumption by other specialists and by the analytics module.
+5. **Artifact directories are created on demand.** Specialists create their output directory when they first need to write. They do not assume the directory exists.
+6. **Generated workflow files go to the project source tree, not to `.workflow-artifacts/`.** The Author specialist writes the actual workflow `.ts` file to the project's source tree (e.g., `workflows/wave2-product/`). The `.workflow-artifacts/generation/` path holds the Author's metadata artifacts (dry-run reports, skill selection logs), not the workflow file itself.
 
 ---
 

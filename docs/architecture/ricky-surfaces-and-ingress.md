@@ -216,6 +216,51 @@ These are not yet implemented. Implementers should follow the same request/respo
 
 ---
 
+## 4a. Cloud API versioning policy
+
+### Versioning strategy
+
+Ricky's Cloud API uses **path-based versioning**. The version segment is embedded in the URL path: `/api/v1/ricky/...`.
+
+This was chosen over header-based versioning because:
+- It is visible and debuggable in logs, dashboards, and curl commands without inspecting headers
+- It is consistent with the existing Cloud API surface patterns in `AgentWorkforce/cloud`
+- Path routing is simpler to implement in the Cloudflare worker than header-based dispatch
+
+### Version lifecycle
+
+| Phase | Duration | Meaning |
+|---|---|---|
+| Active | Indefinite until successor ships | Current recommended version; receives new features and fixes |
+| Deprecated | Minimum 90 days after successor reaches Active | Still functional; responses include `Deprecation` header with sunset date; no new features |
+| Sunset | After deprecation period ends | Returns `410 Gone` with a body pointing to the successor version |
+
+### Deprecation signaling
+
+When a version enters the Deprecated phase, all responses include:
+
+```
+Deprecation: true
+Sunset: <ISO 8601 date>
+Link: </api/v2/ricky/workflows/generate>; rel="successor-version"
+```
+
+### Backward compatibility expectations
+
+Within a single version (e.g., `v1`):
+
+1. **New fields may be added** to response bodies. Clients must tolerate unknown fields.
+2. **Existing response fields are never removed or renamed.** If a field becomes irrelevant, it continues to be returned (possibly as `null`).
+3. **New optional request fields may be added.** Existing requests without the new field continue to work.
+4. **Required request fields are never added** within a version. Adding a new required field is a breaking change that requires a new version.
+5. **Error codes are stable.** Once an error code (e.g., `SPEC_AMBIGUOUS`) is shipped in a version, it is never removed or changed in meaning.
+
+### Rule for implementers
+
+All Cloud API changes must be evaluated against these compatibility rules before merge. A change that violates backward compatibility within a version must be shipped in a new version. Version transitions are planned, not accidental.
+
+---
+
 ## 5. Slack surface
 
 ### Manifest
@@ -266,6 +311,119 @@ This context helps Ricky route the request correctly without degrading to a gene
 ### Rule for implementers
 
 MCP and Claude handoffs must normalize through `request-normalizer.ts` like every other surface. The conversation context is metadata, not a separate execution path.
+
+---
+
+## 6a. MCP tool definition contract
+
+The `ricky.generate` MCP tool is the concrete contract that connected assistants use to invoke Ricky. This section defines the parameter schema, response schema, and behavioral expectations.
+
+### Tool definition
+
+```json
+{
+  "name": "ricky.generate",
+  "description": "Hand off a workflow spec to Ricky for generation, debugging, coordination, or analysis. Ricky will determine the correct action based on the spec content and metadata.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "spec": {
+        "type": "string",
+        "description": "The workflow specification — natural language description, structured spec, or reference to a failing workflow."
+      },
+      "intent": {
+        "type": "string",
+        "enum": ["generate", "debug", "restart", "analyze", "coordinate", "auto"],
+        "description": "What the user wants Ricky to do. 'auto' lets Ricky determine intent from the spec content. Default: 'auto'."
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["local", "cloud", "both"],
+        "description": "Execution mode. Default: 'local'."
+      },
+      "context": {
+        "type": "object",
+        "description": "Optional conversation context from the calling assistant — what was discussed, what the user intends. Helps Ricky route without re-asking.",
+        "properties": {
+          "conversationSummary": { "type": "string" },
+          "userGoal": { "type": "string" },
+          "priorDecisions": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      },
+      "workflowPath": {
+        "type": "string",
+        "description": "Optional path to an existing workflow file on disk for debugging or restart."
+      }
+    },
+    "required": ["spec"]
+  }
+}
+```
+
+### Response schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "success": { "type": "boolean" },
+    "action": {
+      "type": "string",
+      "enum": ["generated", "debugged", "restarted", "analyzed", "coordinated", "escalated"]
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "type": { "type": "string", "enum": ["workflow", "report", "evidence", "log"] },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "followUp": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "summary": { "type": "string" }
+  }
+}
+```
+
+### Error response
+
+On failure, the MCP tool returns the standard MCP error shape:
+
+```json
+{
+  "isError": true,
+  "content": [
+    { "type": "text", "text": "Workflow generation failed: <user-visible reason>" }
+  ]
+}
+```
+
+### Behavioral rules
+
+1. When `intent` is `"auto"`, Ricky inspects the spec content to determine the correct action. A spec describing desired behavior routes to generation; a spec referencing a failed run routes to debugging; an explicit restart or analytics request routes accordingly.
+2. The `context` field is advisory. Ricky uses it for routing heuristics but does not require it. The spec alone must be sufficient to determine the action.
+3. The MCP tool normalizes its input into a `McpHandoff` variant and passes it through `request-normalizer.ts`. No domain logic lives in the MCP tool handler itself.
+4. Response `artifacts` contain file paths (for local mode) or inline summaries (for cloud mode). The calling assistant can use paths to read generated files or present summaries to the user.
 
 ---
 
@@ -392,6 +550,54 @@ Each surface has a distinct authentication method appropriate to its trust conte
 
 ---
 
+## 9b. Rate limiting and abuse protection
+
+Cloud-connected and externally accessible surfaces need rate-limiting guidance to prevent abuse and resource exhaustion. This section defines per-surface expectations.
+
+### Per-surface rate-limiting expectations
+
+| Surface | Rate limit strategy | Implementation layer |
+|---|---|---|
+| CLI | None. Local trust — the user controls invocation frequency. | — |
+| Local/BYOH | None. Same as CLI. | — |
+| MCP | None. Caller trust — the MCP host manages invocation frequency. | — |
+| Slack | Slack's own rate limiting applies to outbound messages. Ricky deduplicates inbound events via `@agent-assistant/webhook-runtime`. No additional Ricky-specific rate limit on inbound. | `@agent-assistant/webhook-runtime` (dedup) |
+| Cloud API | Per-workspace, per-endpoint rate limits enforced by the Cloud infrastructure layer. | Cloudflare worker / Cloud API gateway |
+| Web | Inherits Cloud API rate limits for spec submission endpoints. Session-based limits for auth flows. | Cloud API gateway |
+
+### Cloud API rate-limiting contract
+
+Cloud API rate limits are enforced at the infrastructure layer (Cloudflare worker or Cloud API gateway), not in Ricky's application code. The application code must:
+
+1. **Not implement its own rate-limiting logic.** Ricky's Cloud endpoint handlers assume that the infrastructure has already enforced limits by the time a request reaches them.
+2. **Return standard rate-limit response headers** when the infrastructure injects them:
+   - `X-RateLimit-Limit`: maximum requests per window
+   - `X-RateLimit-Remaining`: remaining requests in current window
+   - `X-RateLimit-Reset`: UTC timestamp when the window resets
+   - `Retry-After`: seconds until the client should retry (on 429 responses)
+3. **Return `429 Too Many Requests`** when the infrastructure signals a rate-limit hit. The body must include a structured error: `{ ok: false, status: 429, error: { code: "RATE_LIMITED", message: "..." } }`.
+
+### Recommended initial rate limits
+
+These are guidance for the Cloud infrastructure team, not application-level config:
+
+| Endpoint | Per-workspace limit | Rationale |
+|---|---|---|
+| `POST /api/v1/ricky/workflows/generate` | 30 requests / minute | Generation is compute-intensive; prevents runaway automation |
+| `POST /api/v1/ricky/workflows/generate-and-run` | 10 requests / minute | Includes execution; more resource-intensive |
+| `POST /api/v1/ricky/workflows/debug` | 30 requests / minute | Diagnosis is cheaper than generation |
+| `POST /api/v1/ricky/workflows/restart` | 10 requests / minute | Restarts are operationally sensitive |
+| `GET /health` | No limit | Health checks are cheap and must always succeed |
+
+### Rules
+
+1. Rate limits are per-workspace, not per-user. A workspace's total request budget is shared across all users and API keys in that workspace.
+2. Rate-limit configuration is owned by the Cloud infrastructure, not by the Ricky application. Ricky never reads or modifies rate-limit settings.
+3. If a surface does not have a rate limit (CLI, local, MCP), it must not artificially throttle requests. Rate limiting is only applied where external abuse is possible.
+4. Abuse patterns beyond rate limits (e.g., credential stuffing, large payload flooding) are handled by the Cloud infrastructure's WAF / DDoS protection, not by Ricky application code.
+
+---
+
 ## 10. Ingress routing decision
 
 After normalization, the mode field in the request determines the execution path:
@@ -501,6 +707,65 @@ Cloud-deployed Ricky surfaces must expose health endpoints for infrastructure mo
 1. Health endpoints must not perform expensive operations (no database calls, no specialist invocations). They verify the service is alive and return the version.
 2. Health endpoints are unauthenticated. They are intended for load balancers and infrastructure monitors, not for users.
 3. When Cloud deployment infrastructure requires a readiness check distinct from liveness, add `GET /ready` that verifies downstream dependencies (e.g., Cloud auth service reachable). This is not required for v1.
+
+---
+
+## 11c. Request timeout and cancellation
+
+Surfaces have different timeout expectations based on their interaction model. This section defines timeout behavior and cancellation propagation for each surface.
+
+### Per-surface timeout behavior
+
+| Surface | Request timeout | Timeout behavior | Cancellation mechanism |
+|---|---|---|---|
+| CLI | No hard timeout (process-level) | The user controls process lifetime via Ctrl-C or `kill`. The CLI orchestrator respects `WorkflowTimeoutSettings` from config for execution phases. | SIGINT/SIGTERM caught by the CLI entry point; triggers graceful shutdown of the executor and evidence capture. |
+| Local/BYOH | `WorkflowTimeoutSettings.runTimeoutMs` | Execution phases respect the configured timeout. On timeout, the local executor records `timed_out` status in evidence and returns. | Same as CLI — process signal propagation. |
+| Slack | 3 seconds (Slack webhook ack requirement) | Slack requires a webhook acknowledgment within 3 seconds. Ricky acknowledges immediately, then processes asynchronously. Results are delivered as follow-up thread messages. | No explicit cancellation. Users can start a new request; the original continues to completion or internal timeout. |
+| Cloud API | 30 seconds default (configurable per deployment) | The Cloudflare worker enforces an HTTP response timeout. For fast operations (generate-only), Ricky returns within the timeout. For long operations (generate-and-run), Ricky returns a run receipt (`runId`) immediately and the client polls for results. | Client can disconnect (HTTP connection close). The worker notes the disconnect but the backend operation continues to completion — results are stored for later retrieval. |
+| Web | Inherits Cloud API timeout | Same as Cloud API. The browser client uses async polling for long operations. | Same as Cloud API — disconnect does not cancel. |
+| MCP | Caller-determined | The MCP host sets the timeout. Ricky's MCP handler has no internal timeout — it relies on the host's timeout and the execution-phase timeouts from config. | MCP cancellation is propagated by the host. If the host cancels, Ricky's handler stops and returns a partial result or error. |
+
+### Timeout propagation model
+
+```
+Surface timeout (HTTP, Slack ack, process signal)
+  │
+  ▼
+Orchestrator timeout (per-mode execution phase)
+  │
+  ▼
+Executor timeout (WorkflowTimeoutSettings.runTimeoutMs)
+  │
+  ▼
+Step timeout (WorkflowTimeoutSettings.stepTimeoutMs)
+```
+
+The most restrictive timeout at any level wins. If the surface timeout fires before the executor completes, the surface returns an appropriate timeout response while the executor may continue (for async surfaces like Cloud API and Slack) or be killed (for synchronous surfaces like CLI).
+
+### Cancellation propagation rules
+
+1. **CLI/Local:** SIGINT triggers an `AbortController` signal that propagates to the executor. The executor has a grace period (5 seconds by default) to capture partial evidence before the process exits.
+2. **Cloud API:** Client disconnection is noted but does not cancel the backend operation. The operation completes and results are stored. This prevents accidental cancellation from network instability.
+3. **Slack:** No cancellation. Once Ricky begins processing, it completes. This is consistent with Slack's fire-and-forget webhook model.
+4. **MCP:** Cancellation is synchronous. If the MCP host signals cancellation, Ricky stops immediately and returns partial results. MCP cancellation does not trigger graceful evidence capture.
+
+### Long-running operation pattern
+
+For operations that exceed the surface timeout (common in generate-and-run flows):
+
+1. The surface handler returns a receipt containing a `runId` and a status URL.
+2. The client polls `GET /api/v1/ricky/workflows/runs/{runId}/status` for progress.
+3. When the operation completes, the status response includes full `WorkflowRunEvidence`.
+4. The status endpoint uses the same auth and workspace scoping as the originating request.
+
+This pattern applies to Cloud API and Web surfaces. CLI and local surfaces are synchronous — they block until completion or timeout.
+
+### Rules
+
+1. Every executor and specialist must respect the `AbortSignal` passed through the execution context. Operations that ignore cancellation signals are bugs.
+2. Partial evidence is always better than no evidence. On timeout or cancellation, the executor must capture whatever evidence has been assembled so far and include it in the response.
+3. Timeout values are part of `WorkflowTimeoutSettings` in the shared config, not hardcoded in surface handlers. The only exception is the Slack 3-second ack requirement, which is a platform constraint.
+4. Cloud API must never return a timeout error for generate-and-run requests. It must always return a run receipt immediately and use the polling pattern.
 
 ---
 
