@@ -48,14 +48,32 @@ describe('workflow generation pipeline', () => {
     });
     expect(artifact.tasks).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-claude' }),
         expect.objectContaining({ id: 'implement-artifact', agentRole: 'impl-primary-codex' }),
         expect.objectContaining({ id: 'fix-loop', name: '80-to-100 fix loop' }),
         expect.objectContaining({ id: 'final-review-claude' }),
         expect.objectContaining({ id: 'final-review-codex' }),
+        expect.objectContaining({ id: 'final-signoff', dependsOn: ['regression-gate'] }),
       ]),
     );
     expect(artifact.content).toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
+    expect(artifact.content).toContain('.agent("validator-claude"');
+    expect(gate(artifact, 'initial-soft-validation')).toMatchObject({
+      stage: 'pre_review',
+      failOnError: false,
+      dependsOn: ['post-implementation-file-gate'],
+    });
+    expect(gate(artifact, 'post-fix-validation')).toMatchObject({
+      stage: 'post_fix',
+      failOnError: false,
+      dependsOn: ['post-fix-verification-gate'],
+    });
+    expect(gate(artifact, 'final-review-pass-gate')).toMatchObject({
+      stage: 'final',
+      failOnError: true,
+      dependsOn: ['final-review-claude', 'final-review-codex'],
+    });
     expect(result.validation).toMatchObject({
       valid: true,
       hasReviewStage: true,
@@ -177,6 +195,8 @@ describe('workflow generation pipeline', () => {
 
     expect(intakeResult.success).toBe(true);
     expect(intakeResult.routing?.target).toBe('generate');
+    expect(normalizedSpec?.intent).toBe('generate');
+    expect(normalizedSpec?.desiredAction.kind).toBe('generate');
     expect(normalizedSpec?.desiredAction.workflowFileHint).toBeUndefined();
     expect(normalizedSpec?.desiredAction.specText).toContain('workflow spec document');
     expect(normalizedSpec?.targetFiles).toEqual(['docs/release-readiness.md']);
@@ -194,6 +214,14 @@ describe('workflow generation pipeline', () => {
       pattern: 'supervisor',
       riskLevel: 'medium',
     });
+    expect(artifact.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-claude' }),
+        expect.objectContaining({ id: 'implement-artifact', agentRole: 'author-codex' }),
+        expect.objectContaining({ id: 'review-claude', dependsOn: ['initial-soft-validation'] }),
+        expect.objectContaining({ id: 'review-codex', dependsOn: ['initial-soft-validation'] }),
+      ]),
+    );
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
     expect(artifact.gates).toEqual(
@@ -267,17 +295,28 @@ describe('workflow generation pipeline', () => {
       workflowId: expect.stringMatching(/^ricky-/),
       channel: expect.stringMatching(/^wf-ricky-/),
     });
+    expect(artifact.channel).not.toBe('general');
     expect(artifact.content).toContain('workflow(');
     expect(artifact.content).toContain(`.channel("${artifact.channel}")`);
     expect(artifact.content).toContain('review-claude');
     expect(artifact.content).toContain('review-codex');
-    expect(artifact.gates).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'initial-soft-validation', failOnError: false }),
-        expect.objectContaining({ name: 'final-hard-validation', failOnError: true }),
-        expect.objectContaining({ name: 'git-diff-gate', command: expect.stringContaining('git diff --name-only') }),
-      ]),
-    );
+    expect(gate(artifact, 'initial-soft-validation')).toMatchObject({
+      failOnError: false,
+      stage: 'pre_review',
+      verificationType: 'exit_code',
+    });
+    expect(gate(artifact, 'final-hard-validation')).toMatchObject({
+      failOnError: true,
+      stage: 'final',
+      verificationType: 'deterministic_gate',
+      dependsOn: ['final-review-pass-gate'],
+    });
+    expect(gate(artifact, 'git-diff-gate')).toMatchObject({
+      command: expect.stringContaining('git diff --name-only'),
+      failOnError: true,
+      stage: 'final',
+      dependsOn: ['final-hard-validation'],
+    });
     expect(result.validation.issues).toEqual([]);
   });
 
@@ -312,6 +351,9 @@ describe('workflow generation pipeline', () => {
         expect.stringContaining('git diff --name-only'),
       ]),
     );
+    expect(result.plannedChecks.map((check) => check.command)).toContain(result.dryRunCommand);
+    expect(result.plannedChecks.find((check) => check.name === 'dry-run')?.stage).toBe('dry_run');
+    expect(result.plannedChecks.find((check) => check.name === 'dry-run')?.command).toContain('--dry-run');
   });
 
   it('final review output paths match the final-review-pass-gate check paths', () => {
@@ -525,6 +567,15 @@ describe('workflow generation pipeline', () => {
 function artifact(result: ReturnType<typeof generate>): NonNullable<ReturnType<typeof generate>['artifact']> {
   expect(result.artifact).not.toBeNull();
   return result.artifact!;
+}
+
+function gate(
+  artifact: NonNullable<ReturnType<typeof generate>['artifact']>,
+  name: string,
+): NonNullable<ReturnType<typeof generate>['artifact']>['gates'][number] {
+  const match = artifact.gates.find((candidate) => candidate.name === name);
+  expect(match).toBeDefined();
+  return match!;
 }
 
 function spec(overrides: SpecFixtureOverrides = {}): NormalizedWorkflowSpec {
