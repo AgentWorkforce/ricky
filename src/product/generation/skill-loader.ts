@@ -173,7 +173,7 @@ function buildGenerationTimeEvidence(skills: SkillDescriptor[]): SkillApplicatio
         effect: 'metadata',
         behavior: 'generation_time_only',
         runtimeEmbodiment: false,
-        evidence: `Loaded ${skill.name} descriptor from ${skill.path} before template rendering.`,
+        evidence: `Loaded ${skill.name} descriptor before template rendering.`,
       },
     ];
   });

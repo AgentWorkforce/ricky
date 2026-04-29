@@ -317,6 +317,7 @@ describe('workflow generation pipeline', () => {
       stage: 'final',
       dependsOn: ['final-hard-validation'],
     });
+    expect(gate(artifact, 'git-diff-gate').command).toContain('git ls-files --others --exclude-standard');
     expect(result.validation.issues).toEqual([]);
   });
 
@@ -349,6 +350,11 @@ describe('workflow generation pipeline', () => {
         expect.stringContaining('npx tsc --noEmit'),
         expect.stringContaining('npx vitest run'),
         expect.stringContaining('git diff --name-only'),
+      ]),
+    );
+    expect(result.deterministicValidationCommands).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('git ls-files --others --exclude-standard'),
       ]),
     );
     expect(result.plannedChecks.map((check) => check.command)).toContain(result.dryRunCommand);
@@ -450,6 +456,45 @@ describe('workflow generation pipeline', () => {
     expect(skillMatchesLine).not.toMatch(/"path"/);
     expect(content).not.toContain('/Users/');
     expect(content).not.toMatch(/source=/);
+    expect(content).not.toMatch(/descriptor from \/|descriptor from [A-Za-z]:\\/);
+  });
+
+  it('no-target git diff gate validates manifest entries including untracked files', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a code change without explicit target files.',
+        targetFiles: [],
+      }),
+      artifactPath: 'workflows/generated/no-target-git-diff.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const gitDiffGate = artifact.gates.find((g) => g.name === 'git-diff-gate')!;
+
+    expect(gitDiffGate.command).toContain('output-manifest.txt');
+    expect(gitDiffGate.command).toContain('git diff --name-only -- "$f"');
+    expect(gitDiffGate.command).toContain('git ls-files --others --exclude-standard -- "$f"');
+    expect(gitDiffGate.command).toContain('sort -u');
+  });
+
+  it('explicit target git diff gate includes untracked files for newly created outputs', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a new generated artifact file.',
+        targetFiles: ['src/product/generation/new-file.ts'],
+      }),
+      artifactPath: 'workflows/generated/explicit-target-git-diff.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const gitDiffGate = artifact.gates.find((g) => g.name === 'git-diff-gate')!;
+
+    expect(gitDiffGate.command).toContain('git diff --name-only');
+    expect(gitDiffGate.command).toContain('git ls-files --others --exclude-standard');
+    expect(gitDiffGate.command).toContain('src/product/generation/new-file.ts');
+    expect(gitDiffGate.command).toContain('sort -u');
   });
 
   it('maps prose acceptance gates with inline shell commands without emitting prose as shell', () => {

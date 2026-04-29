@@ -224,9 +224,10 @@ function buildGates(
   const grepCommand = usingManifest
     ? `test -s ${shellQuote(outputManifest)} && while IFS= read -r f; do test -f "$f"; done < ${shellQuote(outputManifest)}`
     : `grep -Eq ${shellQuote(grepPattern)} ${targetFiles.map(shellQuote).join(' ')}`;
+  const gitDiffPath = `${artifactsDir}/git-diff.txt`;
   const gitDiffCommand = usingManifest
-    ? buildManifestGitDiffCommand(outputManifest, `${artifactsDir}/git-diff.txt`)
-    : `git diff --name-only -- ${targetFiles.map(shellQuote).join(' ')} > ${shellQuote(`${artifactsDir}/git-diff.txt`)} && test -s ${shellQuote(`${artifactsDir}/git-diff.txt`)}`;
+    ? buildManifestGitDiffCommand(outputManifest, gitDiffPath)
+    : `{ git diff --name-only -- ${targetFiles.map(shellQuote).join(' ')}; git ls-files --others --exclude-standard -- ${targetFiles.map(shellQuote).join(' ')}; } > ${shellQuote(gitDiffPath)} && sort -u ${shellQuote(gitDiffPath)} -o ${shellQuote(gitDiffPath)} && test -s ${shellQuote(gitDiffPath)}`;
   const testCommand = deriveTestCommand(spec);
   const typecheckCommand = 'npx tsc --noEmit';
   const acceptanceCommands = spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate));
@@ -268,7 +269,8 @@ function buildManifestGitDiffCommand(outputManifest: string, gitDiffPath: string
   return [
     `test -s ${quotedManifest}`,
     `: > ${quotedGitDiffPath}`,
-    `while IFS= read -r f; do git diff --name-only -- "$f" >> ${quotedGitDiffPath}; done < ${quotedManifest}`,
+    `while IFS= read -r f; do { git diff --name-only -- "$f"; git ls-files --others --exclude-standard -- "$f"; } >> ${quotedGitDiffPath}; done < ${quotedManifest}`,
+    `sort -u ${quotedGitDiffPath} -o ${quotedGitDiffPath}`,
     `test -s ${quotedGitDiffPath}`,
   ].join(' && ');
 }
