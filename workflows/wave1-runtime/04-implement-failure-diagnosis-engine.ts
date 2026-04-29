@@ -241,6 +241,7 @@ Requirements:
       dependsOn: ['final-hard-validation'],
       command: [
         'changed="$(git diff --name-only -- src/runtime/diagnostics workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave1-runtime/implement-failure-diagnosis-engine)"',
+        'if [[ -z "$changed" ]]; then echo RICKY_FAILURE_DIAGNOSIS_REGRESSION_GATE_PASS_NOOP; exit 0; fi',
         'printf "%s\n" "$changed" | grep -Eq "^(src/runtime/diagnostics/|workflows/wave1-runtime/04-implement-failure-diagnosis-engine\\.ts|\\.workflow-artifacts/wave1-runtime/implement-failure-diagnosis-engine/)"',
         '! printf "%s\n" "$changed" | grep -Ev "^(src/runtime/diagnostics/|workflows/wave1-runtime/04-implement-failure-diagnosis-engine\\.ts|\\.workflow-artifacts/wave1-runtime/implement-failure-diagnosis-engine/)"',
         'echo RICKY_FAILURE_DIAGNOSIS_REGRESSION_GATE_PASS',
