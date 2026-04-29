@@ -1,15 +1,16 @@
 {
-  "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node", "vitest/globals"],
     "noEmit": true
   },
-  "include": ["test/**/*.ts", "workflows/**/*.ts", "scripts/**/*.ts"],
-  "references": [
-    { "path": "./packages/shared" },
-    { "path": "./packages/runtime" },
-    { "path": "./packages/product" },
-    { "path": "./packages/cloud" },
-    { "path": "./packages/local" },
-    { "path": "./packages/cli" }
-  ]
+  "include": ["src", "test", "workflows", "scripts"]
 }

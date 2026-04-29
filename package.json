@@ -12,29 +12,16 @@
   "engines": {
     "node": ">=20"
   },
-  "workspaces": [
-    "packages/*"
-  ],
   "type": "module",
   "bin": {
-    "ricky": "./dist/ricky.js"
+    "ricky": "./bin/ricky"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "scripts": {
-    "start": "npm --workspace @ricky/cli run start --",
-    "clean": "npm run clean --workspaces --if-present && node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
-    "build": "tsc -b tsconfig.build.json",
-    "bundle": "node scripts/bundle-cli.mjs",
-    "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p tsconfig.json",
-    "test": "npm run bundle && vitest run",
-    "test:flat-layout": "RICKY_INCLUDE_FLAT_LAYOUT_PROOF=1 vitest run test/flat-layout-proof/flat-layout-proof.test.ts",
-    "test:workspaces": "npm test --workspaces --if-present",
+    "start": "tsx src/surfaces/cli/commands/cli-main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "batch": "bash scripts/run-ricky-batch.sh",
-    "overnight": "bash scripts/run-ricky-overnight.sh",
-    "prepack": "npm run build && npm run bundle"
+    "overnight": "bash scripts/run-ricky-overnight.sh"
   },
   "dependencies": {
     "@agent-assistant/turn-context": "^0.3.11",

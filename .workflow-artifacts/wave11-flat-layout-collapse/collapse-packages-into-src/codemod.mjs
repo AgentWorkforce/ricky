@@ -1,173 +1,100 @@
-#!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-const repoRoot = process.cwd();
-const sourceRoots = process.argv.slice(2);
-const roots = sourceRoots.length > 0 ? sourceRoots : ['src'];
-const rickyLayers = new Set(['shared', 'runtime', 'product', 'cloud', 'local']);
-const sourceExts = ['.ts', '.tsx'];
+const root = process.cwd();
+const fileMapPath = path.join(
+  root,
+  '.workflow-artifacts/wave11-flat-layout-collapse/collapse-packages-into-src/file-map.tsv',
+);
 
-function toPosix(filePath) {
-  return filePath.split(path.sep).join('/');
-}
+const sourceFiles = readFileSync(fileMapPath, 'utf8')
+  .trim()
+  .split('\n')
+  .map((line) => line.split('\t')[1])
+  .filter(Boolean);
 
-function withoutTsExtension(filePath) {
-  return filePath.replace(/\.(ts|tsx)$/u, '');
-}
+const layers = new Set(['shared', 'runtime', 'product', 'cloud', 'local']);
 
-function stripImportExtension(specifier) {
-  return specifier.replace(/\.(js|ts|tsx)$/u, '');
-}
-
-function candidateFiles(basePath) {
-  return [
-    ...sourceExts.map((ext) => `${basePath}${ext}`),
-    ...sourceExts.map((ext) => path.join(basePath, `index${ext}`)),
-  ];
-}
-
-function resolveExisting(candidates, originalSpecifier, importerPath) {
-  const match = candidates.find((candidate) => existsSync(candidate));
-  if (!match) {
-    const relativeImporter = toPosix(path.relative(repoRoot, importerPath));
-    const displayCandidates = candidates.map((candidate) => toPosix(path.relative(repoRoot, candidate))).join(', ');
-    throw new Error(`Could not resolve ${originalSpecifier} from ${relativeImporter}; tried ${displayCandidates}`);
-  }
-  return match;
-}
-
-function toRelativeJsSpecifier(importerPath, targetPath) {
-  const importerDir = path.dirname(importerPath);
-  let relative = toPosix(path.relative(importerDir, withoutTsExtension(targetPath)));
-  if (!relative.startsWith('.')) {
-    relative = `./${relative}`;
-  }
-  return `${relative}.js`;
-}
-
-function resolveRickyAlias(specifier, importerPath) {
-  const raw = specifier.slice('@ricky/'.length);
-  const [layer, ...restParts] = raw.split('/');
-  if (!rickyLayers.has(layer)) {
-    return null;
-  }
-
-  const rest = stripImportExtension(restParts.join('/'));
-  const base = rest
-    ? path.join(repoRoot, 'src', layer, rest)
-    : path.join(repoRoot, 'src', layer, 'index');
-  const target = resolveExisting(candidateFiles(base), specifier, importerPath);
-  return toRelativeJsSpecifier(importerPath, target);
-}
-
-function resolveSelfAlias(specifier, importerPath) {
-  if (!toPosix(path.relative(repoRoot, importerPath)).startsWith('src/surfaces/cli/')) {
-    return null;
-  }
-
-  if (specifier === '@agentworkforce/ricky') {
-    const target = resolveExisting(
-      candidateFiles(path.join(repoRoot, 'src', 'surfaces', 'cli', 'index')),
-      specifier,
-      importerPath,
-    );
-    return toRelativeJsSpecifier(importerPath, target);
-  }
-
-  if (!specifier.startsWith('@agentworkforce/ricky/')) {
-    return null;
-  }
-
-  const rest = stripImportExtension(specifier.slice('@agentworkforce/ricky/'.length));
-  const target = resolveExisting(candidateFiles(path.join(repoRoot, 'src', rest)), specifier, importerPath);
-  return toRelativeJsSpecifier(importerPath, target);
-}
-
-function resolveRelativeSpecifier(specifier, importerPath) {
+function toImportSpecifier(fromFile, targetFile) {
+  const fromDir = path.dirname(path.join(root, fromFile));
+  let specifier = path.relative(fromDir, path.join(root, targetFile)).replaceAll(path.sep, '/');
+  specifier = specifier.replace(/\.(ts|tsx)$/, '.js');
   if (!specifier.startsWith('.')) {
-    return null;
+    specifier = `./${specifier}`;
   }
-
-  const parsed = path.posix.parse(specifier);
-  if (parsed.ext) {
-    return null;
-  }
-
-  const base = path.resolve(path.dirname(importerPath), specifier);
-  const target = resolveExisting(candidateFiles(base), specifier, importerPath);
-  return toRelativeJsSpecifier(importerPath, target);
+  return specifier;
 }
 
-function rewriteSpecifier(specifier, importerPath) {
-  if (specifier === '@ricky/shared' || specifier === '@ricky/runtime' || specifier === '@ricky/product' || specifier === '@ricky/cloud' || specifier === '@ricky/local') {
-    const layer = specifier.slice('@ricky/'.length);
-    const target = resolveExisting(
-      candidateFiles(path.join(repoRoot, 'src', layer, 'index')),
-      specifier,
-      importerPath,
-    );
-    return toRelativeJsSpecifier(importerPath, target);
+function resolveRickySpecifier(specifier) {
+  const [, layer, subpath] = specifier.match(/^@ricky\/([^/]+)(?:\/(.+))?$/) ?? [];
+  if (!layer || !layers.has(layer)) {
+    return null;
   }
 
+  if (!subpath) {
+    return `src/${layer}/index.ts`;
+  }
+
+  return `src/${layer}/${subpath}.ts`;
+}
+
+function resolveSelfSpecifier(specifier) {
+  if (specifier === '@agentworkforce/ricky') {
+    return 'src/surfaces/cli/index.ts';
+  }
+
+  const [, subpath] = specifier.match(/^@agentworkforce\/ricky\/(.+)$/) ?? [];
+  if (!subpath) {
+    return null;
+  }
+
+  const exportTargets = new Map([
+    ['cli', 'src/surfaces/cli/cli/index.ts'],
+    ['commands', 'src/surfaces/cli/commands/index.ts'],
+    ['entrypoint', 'src/surfaces/cli/entrypoint/index.ts'],
+  ]);
+
+  return exportTargets.get(subpath) ?? `src/surfaces/cli/${subpath}.ts`;
+}
+
+function resolveSpecifier(specifier) {
   if (specifier.startsWith('@ricky/')) {
-    return resolveRickyAlias(specifier, importerPath);
+    return resolveRickySpecifier(specifier);
   }
 
   if (specifier.startsWith('@agentworkforce/ricky')) {
-    return resolveSelfAlias(specifier, importerPath);
+    return resolveSelfSpecifier(specifier);
   }
 
-  return resolveRelativeSpecifier(specifier, importerPath);
+  return null;
 }
 
-function rewriteFile(filePath) {
-  const original = readFileSync(filePath, 'utf8');
+const importPattern =
+  /(\bfrom\s*["']|\bimport\s*\(\s*["']|\brequire\s*\(\s*["'])(@ricky\/[^"']+|@agentworkforce\/ricky(?:\/[^"']+)?)(["'])/g;
+
+let rewrittenFiles = 0;
+let rewrittenSpecifiers = 0;
+
+for (const sourceFile of sourceFiles) {
+  const absolutePath = path.join(root, sourceFile);
+  const before = readFileSync(absolutePath, 'utf8');
   let changed = false;
 
-  const replaceSpecifier = (fullMatch, prefix, specifier, suffix) => {
-    const replacement = rewriteSpecifier(specifier, filePath);
-    if (!replacement || replacement === specifier) {
-      return fullMatch;
+  const after = before.replace(importPattern, (match, prefix, specifier, suffix) => {
+    const target = resolveSpecifier(specifier);
+    if (!target) {
+      return match;
     }
-    changed = true;
-    return `${prefix}${replacement}${suffix}`;
-  };
 
-  let next = original.replace(
-    /(\bfrom\s*['"]|import\s*\(\s*['"]|require\s*\(\s*['"])([^'"]+)(['"])/gu,
-    replaceSpecifier,
-  );
-  next = next.replace(/(\bimport\s*['"])([^'"]+)(['"])/gu, replaceSpecifier);
+    changed = true;
+    rewrittenSpecifiers += 1;
+    return `${prefix}${toImportSpecifier(sourceFile, target)}${suffix}`;
+  });
 
   if (changed) {
-    writeFileSync(filePath, next);
-    return true;
+    writeFileSync(absolutePath, after);
+    rewrittenFiles += 1;
   }
-  return false;
 }
 
-function walk(root) {
-  const absoluteRoot = path.resolve(repoRoot, root);
-  if (!existsSync(absoluteRoot)) {
-    return [];
-  }
-
-  const files = [];
-  for (const entry of readdirSync(absoluteRoot)) {
-    const absoluteEntry = path.join(absoluteRoot, entry);
-    const stats = statSync(absoluteEntry);
-    if (stats.isDirectory()) {
-      files.push(...walk(absoluteEntry));
-    } else if (stats.isFile() && /\.(ts|tsx)$/u.test(entry)) {
-      files.push(absoluteEntry);
-    }
-  }
-  return files;
-}
-
-const changedFiles = roots.flatMap(walk).filter(rewriteFile).map((filePath) => toPosix(path.relative(repoRoot, filePath)));
-for (const changedFile of changedFiles) {
-  console.log(changedFile);
-}
-console.log(`Rewrote ${changedFiles.length} file(s).`);
+console.log(`Rewrote ${rewrittenSpecifiers} import specifiers in ${rewrittenFiles} files.`);
