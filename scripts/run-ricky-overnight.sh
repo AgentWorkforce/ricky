@@ -374,7 +374,7 @@ log() {
 workflow_has_stale_package_targets() {
   local workflow_path="$1"
 
-  grep -Eq "packages/cli/packages/cli/|(^|[^[:alnum:]_/])src/(shared|runtime|product|cloud|local|cli)/" "$workflow_path"
+  grep -Eq "packages/cli/packages/cli/|packages/(shared|runtime|product|cloud|local|cli)/src/" "$workflow_path"
 }
 
 artifact_signoff_has_marker() {
