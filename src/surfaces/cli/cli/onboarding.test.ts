@@ -103,9 +103,12 @@ describe('Ricky CLI onboarding', () => {
 
     expect(output).toContain('Give Ricky a spec');
     expect(output).toContain('Generation does not execute anything');
+    expect(output).toContain('Direct CLI handoff:');
     expect(output).toContain('ricky --mode local --spec "generate a workflow for package checks"');
     expect(output).toContain('ricky --mode local --spec-file ./path/to/spec.md');
     expect(output).toContain('ricky --mode local --stdin');
+    expect(output).toContain('MCP handoff:');
+    expect(output).toContain('Use `ricky.generate` with the same spec payload');
     expect(output).toContain('requires npm-linked CLI');
     expect(output).not.toContain('npx ricky generate --spec');
     expect(output).not.toContain('npx ricky generate --spec-file');

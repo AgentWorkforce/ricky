@@ -294,7 +294,10 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             containsAll(handoff, [
               'Give Ricky a spec',
               'Generation does not execute anything',
+              'Direct CLI handoff:',
               'Generate only (default)',
+              'MCP handoff:',
+              'ricky.generate',
             ]),
             excludesAll(handoff, ['npx ricky generate --spec', 'npx ricky generate --spec-file', 'spec-stdin']),
           ],

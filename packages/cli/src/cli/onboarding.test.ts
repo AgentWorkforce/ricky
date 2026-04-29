@@ -108,6 +108,9 @@ describe('Ricky CLI onboarding compatibility surface', () => {
     expect(output).toContain('ricky --mode local --spec "generate a workflow for package checks"');
     expect(output).toContain('ricky --mode local --spec-file ./path/to/spec.md');
     expect(output).toContain('ricky --mode local --stdin');
+    expect(output).toContain('Direct CLI handoff:');
+    expect(output).toContain('MCP handoff:');
+    expect(output).toContain('Use `ricky.generate` with the same spec payload');
     expect(output).toMatch(/recovery|missing|blocked/i);
     expect(output).toContain('Fix the issue above, then retry the same command.');
     expect(output).toContain('Ricky is ready.');

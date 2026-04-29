@@ -156,6 +156,8 @@ export function renderHandoffGuidance(): string {
     '  Generation does not execute anything — it returns the artifact path.',
     '  Add --run to also execute the generated artifact through local agent-relay.',
     '',
+    '  Direct CLI handoff:',
+    '',
     '  Generate only (default):',
     '  $ ricky --mode local --spec "generate a workflow for package checks"',
     '',
@@ -171,6 +173,9 @@ export function renderHandoffGuidance(): string {
     '  Run an existing artifact (requires npm-linked CLI):',
     '  $ ricky run workflows/generated/<file>.ts',
     '  Or without linking: ricky run workflows/generated/<file>.ts',
+    '',
+    '  MCP handoff:',
+    '  Use `ricky.generate` with the same spec payload; Ricky normalizes it like CLI input.',
   ].join('\n');
 }
 
