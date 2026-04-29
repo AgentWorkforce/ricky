@@ -32,7 +32,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint',
-        'mkdir -p packages/cli/src/entrypoint',
+        'mkdir -p src/surfaces/cli/entrypoint',
         'echo RICKY_INTERACTIVE_ENTRYPOINT_READY',
       ].join(' && '),
       captureOutput: true,
@@ -49,9 +49,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" packages/cli/src/index.ts',
+        'sed -n "1,260p" src/surfaces/cli/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,320p" packages/cli/src/cli/onboarding.ts',
+        'sed -n "1,320p" src/surfaces/cli/cli/onboarding.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -60,9 +60,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" packages/local/src/index.ts',
+        'sed -n "1,260p" src/local/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,340p" packages/local/src/entrypoint.ts',
+        'sed -n "1,340p" src/local/entrypoint.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -71,13 +71,13 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" packages/cloud/src/index.ts',
+        'sed -n "1,260p" src/cloud/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,340p" packages/cloud/src/api/generate-endpoint.ts',
+        'sed -n "1,340p" src/cloud/api/generate-endpoint.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/runtime/src/index.ts',
+        'sed -n "1,260p" src/runtime/index.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,320p" packages/runtime/src/diagnostics/failure-diagnosis.ts',
+        'sed -n "1,320p" src/runtime/diagnostics/failure-diagnosis.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -94,9 +94,9 @@ async function main() {
       agent: 'impl-claude',
       dependsOn: ['read-product-spec', 'read-cli-context', 'read-local-context', 'read-cloud-runtime-context', 'read-workflow-standards'],
       task: `Implement a bounded interactive Ricky CLI entry surface in only these files:
-- packages/cli/src/entrypoint/interactive-cli.ts
-- packages/cli/src/entrypoint/interactive-cli.test.ts
-- packages/cli/src/entrypoint/index.ts
+- src/surfaces/cli/entrypoint/interactive-cli.ts
+- src/surfaces/cli/entrypoint/interactive-cli.test.ts
+- src/surfaces/cli/entrypoint/index.ts
 
 Requirements:
 - compose the existing CLI onboarding, local/BYOH surface, Cloud generate surface, and runtime diagnosis engine
@@ -108,17 +108,17 @@ Requirements:
 - write only the requested files to disk, then exit cleanly
 - do not emit long report-style stdout
 `,
-      verification: { type: 'file_exists', value: 'packages/cli/src/entrypoint/interactive-cli.ts' },
+      verification: { type: 'file_exists', value: 'src/surfaces/cli/entrypoint/interactive-cli.ts' },
     })
     .step('implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-interactive-entrypoint'],
       command: [
-        'test -f packages/cli/src/entrypoint/interactive-cli.ts',
-        'test -f packages/cli/src/entrypoint/interactive-cli.test.ts',
-        'test -f packages/cli/src/entrypoint/index.ts',
-        'grep -Eq "local|cloud|diagnos|onboarding" packages/cli/src/entrypoint/interactive-cli.ts packages/cli/src/entrypoint/interactive-cli.test.ts',
-        'grep -Eq "runOnboarding|runLocal|handleCloudGenerate|diagnose" packages/cli/src/entrypoint/interactive-cli.ts',
+        'test -f src/surfaces/cli/entrypoint/interactive-cli.ts',
+        'test -f src/surfaces/cli/entrypoint/interactive-cli.test.ts',
+        'test -f src/surfaces/cli/entrypoint/index.ts',
+        'grep -Eq "local|cloud|diagnos|onboarding" src/surfaces/cli/entrypoint/interactive-cli.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts',
+        'grep -Eq "runOnboarding|runLocal|handleCloudGenerate|diagnose" src/surfaces/cli/entrypoint/interactive-cli.ts',
         'echo RICKY_INTERACTIVE_ENTRYPOINT_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -127,7 +127,7 @@ Requirements:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['implementation-file-gate'],
-      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts packages/cli/src/cli/onboarding.test.ts',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -191,7 +191,7 @@ Requirements:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['fix-entrypoint'],
-      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts packages/cli/src/cli/onboarding.test.ts',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -239,7 +239,7 @@ Requirements:
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts packages/cli/src/cli/onboarding.test.ts',
+      command: 'npm run typecheck && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts',
       captureOutput: true,
       failOnError: true,
     })
@@ -247,10 +247,10 @@ Requirements:
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'git diff --name-only -- packages/cli/src/entrypoint workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/tracked-changes.txt',
+        'git diff --name-only -- src/surfaces/cli/entrypoint workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/tracked-changes.txt',
         'git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/untracked-artifacts.txt',
         'cat .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/tracked-changes.txt .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/untracked-artifacts.txt > .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/changed.txt',
-        '! grep -Ev "^(|packages/cli/src/entrypoint/|workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/)" .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/changed.txt',
+        '! grep -Ev "^(|src/surfaces/cli/entrypoint/|workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/)" .workflow-artifacts/wave4-local-byoh/implement-interactive-cli-entrypoint/changed.txt',
         'echo RICKY_INTERACTIVE_ENTRYPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -264,8 +264,8 @@ Requirements:
         '# Ricky interactive CLI entrypoint signoff',
         '',
         'Validation commands:',
-        '- npx tsc --noEmit',
-        '- npm test --workspace @ricky/cli',
+        '- npm run typecheck',
+        '- npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts',
         '',
         'Expected contract:',
         '- one interactive entry surface composes onboarding + local + cloud + diagnosis',
