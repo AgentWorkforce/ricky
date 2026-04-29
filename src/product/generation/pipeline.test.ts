@@ -332,6 +332,18 @@ describe('workflow generation pipeline', () => {
     });
 
     expect(result.dryRunCommand).toBe('npx agent-relay run --dry-run workflows/generated/command-evidence.ts');
+    expect(result.validation).toMatchObject({
+      valid: true,
+      errors: [],
+      issues: [],
+      hasDeterministicGates: true,
+      hasReviewStage: true,
+    });
+    expect(result.executionRoute).toMatchObject({
+      runnerCommand: result.dryRunCommand,
+      artifactDelivery: 'write_local_file',
+      resolvedTarget: 'local',
+    });
     expect(result.plannedChecks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -513,6 +525,57 @@ describe('workflow generation pipeline', () => {
     const initialValidation = result.artifact!.gates.find((gate) => gate.name === 'initial-soft-validation')!;
     expect(initialValidation.command).toContain("node dist/bin/ricky.js --version | grep -Eq '^ricky [0-9]+\\.[0-9]+\\.[0-9]+$'");
     expect(initialValidation.command).not.toContain('test for this layer');
+  });
+
+  it('enforces executable acceptance gates in post-fix and final-hard validation stages', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement version gate enforcement across all validation stages.',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+        acceptanceGates: [
+          "version gate: `node dist/bin/ricky.js --version | grep -Eq '^ricky [0-9]+\\.[0-9]+\\.[0-9]+$'`",
+        ],
+      }),
+      artifactPath: 'workflows/generated/acceptance-enforcement.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const versionCommand = "node dist/bin/ricky.js --version | grep -Eq '^ricky [0-9]+\\.[0-9]+\\.[0-9]+$'";
+
+    const initialValidation = gate(artifact, 'initial-soft-validation');
+    const postFixValidation = gate(artifact, 'post-fix-validation');
+    const finalHardValidation = gate(artifact, 'final-hard-validation');
+
+    expect(initialValidation.command).toContain(versionCommand);
+    expect(postFixValidation.command).toContain(versionCommand);
+    expect(finalHardValidation.command).toContain(versionCommand);
+
+    expect(initialValidation.failOnError).toBe(false);
+    expect(postFixValidation.failOnError).toBe(false);
+    expect(finalHardValidation.failOnError).toBe(true);
+  });
+
+  it('excludes prose-only acceptance gates from post-fix and final-hard validation', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a workflow with prose-only acceptance gates.',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+        acceptanceGates: ['Reviewer must confirm the output is production-ready.'],
+      }),
+      artifactPath: 'workflows/generated/prose-only-gate.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+
+    const initialValidation = gate(artifact, 'initial-soft-validation');
+    const postFixValidation = gate(artifact, 'post-fix-validation');
+    const finalHardValidation = gate(artifact, 'final-hard-validation');
+
+    expect(initialValidation.command).toContain('Manual acceptance gate:');
+    expect(postFixValidation.command).not.toContain('Manual acceptance gate:');
+    expect(finalHardValidation.command).not.toContain('Manual acceptance gate:');
   });
 
   it('selects pipeline pattern for low-risk simple spec', () => {

@@ -20,6 +20,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave2-product/workflow-generation-pipeline src/product/generation',
+        'rm -f .workflow-artifacts/wave2-product/workflow-generation-pipeline/signoff.md',
         'cat docs/workflows/WORKFLOW_STANDARDS.md > .workflow-artifacts/wave2-product/workflow-generation-pipeline/workflow-standards.md',
         'cat workflows/shared/WORKFLOW_AUTHORING_RULES.md > .workflow-artifacts/wave2-product/workflow-generation-pipeline/authoring-rules.md',
         'cat workflows/meta/spec/generated-workflow-template.md > .workflow-artifacts/wave2-product/workflow-generation-pipeline/generated-template.md',

@@ -231,6 +231,7 @@ function buildGates(
   const testCommand = deriveTestCommand(spec);
   const typecheckCommand = 'npx tsc --noEmit';
   const acceptanceCommands = spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate));
+  const executableAcceptanceCommands = acceptanceCommands.filter((cmd) => !cmd.startsWith("printf '%s\\n'"));
   const skillBoundaryPath = `${artifactsDir}/skill-application-boundary.json`;
 
   return [
@@ -245,7 +246,7 @@ function buildGates(
     gate('post-implementation-file-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['implement-artifact'], 'pre_review'),
     gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
     gate('post-fix-verification-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['fix-loop'], 'post_fix'),
-    gate('post-fix-validation', [typecheckCommand, testCommand].join(' && '), 'exit_code', false, ['post-fix-verification-gate'], 'post_fix'),
+    gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['post-fix-verification-gate'], 'post_fix'),
     gate(
       'final-review-pass-gate',
       [
@@ -257,7 +258,7 @@ function buildGates(
       ['final-review-claude', 'final-review-codex'],
       'final',
     ),
-    gate('final-hard-validation', [typecheckCommand, testCommand].join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
+    gate('final-hard-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', gitDiffCommand, 'artifact_exists', true, ['final-hard-validation'], 'final'),
     gate('regression-gate', isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
   ];
