@@ -7,7 +7,7 @@
  */
 
 import { isAbsolute, resolve } from 'node:path';
-import type { RunRetryMetadata } from '../runtime/types.js';
+import type { RunRetryMetadata } from '@ricky/runtime/types';
 
 // ---------------------------------------------------------------------------
 // Source types — the intake surfaces that can hand off to Ricky locally
