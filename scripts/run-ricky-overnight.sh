@@ -594,6 +594,12 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/signoff.md \
         'LOCAL_BYOH_ENTRYPOINT_COMPLETE'
       ;;
+    workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts)
+      git cat-file -e HEAD:src/surfaces/cli/entrypoint/interactive-cli.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/entrypoint/interactive-cli.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/entrypoint/index.ts 2>/dev/null \
+        && grep -Eq 'runOnboarding|runLocal|handleCloudGenerate|diagnose' src/surfaces/cli/entrypoint/interactive-cli.ts
+      ;;
     workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts)
       git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.ts 2>/dev/null \
         && git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.test.ts 2>/dev/null \
