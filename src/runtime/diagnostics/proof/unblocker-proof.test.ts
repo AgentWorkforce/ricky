@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
+  RecoveryDecision,
+} from '../failure-diagnosis.js';
+import {
   UnblockerDomain,
   canonicalCases,
   diagnoseCanonical,
   allBlockerClasses,
   domainOf,
   domainMap,
+  casesForDomain,
+  recoveryDecisionsForDomain,
 } from './unblocker-proof.js';
 
 // ── Domain coverage ───────────────────────────────────────────────
@@ -107,6 +112,101 @@ describe('unblocker-proof: orchestration blockers', () => {
       expect(d!.unblocker.rationale).toBeTruthy();
     },
   );
+});
+
+// ── Validation strategy blockers ─────────────────────────────────
+
+describe('unblocker-proof: validation strategy blockers', () => {
+  const vsCases = canonicalCases.filter(
+    (c) => c.domain === UnblockerDomain.ValidationStrategy,
+  );
+
+  it('has at least one validation strategy blocker case', () => {
+    expect(vsCases.length).toBeGreaterThan(0);
+  });
+
+  it.each(vsCases.map((c) => [c.blockerClass, c] as const))(
+    '%s diagnoses via the engine and returns guidance',
+    (_label, c) => {
+      const d = diagnoseCanonical(c);
+      expect(d).not.toBeNull();
+      expect(d!.blockerClass).toBe(c.blockerClass);
+      expect(d!.unblocker.action).toBeTruthy();
+      expect(d!.unblocker.rationale).toBeTruthy();
+    },
+  );
+});
+
+// ── Recovery recommendations are domain-appropriate ──────────────
+
+describe('unblocker-proof: recovery recommendations by domain', () => {
+  it('runtime domain allows step retry or probe (no block)', () => {
+    const decisions = recoveryDecisionsForDomain(UnblockerDomain.Runtime);
+    for (const d of decisions) {
+      expect([
+        RecoveryDecision.RestartRuntime,
+        RecoveryDecision.ProbeBeforeRerun,
+      ]).toContain(d);
+    }
+  });
+
+  it('environment domain blocks rerun or requires mutation', () => {
+    const cases = casesForDomain(UnblockerDomain.Environment);
+    for (const c of cases) {
+      const diag = diagnoseCanonical(c)!;
+      const rec = diag.unblocker.recovery;
+      // environment blockers either block rerun or require mutation
+      expect(
+        rec.rerunAllowed === false || rec.requiresMutation === true,
+      ).toBe(true);
+    }
+  });
+
+  it('orchestration domain requires workflow patch before rerun', () => {
+    const decisions = recoveryDecisionsForDomain(UnblockerDomain.Orchestration);
+    for (const d of decisions) {
+      expect(d).toBe(RecoveryDecision.PatchWorkflowBeforeRerun);
+    }
+  });
+
+  it('validation strategy domain recommends replacing the validation gate', () => {
+    const decisions = recoveryDecisionsForDomain(UnblockerDomain.ValidationStrategy);
+    for (const d of decisions) {
+      expect(d).toBe(RecoveryDecision.ReplaceValidation);
+    }
+  });
+});
+
+// ── Taxonomy category alignment ──────────────────────────────────
+
+describe('unblocker-proof: taxonomy categories align with domains', () => {
+  it('runtime cases use agent_runtime taxonomy prefix', () => {
+    for (const c of casesForDomain(UnblockerDomain.Runtime)) {
+      const d = diagnoseCanonical(c)!;
+      expect(d.taxonomyCategory).toMatch(/^agent_runtime\./);
+    }
+  });
+
+  it('environment cases use environment taxonomy prefix', () => {
+    for (const c of casesForDomain(UnblockerDomain.Environment)) {
+      const d = diagnoseCanonical(c)!;
+      expect(d.taxonomyCategory).toMatch(/^environment\./);
+    }
+  });
+
+  it('orchestration cases use workflow_structure taxonomy prefix', () => {
+    for (const c of casesForDomain(UnblockerDomain.Orchestration)) {
+      const d = diagnoseCanonical(c)!;
+      expect(d.taxonomyCategory).toMatch(/^workflow_structure\./);
+    }
+  });
+
+  it('validation strategy cases use validation_strategy taxonomy prefix', () => {
+    for (const c of casesForDomain(UnblockerDomain.ValidationStrategy)) {
+      const d = diagnoseCanonical(c)!;
+      expect(d.taxonomyCategory).toMatch(/^validation_strategy\./);
+    }
+  });
 });
 
 // ── Guidance differentiation ──────────────────────────────────────

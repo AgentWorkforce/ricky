@@ -117,3 +117,16 @@ export function allBlockerClasses(): string[] {
 export function domainOf(blockerClass: string): UnblockerDomain | undefined {
   return domainMap.get(blockerClass);
 }
+
+/** Return canonical cases filtered to a given domain. */
+export function casesForDomain(domain: UnblockerDomain): readonly CanonicalCase[] {
+  return canonicalCases.filter((c) => c.domain === domain);
+}
+
+/** Return the set of distinct recovery decisions across a domain's canonical cases. */
+export function recoveryDecisionsForDomain(domain: UnblockerDomain): string[] {
+  return casesForDomain(domain).map((c) => {
+    const d = diagnose(c.signal);
+    return d!.unblocker.recovery.decision;
+  });
+}
