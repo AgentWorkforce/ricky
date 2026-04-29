@@ -201,6 +201,8 @@ export function getWorkspaceLayoutProofCases(): WorkspaceLayoutProofCase[] {
     workspaces?: unknown;
     packageManager?: unknown;
     bin?: unknown;
+    scripts?: Record<string, unknown>;
+    files?: unknown;
   }>('package.json');
 
   return [

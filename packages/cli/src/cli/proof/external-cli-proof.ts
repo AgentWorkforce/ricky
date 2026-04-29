@@ -170,13 +170,28 @@ async function linkRickyCliIntoExternalRepo(repoRoot: string, repoDir: string): 
   }
 
   const targetPath = resolve(repoRoot, binRelativePath);
-  await access(targetPath, constants.F_OK);
+  await ensureLinkedCliTargetExists(repoRoot, targetPath);
   await chmod(targetPath, 0o755);
 
   const linkedBinPath = join(repoDir, 'node_modules/.bin/ricky');
   await mkdir(dirname(linkedBinPath), { recursive: true });
   await symlink(targetPath, linkedBinPath);
   return linkedBinPath;
+}
+
+async function ensureLinkedCliTargetExists(repoRoot: string, targetPath: string): Promise<void> {
+  try {
+    await access(targetPath, constants.F_OK);
+    return;
+  } catch {
+    const bundleResult = await DEFAULT_RUNNER.run('npm', ['run', 'bundle'], { cwd: repoRoot });
+    if (bundleResult.exitCode !== 0) {
+      throw new Error(
+        `Failed to prepare linked Ricky CLI bundle at ${targetPath}.\nstdout:\n${bundleResult.stdout}\nstderr:\n${bundleResult.stderr}`,
+      );
+    }
+    await access(targetPath, constants.F_OK);
+  }
 }
 
 async function installAgentRelayFixture(repoDir: string): Promise<void> {
