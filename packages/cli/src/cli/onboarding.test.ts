@@ -18,6 +18,30 @@ import {
 } from './index.js';
 
 describe('Ricky CLI onboarding compatibility surface', () => {
+  it('renders the deterministic first-run onboarding contract with Local/BYOH before Cloud', () => {
+    const output = renderOnboarding({ isFirstRun: true, isTTY: true, env: {} });
+    const cloudModeGuidance = renderModeResult('cloud');
+    const localOptionIndex = output.indexOf('  > [1] Local / BYOH  — generate workflow artifacts for your local repo');
+    const cloudOptionIndex = output.indexOf('    [2] Cloud         — generate workflow artifacts through AgentWorkforce Cloud');
+    const localResultIndex = output.indexOf('  Local / BYOH mode selected.');
+    const cloudGuidanceIndex = output.indexOf('Cloud provider guidance:');
+
+    expect(output).toContain("Welcome to Ricky! Let's get you set up.");
+    expect(output).toContain('Ricky generates workflow artifacts for your repo.');
+    expect(output).toContain('  Choice [1]:');
+    expect(localOptionIndex).toBeGreaterThanOrEqual(0);
+    expect(cloudOptionIndex).toBeGreaterThan(localOptionIndex);
+    expect(localResultIndex).toBeGreaterThan(cloudOptionIndex);
+    expect(cloudGuidanceIndex).toBeGreaterThan(localResultIndex);
+    expect(output).toContain('No Cloud credentials required.');
+    expect(output).toContain('npx agent-relay cloud connect google');
+    expect(output).toContain('Open your AgentWorkforce Cloud settings -> Integrations -> GitHub');
+    expect(cloudModeGuidance).toContain('Cloud dashboard / Nango-backed connection flow.');
+    expect(renderSuggestedNextAction('local')).toBe(
+      'Next: run a local handoff with `ricky --mode local --spec "<workflow spec>"`, `--spec-file`, or `--stdin`.',
+    );
+  });
+
   it('re-exports the stable ASCII welcome and first-run copy', () => {
     const output = renderOnboarding({ isFirstRun: true, isTTY: true, env: {} });
 

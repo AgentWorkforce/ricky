@@ -421,7 +421,7 @@ describe('runOnboarding', () => {
     const output = new PassThrough();
 
     // When NO_COLOR is set in the injected env, banner output must contain no ANSI escapes
-    const result = await runOnboarding({
+    const injectedEnvResult = await runOnboarding({
       input: inputStream('1'),
       output,
       isTTY: true,
@@ -429,9 +429,30 @@ describe('runOnboarding', () => {
       configStore: store,
     });
 
-    expect(result.bannerShown).toBe(true);
-    // ANSI escape sequences start with \x1b[
-    expect(result.output).not.toMatch(/\x1b\[/);
+    expect(injectedEnvResult.bannerShown).toBe(true);
+    expect(injectedEnvResult.output).not.toMatch(/\x1b\[/);
+
+    const ambientOutput = new PassThrough();
+    const previousNoColor = process.env.NO_COLOR;
+    process.env.NO_COLOR = '1';
+
+    try {
+      const ambientEnvResult = await runOnboarding({
+        input: inputStream('1'),
+        output: ambientOutput,
+        isTTY: true,
+        configStore: store,
+      });
+
+      expect(ambientEnvResult.bannerShown).toBe(true);
+      expect(ambientEnvResult.output).not.toMatch(/\x1b\[/);
+    } finally {
+      if (previousNoColor === undefined) {
+        delete process.env.NO_COLOR;
+      } else {
+        process.env.NO_COLOR = previousNoColor;
+      }
+    }
   });
 
   it('renders colored banner when NO_COLOR is absent from resolved env', async () => {
