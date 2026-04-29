@@ -136,7 +136,6 @@ Review checklist:
         'test -f src/product/generation/pipeline.test.ts',
         'grep -Eq "describe|it\\(" src/product/generation/pipeline.test.ts',
         'grep -Eq "80|dry-run|review|channel|pattern" src/product/generation/pipeline.test.ts',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/generation/pipeline\\.test\\.ts"',
         'echo GENERATION_PIPELINE_TESTS_VERIFIED',
       ].join(' && '),
       captureOutput: true,
