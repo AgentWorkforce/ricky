@@ -49,7 +49,7 @@ describe('Ricky workspace layout proof', () => {
     ['package-manifests-complete', ['workspace package manifests checked: 6', 'packages/shared/package.json: exists=true']],
     ['typescript-config-covers-workspace', ['tsconfig.base.json exists: true', 'root references packages: true']],
     ['vitest-config-covers-workspace', ['picks up packages/*/src/**/*.test.ts: true', 'picks up test/**/*.test.ts: true']],
-    ['cli-bin-still-wired', ['bin/ricky exists: true', 'packages/cli/src/bin/ricky.ts exists: true']],
+    ['cli-bin-still-wired', ['package.json bin.ricky: ./dist/ricky.js', 'packages/cli/src/bin/ricky.ts exists: true', 'prepack bundles the CLI: true']],
     ['package-boundaries-by-manifest', ['workspace dependency mismatches: 0']],
     ['no-old-src-product-tree', ['root src/ exists: false']],
   ] satisfies Array<[WorkspaceLayoutProofCaseName, string[]]>)(

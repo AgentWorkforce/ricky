@@ -412,29 +412,36 @@ export function getWorkspaceLayoutProofCases(): WorkspaceLayoutProofCase[] {
     },
     {
       name: 'cli-bin-still-wired',
-      description: 'The ricky bin shim remains wired to the CLI workspace source entrypoint.',
+      description: 'The published ricky bin is a self-contained bundle of the CLI workspace source entrypoint.',
       evaluate: () => {
-        const binExists = fileExists('bin/ricky');
         const binTarget = packageBinTarget(rootPkg);
+        const targetIsBundle = binTarget === './dist/ricky.js' || binTarget === 'dist/ricky.js';
+        const bundlerScriptExists = fileExists('scripts/bundle-cli.mjs');
         const packageBinExists = fileExists('packages/cli/src/bin/ricky.ts');
-        const shimText = binExists ? readText('bin/ricky') : '';
-        const resolvesToCliPackage = shimText.includes('packages/cli/src/commands/cli-main.ts');
+        const cliMainExists = fileExists('packages/cli/src/commands/cli-main.ts');
+        const prepackBuildsBundle = typeof rootPkg.scripts?.prepack === 'string'
+          && rootPkg.scripts.prepack.includes('bundle');
+        const filesIncludesDist = Array.isArray(rootPkg.files) && rootPkg.files.includes('dist');
 
         return result(
           'cli-bin-still-wired',
-          [binExists, binTarget === './bin/ricky' || binTarget === 'bin/ricky', packageBinExists, resolvesToCliPackage],
+          [targetIsBundle, bundlerScriptExists, packageBinExists, cliMainExists, prepackBuildsBundle, filesIncludesDist],
           [
-            `bin/ricky exists: ${binExists}`,
             `package.json bin.ricky: ${binTarget || '(missing)'}`,
+            `bundler script exists: ${bundlerScriptExists}`,
             `packages/cli/src/bin/ricky.ts exists: ${packageBinExists}`,
-            `bin shim resolves to packages/cli/src/commands/cli-main.ts: ${resolvesToCliPackage}`,
+            `packages/cli/src/commands/cli-main.ts exists: ${cliMainExists}`,
+            `prepack bundles the CLI: ${prepackBuildsBundle}`,
+            `published files include dist: ${filesIncludesDist}`,
           ],
           [],
           [
-            ...(binExists ? [] : ['Missing bin/ricky']),
-            ...(binTarget ? [] : ['Root package.json bin does not map ricky']),
+            ...(targetIsBundle ? [] : ['Root package.json bin.ricky does not map to ./dist/ricky.js']),
+            ...(bundlerScriptExists ? [] : ['Missing scripts/bundle-cli.mjs']),
             ...(packageBinExists ? [] : ['Missing packages/cli/src/bin/ricky.ts']),
-            ...(resolvesToCliPackage ? [] : ['bin/ricky does not resolve to the CLI package command entrypoint']),
+            ...(cliMainExists ? [] : ['Missing packages/cli/src/commands/cli-main.ts']),
+            ...(prepackBuildsBundle ? [] : ['prepack script does not run the bundler']),
+            ...(filesIncludesDist ? [] : ['Root package.json files does not include dist']),
           ],
         );
       },
