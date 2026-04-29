@@ -28,7 +28,7 @@
     "build": "tsc -b tsconfig.build.json",
     "bundle": "node scripts/bundle-cli.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "npm run bundle && vitest run",
     "test:flat-layout": "RICKY_INCLUDE_FLAT_LAYOUT_PROOF=1 vitest run test/flat-layout-proof/flat-layout-proof.test.ts",
     "test:workspaces": "npm test --workspaces --if-present",
     "batch": "bash scripts/run-ricky-batch.sh",
