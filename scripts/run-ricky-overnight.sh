@@ -142,9 +142,16 @@ EOF
 reconcile_stale_state_dir() {
   local checkpoint_file="$1"
   local artifact_dir=""
+  local queue_mode=""
+  local current_pass=""
+  local current_index=""
+  local workflows_run=""
+  local initial_git_head=""
+  local current_workflow=""
   local run_pid=""
   local run_pgid=""
   local status_file=""
+  local reconciled_status=""
   local key raw_value value
 
   [[ -f "$checkpoint_file" ]] || return 0
@@ -154,7 +161,13 @@ reconcile_stale_state_dir() {
     value="$(printf '%b' "${raw_value//\\/\\\\}")"
     eval "value=$raw_value" 2>/dev/null || value="$raw_value"
     case "$key" in
+      queue_mode) queue_mode="$value" ;;
+      current_pass) current_pass="$value" ;;
+      current_index) current_index="$value" ;;
+      workflows_run) workflows_run="$value" ;;
       artifact_dir) artifact_dir="$value" ;;
+      initial_git_head) initial_git_head="$value" ;;
+      current_workflow) current_workflow="$value" ;;
       run_pid) run_pid="$value" ;;
       run_pgid) run_pgid="$value" ;;
     esac
@@ -166,8 +179,29 @@ reconcile_stale_state_dir() {
   if [[ -f "$status_file" ]] && grep -qx 'running' "$status_file"; then
     if ! is_pid_running "$run_pid" && ! is_process_group_running "$run_pgid"; then
       mark_artifact_stale_or_complete "$artifact_dir"
+      reconciled_status="$(cat "$status_file" 2>/dev/null || true)"
       log "reconciled stale overnight state from $checkpoint_file -> $artifact_dir"
-      rm -f "$checkpoint_file" "$(dirname "$checkpoint_file")/latest-run.txt"
+
+      if [[ "$reconciled_status" == "complete" && -n "$current_workflow" && "$current_index" =~ ^[0-9]+$ ]]; then
+        cat > "$checkpoint_file" <<EOF
+queue_mode=$(printf '%q' "$queue_mode")
+current_pass=$(printf '%q' "$current_pass")
+current_index=$(printf '%q' "$((current_index + 1))")
+workflows_run=$(printf '%q' "$workflows_run")
+artifact_dir=$(printf '%q' "$artifact_dir")
+initial_git_head=$(printf '%q' "$initial_git_head")
+current_workflow=''
+run_pid=''
+run_pgid=''
+updated_at=$(printf '%q' "$(date '+%Y-%m-%dT%H:%M:%S%z')")
+EOF
+      else
+        rm -f "$checkpoint_file"
+      fi
+
+      if [[ ! -f "$checkpoint_file" ]]; then
+        rm -f "$(dirname "$checkpoint_file")/latest-run.txt"
+      fi
     fi
   fi
 }
@@ -588,16 +622,52 @@ EOF
   printf '%s\n' "$ARTIFACT_DIR" > "$STATE_LOG"
 }
 
+resolve_resume_checkpoint_file() {
+  local fallback_state_file="$STATE_FILE"
+  local candidate=""
+  local newest_file=""
+  local newest_epoch="0"
+  local candidate_epoch="0"
+
+  if [[ -f "$fallback_state_file" ]]; then
+    printf '%s\n' "$fallback_state_file"
+    return 0
+  fi
+
+  for candidate in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*/checkpoint.env; do
+    [[ -f "$candidate" ]] || continue
+    candidate_epoch="$(stat -f '%m' "$candidate" 2>/dev/null || printf '0')"
+    if [[ ! "$candidate_epoch" =~ ^[0-9]+$ ]]; then
+      candidate_epoch="0"
+    fi
+    if (( candidate_epoch >= newest_epoch )); then
+      newest_epoch="$candidate_epoch"
+      newest_file="$candidate"
+    fi
+  done
+
+  if [[ -n "$newest_file" ]]; then
+    log "resume requested with no $QUEUE_MODE checkpoint; using latest checkpoint $newest_file"
+    printf '%s\n' "$newest_file"
+    return 0
+  fi
+
+  return 1
+}
+
 restore_checkpoint() {
+  local resume_checkpoint_file=""
+
   if [[ "$RESUME_FLAG" != "--resume" ]]; then
     return 0
   fi
-  if [[ ! -f "$STATE_FILE" ]]; then
+
+  if ! resume_checkpoint_file="$(resolve_resume_checkpoint_file)"; then
     log "resume requested but no checkpoint exists for queue mode $QUEUE_MODE"
     return 0
   fi
 
-  log "restoring checkpoint from $STATE_FILE"
+  log "restoring checkpoint from $resume_checkpoint_file"
 
   local restored_queue_mode=""
   local restored_current_pass=""
@@ -624,7 +694,7 @@ restore_checkpoint() {
       run_pid) restored_run_pid="$value" ;;
       run_pgid) restored_run_pgid="$value" ;;
     esac
-  done < "$STATE_FILE"
+  done < "$resume_checkpoint_file"
 
   local previous_artifact_dir="${restored_artifact_dir:-}"
   local previous_status_file=""
