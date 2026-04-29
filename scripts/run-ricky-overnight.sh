@@ -52,6 +52,7 @@ RUN_PID="$$"
 RUN_PGID=""
 SCRIPT_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
 RUNNER_START_PID=""
+RUNNER_EXPECTS_DETACHED_PGID="false"
 STATUS_MARKED="false"
 RESTORED_ARTIFACT_DIR=""
 RESTORED_QUEUE_FILE=""
@@ -830,9 +831,13 @@ start_runner() {
   local workflow_path="$1"
   local runner_output="$2"
 
+  RUNNER_EXPECTS_DETACHED_PGID="false"
+
   if command -v setsid >/dev/null 2>&1; then
+    RUNNER_EXPECTS_DETACHED_PGID="true"
     setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
   elif command -v python3 >/dev/null 2>&1; then
+    RUNNER_EXPECTS_DETACHED_PGID="true"
     log "setsid unavailable; detaching runner via python3 setsid fallback" >&2
     python3 - "$RUNNER" "$workflow_path" "$runner_output" <<'PY' &
 import os
@@ -847,6 +852,7 @@ os.close(stream)
 os.execvp(runner, [runner, 'run', workflow_path])
 PY
   elif command -v perl >/dev/null 2>&1; then
+    RUNNER_EXPECTS_DETACHED_PGID="true"
     log "setsid unavailable; detaching runner via perl setsid fallback" >&2
     perl -e 'use POSIX qw(setsid); my ($runner, $workflow, $output) = @ARGV; open my $fh, q{>>}, $output or die "open $output: $!"; setsid() or die "setsid: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!";' "$RUNNER" "$workflow_path" "$runner_output" &
   else
@@ -855,6 +861,35 @@ PY
   fi
 
   RUNNER_START_PID="$!"
+}
+
+resolve_runner_pgid() {
+  local runner_pid="$1"
+  local attempts="0"
+  local candidate=""
+
+  command -v ps >/dev/null 2>&1 || return 0
+
+  while is_pid_running "$runner_pid"; do
+    candidate="$(ps -o pgid= -p "$runner_pid" 2>/dev/null | tr -d '[:space:]')"
+    if [[ -n "$candidate" ]]; then
+      if [[ "$RUNNER_EXPECTS_DETACHED_PGID" != "true" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+      if [[ -z "$SCRIPT_PGID" || "$candidate" != "$SCRIPT_PGID" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    fi
+    attempts=$((attempts + 1))
+    (( attempts >= 10 )) && break
+    sleep 0.2
+  done
+
+  if [[ -n "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+  fi
 }
 
 run_one() {
@@ -903,13 +938,10 @@ run_one() {
   start_runner "$workflow_path" "$runner_output"
   runner_pid="$RUNNER_START_PID"
   RUN_PID="$runner_pid"
-  RUN_PGID=""
-  if command -v ps >/dev/null 2>&1; then
-    RUN_PGID="$(ps -o pgid= -p "$runner_pid" 2>/dev/null | tr -d '[:space:]')"
-    if [[ -n "$SCRIPT_PGID" && "$RUN_PGID" == "$SCRIPT_PGID" ]]; then
-      log "runner shares shell process group; disabling process-group tracking for stale detection"
-      RUN_PGID=""
-    fi
+  RUN_PGID="$(resolve_runner_pgid "$runner_pid")"
+  if [[ -n "$SCRIPT_PGID" && -n "$RUN_PGID" && "$RUN_PGID" == "$SCRIPT_PGID" ]]; then
+    log "runner shares shell process group; disabling process-group tracking for stale detection"
+    RUN_PGID=""
   fi
   persist_checkpoint
 
