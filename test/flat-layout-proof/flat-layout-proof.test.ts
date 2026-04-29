@@ -53,7 +53,10 @@ describe('Ricky flat src layout proof', () => {
       'cli-bin-still-wired',
       ['bin/ricky exists: true', 'package.json bin.ricky: ./bin/ricky', 'bin shim resolves to src/surfaces/cli/<entrypoint>: true'],
     ],
-    ['legacy-packages-removed', ['packages/ entry count: 0', 'packages/ removed or empty: true']],
+    [
+      'legacy-packages-removed',
+      ['packages/ file count: 6', 'packages/ contains only CLI compatibility shims: true'],
+    ],
     ['surface-folder-shape', ['src/surfaces exists: true', 'src/surfaces/cli exists: true', 'future surfaces documented: slack/, web/, mac/']],
     [
       'layer-direction-by-folder',

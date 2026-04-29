@@ -397,18 +397,37 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
     },
     {
       name: 'legacy-packages-removed',
-      description: 'The legacy packages/ workspace folder is removed or empty.',
+      description: 'The legacy packages/ workspace folder is removed or contains only explicit CLI compatibility shims.',
       evaluate: () => {
         const packagesExists = directoryExists('packages');
-        const packagesEntries = packagesExists ? readdirSync(join(repoRoot(), 'packages')).sort() : [];
-        const removedOrEmpty = !packagesExists || packagesEntries.length === 0;
+        const packageFiles = packagesExists ? listFiles('packages') : [];
+        const allowedShimFiles = new Set([
+          'packages/cli/src/cli/ascii-art.ts',
+          'packages/cli/src/cli/index.ts',
+          'packages/cli/src/cli/mode-selector.ts',
+          'packages/cli/src/cli/onboarding.test.ts',
+          'packages/cli/src/cli/onboarding.ts',
+          'packages/cli/src/cli/welcome.ts',
+        ]);
+        const disallowedFiles = packageFiles.filter((file) => !allowedShimFiles.has(file));
+        const packageJsonExists = fileExists('packages/cli/package.json');
+        const removedOrExplicitShims = !packagesExists || (disallowedFiles.length === 0 && !packageJsonExists);
 
         return result(
           'legacy-packages-removed',
-          [removedOrEmpty],
-          [`packages/ exists: ${packagesExists}`, `packages/ entry count: ${packagesEntries.length}`, `packages/ removed or empty: ${removedOrEmpty}`],
+          [removedOrExplicitShims],
+          [
+            `packages/ exists: ${packagesExists}`,
+            `packages/ file count: ${packageFiles.length}`,
+            `packages/ contains only CLI compatibility shims: ${removedOrExplicitShims}`,
+          ],
           [],
-          removedOrEmpty ? [] : [`packages/ still contains: ${packagesEntries.join(', ')}`],
+          removedOrExplicitShims
+            ? []
+            : [
+                ...disallowedFiles.map((file) => `packages/ has non-shim file: ${file}`),
+                ...(packageJsonExists ? ['packages/cli/package.json would recreate a workspace package'] : []),
+              ],
         );
       },
     },

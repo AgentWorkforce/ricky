@@ -6,7 +6,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'test/**/*.test.ts', 'packages/cli/src/**/*.test.ts'],
     exclude: [
       ...configDefaults.exclude,
       '.claude/**',
