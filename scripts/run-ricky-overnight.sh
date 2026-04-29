@@ -436,6 +436,16 @@ workflow_is_already_satisfied() {
   local workflow_path="$1"
 
   case "$workflow_path" in
+    workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/implement-failure-diagnosis-engine/signoff.md \
+        'RICKY_FAILURE_DIAGNOSIS_ENGINE_COMPLETE'
+      ;;
+    workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/prove-runtime-environment-orchestration-unblockers/signoff.md \
+        'RICKY_FAILURE_UNBLOCKER_PROOF_COMPLETE'
+      ;;
     workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts)
       git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.ts 2>/dev/null \
         && git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.test.ts 2>/dev/null
