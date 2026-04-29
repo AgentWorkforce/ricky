@@ -327,33 +327,31 @@ Check the original review checklist again and verify any earlier concrete failur
     .step('final-signoff', {
       type: 'deterministic',
       dependsOn: ['regression-scope-gate'],
-      command: [
-        "cat > .workflow-artifacts/wave0-foundation/architecture-docs/signoff.md <<'EOF'",
-        '# Wave 0 architecture docs signoff',
-        '',
-        'Files changed:',
-        '- docs/architecture/ricky-runtime-architecture.md',
-        '- docs/architecture/ricky-surfaces-and-ingress.md',
-        '- docs/architecture/ricky-specialist-boundaries.md',
-        '',
-        'Validation commands run:',
-        '- grep -Eiq "Agent Assistant|runtime composition|workflow" docs/architecture/ricky-runtime-architecture.md',
-        '- grep -Eiq "surfaces|ingress|local|cloud|Slack|CLI|MCP" docs/architecture/ricky-surfaces-and-ingress.md',
-        '- grep -Eiq "specialist|author|debug|repair|validator|analytics" docs/architecture/ricky-specialist-boundaries.md',
-        '- wc -l docs/architecture/ricky-*.md',
-        '',
-        'Review verdicts:',
-        '- review.md: REVIEW_ARCHITECTURE_PASS',
-        '- final-review.md: REVIEW_ARCHITECTURE_PASS',
-        '- gates: W0_ARCHITECTURE_DOCS_POST_FIX_VALIDATION_PASS, W0_ARCHITECTURE_DOCS_REVIEW_PASS_GATE, W0_ARCHITECTURE_DOCS_FINAL_GATE_PASS, W0_ARCHITECTURE_DOCS_REGRESSION_SCOPE_PASS',
-        '',
-        'Remaining risks:',
-        '- Architecture file paths and contracts are documented ahead of implementation and still need future code waves to honor them.',
-        '- This workflow intentionally validates documentation structure and scope, not runtime behavior.',
-        '',
-        'W0_ARCHITECTURE_DOCS_WORKFLOW_COMPLETE',
-        'EOF',
-      ].join(' && '),
+      command: `cat > .workflow-artifacts/wave0-foundation/architecture-docs/signoff.md <<'EOF'
+# Wave 0 architecture docs signoff
+
+Files changed:
+- docs/architecture/ricky-runtime-architecture.md
+- docs/architecture/ricky-surfaces-and-ingress.md
+- docs/architecture/ricky-specialist-boundaries.md
+
+Validation commands run:
+- grep -Eiq "Agent Assistant|runtime composition|workflow" docs/architecture/ricky-runtime-architecture.md
+- grep -Eiq "surfaces|ingress|local|cloud|Slack|CLI|MCP" docs/architecture/ricky-surfaces-and-ingress.md
+- grep -Eiq "specialist|author|debug|repair|validator|analytics" docs/architecture/ricky-specialist-boundaries.md
+- wc -l docs/architecture/ricky-*.md
+
+Review verdicts:
+- review.md: REVIEW_ARCHITECTURE_PASS
+- final-review.md: REVIEW_ARCHITECTURE_PASS
+- gates: W0_ARCHITECTURE_DOCS_POST_FIX_VALIDATION_PASS, W0_ARCHITECTURE_DOCS_REVIEW_PASS_GATE, W0_ARCHITECTURE_DOCS_FINAL_GATE_PASS, W0_ARCHITECTURE_DOCS_REGRESSION_SCOPE_PASS
+
+Remaining risks:
+- Architecture file paths and contracts are documented ahead of implementation and still need future code waves to honor them.
+- This workflow intentionally validates documentation structure and scope, not runtime behavior.
+
+W0_ARCHITECTURE_DOCS_WORKFLOW_COMPLETE
+EOF`,
       captureOutput: true,
       failOnError: true,
     })
