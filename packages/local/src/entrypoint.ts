@@ -578,7 +578,7 @@ export async function runLocal(
       ],
       nextActions: [
         isMissingFile
-          ? 'Confirm the artifact path exists and retry the command.'
+          ? 'Confirm the artifact path exists and rerun the command.'
           : 'Check the spec content or artifact path and retry.',
       ],
     };
