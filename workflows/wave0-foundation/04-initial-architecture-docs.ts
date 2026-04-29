@@ -21,6 +21,12 @@ async function main() {
       role: 'Architecture author who writes focused docs for Ricky runtime, ingress surfaces, and specialist boundaries.',
       retries: 2,
     })
+    .agent('reviewer-claude', {
+      cli: 'claude',
+      preset: 'reviewer',
+      role: 'Reviews architecture docs for scope control, implementation usefulness, and evidence quality.',
+      retries: 1,
+    })
     .agent('reviewer-codex', {
       cli: 'codex',
       preset: 'reviewer',
@@ -267,7 +273,7 @@ Do not add extra docs or source code. If the review passes, make no unrelated ed
     })
 
     .step('final-review-architecture-docs', {
-      agent: 'reviewer-codex',
+      agent: 'reviewer-claude',
       dependsOn: ['post-fix-structure-gate'],
       task: `Final review for the Wave 0 architecture docs after fixes and post-fix validation.
 
@@ -279,7 +285,8 @@ Read:
 - Post-fix validation output:
 {{steps.post-fix-structure-gate.output}}
 
-Check the original review checklist again and verify any earlier concrete failures were fixed. Write .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md and end with REVIEW_ARCHITECTURE_PASS or REVIEW_ARCHITECTURE_FAIL.`,
+Check the original review checklist again and verify any earlier concrete failures were fixed. Write .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md and end with REVIEW_ARCHITECTURE_PASS or REVIEW_ARCHITECTURE_FAIL.
+Note that this workflow intentionally uses Claude for the final review because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing the final-review artifact.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/architecture-docs/final-review.md' },
     })
 
