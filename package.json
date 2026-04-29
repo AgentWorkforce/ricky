@@ -37,7 +37,8 @@
   },
   "dependencies": {
     "@agent-assistant/turn-context": "^0.3.11",
-    "@agent-relay/sdk": "^5.0.0"
+    "@agent-relay/sdk": "^5.0.0",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
