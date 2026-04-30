@@ -281,7 +281,7 @@ acquire_global_lock() {
   read_global_lock
   other_pid="$LOCK_OWNER_PID"
 
-  if [[ -n "$other_pid" && "$other_pid" != "$$" ]] && is_pid_running "$other_pid"; then
+  if [[ -n "$other_pid" && "$other_pid" != "$$" ]] && kill -0 "$other_pid" 2>/dev/null; then
     STATUS_REASON="another overnight harness is already running: ${LOCK_OWNER_ARTIFACT_DIR:-pid $other_pid} (queue mode: ${LOCK_OWNER_QUEUE_MODE:-unknown})"
     echo "blocked" > "$STATUS_FILE"
     cat > "$SUMMARY_FILE" <<EOF
