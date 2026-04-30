@@ -278,9 +278,10 @@ read_global_lock() {
 acquire_global_lock() {
   local other_pid=""
 
-  other_pid="$(pgrep -f 'run-ricky-overnight.sh' | awk -v self="$$" '$1 != self { print $1; exit }')"
-  if [[ -n "$other_pid" ]]; then
-    read_global_lock
+  read_global_lock
+  other_pid="$LOCK_OWNER_PID"
+
+  if [[ -n "$other_pid" && "$other_pid" != "$$" ]] && is_pid_running "$other_pid"; then
     STATUS_REASON="another overnight harness is already running: ${LOCK_OWNER_ARTIFACT_DIR:-pid $other_pid} (queue mode: ${LOCK_OWNER_QUEUE_MODE:-unknown})"
     echo "blocked" > "$STATUS_FILE"
     cat > "$SUMMARY_FILE" <<EOF
