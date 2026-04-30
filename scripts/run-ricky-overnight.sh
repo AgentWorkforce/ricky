@@ -119,6 +119,13 @@ artifact_runner_logs_show_failure() {
   return 1
 }
 
+clear_artifact_checkpoint() {
+  local artifact_dir="$1"
+
+  [[ -n "$artifact_dir" ]] || return 0
+  rm -f "$artifact_dir/checkpoint.env"
+}
+
 mark_artifact_stale_or_complete() {
   local artifact_dir="$1"
   local status_file="$artifact_dir/status.txt"
@@ -145,6 +152,8 @@ mark_artifact_stale_or_complete() {
 - reason: $resolved_reason
 - artifact_dir: $artifact_dir
 EOF
+
+  clear_artifact_checkpoint "$artifact_dir"
 }
 
 reconcile_stale_state_dir() {
@@ -234,6 +243,10 @@ clear_all_state_checkpoints() {
     [[ -d "$state_dir" ]] || continue
     rm -f "$state_dir/checkpoint.env" "$state_dir/latest-run.txt"
   done
+}
+
+finalize_current_artifact_checkpoint() {
+  clear_artifact_checkpoint "$ARTIFACT_DIR"
 }
 
 kill_process_group() {
@@ -1284,6 +1297,7 @@ if (( QUEUE_TOTAL == 0 )); then
   fi
 
   clear_all_state_checkpoints
+  finalize_current_artifact_checkpoint
   write_summary "$(cat "$STATUS_FILE")"
   log "overnight queue finished without actionable workflows"
   exit 0
@@ -1339,5 +1353,6 @@ else
   mark_status "complete" "queue finished"
 fi
 clear_all_state_checkpoints
+finalize_current_artifact_checkpoint
 write_summary "$(cat "$STATUS_FILE")"
 log "overnight queue finished"
