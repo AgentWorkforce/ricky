@@ -51,7 +51,7 @@ describe('Ricky flat src layout proof', () => {
     ],
     [
       'cli-bin-still-wired',
-      ['bin/ricky exists: true', 'package.json bin.ricky: ./bin/ricky', 'bin shim resolves to src/surfaces/cli/<entrypoint>: true'],
+      ['package.json bin.ricky: ./dist/ricky.js', 'src/surfaces/cli/bin/ricky.ts exists: true', 'prepack builds the bundle: true'],
     ],
     [
       'legacy-packages-removed',

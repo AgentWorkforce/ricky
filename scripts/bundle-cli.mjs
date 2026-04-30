@@ -2,10 +2,10 @@
 /**
  * Bundle the ricky CLI into a single self-contained ESM file at dist/ricky.js.
  *
- * The published @agentworkforce/ricky package can't rely on workspace symlinks
- * that only exist in the development checkout, so we bake @ricky/* sources in
- * via esbuild. Real npm dependencies (@agent-relay/*, @agent-assistant/*,
- * etc.) stay external — npm install resolves them.
+ * The published @agentworkforce/ricky package ships a precompiled bundle so
+ * global installs work without a separate tsc pass and without devDeps like
+ * tsx. Real npm dependencies stay external (resolved at install time);
+ * everything from src/ is inlined.
  */
 
 import { build } from 'esbuild';
@@ -15,33 +15,17 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
-function collectExternals() {
-  const externals = new Set();
-  const rootPkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
-  for (const name of Object.keys(rootPkg.dependencies ?? {})) externals.add(name);
-
-  const workspacePkgs = ['shared', 'runtime', 'product', 'cloud', 'local', 'cli'];
-  for (const ws of workspacePkgs) {
-    const pkg = JSON.parse(readFileSync(join(repoRoot, 'packages', ws, 'package.json'), 'utf8'));
-    for (const dep of Object.keys(pkg.dependencies ?? {})) {
-      if (dep.startsWith('@ricky/')) continue;
-      externals.add(dep);
-    }
-  }
-  return Array.from(externals);
-}
-
-const externals = collectExternals();
+const rootPkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+const externals = Object.keys(rootPkg.dependencies ?? {});
 
 await build({
-  entryPoints: [join(repoRoot, 'packages/cli/src/bin/ricky.ts')],
+  entryPoints: [join(repoRoot, 'src/surfaces/cli/bin/ricky.ts')],
   bundle: true,
   platform: 'node',
   format: 'esm',
   target: 'node20',
   outfile: join(repoRoot, 'dist/ricky.js'),
   external: externals,
-  conditions: ['development'],
   resolveExtensions: ['.ts', '.tsx', '.mjs', '.js'],
   sourcemap: 'inline',
   logLevel: 'info',
