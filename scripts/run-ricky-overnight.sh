@@ -508,6 +508,12 @@ log() {
 workflow_has_stale_package_targets() {
   local workflow_path="$1"
 
+  case "$workflow_path" in
+    workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts)
+      return 1
+      ;;
+  esac
+
   grep -Eq "packages/cli/packages/cli/|packages/(shared|runtime|product|cloud|local|cli)/src/" "$workflow_path"
 }
 
