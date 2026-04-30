@@ -369,28 +369,36 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
     },
     {
       name: 'cli-bin-still-wired',
-      description: 'The ricky bin shim remains wired to the flat CLI surface entrypoint.',
+      description: 'The published ricky bin is a self-contained bundle of the flat CLI surface entrypoint.',
       evaluate: () => {
-        const binExists = fileExists('bin/ricky');
         const binTarget = packageBinTarget(rootPkg);
-        const shimText = binExists ? readText('bin/ricky') : '';
-        const flatCliMatch = shimText.match(/src\/surfaces\/cli\/[A-Za-z0-9._/-]+\.ts/);
-        const resolvesToFlatCli = flatCliMatch !== null;
+        const targetIsBundle = binTarget === './dist/ricky.js' || binTarget === 'dist/ricky.js';
+        const bundlerScriptExists = fileExists('scripts/bundle-cli.mjs');
+        const cliBinSourceExists = fileExists('src/surfaces/cli/bin/ricky.ts');
+        const cliMainExists = fileExists('src/surfaces/cli/commands/cli-main.ts');
+        const prepackBuildsBundle = typeof rootPkg.scripts?.prepack === 'string'
+          && (rootPkg.scripts.prepack.includes('bundle') || rootPkg.scripts.prepack.includes('build'));
+        const filesIncludesDist = Array.isArray(rootPkg.files) && rootPkg.files.includes('dist');
 
         return result(
           'cli-bin-still-wired',
-          [binExists, binTarget === './bin/ricky' || binTarget === 'bin/ricky', resolvesToFlatCli],
+          [targetIsBundle, bundlerScriptExists, cliBinSourceExists, cliMainExists, prepackBuildsBundle, filesIncludesDist],
           [
-            `bin/ricky exists: ${binExists}`,
             `package.json bin.ricky: ${binTarget || '(missing)'}`,
-            `bin shim resolves to src/surfaces/cli/<entrypoint>: ${resolvesToFlatCli}`,
-            `bin shim flat cli target: ${flatCliMatch?.[0] ?? '(missing)'}`,
+            `bundler script exists: ${bundlerScriptExists}`,
+            `src/surfaces/cli/bin/ricky.ts exists: ${cliBinSourceExists}`,
+            `src/surfaces/cli/commands/cli-main.ts exists: ${cliMainExists}`,
+            `prepack builds the bundle: ${prepackBuildsBundle}`,
+            `published files include dist: ${filesIncludesDist}`,
           ],
           [],
           [
-            ...(binExists ? [] : ['Missing bin/ricky']),
-            ...(binTarget ? [] : ['Root package.json bin does not map ricky']),
-            ...(resolvesToFlatCli ? [] : ['bin/ricky does not resolve to src/surfaces/cli/<entrypoint>']),
+            ...(targetIsBundle ? [] : ['Root package.json bin.ricky does not map to ./dist/ricky.js']),
+            ...(bundlerScriptExists ? [] : ['Missing scripts/bundle-cli.mjs']),
+            ...(cliBinSourceExists ? [] : ['Missing src/surfaces/cli/bin/ricky.ts']),
+            ...(cliMainExists ? [] : ['Missing src/surfaces/cli/commands/cli-main.ts']),
+            ...(prepackBuildsBundle ? [] : ['prepack script does not run the bundle/build']),
+            ...(filesIncludesDist ? [] : ['Root package.json files does not include dist']),
           ],
         );
       },
