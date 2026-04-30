@@ -368,7 +368,11 @@ describe('workflow generation pipeline', () => {
       artifactPath: 'workflows/generated/command-evidence.ts',
     });
 
+    expect(result.artifact).not.toBeNull();
+    const renderedArtifact = result.artifact!;
+
     expect(result.dryRunCommand).toBe('npx agent-relay run --dry-run workflows/generated/command-evidence.ts');
+    expect(renderedArtifact.content).not.toContain(result.dryRunCommand);
     expect(result.validation).toMatchObject({
       valid: true,
       errors: [],
@@ -422,6 +426,18 @@ describe('workflow generation pipeline', () => {
     expect(result.plannedChecks.map((check) => check.command)).toContain(result.dryRunCommand);
     expect(result.plannedChecks.find((check) => check.name === 'dry-run')?.stage).toBe('dry_run');
     expect(result.plannedChecks.find((check) => check.name === 'dry-run')?.command).toContain('--dry-run');
+    expect(result.plannedChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: expect.any(String),
+          command: expect.any(String),
+          stage: expect.any(String),
+          failOnError: expect.any(Boolean),
+          verificationType: expect.any(String),
+        }),
+      ]),
+    );
+    expect(result.plannedChecks.every((check) => check.command.length > 0)).toBe(true);
   });
 
   it('final review output paths match the final-review-pass-gate check paths', () => {
