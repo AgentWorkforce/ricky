@@ -41,6 +41,12 @@ describe('workflow generation pipeline', () => {
       riskLevel: 'high',
       overrideUsed: false,
     });
+    expect(result.patternDecision.reason).toMatch(/parallel implementation, review, and validation gates/i);
+    expect(result.executionRoute).toMatchObject({
+      artifactDelivery: 'write_local_file',
+      resolvedTarget: 'local',
+      runnerCommand: 'npx agent-relay run --dry-run workflows/generated/code-generation.ts',
+    });
     expect(artifact).toMatchObject({
       artifactPath: 'workflows/generated/code-generation.ts',
       pattern: 'dag',
@@ -59,6 +65,7 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
     expect(artifact.content).toContain('.agent("validator-claude"');
+    expect(artifact.content).toContain('80-to-100 fix loop');
     expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -93,6 +100,13 @@ describe('workflow generation pipeline', () => {
       hasReviewStage: true,
       hasDeterministicGates: true,
     });
+    expect(result.deterministicValidationCommands).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('npx tsc --noEmit'),
+        expect.stringContaining('npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts'),
+        expect.stringContaining('git diff --name-only'),
+      ]),
+    );
     expect(result.validation.issues).toEqual([]);
     expect(artifact.content).toMatch(/80-to-100 fix loop/i);
     expect(artifact.content).toContain('final-review');
@@ -221,9 +235,21 @@ describe('workflow generation pipeline', () => {
     });
 
     expect(result.success).toBe(true);
+    expect(result.validation).toMatchObject({
+      valid: true,
+      errors: [],
+      issues: [],
+      hasReviewStage: true,
+      hasDeterministicGates: true,
+    });
     expect(result.artifact).not.toBeNull();
     const artifact = result.artifact!;
 
+    expect(result.executionRoute).toMatchObject({
+      invocationSurface: 'cli',
+      artifactDelivery: 'write_local_file',
+      runnerCommand: 'npx agent-relay run --dry-run workflows/generated/doc-spec.ts',
+    });
     expect(result.patternDecision).toMatchObject({
       pattern: 'supervisor',
       riskLevel: 'medium',
@@ -238,6 +264,7 @@ describe('workflow generation pipeline', () => {
     );
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
+    expect(artifact.content).toContain('docs/release-readiness.md');
     expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -300,6 +327,7 @@ describe('workflow generation pipeline', () => {
     expect(result.skillContext.loadWarnings).toEqual([
       expect.stringContaining('missing-optional-skill'),
     ]);
+    expect(result.skillContext.applicableSkillNames).not.toContain('missing-optional-skill');
     expect(result.validation.issues).toEqual([
       expect.objectContaining({
         severity: 'warning',
@@ -327,12 +355,19 @@ describe('workflow generation pipeline', () => {
     expect(result.artifact).not.toBeNull();
     const artifact = result.artifact!;
 
+    expect(result.validation).toMatchObject({
+      valid: true,
+      errors: [],
+      issues: [],
+      hasReviewStage: true,
+      hasDeterministicGates: true,
+    });
     expect(artifact).toMatchObject({
       workflowId: expect.stringMatching(/^ricky-/),
       channel: expect.stringMatching(/^wf-ricky-/),
     });
     expect(artifact.channel).not.toBe('general');
-    expect(artifact.content).toContain('workflow(');
+    expect(artifact.content).toMatch(/\bworkflow\(/);
     expect(artifact.content).toContain(`.channel("${artifact.channel}")`);
     expect(artifact.content).toContain('.run({ cwd: process.cwd() })');
     expect(artifact.content).toContain('review-claude');
@@ -392,6 +427,7 @@ describe('workflow generation pipeline', () => {
           command: result.dryRunCommand,
           stage: 'dry_run',
           failOnError: true,
+          verificationType: 'exit_code',
         }),
         expect.objectContaining({ name: 'final-hard-validation', command: expect.stringContaining('npx tsc --noEmit') }),
         expect.objectContaining({ name: 'regression-gate', command: 'npx vitest run' }),
