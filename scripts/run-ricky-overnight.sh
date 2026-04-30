@@ -1311,7 +1311,7 @@ if (( QUEUE_TOTAL == 0 )); then
   persist_checkpoint
 
   if (( LAST_FILTER_REMOVED_STALE > 0 )); then
-    mark_status "blocked" "queue exhausted by repo-state filtering: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
+    mark_status "complete" "queue exhausted after repo-state filtering: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
   else
     mark_status "complete" "queue exhausted with no actionable workflows after repo-state filtering"
   fi
