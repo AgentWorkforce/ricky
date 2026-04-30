@@ -192,7 +192,7 @@ Write .workflow-artifacts/wave2-product/workflow-generation-pipeline/review-clau
         "  ['pattern selector stays explicit', /selectPattern|patternSelector|pattern-selector/s, `${contents['src/product/generation/pattern-selector.ts'] ?? ''}\n${contents['src/product/generation/pipeline.ts'] ?? ''}`],",
         "  ['renderer encodes deterministic gates and review stages', /deterministic|review|file_exists|typecheck|git-diff|80/s, `${contents['src/product/generation/template-renderer.ts'] ?? ''}\n${contents['src/product/generation/pipeline.ts'] ?? ''}`],",
         "  ['pipeline exposes validation planning', /dry-run|validation|plannedChecks|deterministic/s, contents['src/product/generation/pipeline.ts'] ?? ''],",
-        "  ['tests cover rendered workflow behavior', /workflow\(|dry-run|review|channel|pattern|80/s, contents['src/product/generation/pipeline.test.ts'] ?? ''],",
+        "  ['tests cover rendered workflow behavior', /(workflow\\(|dry-run|review|channel|pattern|80)/s, contents['src/product/generation/pipeline.test.ts'] ?? ''],",
         "];",
         "const missingChecks = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label]) => label);",
         "const failures = [...missingFiles.map((file) => `missing file: ${file}`), ...missingChecks];",
