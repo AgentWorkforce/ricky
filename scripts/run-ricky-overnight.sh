@@ -498,6 +498,21 @@ artifact_signoff_has_marker() {
   [[ -f "$signoff_path" ]] && grep -q "$marker" "$signoff_path"
 }
 
+append_unique_lines_from_file() {
+  local source_file="$1"
+  local destination_file="$2"
+  local line=""
+
+  [[ -f "$source_file" ]] || return 0
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if [[ ! -f "$destination_file" ]] || ! grep -Fxq "$line" "$destination_file"; then
+      printf '%s\n' "$line" >> "$destination_file"
+    fi
+  done < "$source_file"
+}
+
 workflow_is_already_satisfied() {
   local workflow_path="$1"
 
@@ -806,11 +821,17 @@ restore_checkpoint() {
 
   local previous_artifact_dir="${restored_artifact_dir:-}"
   local previous_status_file=""
+  local previous_failed_file=""
+  local previous_skipped_file=""
   local previous_pid="${restored_run_pid:-}"
   local previous_pgid="${restored_run_pgid:-}"
   if [[ -n "$previous_artifact_dir" ]]; then
     previous_status_file="$previous_artifact_dir/status.txt"
+    previous_failed_file="$previous_artifact_dir/failed.txt"
+    previous_skipped_file="$previous_artifact_dir/skipped.txt"
   fi
+  append_unique_lines_from_file "$previous_failed_file" "$FAILED_FILE"
+  append_unique_lines_from_file "$previous_skipped_file" "$SKIPPED_FILE"
   if [[ -n "$previous_status_file" && -f "$previous_status_file" ]] && grep -qx 'running' "$previous_status_file"; then
     if ! is_pid_running "$previous_pid" && ! is_process_group_running "$previous_pgid"; then
       mark_artifact_stale_or_complete "$previous_artifact_dir"
@@ -1286,7 +1307,9 @@ if (( QUEUE_TOTAL == 0 )); then
   CURRENT_WORKFLOW=""
   persist_checkpoint
 
-  if (( LAST_FILTER_REMOVED_STALE > 0 )); then
+  if [[ -s "$FAILED_FILE" ]]; then
+    mark_status "complete-with-failures" "restored checkpoint contained failed workflows; queue is now exhausted after repo-state filtering"
+  elif (( LAST_FILTER_REMOVED_STALE > 0 )); then
     mark_status "complete" "queue exhausted after repo-state filtering: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
   else
     mark_status "complete" "queue exhausted with no actionable workflows after repo-state filtering"
