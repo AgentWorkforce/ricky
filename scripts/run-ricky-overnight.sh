@@ -664,6 +664,22 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/signoff.md \
         'LOCAL_BYOH_ENTRYPOINT_COMPLETE'
       ;;
+    workflows/wave0-foundation/04-initial-architecture-docs.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave0-foundation/architecture-docs/signoff.md \
+        'W0_ARCHITECTURE_DOCS_WORKFLOW_COMPLETE'
+      ;;
+    workflows/wave2-product/02-workflow-generation-pipeline.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-generation-pipeline/fix-loop.md \
+        'GENERATION_PIPELINE_FIX_LOOP_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-generation-pipeline/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-generation-pipeline/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS'
+      ;;
     workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts)
       git cat-file -e HEAD:src/surfaces/cli/entrypoint/interactive-cli.ts 2>/dev/null \
         && git cat-file -e HEAD:src/surfaces/cli/entrypoint/interactive-cli.test.ts 2>/dev/null \
