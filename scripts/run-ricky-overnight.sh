@@ -11,6 +11,9 @@ MAX_WORKFLOWS_PER_INVOCATION="${RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION:-4}
 IDLE_TIMEOUT_SECONDS="${RICKY_OVERNIGHT_IDLE_TIMEOUT_SECONDS:-900}"
 DEFAULT_MAX_WORKFLOWS_PER_INVOCATION=4
 STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
+GLOBAL_STATE_ROOT="$REPO_ROOT/.workflow-artifacts/overnight-state"
+GLOBAL_LOCK_DIR="$GLOBAL_STATE_ROOT/active.lock"
+GLOBAL_LOCK_FILE="$GLOBAL_LOCK_DIR/lock.env"
 RESUME_FLAG="${1:-}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_DIR="$REPO_ROOT/.workflow-artifacts/overnight-$STAMP"
@@ -25,8 +28,13 @@ CHECKPOINT_FILE="$ARTIFACT_DIR/checkpoint.env"
 STOP_FILE="$ARTIFACT_DIR/STOP"
 STATE_FILE="$STATE_ROOT/checkpoint.env"
 STATE_LOG="$STATE_ROOT/latest-run.txt"
+LOCK_OWNER_PID=""
+LOCK_OWNER_ARTIFACT_DIR=""
+LOCK_OWNER_QUEUE_MODE=""
+LOCK_OWNER_STATUS_FILE=""
+LOCK_ACQUIRED="false"
 
-mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT"
+mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT" "$GLOBAL_STATE_ROOT"
 : > "$LOG_FILE"
 : > "$FAILED_FILE"
 : > "$SKIPPED_FILE"
@@ -237,6 +245,66 @@ kill_process_group() {
   kill -0 -- "-$pgid" 2>/dev/null && kill -KILL -- "-$pgid" 2>/dev/null || true
 }
 
+release_global_lock() {
+  [[ "$LOCK_ACQUIRED" == "true" ]] || return 0
+  rm -f "$GLOBAL_LOCK_FILE"
+  rmdir "$GLOBAL_LOCK_DIR" 2>/dev/null || true
+  LOCK_ACQUIRED="false"
+}
+
+read_global_lock() {
+  local key raw_value value
+
+  LOCK_OWNER_PID=""
+  LOCK_OWNER_ARTIFACT_DIR=""
+  LOCK_OWNER_QUEUE_MODE=""
+  LOCK_OWNER_STATUS_FILE=""
+
+  [[ -f "$GLOBAL_LOCK_FILE" ]] || return 0
+
+  while IFS='=' read -r key raw_value; do
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    value="$(printf '%b' "${raw_value//\\/\\\\}")"
+    eval "value=$raw_value" 2>/dev/null || value="$raw_value"
+    case "$key" in
+      pid) LOCK_OWNER_PID="$value" ;;
+      artifact_dir) LOCK_OWNER_ARTIFACT_DIR="$value" ;;
+      queue_mode) LOCK_OWNER_QUEUE_MODE="$value" ;;
+      status_file) LOCK_OWNER_STATUS_FILE="$value" ;;
+    esac
+  done < "$GLOBAL_LOCK_FILE"
+}
+
+acquire_global_lock() {
+  local other_pid=""
+
+  other_pid="$(pgrep -f 'run-ricky-overnight.sh' | awk -v self="$$" '$1 != self { print $1; exit }')"
+  if [[ -n "$other_pid" ]]; then
+    read_global_lock
+    STATUS_REASON="another overnight harness is already running: ${LOCK_OWNER_ARTIFACT_DIR:-pid $other_pid} (queue mode: ${LOCK_OWNER_QUEUE_MODE:-unknown})"
+    echo "blocked" > "$STATUS_FILE"
+    cat > "$SUMMARY_FILE" <<EOF
+# Ricky overnight run
+
+- status: blocked
+- reason: $STATUS_REASON
+- artifact_dir: $ARTIFACT_DIR
+EOF
+    STATUS_MARKED="true"
+    exit 0
+  fi
+
+  rm -rf "$GLOBAL_LOCK_DIR"
+  mkdir -p "$GLOBAL_LOCK_DIR"
+  cat > "$GLOBAL_LOCK_FILE" <<EOF
+pid=$$
+artifact_dir=$(printf '%q' "$ARTIFACT_DIR")
+queue_mode=$(printf '%q' "$QUEUE_MODE")
+status_file=$(printf '%q' "$STATUS_FILE")
+EOF
+  LOCK_ACQUIRED="true"
+}
+
 quarantine_repo_runtime_state() {
   local quarantine_root="$ARTIFACT_DIR/runtime-state-quarantine"
   local candidate=""
@@ -259,28 +327,30 @@ on_exit() {
     kill_process_group "$RUN_PGID"
   fi
 
-  if [[ "$STATUS_MARKED" == "true" ]]; then
-    return "$exit_code"
-  fi
-
-  if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
-    if artifact_runner_logs_show_success "$ARTIFACT_DIR"; then
-      STATUS_REASON="runner completed before harness status flush"
-      echo "complete" > "$STATUS_FILE"
-      persist_checkpoint
-      write_summary "complete"
-    else
-      STATUS_REASON="process exited unexpectedly"
-      echo "stale" > "$STATUS_FILE"
-      persist_checkpoint
-      write_summary "stale"
+  if [[ "$STATUS_MARKED" != "true" ]]; then
+    if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
+      if artifact_runner_logs_show_success "$ARTIFACT_DIR"; then
+        STATUS_REASON="runner completed before harness status flush"
+        echo "complete" > "$STATUS_FILE"
+        persist_checkpoint
+        write_summary "complete"
+      else
+        STATUS_REASON="process exited unexpectedly"
+        echo "stale" > "$STATUS_FILE"
+        persist_checkpoint
+        write_summary "stale"
+      fi
     fi
   fi
+
+  release_global_lock
 
   return "$exit_code"
 }
 
 trap on_exit EXIT
+
+acquire_global_lock
 
 write_queue() {
   case "$QUEUE_MODE" in
