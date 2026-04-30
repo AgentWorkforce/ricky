@@ -421,9 +421,17 @@ queue_count() {
   awk 'NF { count += 1 } END { print count + 0 }' "$QUEUE_FILE"
 }
 
+LAST_FILTER_REMOVED_TOTAL=0
+LAST_FILTER_REMOVED_MISSING=0
+LAST_FILTER_REMOVED_STALE=0
+LAST_FILTER_REMOVED_SATISFIED=0
+
 filter_queue_for_repo_state() {
   local filtered_queue="$ARTIFACT_DIR/queue.filtered.tmp"
   local removed_count=0
+  local removed_missing=0
+  local removed_stale=0
+  local removed_satisfied=0
   local workflow_path=""
 
   cp "$QUEUE_FILE" "$ARTIFACT_DIR/queue.raw.txt"
@@ -435,18 +443,21 @@ filter_queue_for_repo_state() {
     if [[ ! -f "$workflow_path" ]]; then
       log "dropping missing workflow from queue: $workflow_path"
       removed_count=$((removed_count + 1))
+      removed_missing=$((removed_missing + 1))
       continue
     fi
 
     if workflow_has_stale_package_targets "$workflow_path"; then
       log "dropping stale pre-package-split workflow from queue: $workflow_path"
       removed_count=$((removed_count + 1))
+      removed_stale=$((removed_stale + 1))
       continue
     fi
 
     if workflow_is_already_satisfied "$workflow_path"; then
       log "dropping already-satisfied workflow from queue: $workflow_path"
       removed_count=$((removed_count + 1))
+      removed_satisfied=$((removed_satisfied + 1))
       continue
     fi
 
@@ -454,7 +465,11 @@ filter_queue_for_repo_state() {
   done < "$QUEUE_FILE"
 
   mv "$filtered_queue" "$QUEUE_FILE"
-  log "queue prepared with $(queue_count) actionable workflows (${removed_count} removed)"
+  LAST_FILTER_REMOVED_TOTAL="$removed_count"
+  LAST_FILTER_REMOVED_MISSING="$removed_missing"
+  LAST_FILTER_REMOVED_STALE="$removed_stale"
+  LAST_FILTER_REMOVED_SATISFIED="$removed_satisfied"
+  log "queue prepared with $(queue_count) actionable workflows (${removed_count} removed: stale=${removed_stale}, satisfied=${removed_satisfied}, missing=${removed_missing})"
 }
 
 fallback_to_expanded_queue_when_flight_safe_exhausted() {
@@ -908,6 +923,10 @@ write_summary() {
 - artifact_dir: $ARTIFACT_DIR
 - checkpoint_file: $summary_checkpoint_file
 - last_commit: $(cat "$LAST_COMMIT_FILE" 2>/dev/null || echo unknown)
+- queue_filter_removed_total: ${LAST_FILTER_REMOVED_TOTAL:-0}
+- queue_filter_removed_stale: ${LAST_FILTER_REMOVED_STALE:-0}
+- queue_filter_removed_satisfied: ${LAST_FILTER_REMOVED_SATISFIED:-0}
+- queue_filter_removed_missing: ${LAST_FILTER_REMOVED_MISSING:-0}
 - failed_workflows:
 $(sed 's/^/  - /' "$FAILED_FILE" 2>/dev/null || true)
 - skipped_workflows:
@@ -1284,6 +1303,24 @@ while IFS= read -r workflow_line; do
   QUEUE_ITEMS+=("$workflow_line")
 done < "$QUEUE_FILE"
 QUEUE_TOTAL="${#QUEUE_ITEMS[@]}"
+
+if (( QUEUE_TOTAL == 0 )); then
+  CURRENT_PASS="$PASSES"
+  CURRENT_INDEX=0
+  CURRENT_WORKFLOW=""
+  persist_checkpoint
+
+  if (( LAST_FILTER_REMOVED_STALE > 0 )); then
+    mark_status "blocked" "queue exhausted by repo-state filtering: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
+  else
+    mark_status "complete" "queue exhausted with no actionable workflows after repo-state filtering"
+  fi
+
+  clear_all_state_checkpoints
+  write_summary "$(cat "$STATUS_FILE")"
+  log "overnight queue finished without actionable workflows"
+  exit 0
+fi
 
 for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
   local_start_index="$CURRENT_INDEX"
