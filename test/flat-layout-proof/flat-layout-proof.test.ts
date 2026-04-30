@@ -44,7 +44,7 @@ describe('Ricky flat src layout proof', () => {
       'single-tsconfig-covers-src',
       ['tsconfig.json files found: 1', 'only root tsconfig.json: true', 'root include references src: true', 'root compilerOptions.strict: true'],
     ],
-    ['single-vitest-config', ['vitest.config.ts files found: 1', 'only root vitest.config.ts: true', 'picks up src/**/*.test.ts: true']],
+    ['single-vitest-config', ['vitest.config.ts files found: 1', 'only root vitest.config.ts: true', 'picks up src/**/*.test.ts: true', 'contains legacy packages/ test globs: false']],
     [
       'no-cross-package-aliases',
       ['@ricky import specifiers under src: 0', 'package.json has file:../ references: false', 'surfaces use relative inner-layer imports only: true'],
@@ -53,10 +53,7 @@ describe('Ricky flat src layout proof', () => {
       'cli-bin-still-wired',
       ['package.json bin.ricky: ./dist/ricky.js', 'src/surfaces/cli/bin/ricky.ts exists: true', 'prepack builds the bundle: true'],
     ],
-    [
-      'legacy-packages-removed',
-      ['packages/ file count: 6', 'packages/ contains only CLI compatibility shims: true'],
-    ],
+    ['legacy-packages-removed', ['packages/ exists: false', 'packages/ file count: 0']],
     ['surface-folder-shape', ['src/surfaces exists: true', 'src/surfaces/cli exists: true', 'future surfaces documented: slack/, web/, mac/']],
     [
       'layer-direction-by-folder',

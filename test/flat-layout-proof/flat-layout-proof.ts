@@ -322,25 +322,28 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
     },
     {
       name: 'single-vitest-config',
-      description: 'The repo has one root Vitest config that discovers src tests.',
+      description: 'The repo has one root Vitest config that discovers src tests and does not keep legacy packages/ test globs alive.',
       evaluate: () => {
         const configs = vitestConfigFiles();
         const configText = fileExists('vitest.config.ts') ? readText('vitest.config.ts') : '';
         const onlyRootConfig = configs.length === 1 && configs[0] === 'vitest.config.ts';
         const srcTestPattern = vitestConfigIncludesSrcTests(configText);
+        const hasLegacyPackagesGlob = configText.includes('packages/');
 
         return result(
           'single-vitest-config',
-          [onlyRootConfig, srcTestPattern],
+          [onlyRootConfig, srcTestPattern, !hasLegacyPackagesGlob],
           [
             `vitest.config.ts files found: ${configs.length}`,
             `only root vitest.config.ts: ${onlyRootConfig}`,
             `picks up src/**/*.test.ts: ${srcTestPattern}`,
+            `contains legacy packages/ test globs: ${hasLegacyPackagesGlob}`,
           ],
           [],
           [
             ...(onlyRootConfig ? [] : [`Expected only root vitest.config.ts, found: ${configs.join(', ') || '(none)'}`]),
             ...(srcTestPattern ? [] : ['Root Vitest config does not include src/**/*.test.ts']),
+            ...(!hasLegacyPackagesGlob ? [] : ['Root Vitest config still includes legacy packages/ test globs']),
           ],
         );
       },
@@ -407,36 +410,24 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
     },
     {
       name: 'legacy-packages-removed',
-      description: 'The legacy packages/ workspace folder is removed or contains only explicit CLI compatibility shims.',
+      description: 'The legacy packages/ workspace folder is fully removed.',
       evaluate: () => {
         const packagesExists = directoryExists('packages');
         const packageFiles = packagesExists ? listFiles('packages') : [];
-        const allowedShimFiles = new Set([
-          'packages/cli/src/cli/ascii-art.ts',
-          'packages/cli/src/cli/index.ts',
-          'packages/cli/src/cli/mode-selector.ts',
-          'packages/cli/src/cli/onboarding.test.ts',
-          'packages/cli/src/cli/onboarding.ts',
-          'packages/cli/src/cli/welcome.ts',
-        ]);
-        const disallowedFiles = packageFiles.filter((file) => !allowedShimFiles.has(file));
-        const packageJsonExists = fileExists('packages/cli/package.json');
-        const removedOrExplicitShims = !packagesExists || (disallowedFiles.length === 0 && !packageJsonExists);
 
         return result(
           'legacy-packages-removed',
-          [removedOrExplicitShims],
+          [!packagesExists],
           [
             `packages/ exists: ${packagesExists}`,
             `packages/ file count: ${packageFiles.length}`,
-            `packages/ contains only CLI compatibility shims: ${removedOrExplicitShims}`,
           ],
           [],
-          removedOrExplicitShims
+          !packagesExists
             ? []
             : [
-                ...disallowedFiles.map((file) => `packages/ has non-shim file: ${file}`),
-                ...(packageJsonExists ? ['packages/cli/package.json would recreate a workspace package'] : []),
+                'packages/ directory still exists after the flat-layout collapse',
+                ...packageFiles.map((file) => `legacy package file still present: ${file}`),
               ],
         );
       },

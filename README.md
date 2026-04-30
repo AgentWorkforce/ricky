@@ -77,39 +77,38 @@ The provided runner mark is used as the Ricky project logo and should be used as
 
 ## Bootstrap
 
-Ricky uses npm workspaces as its workspace package manager. The root package is private and orchestrates the internal `@ricky/*` packages under `packages/`.
+Ricky is a single-package repo with a flat `src/` tree. The product surfaces live under `src/surfaces/`, with shared inner layers under `src/{shared,runtime,product,cloud,local}`.
 
 ```sh
-npm install          # install root and workspace dependencies
-npm run typecheck    # typecheck every workspace package and root workflow assets
-npm test             # run package tests plus root proof tests
-npm start            # launch the CLI through @ricky/cli
+npm install          # install dependencies for the single root package
+npm run typecheck    # typecheck src, tests, workflows, and scripts
+npm test             # bundle the CLI and run the repo test suite + proof tests
+npm start            # launch the CLI from src/surfaces/cli/commands/cli-main.ts
 ```
 
 npm scripts:
-- `npm start` — launch the interactive CLI through the `@ricky/cli` workspace
-- `npm test` — run workspace package tests, then root proof tests
-- `npm run typecheck` — run workspace package typechecks, then root workflow/proof typecheck
+- `npm start` — launch the interactive CLI from `src/surfaces/cli/commands/cli-main.ts`
+- `npm test` — bundle the CLI, then run the full test suite and proof tests
+- `npm run typecheck` — typecheck the flat `src/` tree plus workflows/proofs/scripts
 - `npm run batch` — run workflow batches via `scripts/run-ricky-batch.sh`
 - `npm run overnight` — run the overnight workflow queue via `scripts/run-ricky-overnight.sh`
   - default queue mode is now `flight-safe`, which only runs the workflows currently classified as unattended-safe
-  - use `RICKY_OVERNIGHT_QUEUE_MODE=expanded` when you explicitly want the broader supervised queue, including the wave11 flat-layout collapse migration
   - default behavior checkpoints after a small bounded chunk (`RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION`, default `4`) and can resume with `bash scripts/run-ricky-overnight.sh --resume`
   - checkpoint state lives under `.workflow-artifacts/overnight-state/<queue-mode>/checkpoint.env`
 
 ## Package shape
 
-Ricky is a private npm workspace repo.
+Ricky is a private single-package repo.
 
-Workspace packages:
-- `@ricky/shared` — shared constants, workflow config models, and workflow evidence models
-- `@ricky/runtime` — local coordination, runtime evidence, failure classification, and diagnostics
-- `@ricky/product` — spec intake, workflow generation, specialists, and analytics
-- `@ricky/cloud` — Cloud auth, workspace scoping, provider guidance, and generate API surfaces
-- `@ricky/local` — local/BYOH request normalization and execution composition
-- `@ricky/cli` — onboarding, command surface, and interactive CLI entrypoints
+Source layout:
+- `src/shared` — shared constants, workflow config models, and workflow evidence models
+- `src/runtime` — local coordination, runtime evidence, failure classification, and diagnostics
+- `src/product` — spec intake, workflow generation, specialists, and analytics
+- `src/cloud` — Cloud auth, workspace scoping, provider guidance, and generate API surfaces
+- `src/local` — local/BYOH request normalization and execution composition
+- `src/surfaces/cli` — onboarding, command surface, and interactive CLI entrypoints
 
-The root keeps workflow program assets, bootstrap scripts, shared validation config, npm workspace lock/config state, and repo-level proof tests.
+The root keeps workflow program assets, bootstrap scripts, validation config, bundle output, and repo-level proof tests.
 
 ## Product direction
 
@@ -123,4 +122,4 @@ The product goal is:
 
 ## Repo shape
 
-Ricky now uses the workspace package split described in `docs/architecture/ricky-package-split-migration-spec.md`. Product source should live in the owning `packages/*/src` tree rather than in a parallel root `src/` tree.
+Ricky now uses the flat-layout collapse proved by `test/flat-layout-proof/`. Product source should live under the root `src/` tree, with surfaces under `src/surfaces/` and no legacy `packages/*` workspace sources.

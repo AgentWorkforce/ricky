@@ -691,13 +691,9 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:src/cloud/index.ts 2>/dev/null \
         && git cat-file -e HEAD:src/local/index.ts 2>/dev/null \
         && git cat-file -e HEAD:src/surfaces/cli/index.ts 2>/dev/null \
-        && ! git cat-file -e HEAD:packages/shared/package.json 2>/dev/null \
-        && ! git cat-file -e HEAD:packages/runtime/package.json 2>/dev/null \
-        && ! git cat-file -e HEAD:packages/product/package.json 2>/dev/null \
-        && ! git cat-file -e HEAD:packages/cloud/package.json 2>/dev/null \
-        && ! git cat-file -e HEAD:packages/local/package.json 2>/dev/null \
-        && ! git cat-file -e HEAD:packages/cli/package.json 2>/dev/null \
-        && ! grep -q '"workspaces"' package.json
+        && ! git ls-tree -r --name-only HEAD packages | grep -q . \
+        && ! grep -q '"workspaces"' package.json \
+        && ! grep -q 'packages/' vitest.config.ts
       ;;
     *)
       return 1
