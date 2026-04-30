@@ -121,9 +121,9 @@ Accepts numeric input (1-4) or text aliases. Defaults to `local` if no input.
 
 ### The normalizer
 
-`src/local/request-normalizer.ts` accepts requests from four ingress types and normalizes them into a single contract.
+`src/local/request-normalizer.ts` accepts requests from five ingress types and normalizes them into a single contract.
 
-### Four handoff types
+### Five handoff types
 
 **CliHandoff** - direct CLI submission
 - Source: `--spec "string"` argument or stdin
@@ -141,9 +141,14 @@ Accepts numeric input (1-4) or text aliases. Defaults to `local` if no input.
 - Source: path to a workflow file on disk
 - Contains: file path, optional metadata
 
+**WebHandoff** - browser-initiated submission
+- Source: `POST /api/v1/ricky/web/submit` (see §7)
+- Contains: session/OAuth auth context, spec, mode, and metadata
+- Normalizes to `CloudGenerateRequest` when mode is `cloud` or `both`, or `LocalInvocationRequest` when mode is `local`
+
 ### Normalized output
 
-All handoff types normalize to `LocalInvocationRequest`:
+All five handoff variants normalize through the same boundary. Four of the five (CliHandoff, McpHandoff, ClaudeHandoff, WorkflowArtifactHandoff) always normalize to `LocalInvocationRequest`. WebHandoff normalizes to either `CloudGenerateRequest` (when mode is `cloud` or `both`) or `LocalInvocationRequest` (when mode is `local`), with the mode field in the handoff determining the downstream domain contract:
 
 - `spec` - the workflow spec string
 - `source` - label identifying the handoff origin

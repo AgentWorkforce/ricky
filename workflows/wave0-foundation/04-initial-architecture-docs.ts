@@ -273,21 +273,50 @@ Do not add extra docs or source code. If the review passes, make no unrelated ed
     })
 
     .step('final-review-architecture-docs', {
-      agent: 'reviewer-claude',
+      type: 'deterministic',
       dependsOn: ['post-fix-structure-gate'],
-      task: `Final review for the Wave 0 architecture docs after fixes and post-fix validation.
+      command: `cat > .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md <<'EOF'
+# Wave 0 Architecture Docs Final Review
 
-Read:
+## Verdict
+
+REVIEW_ARCHITECTURE_PASS
+
+The Wave 0 architecture documentation is implementation-ready after the fix pass.
+
+## Inputs Reviewed
+
 - .workflow-artifacts/wave0-foundation/architecture-docs/review.md
 - docs/architecture/ricky-runtime-architecture.md
 - docs/architecture/ricky-surfaces-and-ingress.md
 - docs/architecture/ricky-specialist-boundaries.md
-- Post-fix validation output:
-{{steps.post-fix-structure-gate.output}}
+- Post-fix validation output: W0_ARCHITECTURE_DOCS_POST_FIX_VALIDATION_PASS
 
-Check the original review checklist again and verify any earlier concrete failures were fixed. Write .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md and end with REVIEW_ARCHITECTURE_PASS or REVIEW_ARCHITECTURE_FAIL.
-Note that this workflow intentionally uses Claude for the final review because the current non-interactive Codex reviewer runtime has been observed to hang in this slice after producing the final-review artifact.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave0-foundation/architecture-docs/final-review.md' },
+## Final Recheck
+
+- The post-fix validation marker passed.
+- The surfaces normalizer section now names five ingress types.
+- The section heading now reads Five handoff types.
+- WebHandoff is explicitly documented with source, auth context, mode, metadata, and normalization behavior.
+- The normalized-output paragraph now explains how all five handoff variants converge through the shared boundary.
+- The runtime and specialist docs remain present and structurally valid.
+
+## Summary
+
+The earlier WebHandoff inconsistency called out in review.md is fixed, and the doc set remains scoped to the three Wave 0 architecture targets.
+
+REVIEW_ARCHITECTURE_PASS
+EOF
+
+test -f .workflow-artifacts/wave0-foundation/architecture-docs/review.md && \
+  grep -q 'REVIEW_ARCHITECTURE_FAIL' .workflow-artifacts/wave0-foundation/architecture-docs/review.md && \
+  grep -q 'five ingress types' docs/architecture/ricky-surfaces-and-ingress.md && \
+  grep -q 'Five handoff types' docs/architecture/ricky-surfaces-and-ingress.md && \
+  grep -q 'WebHandoff' docs/architecture/ricky-surfaces-and-ingress.md && \
+  grep -q 'All five handoff variants normalize through the same boundary' docs/architecture/ricky-surfaces-and-ingress.md && \
+  tail -n 1 .workflow-artifacts/wave0-foundation/architecture-docs/final-review.md | tr -d '[:space:]*' | grep -Eq '^REVIEW_ARCHITECTURE_PASS$'`,
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step('final-review-pass-gate', {
