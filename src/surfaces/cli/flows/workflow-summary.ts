@@ -34,7 +34,7 @@ export function buildWorkflowSummary(input: {
 
   const sideEffects = [
     ...(input.capture.source === 'workflow-artifact' ? [] : [`Write workflow artifact ${artifactPath}`]),
-    'Run local shell commands declared by the workflow',
+    'Run the workflow through @agent-relay/sdk/workflows',
     'Write run state, logs, evidence, and generated metadata under .workflow-artifacts/',
     'Apply only bounded non-destructive auto-fixes when explicitly running with repair enabled',
   ];
@@ -47,7 +47,7 @@ export function buildWorkflowSummary(input: {
     desiredOutcome: 'A completed local Agent Relay run with evidence, logs, artifacts, and a final outcome summary.',
     sideEffects,
     missingLocalBlockers: blockers,
-    command: `npx --no-install agent-relay run ${artifactPath}`,
+    command: `ricky run --artifact ${artifactPath}`,
   };
 }
 
@@ -95,10 +95,10 @@ export function localWorkflowSummary(
       ? 'A completed local Agent Relay execution with logs and evidence.'
       : 'A generated local workflow artifact ready for explicit execution.',
     sideEffects: localResult.execution
-      ? ['Write workflow artifact', 'Run local agent-relay execution', 'Write local run evidence and logs']
+      ? ['Write workflow artifact', 'Run local SDK workflow execution', 'Write local run evidence and logs']
       : ['Write workflow artifact only'],
     missingLocalBlockers: localResult.ok ? [] : localResult.warnings,
-    command: localResult.generation?.next?.run_command ?? `npx --no-install agent-relay run ${artifactPath}`,
+    command: localResult.generation?.next?.run_command ?? `ricky run --artifact ${artifactPath}`,
   };
 }
 
@@ -180,7 +180,7 @@ export function localPowerUserWorkflowSummary(
   const evidencePath = localResult.execution?.evidence?.logs.stdout_path
     ?? localResult.execution?.evidence?.logs.stderr_path;
   const runCommand = localResult.generation?.next?.run_command
-    ?? (workflowPath ? `npx --no-install agent-relay run ${workflowPath}` : undefined);
+    ?? (workflowPath ? `ricky run --artifact ${workflowPath}` : undefined);
 
   return {
     mode: options.mode,

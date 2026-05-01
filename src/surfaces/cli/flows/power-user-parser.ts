@@ -29,6 +29,8 @@ export interface PowerUserParsedArgs {
   refine?: false | { model?: string };
   login?: boolean;
   connectMissing?: boolean;
+  /** Set only when the CLI passes --workforce-persona/--no-workforce-persona; omitted otherwise. */
+  workforcePersonaWriterCli?: boolean;
   errors?: string[];
 }
 
@@ -87,8 +89,12 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const refine = parseRefine(effectiveArgv);
   const login = effectiveArgv.includes('--login');
   const connectMissing = effectiveArgv.includes('--connect-missing');
+  const workforcePersonaWriterCli = parseWorkforcePersonaWriterCliFlag(effectiveArgv);
 
   const errors: string[] = [...(parsed.errors ?? [])];
+  if (effectiveArgv.includes('--workforce-persona') && effectiveArgv.includes('--no-workforce-persona')) {
+    errors.push('--workforce-persona and --no-workforce-persona cannot be combined.');
+  }
   for (const flag of ['--spec', '--spec-file', '--file', '--artifact', '--workflow', '--name']) {
     if (effectiveArgv.includes(flag) && readFlagValue(effectiveArgv, flag) === undefined) {
       errors.push(`${flag} requires a value.`);
@@ -117,6 +123,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
     ...(refine ? { refine } : {}),
     ...(login ? { login: true } : {}),
     ...(connectMissing ? { connectMissing: true } : {}),
+    ...(workforcePersonaWriterCli !== undefined ? { workforcePersonaWriterCli } : {}),
     ...(errors.length > 0 ? { errors } : {}),
   };
 }
@@ -184,6 +191,12 @@ function parseRefine(argv: string[]): false | { model?: string } {
     return next && !next.startsWith('--') ? { model: next } : {};
   }
   return {};
+}
+
+function parseWorkforcePersonaWriterCliFlag(argv: string[]): boolean | undefined {
+  if (argv.includes('--no-workforce-persona')) return false;
+  if (argv.includes('--workforce-persona')) return true;
+  return undefined;
 }
 
 function parseAutoFix(argv: string[]): number | undefined {

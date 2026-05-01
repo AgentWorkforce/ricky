@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { basename, extname } from 'node:path';
 import {
   CHANNEL_PREFIX,
   DEFAULT_MAX_CONCURRENCY,
@@ -40,7 +41,12 @@ interface TeamMemberSpec {
 }
 
 export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
-  const slug = slugify(input.spec.description || input.spec.desiredAction.summary || 'generated-workflow');
+  const slug = slugify(
+    workflowNameFromArtifactPath(input.artifactPath) ||
+    input.spec.description ||
+    input.spec.desiredAction.summary ||
+    'generated-workflow',
+  );
   const workflowId = `ricky-${slug}`;
   const channel = `${CHANNEL_PREFIX}${slug}`;
   const artifactPath = input.artifactPath ?? `workflows/generated/${workflowId}.ts`;
@@ -84,6 +90,13 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
     toolSelections: toolSelection.selections,
     artifactsDir,
   };
+}
+
+function workflowNameFromArtifactPath(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const fileName = basename(path);
+  const name = basename(fileName, extname(fileName));
+  return name.trim() || undefined;
 }
 
 function renderSource(input: {

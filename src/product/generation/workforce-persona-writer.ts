@@ -265,7 +265,11 @@ export async function loadWorkforcePersonaModule(): Promise<{
   }
 
   throw new WorkforcePersonaWriterError(
-    'Workforce workload-router is unavailable. Install @agentworkforce/workload-router or build ../workforce/packages/workload-router.',
+    [
+      '@agentworkforce/workload-router is bundled as a Ricky dependency but could not be loaded.',
+      'Try reinstalling @agentworkforce/ricky (`npm install` in this project).',
+      'If you develop Ricky locally with a sibling ../workforce clone, publish or link that workload-router.',
+    ].join(' '),
     warnings,
   );
 }
@@ -319,6 +323,7 @@ export function buildWorkflowPersonaTask(
     '',
     'Agent Relay workflow standards:',
     '- Prefer TypeScript workflows using @agent-relay/sdk/workflows.',
+    '- Choose `.pattern(...)` from the normalized spec: pipeline (linear stages), supervisor (coordinated review/hand-off), or dag (parallel branches, gated fan-out). Prefer dag when multiple independent workstreams, critical evidence, or high risk; pipeline for simple linear work; supervisor when a lead must gate subordinate steps.',
     '- Use a dedicated workflow channel, not general.',
     '- Include explicit agents, step dependencies, deterministic gates, review stages, and final signoff.',
     '- Include an 80-to-100 fix loop: implement, validate, review, fix, final review, hard validation.',

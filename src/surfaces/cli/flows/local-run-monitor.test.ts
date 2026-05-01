@@ -4,11 +4,12 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { LocalResponse } from '../../../local/entrypoint.js';
-import { startLocalRunMonitor, withSafeRunOptions } from './local-run-monitor.js';
+import { localRunStateRoot, startLocalRunMonitor, withSafeRunOptions } from './local-run-monitor.js';
 
 describe('local run monitor', () => {
   it('persists state, logs, fixes, evidence, generated artifacts, and a reattach command', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'ricky-run-monitor-'));
+    const stateRoot = join(cwd, '.ricky-state');
     const response: LocalResponse = {
       ok: true,
       artifacts: [{ path: 'workflows/generated/release-health.ts', content: 'workflow("x")' }],
@@ -21,7 +22,7 @@ describe('local run monitor', () => {
         execution: {
           workflow_id: 'wf-release',
           artifact_path: 'workflows/generated/release-health.ts',
-          command: 'npx --no-install agent-relay run workflows/generated/release-health.ts',
+          command: '@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/release-health.ts',
           workflow_file: 'workflows/generated/release-health.ts',
           cwd,
           started_at: '2026-01-01T00:00:00.000Z',
@@ -36,7 +37,7 @@ describe('local run monitor', () => {
           logs: { tail: ['ok'], truncated: false },
           side_effects: {
             files_written: ['workflows/generated/release-health.ts'],
-            commands_invoked: ['npx --no-install agent-relay run workflows/generated/release-health.ts'],
+            commands_invoked: ['@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/release-health.ts'],
           },
           assertions: [{ name: 'exit', status: 'pass', detail: '0' }],
         },
@@ -55,6 +56,7 @@ describe('local run monitor', () => {
           invocationRoot: cwd,
         },
         runLocalFn,
+        stateRoot,
       });
 
       expect(state.status).toBe('completed');
@@ -81,6 +83,7 @@ describe('local run monitor', () => {
 
   it('uses an injected runIdFactory so state, log, evidence, and reattach paths are deterministic', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'ricky-deterministic-runid-'));
+    const stateRoot = join(cwd, '.ricky-state');
     const response: LocalResponse = {
       ok: true,
       artifacts: [{ path: 'workflows/generated/release-health.ts', content: 'workflow("x")' }],
@@ -101,14 +104,15 @@ describe('local run monitor', () => {
           invocationRoot: cwd,
         },
         runLocalFn,
+        stateRoot,
         runIdFactory: () => 'fixture-run-id',
       });
 
       expect(state.runId).toBe('fixture-run-id');
-      expect(state.statePath).toBe(`${cwd}/.workflow-artifacts/ricky-local-runs/fixture-run-id/state.json`);
-      expect(state.logPath).toBe(`${cwd}/.workflow-artifacts/ricky-local-runs/fixture-run-id/run.log`);
-      expect(state.evidencePath).toBe(`${cwd}/.workflow-artifacts/ricky-local-runs/fixture-run-id/evidence.json`);
-      expect(state.fixesPath).toBe(`${cwd}/.workflow-artifacts/ricky-local-runs/fixture-run-id/fixes.json`);
+      expect(state.statePath).toBe(`${stateRoot}/fixture-run-id/state.json`);
+      expect(state.logPath).toBe(`${stateRoot}/fixture-run-id/run.log`);
+      expect(state.evidencePath).toBe(`${stateRoot}/fixture-run-id/evidence.json`);
+      expect(state.fixesPath).toBe(`${stateRoot}/fixture-run-id/fixes.json`);
       expect(state.reattachCommand).toBe('ricky status --run fixture-run-id');
     } finally {
       await rm(cwd, { recursive: true, force: true });
@@ -117,6 +121,7 @@ describe('local run monitor', () => {
 
   it('announces the running state before awaiting the local run result', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'ricky-monitor-started-'));
+    const stateRoot = join(cwd, '.ricky-state');
     const events: string[] = [];
     const response: LocalResponse = {
       ok: true,
@@ -141,6 +146,7 @@ describe('local run monitor', () => {
           invocationRoot: cwd,
         },
         runLocalFn,
+        stateRoot,
         runIdFactory: () => 'announce-run-id',
         onMonitorStarted: (state) => {
           events.push(`started:${state.runId}:${state.status}:${state.reattachCommand}`);
@@ -154,6 +160,14 @@ describe('local run monitor', () => {
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
+  });
+
+  it('defaults run state outside the repo under a repo-keyed state directory', () => {
+    const cwd = '/workspace/customer-repo';
+    const stateRoot = localRunStateRoot(cwd, { RICKY_STATE_HOME: '/tmp/ricky-state' });
+
+    expect(stateRoot).toMatch(/^\/tmp\/ricky-state\/ricky\/local-runs\/[a-f0-9]{12}$/);
+    expect(stateRoot).not.toContain('/workspace/customer-repo');
   });
 
   it('clamps auto-fix attempts and never approves destructive actions or commits', () => {

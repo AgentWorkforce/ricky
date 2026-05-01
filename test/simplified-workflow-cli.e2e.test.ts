@@ -87,7 +87,7 @@ describe('simplified workflow CLI E2E paths', () => {
           expect(result.capture.artifactPath).toBe('workflows/generated/existing.ts');
         } else {
           expect(runLocalFn).toHaveBeenCalledTimes(1);
-          expect(result.summary.command).toContain('npx --no-install agent-relay run');
+          expect(result.summary.command).toContain('ricky run --artifact');
         }
       }
 
@@ -102,6 +102,8 @@ describe('simplified workflow CLI E2E paths', () => {
 
   it('covers local run confirmation: background, foreground, not now, and edit first', async () => {
     const repo = await makeRepo();
+    const stateHome = join(repo, '.ricky-state');
+    vi.stubEnv('RICKY_STATE_HOME', stateHome);
 
     try {
       const confirmations = ['background', 'foreground', 'not-now', 'edit-first'] as const;
@@ -133,7 +135,7 @@ describe('simplified workflow CLI E2E paths', () => {
 
         if (confirmation === 'background') {
           expect(result.monitoredRun?.status).toBe('completed');
-          expect(result.monitoredRun?.logPath).toContain('.workflow-artifacts');
+          expect(result.monitoredRun?.logPath).toContain(`${stateHome}/ricky/local-runs/`);
           expect(result.monitoredRun?.evidencePath).toContain('evidence.json');
           expect(result.monitoredRun?.reattachCommand).toMatch(/^ricky status --run /);
           await expect(readFile(result.monitoredRun!.logPath, 'utf8')).resolves.toContain('generated');
@@ -152,6 +154,7 @@ describe('simplified workflow CLI E2E paths', () => {
         }
       }
     } finally {
+      vi.unstubAllEnvs();
       await rm(repo, { recursive: true, force: true });
     }
   });
@@ -230,7 +233,12 @@ describe('simplified workflow CLI E2E paths', () => {
       argv: ['local', '--spec', 'build a workflow', '--run', '--yes', '--quiet', '--verbose'],
       runInteractive: runner,
     });
-    const status = await cliMain({ argv: ['status', '--json'], cwd: '/repo', runInteractive: runner });
+    const status = await cliMain({
+      argv: ['status', '--json'],
+      cwd: '/repo',
+      runInteractive: runner,
+      readCloudAuth: vi.fn().mockResolvedValue(null),
+    });
     const connect = await cliMain({
       argv: ['connect', 'integrations', '--cloud', 'slack,github', '--quiet'],
       runInteractive: runner,
@@ -323,7 +331,7 @@ function localResponse(label: string): LocalResponse {
         spec_digest: 'digest-release-health',
       },
       next: {
-        run_command: 'npx --no-install agent-relay run workflows/generated/release-health.ts',
+        run_command: 'ricky run --artifact workflows/generated/release-health.ts',
         run_mode_hint: 'ricky run --artifact workflows/generated/release-health.ts',
       },
     },
@@ -343,7 +351,7 @@ function executedLocalResponse(options: { cwd: string; runId: string }): LocalRe
       execution: {
         workflow_id: 'wf-release-health',
         artifact_path: 'workflows/generated/release-health.ts',
-        command: 'npx --no-install agent-relay run workflows/generated/release-health.ts',
+        command: '@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/release-health.ts',
         workflow_file: 'workflows/generated/release-health.ts',
         cwd: options.cwd,
         started_at: '2026-04-30T00:00:00.000Z',
@@ -364,7 +372,7 @@ function executedLocalResponse(options: { cwd: string; runId: string }): LocalRe
         },
         side_effects: {
           files_written: ['workflows/generated/release-health.ts', stdout, stderr],
-          commands_invoked: ['npx --no-install agent-relay run workflows/generated/release-health.ts'],
+          commands_invoked: ['@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/release-health.ts'],
           network_calls: [],
         },
         assertions: [{ name: 'runtime_exit_code', status: 'pass', detail: 'Runtime exited with code 0.' }],

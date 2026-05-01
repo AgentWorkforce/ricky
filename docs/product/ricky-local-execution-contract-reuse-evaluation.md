@@ -4,7 +4,7 @@
 
 Ricky's local execution contract should remain Ricky-local for now.
 
-The seam is real and mature enough to evaluate: `packages/local/src/request-normalizer.ts` turns CLI, MCP, Claude-style, free-form, structured, and workflow-artifact handoffs into one `LocalInvocationRequest`; `packages/local/src/entrypoint.ts` then returns a staged `LocalResponse` with generation, execution, blockers, recovery guidance, execution evidence, and process-oriented exit codes.
+The seam is real and mature enough to evaluate: `src/local/request-normalizer.ts` turns CLI, MCP, Claude-style, free-form, structured, and workflow-artifact handoffs into one `LocalInvocationRequest`; `src/local/entrypoint.ts` then returns a staged `LocalResponse` with generation, execution, blockers, recovery guidance, execution evidence, and process-oriented exit codes.
 
 That shape is adjacent to agent-assistant-style shared runtime concerns, especially request/turn intake, execution harnessing, blocker recovery, and evidence reporting. But the reusable core is not concrete enough yet to extract. The current contract still encodes Ricky-specific workflow authoring semantics, artifact paths, local/BYOH defaults, Relay workflow commands, staged generate/run product UX, and workflow-oriented blocker/evidence language.
 

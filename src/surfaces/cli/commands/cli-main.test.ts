@@ -207,6 +207,18 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses Workforce persona writer flags and conflict recovery', () => {
+    expect(parseArgs(['local', '--spec', 'x', '--workforce-persona'])).toMatchObject({
+      workforcePersonaWriterCli: true,
+    });
+    expect(parseArgs(['--mode', 'local', '--spec', 'x', '--no-workforce-persona'])).toMatchObject({
+      workforcePersonaWriterCli: false,
+    });
+    expect(parseArgs(['local', '--spec', 'x', '--workforce-persona', '--no-workforce-persona'])).toMatchObject({
+      errors: ['--workforce-persona and --no-workforce-persona cannot be combined.'],
+    });
+  });
+
   it('parses status and connect commands', () => {
     expect(parseArgs(['status', '--json'])).toEqual({
       command: 'status',
@@ -291,6 +303,8 @@ function fakeInteractiveResult(overrides: Partial<InteractiveCliResult> = {}): I
 
 function stagedLocalResult(overrides: Partial<LocalResponse> = {}): LocalResponse {
   const artifactPath = 'workflows/generated/issue-3.ts';
+  const runCommand = `ricky run --artifact ${artifactPath}`;
+  const sdkCommand = `@agent-relay/sdk/workflows runScriptWorkflow ${artifactPath}`;
   return {
     ok: true,
     artifacts: [{ path: artifactPath, type: 'text/typescript', content: 'workflow("issue-3")' }],
@@ -307,8 +321,8 @@ function stagedLocalResult(overrides: Partial<LocalResponse> = {}): LocalRespons
         spec_digest: 'digest-issue-3',
       },
       next: {
-        run_command: `npx --no-install agent-relay run ${artifactPath}`,
-        run_mode_hint: `ricky run --artifact ${artifactPath}`,
+        run_command: runCommand,
+        run_mode_hint: runCommand,
       },
     },
     execution: {
@@ -317,7 +331,7 @@ function stagedLocalResult(overrides: Partial<LocalResponse> = {}): LocalRespons
       execution: {
         workflow_id: 'wf-issue-3',
         artifact_path: artifactPath,
-        command: `npx --no-install agent-relay run ${artifactPath}`,
+        command: sdkCommand,
         workflow_file: artifactPath,
         cwd: '/repo',
         started_at: '2026-01-01T00:00:00.000Z',
@@ -340,7 +354,7 @@ function stagedLocalResult(overrides: Partial<LocalResponse> = {}): LocalRespons
             '/repo/.workflow-artifacts/ricky-local-runs/run-1/stdout.log',
             '/repo/.workflow-artifacts/ricky-local-runs/run-1/stderr.log',
           ],
-          commands_invoked: [`npx --no-install agent-relay run ${artifactPath}`],
+          commands_invoked: [sdkCommand],
           network_calls: [],
         },
         assertions: [
@@ -407,6 +421,80 @@ describe('cliMain', () => {
     expect(runner).toHaveBeenCalledTimes(1);
     expect(result.exitCode).toBe(0);
     expect(result.interactiveResult?.ok).toBe(true);
+  });
+
+  it('passes stored Cloud auth into the compact first-screen provider status', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+    await cliMain({
+      argv: [],
+      runInteractive: runner,
+      readCloudAuth: vi.fn().mockResolvedValue({
+        accessToken: 'stored-token',
+        refreshToken: 'stored-refresh',
+        accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        apiUrl: 'https://cloud.example.test',
+      }),
+    });
+
+    expect(runner).toHaveBeenCalledWith(expect.objectContaining({
+      providerStatus: expect.objectContaining({
+        google: { connected: true },
+      }),
+    }));
+  });
+
+  it('prefers Workforce persona workflow authoring for CLI generation by default', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: [],
+      runInteractive: runner,
+      readCloudAuth: async () => null,
+    });
+
+    expect(runner).toHaveBeenCalledWith(expect.objectContaining({
+      preferWorkforcePersonaWorkflowWriter: true,
+    }));
+  });
+
+  it('allows CLI callers to disable Workforce persona workflow authoring explicitly', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['local', '--spec', 'build a workflow', '--no-workforce-persona'],
+      runInteractive: runner,
+    });
+
+    expect(runner).toHaveBeenCalledWith(expect.objectContaining({
+      preferWorkforcePersonaWorkflowWriter: false,
+    }));
+  });
+
+  it('renders the full status dashboard after selecting Status interactively', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({
+      onboarding: {
+        mode: 'status',
+        firstRun: false,
+        bannerShown: false,
+        output: 'mode=status',
+      },
+      guidance: ['Status selected.', 'Run:', '  ricky status --json'],
+      awaitingInput: true,
+    }));
+
+    const result = await cliMain({
+      argv: [],
+      runInteractive: runner,
+      readCloudAuth: async () => null,
+    });
+    const output = result.output.join('\n');
+
+    expect(output).toContain('Ricky status');
+    expect(output).toContain('╭─ Local tools');
+    expect(output).toContain('╭─ AgentWorkforce Cloud');
+    expect(output).toContain('Account:     not connected');
+    expect(output).not.toContain('Status selected.');
+    expect(output).not.toContain('ricky status --json');
   });
 
   it('passes mode override to interactive runner', async () => {
@@ -485,11 +573,11 @@ describe('cliMain', () => {
           desiredOutcome: 'Complete locally.',
           sideEffects: [],
           missingLocalBlockers: [],
-          command: 'npx --no-install agent-relay run workflows/generated/background.ts',
+          command: 'ricky run --artifact workflows/generated/background.ts',
         },
         confirmation: 'background',
         monitoredRun,
-        command: 'npx --no-install agent-relay run workflows/generated/background.ts',
+        command: 'ricky run --artifact workflows/generated/background.ts',
       },
     }));
 
@@ -529,6 +617,27 @@ describe('cliMain', () => {
         }),
       }),
     );
+  });
+
+  it('uses --name as the generated local artifact identity', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['local', '--spec', 'clean up unused files', '--name', 'repo-tidying', '--no-run'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+    });
+
+    const handoff = runner.mock.calls[0][0].handoff;
+    expect(handoff).toMatchObject({
+      source: 'cli',
+      stageMode: 'generate',
+      cliMetadata: expect.objectContaining({ workflowName: 'repo-tidying' }),
+    });
+    expect(handoff.spec).toMatchObject({
+      workflowName: 'repo-tidying',
+      artifactPath: 'workflows/generated/repo-tidying.ts',
+    });
   });
 
   it('captures the caller repo root at the CLI boundary and passes it through the handoff deps', async () => {
@@ -726,7 +835,7 @@ describe('cliMain', () => {
             spec_digest: 'abc123',
           },
           next: {
-            run_command: 'npx --no-install agent-relay run workflows/generated/example.ts',
+            run_command: 'ricky run --artifact workflows/generated/example.ts',
             run_mode_hint: 'ricky run --artifact workflows/generated/example.ts',
           },
         },
@@ -736,7 +845,7 @@ describe('cliMain', () => {
           execution: {
             workflow_id: 'wf-example',
             artifact_path: 'workflows/generated/example.ts',
-            command: 'npx --no-install agent-relay run workflows/generated/example.ts',
+            command: '@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/example.ts',
             workflow_file: 'workflows/generated/example.ts',
             cwd: '/repo',
             started_at: '2026-01-01T00:00:00.000Z',
@@ -800,7 +909,8 @@ describe('cliMain', () => {
 
       expect(result.exitCode).toBe(0);
       expect(output).toContain('Generation: ok — artifact written to disk.');
-      expect(output).toContain('Execution: success — artifact ran through local agent-relay.');
+      expect(output).toContain('Execution: success — artifact ran through the Relay SDK workflow runner.');
+      expect(output).toContain('  Author: deterministic generator');
       expect(generationIndex).toBeGreaterThan(-1);
       expect(executionIndex).toBeGreaterThan(generationIndex);
       expect(output).toContain('  Artifact: workflows/generated/issue-3.ts');
@@ -808,15 +918,43 @@ describe('cliMain', () => {
       expect(output).toContain('--- execution ---');
       expect(output).toContain('stage: execute');
       expect(output).toContain('status: success');
-      expect(output).toContain('  command: npx --no-install agent-relay run workflows/generated/issue-3.ts');
+      expect(output).toContain('  command: @agent-relay/sdk/workflows runScriptWorkflow workflows/generated/issue-3.ts');
       expect(output).toContain('  outcome_summary: Workflow completed successfully with deterministic evidence.');
+    });
+
+    it('prints Workforce persona author metadata when the workflow was persona-authored', async () => {
+      const personaResult = stagedLocalResult({
+        generation: {
+          ...stagedLocalResult().generation!,
+          decisions: {
+            workforce_persona: {
+              personaId: 'agent-relay-workflow',
+              tier: 'pro',
+              harness: 'codex',
+              model: 'gpt-5.5',
+            },
+          },
+        },
+        execution: undefined,
+      });
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({
+        ok: true,
+        localResult: personaResult,
+      }));
+
+      const result = await cliMain({
+        argv: ['--mode', 'local', '--spec', 'build a workflow'],
+        runInteractive: runner,
+      });
+
+      expect(result.output.join('\n')).toContain('  Author: agent-relay-workflow@pro (gpt-5.5) via codex');
     });
 
     it('keeps stop-after-generation human output artifact-only when no execution stage is returned', async () => {
       const artifactOnly = stagedLocalResult({
         execution: undefined,
         nextActions: [
-          'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+          'Run the generated workflow locally: ricky run --artifact workflows/generated/issue-3.ts',
           'Inspect the generated workflow artifact and choose whether to run it locally.',
         ],
       });
@@ -838,7 +976,7 @@ describe('cliMain', () => {
       expect(output).toContain('status: ok');
       expect(output).toContain('  Artifact: workflows/generated/issue-3.ts');
       expect(output).toContain(
-        '  To execute this artifact: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+        '  To execute this artifact: ricky run --artifact workflows/generated/issue-3.ts',
       );
       expect(output).not.toContain('--- execution ---');
       expect(output).not.toContain('outcome_summary:');
@@ -913,7 +1051,7 @@ describe('cliMain', () => {
           logs: ['[local] workflow generation: passed'],
           warnings: [],
           nextActions: [
-            'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/package-checks.ts',
+            'Run the generated workflow locally: ricky run --artifact workflows/generated/package-checks.ts',
             'Inspect the generated workflow artifact and choose whether to run it locally.',
           ],
         }),
@@ -924,7 +1062,7 @@ describe('cliMain', () => {
     expect(result.exitCode).toBe(0);
     expect(output).toContain('Artifact returned.');
     expect(output).toContain('Artifact: workflows/generated/package-checks.ts');
-    expect(output).toContain('Next: Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/package-checks.ts');
+    expect(output).toContain('Next: Run the generated workflow locally: ricky run --artifact workflows/generated/package-checks.ts');
     expect(output).toContain('Next: Inspect the generated workflow artifact and choose whether to run it locally.');
   });
 
@@ -978,7 +1116,7 @@ describe('cliMain', () => {
     const artifactOnly = stagedLocalResult({
       execution: undefined,
       nextActions: [
-        'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+        'Run the generated workflow locally: ricky run --artifact workflows/generated/issue-3.ts',
       ],
     });
     const runner = vi.fn().mockResolvedValue(
@@ -1011,7 +1149,7 @@ describe('cliMain', () => {
       status: 'ok',
       warnings: [],
       nextActions: expect.arrayContaining([
-        'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+        'Run the generated workflow locally: ricky run --artifact workflows/generated/issue-3.ts',
       ]),
     });
   });
@@ -1104,8 +1242,8 @@ describe('cliMain', () => {
 
       await mkdir(join(repoWithoutAgentRelay, '.git'), { recursive: true });
 
-      const found = await cliMain({ argv: ['status', '--json'], cwd: repoWithAgentRelay });
-      const missing = await cliMain({ argv: ['status', '--json'], cwd: repoWithoutAgentRelay });
+      const found = await cliMain({ argv: ['status', '--json'], cwd: repoWithAgentRelay, readCloudAuth: async () => null });
+      const missing = await cliMain({ argv: ['status', '--json'], cwd: repoWithoutAgentRelay, readCloudAuth: async () => null });
 
       const foundJson = JSON.parse(found.output.join('\n'));
       const missingJson = JSON.parse(missing.output.join('\n'));
@@ -1118,6 +1256,114 @@ describe('cliMain', () => {
       process.env.PATH = previousPath;
       await rm(repoWithAgentRelay, { recursive: true, force: true });
       await rm(repoWithoutAgentRelay, { recursive: true, force: true });
+    }
+  });
+
+  it('ricky status reads stored Relay Cloud auth and reconciles the workspace', async () => {
+    const readCloudAuth = vi.fn().mockResolvedValue({
+      accessToken: 'stored-token',
+      refreshToken: 'stored-refresh',
+      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      apiUrl: 'https://cloud.example.test',
+    });
+    const resolveCloudWorkspace = vi.fn().mockResolvedValue('workspace-from-cloud-profile');
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === 'https://cloud.example.test/api/v1/cloud-agents') {
+        return new Response(JSON.stringify({
+          agents: [
+            { harness: 'anthropic', displayName: 'Claude', status: 'connected', credentialStoredAt: '2026-01-01T00:00:00.000Z' },
+            { harness: 'openai', displayName: 'Codex', status: 'connected', credentialStoredAt: '2026-01-01T00:00:00.000Z' },
+            { harness: 'google/gemini', displayName: 'Gemini', status: 'connected', credentialStoredAt: '2026-01-01T00:00:00.000Z' },
+          ],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.endsWith('/integrations/slack')) {
+        return new Response(JSON.stringify({ connectionId: 'slack-conn', providerConfigKey: 'slack-sage' }), { status: 200 });
+      }
+      if (url.endsWith('/integrations/github')) {
+        return new Response(JSON.stringify({ connectionId: 'github-conn', providerConfigKey: 'github' }), { status: 200 });
+      }
+      if (url.endsWith('/integrations/notion')) {
+        return new Response(JSON.stringify({ connectionId: null, providerConfigKey: null }), { status: 200 });
+      }
+      if (url.endsWith('/integrations/linear')) {
+        return new Response(JSON.stringify({ connectionId: 'linear-conn', providerConfigKey: 'linear' }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const json = await cliMain({
+        argv: ['status', '--json'],
+        cwd: '/repo-root',
+        readCloudAuth,
+        resolveCloudWorkspace,
+      });
+      const parsed = JSON.parse(json.output.join('\n'));
+
+      expect(readCloudAuth).toHaveBeenCalledTimes(1);
+      expect(resolveCloudWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+        accessToken: 'stored-token',
+      }));
+      expect(fetchMock).toHaveBeenCalledWith('https://cloud.example.test/api/v1/cloud-agents', expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer stored-token' }),
+      }));
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://cloud.example.test/api/v1/workspaces/workspace-from-cloud-profile/integrations/github',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(parsed.cloud).toMatchObject({
+        account: 'connected',
+        workspace: 'workspace-from-cloud-profile',
+        agents: 'connected: Claude, Codex, Gemini; missing: OpenCode',
+      });
+      expect(parsed.integrations.slack).toBe('connected (slack-sage)');
+      expect(parsed.integrations.github).toBe('connected (github)');
+      expect(parsed.integrations.notion).toBe('not connected');
+      expect(parsed.integrations.linear).toBe('connected (linear)');
+
+      const human = await cliMain({
+        argv: ['status'],
+        cwd: '/repo-root',
+        readCloudAuth,
+        resolveCloudWorkspace,
+      });
+      expect(human.output.join('\n')).toContain('Account:     connected');
+      expect(human.output.join('\n')).toContain('Workspace:   workspace-from-cloud-profile');
+      expect(human.output.join('\n')).toContain('Agents:      connected: Claude, Codex, Gemini; missing: OpenCode');
+      expect(human.output.join('\n')).toContain('Slack:       connected (slack-sage)');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('ricky status treats rejected stored Cloud auth as not authenticated', async () => {
+    const readCloudAuth = vi.fn().mockResolvedValue({
+      accessToken: 'expired-token',
+      refreshToken: 'stored-refresh',
+      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      apiUrl: 'https://cloud.example.test',
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const json = await cliMain({
+        argv: ['status', '--json'],
+        cwd: '/repo-root',
+        readCloudAuth,
+        resolveCloudWorkspace: vi.fn().mockResolvedValue('workspace-from-cloud-profile'),
+      });
+      const parsed = JSON.parse(json.output.join('\n'));
+
+      expect(parsed.cloud.account).toBe('not connected (Cloud login required)');
+      expect(parsed.cloud.agents).toBe('not connected (Cloud login required)');
+      expect(parsed.integrations.github).toBe('not connected (Cloud login required)');
+      expect(parsed.warnings.join('\n')).toContain('Cloud auth was rejected');
+      expect(parsed.nextActions).toContain('ricky connect cloud');
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 
@@ -1175,6 +1421,63 @@ describe('cliMain', () => {
           },
         },
       });
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('ricky status --run explains that a blocked monitor state is historical and gives a rerun command', async () => {
+    const { mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-status-blocked-run-'));
+    const runId = 'ricky-local-blocked-fixture';
+    const artifactPath = 'workflows/generated/blocked.ts';
+    const artifactDir = join(repo, '.workflow-artifacts', 'ricky-local-runs', runId);
+    const statePath = join(artifactDir, 'state.json');
+    const response = stagedLocalResult({
+      ok: false,
+      execution: {
+        ...stagedLocalResult().execution!,
+        status: 'blocker',
+        execution: {
+          ...stagedLocalResult().execution!.execution,
+          command: `npx --no-install agent-relay run ${artifactPath}`,
+        },
+        evidence: {
+          outcome_summary: 'Runtime package "agent-relay" is not installed in this workspace.',
+          logs: { tail: ['Runtime package "agent-relay" is not installed in this workspace.'], truncated: false },
+          side_effects: {
+            files_written: [],
+            commands_invoked: [`npx --no-install agent-relay run ${artifactPath}`],
+          },
+          assertions: [{ name: 'runtime_precheck', status: 'fail', detail: 'missing package' }],
+        },
+      },
+    });
+
+    try {
+      await mkdir(artifactDir, { recursive: true });
+      await writeFile(statePath, JSON.stringify({
+        runId,
+        status: 'blocked',
+        artifactPath,
+        artifactDir,
+        statePath,
+        logPath: join(artifactDir, 'run.log'),
+        evidencePath: join(artifactDir, 'evidence.json'),
+        fixesPath: join(artifactDir, 'fixes.json'),
+        reattachCommand: `ricky status --run ${runId}`,
+        response,
+      }), 'utf8');
+
+      const human = await cliMain({ argv: ['status', '--run', runId], cwd: repo });
+      const output = human.output.join('\n');
+      expect(output).toContain('Status:    blocked');
+      expect(output).toContain('This run has finished with persisted evidence; its status will not change.');
+      expect(output).toContain('New runs can use agent-relay on PATH when node_modules/.bin/agent-relay is absent.');
+      expect(output).toContain(`ricky run ${artifactPath}`);
+      expect(output).toContain('If you choose background monitoring again, use the new run id Ricky prints.');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -1304,7 +1607,12 @@ describe('cliMain', () => {
       accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       apiUrl: 'https://cloud.example.test',
     });
-    const status = await cliMain({ argv: ['status', '--json'], cwd: '/repo-root', runInteractive: runner });
+    const status = await cliMain({
+      argv: ['status', '--json'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+      readCloudAuth: async () => null,
+    });
     const connect = await cliMain({ argv: ['connect', 'cloud', '--quiet'], runInteractive: runner, ensureCloudAuthenticated });
 
     expect(status.exitCode).toBe(0);
@@ -1609,7 +1917,7 @@ describe('cliMain', () => {
 
       try {
         const result = await cliMain({
-          argv: ['--mode', 'local', '--spec', 'generate a workflow for test coverage'],
+          argv: ['--mode', 'local', '--spec', 'generate a workflow for test coverage', '--no-workforce-persona'],
           cwd: tempRepo,
           onboard: vi.fn().mockResolvedValue({
             mode: 'local',
@@ -1636,7 +1944,7 @@ describe('cliMain', () => {
 
         // Next action command points to the same relative path
         const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
-          a.includes('npx --no-install agent-relay run'),
+          a.includes('ricky run --artifact'),
         );
         expect(runAction).toContain(artifact?.path);
 
@@ -1658,7 +1966,7 @@ describe('cliMain', () => {
 
       try {
         const result = await cliMain({
-          argv: ['--mode', 'local', '--spec-file', './workflow-spec.md'],
+          argv: ['--mode', 'local', '--spec-file', './workflow-spec.md', '--no-workforce-persona'],
           cwd: tempRepo,
           readFileText: vi.fn().mockResolvedValue('generate a workflow for specfile test'),
           onboard: vi.fn().mockResolvedValue({
@@ -1686,7 +1994,7 @@ describe('cliMain', () => {
 
         // Next action command points to the same relative path
         const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
-          a.includes('npx --no-install agent-relay run'),
+          a.includes('ricky run --artifact'),
         );
         expect(runAction).toContain(artifact?.path);
 
@@ -1710,7 +2018,7 @@ describe('cliMain', () => {
 
       try {
         const result = await cliMain({
-          argv: ['--mode', 'local', '--stdin'],
+          argv: ['--mode', 'local', '--stdin', '--no-workforce-persona'],
           cwd: tempRepo,
           input,
           onboard: vi.fn().mockResolvedValue({
@@ -1738,7 +2046,7 @@ describe('cliMain', () => {
 
         // Next action command points to the same relative path
         const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
-          a.includes('npx --no-install agent-relay run'),
+          a.includes('ricky run --artifact'),
         );
         expect(runAction).toContain(artifact?.path);
 

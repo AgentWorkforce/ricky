@@ -115,8 +115,7 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('ricky --mode local --stdin');
     expect(output).toContain('MCP handoff:');
     expect(output).toContain('Use `ricky.generate` with the same spec payload');
-    expect(output).toContain('npx --no-install agent-relay run workflows/generated/<file>.ts');
-    expect(output).toContain('Or with linked CLI: ricky run');
+    expect(output).toContain('ricky run --artifact workflows/generated/<file>.ts');
     expect(output).not.toContain('Or without linking: ricky run');
     expect(output).not.toContain('npx ricky generate --spec');
     expect(output).not.toContain('npx ricky generate --spec-file');

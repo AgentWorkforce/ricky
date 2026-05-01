@@ -33,7 +33,7 @@ Auth / validation          ← surface-specific (see §9a)
 Request normalization      ← src/local/request-normalizer.ts
   │                          Produces LocalInvocationRequest or CloudGenerateRequest
   ▼
-Ingress routing            ← src/entrypoint/interactive-cli.ts
+Ingress routing            ← src/surfaces/cli/entrypoint/interactive-cli.ts
   │                          Mode-based: local / cloud / both / explore
   ▼
 Executor                   ← LocalExecutor or CloudExecutor
@@ -57,7 +57,7 @@ Response delivery          ← CLI stdout, Slack thread, JSON body, MCP response
 |---|---|
 | Auth / validation | Surface-specific (see §9a Authentication model) |
 | Request normalization | `src/local/request-normalizer.ts` |
-| Ingress routing | `src/entrypoint/interactive-cli.ts` |
+| Ingress routing | `src/surfaces/cli/entrypoint/interactive-cli.ts` |
 | Local execution | `src/local/entrypoint.ts` (LocalExecutor) |
 | Cloud execution | `src/cloud/api/generate-endpoint.ts` (CloudExecutor) |
 | Evidence capture | `src/runtime/evidence/` |
@@ -74,7 +74,7 @@ When adding a new surface or modifying an existing one, trace your request throu
 
 ### Entry point
 
-`src/commands/cli-main.ts` parses command-line arguments:
+`src/surfaces/cli/commands/cli-main.ts` parses command-line arguments:
 
 ```
 ricky                    # Interactive (default)
@@ -87,11 +87,11 @@ Returns a structured `CliMainResult` with exit code, output lines, and optional 
 
 ### Onboarding flow
 
-`src/cli/onboarding.ts` orchestrates the first-run experience:
+`src/surfaces/cli/cli/onboarding.ts` orchestrates the first-run experience:
 
-1. **Banner** - ASCII art from `src/cli/ascii-art.ts`
-2. **Welcome** - first-run vs returning user messaging from `src/cli/welcome.ts`
-3. **Mode selection** - local, cloud, both, or explore via `src/cli/mode-selector.ts`
+1. **Banner** - ASCII art from `src/surfaces/cli/cli/ascii-art.ts`
+2. **Welcome** - first-run vs returning user messaging from `src/surfaces/cli/cli/welcome.ts`
+3. **Mode selection** - local, cloud, both, or explore via `src/surfaces/cli/cli/mode-selector.ts`
 4. **Provider guidance** - next-step instructions per selected mode
 
 ### Configuration
@@ -104,7 +104,7 @@ Project-level config overrides global config. Both are plain JSON.
 
 ### Mode selection
 
-`src/cli/mode-selector.ts` accepts four modes:
+`src/surfaces/cli/cli/mode-selector.ts` accepts four modes:
 
 | Mode | Behavior |
 |---|---|
@@ -614,7 +614,7 @@ mode = "both"   -> LocalExecutor.execute() with cloud fallback
 mode = "explore" -> informational response, no execution
 ```
 
-The orchestrator (`src/entrypoint/interactive-cli.ts`) makes this routing decision. No surface should pre-decide the execution path; that is the orchestrator's responsibility.
+The orchestrator (`src/surfaces/cli/entrypoint/interactive-cli.ts`) makes this routing decision. No surface should pre-decide the execution path; that is the orchestrator's responsibility.
 
 ---
 

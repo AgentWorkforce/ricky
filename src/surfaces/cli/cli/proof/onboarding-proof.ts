@@ -184,7 +184,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
           [
             containsAll(welcome, ['Ricky is ready']),
             localHeader === 'ricky · local mode · ready',
-            cloudHeader === 'ricky · cloud mode · google connected',
+            cloudHeader === 'ricky · cloud mode · cloud connected',
             !returningOutput.includes(RICKY_BANNER),
           ],
           [
@@ -510,8 +510,8 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
           'status-journey',
           [
             localHeader === 'ricky · local mode · ready',
-            cloudConnected.includes('google connected'),
-            cloudDisconnected.includes('google not connected'),
+            cloudConnected.includes('cloud connected'),
+            cloudDisconnected.includes('cloud not connected'),
             bothConnected.includes('cloud connected'),
             bothDisconnected.includes('cloud not connected'),
           ],

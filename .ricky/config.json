@@ -1,0 +1,12 @@
+{
+  "mode": "cloud",
+  "firstRunComplete": true,
+  "providers": {
+    "google": {
+      "connected": false
+    },
+    "github": {
+      "connected": false
+    }
+  }
+}

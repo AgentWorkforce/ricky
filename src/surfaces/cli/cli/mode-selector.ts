@@ -179,8 +179,8 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '    Nothing is executed at this stage.',
         '',
         '  Execution (opt-in only):',
-        '    Pass --run with a spec, or use `ricky run <artifact>` (requires npm-linked CLI).',
-        '    Execution launches the artifact through local agent-relay.',
+        '    Pass --run with a spec, or use `ricky run <artifact>`.',
+        '    Execution launches the artifact through the Relay SDK workflow runner.',
         '    On failure, Ricky prints a classified blocker code and shell-ready recovery steps.',
         '',
         '  No Cloud credentials required.',
@@ -289,8 +289,8 @@ export function renderModeResult(choice: OnboardingChoice): string {
 
 export function renderCompactHeader(mode: RickyMode, providerStatus: ProviderStatus = DEFAULT_PROVIDER_STATUS): string {
   if (mode === 'cloud') {
-    const googleStatus = providerStatus.google.connected ? 'google connected' : 'google not connected';
-    return `ricky · cloud mode · ${googleStatus}`;
+    const cloudStatus = providerStatus.google.connected ? 'cloud connected' : 'cloud not connected';
+    return `ricky · cloud mode · ${cloudStatus}`;
   }
 
   if (mode === 'both') {

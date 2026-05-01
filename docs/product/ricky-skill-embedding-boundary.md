@@ -4,7 +4,7 @@ Ricky currently applies workflow-generation skills at generation time only. The 
 
 ## Current Behavior
 
-The current product boundary has three observable phases. First, selection happens before rendering when `packages/product/src/generation/skill-loader.ts` decides which registered skills apply to the normalized request. Second, loading records the skill descriptor path and prerequisite result. Third, rendering in `packages/product/src/generation/template-renderer.ts` turns selected skills into workflow-contract evidence, validation gates, and metadata files in the generated workflow.
+The current product boundary has three observable phases. First, selection happens before rendering when `src/product/generation/skill-loader.ts` decides which registered skills apply to the normalized request. Second, loading records the skill descriptor path and prerequisite result. Third, rendering in `src/product/generation/template-renderer.ts` turns selected skills into workflow-contract evidence, validation gates, and metadata files in the generated workflow.
 
 For strict TypeScript or proof-oriented workflow generation, the expected loaded skills include `writing-agent-relay-workflows` and `relay-80-100-workflow`. The generated artifact records this in `loaded-skills.txt` and `skill-application-boundary.json`. That boundary file marks each evidence item as `generation_time_only` with `runtimeEmbodiment: false`.
 

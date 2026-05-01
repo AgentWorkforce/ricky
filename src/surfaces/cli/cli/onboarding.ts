@@ -57,6 +57,7 @@ export interface OnboardingOptions {
   columns?: number;
   env?: NodeJS.ProcessEnv;
   configStore?: RickyConfigStore;
+  providerStatus?: ProviderStatus;
   promptShell?: PromptShell;
   signal?: AbortSignal;
   firstRun?: boolean;
@@ -171,7 +172,7 @@ export function renderHandoffGuidance(): string {
     'Spec handoff:',
     '  Give Ricky a spec. Ricky generates a workflow artifact and writes it to disk.',
     '  Generation does not execute anything — it returns the artifact path.',
-    '  Add --run to also execute the generated artifact through local agent-relay.',
+    '  Add --run to also execute the generated artifact through @agent-relay/sdk/workflows.',
     '',
     '  Direct CLI handoff:',
     '',
@@ -188,8 +189,7 @@ export function renderHandoffGuidance(): string {
     '  $ printf "%s\\n" "run workflows/release.workflow.ts" | ricky --mode local --stdin',
     '',
     '  Run an existing artifact:',
-    '  $ npx --no-install agent-relay run workflows/generated/<file>.ts',
-    '  Or with linked CLI: ricky run workflows/generated/<file>.ts',
+    '  $ ricky run --artifact workflows/generated/<file>.ts',
     '',
     '  MCP handoff:',
     '  Use `ricky.generate` with the same spec payload; Ricky normalizes it like CLI input.',
@@ -332,6 +332,7 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
   const projectConfig = await configStore.readProjectConfig();
   const globalConfig = projectConfig ? null : await configStore.readGlobalConfig();
   const config = projectConfig ?? globalConfig ?? DEFAULT_CONFIG;
+  const providerStatus = options.providerStatus ?? config.providers;
   const firstRun = options.firstRun ?? config.firstRunComplete !== true;
 
   if (options.quiet === true) {
@@ -372,7 +373,7 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
     const fallbackMode = modeOverride ?? config.mode;
     if (!modeOverride && options.compactForExecution !== true && shouldUsePromptShell(options, input, output)) {
       const headerLines = [
-        renderCompactHeader(fallbackMode, config.providers),
+        renderCompactHeader(fallbackMode, providerStatus),
         renderWelcome({ isFirstRun: false }),
       ];
       const promptIntro = `${sections.concat(headerLines).join('\n\n')}`;
@@ -405,7 +406,7 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
       }
     }
 
-    sections.push(renderCompactHeader(fallbackMode, config.providers));
+    sections.push(renderCompactHeader(fallbackMode, providerStatus));
     sections.push(renderWelcome({ isFirstRun: false }));
     sections.push(renderSuggestedNextAction(fallbackMode));
     const text = `${sections.join('\n')}\n`;

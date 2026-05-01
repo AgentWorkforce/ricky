@@ -75,6 +75,7 @@ export function specCaptureToHandoff(
     };
   }
 
+  const artifactPath = options.outputPath ?? capture.artifactPath ?? defaultArtifactPathForWorkflowName(capture.workflowName);
   return {
     source: 'cli',
     spec: {
@@ -82,7 +83,7 @@ export function specCaptureToHandoff(
       description: capture.spec,
       workflowName: capture.workflowName,
       name: capture.workflowName,
-      ...(options.outputPath ? { artifactPath: options.outputPath } : {}),
+      artifactPath,
     },
     specFile: capture.specPath,
     invocationRoot,
@@ -94,6 +95,10 @@ export function specCaptureToHandoff(
       ...(capture.generatedFromGoal ? { generatedFromGoal: capture.generatedFromGoal } : {}),
     },
   };
+}
+
+export function defaultArtifactPathForWorkflowName(workflowName: string): string {
+  return `workflows/generated/${sanitizeWorkflowName(workflowName)}.ts`;
 }
 
 export function defaultWorkflowNameFromPath(path: string): string {

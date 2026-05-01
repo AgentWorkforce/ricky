@@ -118,9 +118,11 @@ export async function runExternalCliProof(
       );
     }
 
+    await writeFile(artifactFullPath, deterministicSdkSmokeWorkflow(), 'utf8');
+
     const nextInvocation = await runner.run('sh', ['-lc', nextCommand], {
       cwd: repoDir,
-      env: { INIT_CWD: repoDir },
+      env: { INIT_CWD: repoDir, PATH: `${join(repoDir, 'node_modules/.bin')}:${process.env.PATH ?? ''}` },
     });
 
     if (nextInvocation.exitCode !== 0) {
@@ -142,6 +144,31 @@ export async function runExternalCliProof(
     await rm(repoDir, { recursive: true, force: true });
     throw error;
   }
+}
+
+function deterministicSdkSmokeWorkflow(): string {
+  return `import { workflow } from '@agent-relay/sdk/workflows';
+
+async function main() {
+  const result = await workflow('ricky-external-cli-proof-smoke')
+    .description('Prove Ricky can execute an artifact through the Relay SDK from an external repo.')
+    .pattern('dag')
+    .step('sdk-smoke', {
+      type: 'deterministic',
+      command: "mkdir -p .workflow-artifacts/external-cli-proof && printf '%s\\\\n' SDK_RUN_OK > .workflow-artifacts/external-cli-proof/sdk-run.txt && cat .workflow-artifacts/external-cli-proof/sdk-run.txt",
+      captureOutput: true,
+      failOnError: true,
+    })
+    .run({ cwd: process.cwd() });
+
+  console.log(result.status);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+`;
 }
 
 async function writeExternalRepoPackageJson(repoDir: string): Promise<void> {
@@ -180,46 +207,22 @@ async function linkRickyCliIntoExternalRepo(repoRoot: string, repoDir: string): 
 }
 
 async function ensureLinkedCliTargetExists(repoRoot: string, targetPath: string): Promise<void> {
+  const bundleResult = await DEFAULT_RUNNER.run('npm', ['run', 'bundle'], { cwd: repoRoot });
+  if (bundleResult.exitCode !== 0) {
+    throw new Error(
+      `Failed to prepare linked Ricky CLI bundle at ${targetPath}.\nstdout:\n${bundleResult.stdout}\nstderr:\n${bundleResult.stderr}`,
+    );
+  }
+
   try {
     await access(targetPath, constants.F_OK);
-    return;
   } catch {
-    const bundleResult = await DEFAULT_RUNNER.run('npm', ['run', 'bundle'], { cwd: repoRoot });
-    if (bundleResult.exitCode !== 0) {
-      throw new Error(
-        `Failed to prepare linked Ricky CLI bundle at ${targetPath}.\nstdout:\n${bundleResult.stdout}\nstderr:\n${bundleResult.stderr}`,
-      );
-    }
-    await access(targetPath, constants.F_OK);
+    throw new Error(`Bundled Ricky CLI target was not written: ${targetPath}`);
   }
 }
 
 async function installAgentRelayFixture(repoDir: string): Promise<void> {
-  const fixturePath = join(repoDir, 'node_modules/.bin/agent-relay');
-  const fixtureScript = [
-    '#!/usr/bin/env node',
-    "import { access } from 'node:fs/promises';",
-    "import { constants } from 'node:fs';",
-    '',
-    'const [, , command, workflowPath] = process.argv;',
-    "if (command !== 'run' || !workflowPath) {",
-    "  console.error('[fixture-agent-relay] expected usage: agent-relay run <workflow-path>');",
-    '  process.exit(1);',
-    '}',
-    '',
-    'try {',
-    '  await access(workflowPath, constants.F_OK);',
-    "  console.log(`[fixture-agent-relay] ran ${workflowPath}`);",
-    '} catch (error) {',
-    "  const message = error instanceof Error ? error.message : String(error);",
-    "  console.error(`[fixture-agent-relay] missing workflow ${workflowPath}: ${message}`);",
-    '  process.exit(1);',
-    '}',
-  ].join('\n');
-
-  await mkdir(dirname(fixturePath), { recursive: true });
-  await writeFile(fixturePath, fixtureScript, 'utf8');
-  await chmod(fixturePath, 0o755);
+  await mkdir(join(repoDir, 'node_modules/.bin'), { recursive: true });
 }
 
 function normalizeOutput(output: string): string {

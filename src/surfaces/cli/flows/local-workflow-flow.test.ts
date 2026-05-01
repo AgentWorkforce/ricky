@@ -94,7 +94,7 @@ describe('local workflow flow', () => {
           spec_digest: 'digest',
         },
         next: {
-          run_command: 'npx --no-install agent-relay run workflows/generated/release-health.ts',
+          run_command: 'ricky run --artifact workflows/generated/release-health.ts',
           run_mode_hint: 'ricky run --artifact workflows/generated/release-health.ts',
         },
       },
@@ -119,10 +119,17 @@ describe('local workflow flow', () => {
       });
 
       expect(runLocalFn).toHaveBeenCalledTimes(1);
+      expect(runLocalFn).toHaveBeenCalledWith(expect.objectContaining({
+        source: 'cli',
+        spec: expect.objectContaining({
+          workflowName: 'release-health',
+          artifactPath: 'workflows/generated/release-health.ts',
+        }),
+      }), undefined);
       expect(result.confirmation).toBe('not-now');
       expect(result.summary.artifactPath).toBe('workflows/generated/release-health.ts');
       expect(result.summary.agents).toEqual([{ name: 'codex', job: 'Run local checks' }]);
-      expect(result.command).toBe('npx --no-install agent-relay run workflows/generated/release-health.ts');
+      expect(result.command).toBe('ricky run --artifact workflows/generated/release-health.ts');
       expect(result.run).toBeUndefined();
     } finally {
       await rm(repo, { recursive: true, force: true });
@@ -143,7 +150,7 @@ describe('local workflow flow', () => {
         execution: {
           workflow_id: 'wf-existing',
           artifact_path: 'workflows/generated/existing.ts',
-          command: 'npx --no-install agent-relay run workflows/generated/existing.ts',
+          command: '@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/existing.ts',
           workflow_file: 'workflows/generated/existing.ts',
           cwd: repo,
           started_at: '2026-04-30T00:00:00.000Z',
@@ -158,7 +165,7 @@ describe('local workflow flow', () => {
           logs: { stdout_path: `${repo}/.workflow-artifacts/ricky-local-runs/foreground-existing/stdout.log`, truncated: false },
           side_effects: {
             files_written: ['.workflow-artifacts/ricky-local-runs/foreground-existing/stdout.log'],
-            commands_invoked: ['npx --no-install agent-relay run workflows/generated/existing.ts'],
+            commands_invoked: ['@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/existing.ts'],
           },
           assertions: [{ name: 'runtime_exit_code', status: 'pass', detail: '0' }],
         },
@@ -192,7 +199,7 @@ describe('local workflow flow', () => {
       expect(result.generation).toBeUndefined();
       expect(result.confirmation).toBe('foreground');
       expect(result.run?.execution?.evidence?.outcome_summary).toContain('final summary');
-      expect(result.command).toBe('npx --no-install agent-relay run workflows/generated/existing.ts');
+      expect(result.command).toBe('ricky run --artifact workflows/generated/existing.ts');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

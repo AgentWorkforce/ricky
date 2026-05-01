@@ -23,7 +23,7 @@ import type {
 } from '../flows/cloud-workflow-flow.js';
 import type { CloudWorkflowSummary } from '../flows/workflow-summary.js';
 import type { LocalWorkflowFlowDeps, LocalWorkflowFlowResult } from '../flows/local-workflow-flow.js';
-import type { LocalExecutor, LocalResponse } from '../../../local/entrypoint.js';
+import type { LocalExecutor, LocalEntrypointOptions, LocalExecutorOptions, LocalResponse } from '../../../local/entrypoint.js';
 import type { RawHandoff } from '../../../local/request-normalizer.js';
 import type { Diagnosis, DiagnosticSignal } from '../../../runtime/diagnostics/failure-diagnosis.js';
 import type { ConnectProviderOptions, ConnectProviderResult, StoredAuth, WhoAmIResponse } from '@agent-relay/cloud';
@@ -34,6 +34,7 @@ import {
   runOnboarding,
 } from '../cli/onboarding.js';
 import { toRickyMode } from '../cli/mode-selector.js';
+import type { ProviderStatus } from '../cli/mode-selector.js';
 import { handleCloudGenerate } from '../../../cloud/api/generate-endpoint.js';
 import { runLocal } from '../../../local/entrypoint.js';
 import { diagnose } from '../../../runtime/diagnostics/failure-diagnosis.js';
@@ -132,8 +133,14 @@ export interface InteractiveCliDeps extends CloudWorkflowFlowDeps {
   /** Config store override for onboarding. */
   configStore?: RickyConfigStore;
 
+  /** Provider status override for the compact first screen. */
+  providerStatus?: ProviderStatus;
+
   /** Explicit mode override — skips interactive selection. */
   mode?: RickyMode;
+
+  /** Overrides env/CLI derivation when tests inject Ricky-owned executors. */
+  preferWorkforcePersonaWorkflowWriter?: undefined | boolean;
 
   /** Guided local prompt/runtime dependencies. Present only for interactive hand-holding mode. */
   localWorkflow?: Omit<LocalWorkflowFlowDeps, 'cwd' | 'runLocalFn'>;
@@ -174,6 +181,24 @@ export interface InteractiveCliDeps extends CloudWorkflowFlowDeps {
   isTTY?: boolean;
 }
 
+function applyCliWorkforcePersonaPreferenceToLocalExecutor(
+  preference: InteractiveCliDeps['preferWorkforcePersonaWorkflowWriter'],
+  base: LocalExecutorOptions,
+): LocalExecutorOptions {
+  if (preference === undefined) return base;
+  if (preference === false) return { ...base, workforcePersonaWriter: false };
+  return { ...base, workforcePersonaWriter: {} };
+}
+
+function guidedLocalOptionsPreferringWorkforcePersona(
+  preference: InteractiveCliDeps['preferWorkforcePersonaWorkflowWriter'],
+): Pick<LocalEntrypointOptions, 'localExecutor'> | undefined {
+  if (preference === undefined) return undefined;
+  return {
+    localExecutor: applyCliWorkforcePersonaPreferenceToLocalExecutor(preference, {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Local path — execute with diagnosis on failure
 // ---------------------------------------------------------------------------
@@ -191,8 +216,12 @@ async function executeLocalPath(
   if (!deps.handoff) {
     const localWorkflow = deps.localWorkflow ?? defaultLocalWorkflowDeps(deps);
     if (localWorkflow) {
+      const defaultLocalOptions = deps.localExecutor
+        ? { executor: deps.localExecutor }
+        : guidedLocalOptionsPreferringWorkforcePersona(deps.preferWorkforcePersonaWorkflowWriter);
       const localWorkflowResult = await runLocalWorkflowFlow({
         ...localWorkflow,
+        localOptions: localWorkflow.localOptions ?? defaultLocalOptions,
         cwd: resolveLocalInvocationRoot(deps),
         runLocalFn: runLocal,
       });
@@ -236,10 +265,10 @@ async function executeLocalPath(
     executor: deps.localExecutor,
     localExecutor: deps.localExecutor
       ? undefined
-      : {
+      : applyCliWorkforcePersonaPreferenceToLocalExecutor(deps.preferWorkforcePersonaWorkflowWriter, {
           cwd: invocationRoot,
           returnGeneratedArtifactOnly: handoff.stageMode !== 'run',
-        },
+        }),
   });
 
   const diagnoses: Diagnosis[] = [];
@@ -327,7 +356,7 @@ function defaultLocalWorkflowDeps(
     prompts: createInquirerLocalWorkflowPrompts({ input, output }),
     localOptions: deps.localExecutor
       ? { executor: deps.localExecutor }
-      : undefined,
+      : guidedLocalOptionsPreferringWorkforcePersona(deps.preferWorkforcePersonaWorkflowWriter),
     onMonitorStarted: (state) => {
       output.write([
         '',
@@ -1398,6 +1427,7 @@ export async function runInteractiveCli(
     isTTY: deps.isTTY,
     mode: deps.mode,
     configStore: deps.configStore,
+    providerStatus: deps.providerStatus,
     compactForExecution: deps.handoff !== undefined,
     skipFirstRunPersistence: deps.handoff !== undefined,
   });

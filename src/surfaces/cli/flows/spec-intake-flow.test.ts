@@ -76,6 +76,29 @@ describe('spec intake flow', () => {
     });
   });
 
+  it('uses the approved workflow name as the default generated artifact path', async () => {
+    const capture = await runSpecIntakeFlow({
+      cwd: '/repo',
+      prompts: {
+        selectSpecSource: async () => 'goal',
+        inputSpecFilePath: async () => 'SPEC.md',
+        editSpec: async ({ initialValue }) => initialValue ?? '',
+        inputWorkflowName: async () => 'Repo Tidying',
+        inputGoal: async () => 'I want to clean up the codebase to remove outdated and unused files',
+        approveGeneratedSpec: async () => 'approve',
+        inputWorkflowArtifactPath: async () => 'unused',
+      },
+    });
+
+    const handoff = specCaptureToHandoff(capture, '/repo');
+
+    expect(capture.workflowName).toBe('repo-tidying');
+    expect(handoff.source === 'cli' ? handoff.spec : undefined).toMatchObject({
+      workflowName: 'repo-tidying',
+      artifactPath: 'workflows/generated/repo-tidying.ts',
+    });
+  });
+
   it('builds safety and evidence expectations into goal specs', () => {
     const spec = buildSpecFromGoal('fix failing tests', ['Run vitest and typecheck']);
 

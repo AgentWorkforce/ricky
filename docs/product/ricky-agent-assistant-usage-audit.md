@@ -29,9 +29,9 @@ This matters because Ricky is not inventing a separate workflow runtime. It is b
 
 Ricky has a real generation-time skill layer under:
 
-- `packages/product/src/generation/skill-loader.ts`
-- `packages/product/src/generation/pipeline.ts`
-- `packages/product/src/generation/template-renderer.ts`
+- `src/product/generation/skill-loader.ts`
+- `src/product/generation/pipeline.ts`
+- `src/product/generation/template-renderer.ts`
 
 Observed loaded skills include:
 
@@ -74,13 +74,13 @@ Ricky currently has many seams that *look* like `agent-assistant` runtime primit
 
 Ricky has a serious multi-surface handoff normalization layer in:
 
-- `packages/local/src/request-normalizer.ts`
+- `src/local/request-normalizer.ts`
 
 It handles local invocation shapes for CLI, MCP, Claude-style handoffs, and workflow artifacts. This is strongly adjacent to assistant-runtime turn-context or ingress normalization, but it is currently Ricky-owned rather than clearly delegated to a shared `agent-assistant` package.
 
 ### 2. Interactive assistant-like orchestration
 
-`packages/cli/src/entrypoint/interactive-cli.ts` acts like a narrow assistant orchestrator:
+`src/surfaces/cli/entrypoint/interactive-cli.ts` acts like a narrow assistant orchestrator:
 
 - onboarding
 - mode selection
@@ -95,7 +95,7 @@ This is conceptually close to a sessions/surfaces/turn-context orchestration bou
 
 Ricky's local execution path now has a meaningful staged assistant-like contract in:
 
-- `packages/local/src/entrypoint.ts`
+- `src/local/entrypoint.ts`
 
 That includes:
 
@@ -110,7 +110,7 @@ This is one of Ricky's strongest seams, and it is the most plausible candidate e
 
 ### 4. Diagnosis and unblocker guidance
 
-Ricky's diagnostic engine under `packages/runtime/diagnostics/` behaves like a shared runtime primitive:
+Ricky's diagnostic engine under `src/runtime/diagnostics/` behaves like a shared runtime primitive:
 
 - typed input
 - deterministic classification
@@ -135,9 +135,9 @@ Ricky owns:
 
 Primary files:
 
-- `packages/cli/src/commands/cli-main.ts`
-- `packages/cli/src/cli/onboarding.ts`
-- `packages/cli/src/entrypoint/interactive-cli.ts`
+- `src/surfaces/cli/commands/cli-main.ts`
+- `src/surfaces/cli/cli/onboarding.ts`
+- `src/surfaces/cli/entrypoint/interactive-cli.ts`
 
 ### Handoff normalization and request shaping
 
@@ -151,8 +151,8 @@ Ricky owns:
 
 Primary files:
 
-- `packages/local/src/request-normalizer.ts`
-- `packages/local/src/entrypoint.ts`
+- `src/local/request-normalizer.ts`
+- `src/local/entrypoint.ts`
 
 ### Execution reporting and blocker classification
 
@@ -167,8 +167,8 @@ Ricky owns:
 
 Primary files:
 
-- `packages/local/src/entrypoint.ts`
-- `packages/runtime/diagnostics/*`
+- `src/local/entrypoint.ts`
+- `src/runtime/diagnostics/*`
 
 ### Workflow generation pipeline
 
@@ -182,9 +182,9 @@ Ricky owns:
 
 Primary files:
 
-- `packages/product/src/spec-intake/*`
-- `packages/product/src/generation/*`
-- `packages/product/src/specialists/*`
+- `src/product/spec-intake/*`
+- `src/product/generation/*`
+- `src/product/specialists/*`
 
 ### Local/cloud product routing
 
@@ -196,9 +196,9 @@ Ricky owns:
 
 Primary files:
 
-- `packages/cli/src/entrypoint/interactive-cli.ts`
-- `packages/cloud/src/api/*`
-- `packages/local/src/entrypoint.ts`
+- `src/surfaces/cli/entrypoint/interactive-cli.ts`
+- `src/cloud/api/*`
+- `src/local/entrypoint.ts`
 
 ## Divergences from an agent-assistant-native architecture
 

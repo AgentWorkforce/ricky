@@ -129,7 +129,7 @@ describe('runInteractiveCli', () => {
         ]),
       );
       expect(result.localResult?.nextActions).toContain(
-        'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/ricky-generate-a-workflow-for-package-checks.ts',
+        'Run the generated workflow locally: ricky run --artifact workflows/generated/ricky-generate-a-workflow-for-package-checks.ts',
       );
       await expect(access(join(tempRepo, 'workflows/generated/ricky-generate-a-workflow-for-package-checks.ts'))).resolves.toBeUndefined();
     } finally {
@@ -213,7 +213,7 @@ describe('runInteractiveCli', () => {
       expect(result.ok).toBe(true);
       expect(result.localResult?.artifacts[0].path).toBe(artifactPath);
       expect(result.localResult?.nextActions).toContain(
-        `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+        `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
       );
       await expect(access(join(tempRepo, artifactPath))).resolves.toBeUndefined();
     } finally {
@@ -287,7 +287,7 @@ describe('runInteractiveCli', () => {
           spec_digest: 'digest-guided',
         },
         next: {
-          run_command: 'npx --no-install agent-relay run workflows/generated/guided.ts',
+          run_command: 'ricky run --artifact workflows/generated/guided.ts',
           run_mode_hint: 'ricky run --artifact workflows/generated/guided.ts',
         },
       },
@@ -323,6 +323,57 @@ describe('runInteractiveCli', () => {
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
       source: 'cli',
       mode: 'local',
+      stageMode: 'generate',
+    }));
+  });
+
+  it('threads Workforce persona preference into guided local workflow generation', async () => {
+    const execute = vi.fn().mockResolvedValue({
+      ok: true,
+      artifacts: [{ path: 'workflows/generated/guided.ts', type: 'text/typescript' }],
+      logs: ['generated'],
+      warnings: [],
+      nextActions: ['Run later'],
+      generation: {
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: 'workflows/generated/guided.ts',
+          workflow_id: 'wf-guided',
+          spec_digest: 'digest-guided',
+        },
+        next: {
+          run_command: 'ricky run --artifact workflows/generated/guided.ts',
+          run_mode_hint: 'ricky run --artifact workflows/generated/guided.ts',
+        },
+      },
+      exitCode: 0,
+    });
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      cwd: '/repo',
+      preferWorkforcePersonaWorkflowWriter: true,
+      localWorkflow: {
+        prompts: {
+          selectSpecSource: async () => 'editor',
+          inputSpecFilePath: async () => 'SPEC.md',
+          editSpec: async () => 'Generate a guided workflow.',
+          inputWorkflowName: async () => 'Guided',
+          inputGoal: async () => 'generate guided workflow',
+          approveGeneratedSpec: async () => 'approve',
+          inputWorkflowArtifactPath: async () => 'workflows/generated/guided.ts',
+          confirmRun: async () => 'not-now',
+        },
+      },
+      localExecutor: {
+        execute,
+      },
+    });
+
+    expect(result.localWorkflowResult?.generation?.ok).toBe(true);
+    expect(result.localWorkflowResult?.generation?.logs).toContain('generated');
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'cli',
       stageMode: 'generate',
     }));
   });
@@ -1074,9 +1125,9 @@ describe('runInteractiveCli', () => {
   it('passes classified local execution blockers and evidence into interactive diagnosis guidance', async () => {
     const customDiagnosis = {
       blockerClass: BlockerClass.RuntimeHandoffStall,
-      label: 'Local runtime dependency missing',
+      label: 'Relay SDK workflow runner missing',
       unblocker: {
-        action: 'Install agent-relay and rerun the generated artifact command',
+        action: 'Install dependencies and rerun the generated artifact through Ricky',
         rationale: 'The local execution stage returned a MISSING_BINARY blocker with runtime stderr evidence.',
         automatable: false,
       },
@@ -1094,7 +1145,7 @@ describe('runInteractiveCli', () => {
           artifacts: [{ path: 'workflows/generated/issue-3.ts', type: 'text/typescript' }],
           logs: [],
           warnings: [],
-          nextActions: ['npm install', 'npx --no-install agent-relay run workflows/generated/issue-3.ts'],
+          nextActions: ['npm install', 'ricky run --artifact workflows/generated/issue-3.ts'],
           exitCode: 2,
           generation: {
             stage: 'generate',
@@ -1105,7 +1156,7 @@ describe('runInteractiveCli', () => {
               spec_digest: 'digest-issue-3',
             },
             next: {
-              run_command: 'npx --no-install agent-relay run workflows/generated/issue-3.ts',
+              run_command: 'ricky run --artifact workflows/generated/issue-3.ts',
               run_mode_hint: 'ricky run --artifact workflows/generated/issue-3.ts',
             },
           },
@@ -1115,7 +1166,7 @@ describe('runInteractiveCli', () => {
             execution: {
               workflow_id: 'wf-issue-3',
               artifact_path: 'workflows/generated/issue-3.ts',
-              command: 'npx --no-install agent-relay run workflows/generated/issue-3.ts',
+              command: '@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/issue-3.ts',
               workflow_file: 'workflows/generated/issue-3.ts',
               cwd: '/repo',
               started_at: '2026-01-01T00:00:00.000Z',
@@ -1127,15 +1178,15 @@ describe('runInteractiveCli', () => {
             blocker: {
               code: 'MISSING_BINARY',
               category: 'dependency',
-              message: 'Runtime dependency is unavailable: agent-relay: command not found.',
+              message: 'Runtime dependency is unavailable: @agent-relay/sdk/workflows runtime.',
               detected_at: '2026-01-01T00:00:00.000Z',
               detected_during: 'launch',
               recovery: {
                 actionable: true,
-                steps: ['npm install', 'npx --no-install agent-relay run workflows/generated/issue-3.ts'],
+                steps: ['npm install', 'ricky run --artifact workflows/generated/issue-3.ts'],
               },
               context: {
-                missing: ['agent-relay'],
+                missing: ['@agent-relay/sdk/workflows runtime'],
                 found: ['cwd=/repo'],
               },
             },
@@ -1144,12 +1195,12 @@ describe('runInteractiveCli', () => {
               failed_step: { id: 'runtime-launch', name: 'Local runtime execution' },
               exit_code: 127,
               logs: {
-                tail: ['agent-relay: command not found'],
+                tail: ['@agent-relay/sdk/workflows runtime unavailable'],
                 truncated: false,
               },
               side_effects: {
                 files_written: ['workflows/generated/issue-3.ts'],
-                commands_invoked: ['npx --no-install agent-relay run workflows/generated/issue-3.ts'],
+                commands_invoked: ['@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/issue-3.ts'],
               },
               assertions: [
                 {
@@ -1167,15 +1218,15 @@ describe('runInteractiveCli', () => {
 
     expect(result.ok).toBe(false);
     expect(result.diagnoses).toEqual([customDiagnosis]);
-    expect(result.guidance.join('\n')).toContain('[Local runtime dependency missing]');
+    expect(result.guidance.join('\n')).toContain('[Relay SDK workflow runner missing]');
     expect(result.guidance.join('\n')).toContain(
-      'Install agent-relay and rerun the generated artifact command',
+      'Install dependencies and rerun the generated artifact through Ricky',
     );
     expect(result.guidance.join('\n')).not.toContain('Recovery:');
     expect(diagnoseFn).toHaveBeenCalledWith(
       expect.objectContaining({
         source: 'local-blocker',
-        message: 'Runtime dependency is unavailable: agent-relay: command not found.',
+        message: 'Runtime dependency is unavailable: @agent-relay/sdk/workflows runtime.',
         meta: {
           code: 'MISSING_BINARY',
           category: 'dependency',
@@ -1192,7 +1243,7 @@ describe('runInteractiveCli', () => {
     expect(diagnoseFn).toHaveBeenCalledWith(
       expect.objectContaining({
         source: 'local-runtime-tail',
-        message: 'agent-relay: command not found',
+        message: '@agent-relay/sdk/workflows runtime unavailable',
       }),
     );
   });
@@ -1571,7 +1622,7 @@ describe('runInteractiveCli', () => {
 
         // Next action uses the same relative path
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
         );
       } finally {
         await rm(tempRepo, { recursive: true, force: true });
@@ -1608,7 +1659,7 @@ describe('runInteractiveCli', () => {
 
         // Next action uses the same relative path
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
         );
       } finally {
         await rm(tempRepo, { recursive: true, force: true });
@@ -1640,7 +1691,7 @@ describe('runInteractiveCli', () => {
         await expect(access(join(tempRepo, artifactPath))).resolves.toBeUndefined();
         await expect(access(join(tempPackageCwd, artifactPath))).rejects.toThrow();
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
         );
       } finally {
         await rm(tempRepo, { recursive: true, force: true });
@@ -1704,7 +1755,7 @@ describe('runInteractiveCli', () => {
         expect(content).toContain('workflow(');
 
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
         );
 
         // Artifact is NOT in packages/cli/workflows/generated
@@ -1745,7 +1796,7 @@ describe('runInteractiveCli', () => {
         expect(content).toContain('workflow(');
 
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: npx --no-install agent-relay run ${artifactPath}`,
+          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
         );
 
         // Artifact is NOT in packages/cli/workflows/generated
@@ -1774,7 +1825,7 @@ describe('runInteractiveCli', () => {
 
         const artifactPath = result.localResult!.artifacts[0].path;
         const physicalPath = join(tempRepo, artifactPath);
-        const runCommand = `npx --no-install agent-relay run ${artifactPath}`;
+        const runCommand = `ricky run --artifact ${artifactPath}`;
 
         // All three point to the same location
         await expect(access(physicalPath)).resolves.toBeUndefined();

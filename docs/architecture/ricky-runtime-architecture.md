@@ -144,8 +144,8 @@ Ricky uses a **request-response, per-invocation** execution model. There is no p
 
 ```
 CLI argv
-  -> src/commands/cli-main.ts        (parse --help, --version, --mode)
-  -> src/entrypoint/interactive-cli.ts  (three-phase orchestrator)
+  -> src/surfaces/cli/commands/cli-main.ts        (parse --help, --version, --mode)
+  -> src/surfaces/cli/entrypoint/interactive-cli.ts  (three-phase orchestrator)
 ```
 
 ### Three-phase execution
@@ -515,7 +515,7 @@ Configuration is loaded once at the entry point and threaded through as a parame
 
 1. `--mode` from CLI argv always overrides mode from config files.
 2. Project config overrides global config on a per-key basis (shallow merge, not deep merge).
-3. Config is loaded by the entry point (`src/commands/cli-main.ts`) and passed as a typed `RickyConfig` parameter to the orchestrator. No module reads config files directly.
+3. Config is loaded by the entry point (`src/surfaces/cli/commands/cli-main.ts`) and passed as a typed `RickyConfig` parameter to the orchestrator. No module reads config files directly.
 4. Config loading happens before onboarding. The onboarding flow reads the loaded config to decide first-run vs returning user behavior.
 5. Config files are plain JSON with no environment-variable interpolation. Secrets belong in environment variables read at the entry point, not in config files.
 
@@ -566,7 +566,7 @@ Every function that performs I/O or side effects must accept its dependencies as
 
 ### Testing
 
-- Framework: Vitest with global test setup in `src/test/setup.ts`
+- Framework: Vitest with global test setup in `test/setup.ts`
 - All executor and diagnostic interfaces are testable with stub implementations
 - Proof modules (`*/proof/*.ts`) serve as integration-level smoke tests
 
@@ -584,15 +584,15 @@ For structural tasks (file enumeration, plan synthesis, bounded file writes), pr
 ### Layer boundaries
 
 ```
-src/commands/       CLI argument parsing only
-src/entrypoint/     Orchestration only, no domain logic
-src/cli/            CLI product surface (onboarding, welcome, mode selection)
+src/surfaces/cli/commands/    CLI argument parsing only
+src/surfaces/cli/entrypoint/  Orchestration only, no domain logic
+src/surfaces/cli/cli/         CLI product surface (onboarding, welcome, mode selection)
 src/local/          Local/BYOH execution coordination
 src/cloud/api/      Cloud API surface
 src/runtime/        Runtime substrate (diagnostics, evidence, coordination)
 src/shared/         Cross-layer types, models, constants
 src/product/        (future) Domain specialists and generation pipeline
-src/analytics/      (future) Workflow health analytics
+src/product/analytics/        Workflow health analytics
 ```
 
 No layer should import from a layer above it. Shared models are the only cross-cutting import path.
