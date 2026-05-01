@@ -243,6 +243,7 @@ describe('runOnboarding', () => {
       input: inputStream('1'),
       output,
       isTTY: true,
+      env: {},
       configStore: store,
     });
 
@@ -438,6 +439,7 @@ describe('runOnboarding', () => {
       input,
       output,
       isTTY: true,
+      env: {},
       configStore: store,
     });
 
@@ -456,6 +458,7 @@ describe('runOnboarding', () => {
     const result = await runOnboarding({
       output,
       isTTY: true,
+      env: {},
       configStore: store,
       promptShell,
     });
@@ -481,6 +484,7 @@ describe('runOnboarding', () => {
     const result = await runOnboarding({
       output,
       isTTY: true,
+      env: {},
       configStore: store,
       promptShell,
     });
@@ -501,6 +505,7 @@ describe('runOnboarding', () => {
       runOnboarding({
         output: new PassThrough(),
         isTTY: true,
+        env: {},
         configStore: mockConfigStore(),
         promptShell,
         verbose: true,
@@ -530,7 +535,9 @@ describe('runOnboarding', () => {
 
     const ambientOutput = new PassThrough();
     const previousNoColor = process.env.NO_COLOR;
+    const previousCi = process.env.CI;
     process.env.NO_COLOR = '1';
+    delete process.env.CI;
 
     try {
       const ambientEnvResult = await runOnboarding({
@@ -547,6 +554,11 @@ describe('runOnboarding', () => {
         delete process.env.NO_COLOR;
       } else {
         process.env.NO_COLOR = previousNoColor;
+      }
+      if (previousCi === undefined) {
+        delete process.env.CI;
+      } else {
+        process.env.CI = previousCi;
       }
     }
   });
