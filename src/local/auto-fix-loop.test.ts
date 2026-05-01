@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { runWithAutoFix } from './auto-fix-loop.js';
+import { repairWorkflowDeterministically, runWithAutoFix } from './auto-fix-loop.js';
 import type { LocalClassifiedBlocker, LocalResponse } from './entrypoint.js';
 import type { LocalInvocationRequest } from './request-normalizer.js';
 import type { FailureClassification } from '../runtime/failure/types.js';
@@ -86,6 +86,93 @@ describe('runWithAutoFix', () => {
         summary: 'persona patched the workflow',
       },
     });
+  });
+
+  it('extracts SDK workflow failed-step evidence from log tails for repair and resume', async () => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(sdkRuntimeBlockerResponse())
+      .mockResolvedValueOnce(successResponse('run-2'));
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired workflow'));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 2,
+      runSingleAttempt,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(workflowRepairer).toHaveBeenCalledWith(expect.objectContaining({
+      failedStep: 'verify-greeting',
+      runId: 'relay-run-123',
+      classification: expect.objectContaining({
+        failureClass: 'verification_failure',
+      }),
+      debuggerResult: expect.objectContaining({
+        summary: expect.stringContaining('required file or artifact was not materialized'),
+      }),
+    }));
+    expect(workflowRepairer.mock.calls[0][0].evidence.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        stepId: 'verify-greeting',
+        status: 'failed',
+        verifications: [expect.objectContaining({
+          type: 'file_exists',
+          passed: false,
+          expected: '.workflow-artifacts/demo-auto-fix/broken-greeting/hello.txt',
+          command: 'test -f .workflow-artifacts/demo-auto-fix/broken-greeting/hello.txt',
+        })],
+      }),
+      expect.objectContaining({
+        stepId: 'emit-done',
+        status: 'skipped',
+      }),
+    ]));
+    expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
+      previousRunId: 'relay-run-123',
+      retryOfRunId: 'relay-run-123',
+      startFromStep: 'verify-greeting',
+    });
+  });
+
+  it('deterministically repairs bounded workflow artifact mismatches when persona repair is unavailable', async () => {
+    const response = sdkRuntimeBlockerResponse();
+    const runSingleAttempt = vi.fn().mockResolvedValueOnce(response);
+    let capturedEvidence: WorkflowRunEvidence | undefined;
+    const workflowRepairer = vi.fn((input) => {
+      capturedEvidence = input.evidence;
+      return Promise.resolve({
+        applied: false,
+        summary: 'stop after evidence capture',
+      });
+    });
+
+    await runWithAutoFix(baseRequest, {
+      maxAttempts: 2,
+      runSingleAttempt,
+      workflowRepairer,
+    });
+
+    expect(capturedEvidence).toBeDefined();
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/demo-auto-fix/broken-greeting.ts',
+      artifactContent: brokenDemoWorkflowContent(),
+      evidence: capturedEvidence!,
+    }, new Error('No Workforce persona could be resolved'));
+
+    expect(repair).toMatchObject({
+      applied: true,
+      artifactPath: 'workflows/demo-auto-fix/broken-greeting.ts',
+      summary: expect.stringContaining('bounded deterministic workflow repair'),
+      warnings: [expect.stringContaining('Workforce persona repair unavailable')],
+    });
+    expect(repair?.content).toContain('test -f ${artifactDir}/greeting.txt');
+    expect(repair?.content).toContain('command: `echo COMPLETE`');
+    expect(repair?.content).toContain('{{steps.write-greeting.output}}');
+    expect(repair?.content).not.toContain(`${demoArtifactDir()}/hello.txt`);
+    expect(repair?.content).not.toContain('command: `echo DONE`');
+    expect(repair?.content).not.toContain('{{steps.write-message.output}}');
   });
 
   it('persona repair failure escalates without retrying', async () => {
@@ -259,6 +346,69 @@ function blockerResponse(code: LocalClassifiedBlocker['code'], runId: string | u
   };
 }
 
+function sdkRuntimeBlockerResponse(): LocalResponse {
+  const blocker: LocalClassifiedBlocker = {
+    code: 'INVALID_ARTIFACT',
+    category: 'workflow_invalid',
+    message: 'Workflow reported a failed run: Workflow runtime reported failure despite a zero process exit: ✗ verify-greeting — FAILED: Command failed with exit code 1.',
+    detected_at: '2026-04-28T00:00:00.000Z',
+    detected_during: 'launch',
+    recovery: {
+      actionable: true,
+      steps: ['Inspect the captured workflow logs.'],
+    },
+    context: {
+      missing: [],
+      found: [],
+    },
+  };
+  return {
+    ok: false,
+    artifacts: [{ path: 'workflows/generated/foo.ts', content: workflowContent() }],
+    logs: [],
+    warnings: [blocker.message],
+    nextActions: [...blocker.recovery.steps],
+    generation: {
+      stage: 'generate',
+      status: 'ok',
+      artifact: { path: 'workflows/generated/foo.ts', workflow_id: 'wf-1', spec_digest: 'abc' },
+    },
+    execution: {
+      stage: 'execute',
+      status: 'blocker',
+      execution: execution(undefined),
+      blocker,
+      evidence: {
+        outcome_summary: blocker.message,
+        logs: {
+          tail: [
+            '[workflow 00:00] Starting workflow "ricky-demo-broken-greeting-workflow" (5 steps)',
+            '[workflow] run relay-run-123',
+            '[workflow 00:00] Executing 5 steps (pattern: pipeline)',
+            '  ● prepare — started',
+            '[workflow 00:00] [prepare] Running: mkdir -p .workflow-artifacts/demo-auto-fix/broken-greeting',
+            '  ✓ prepare — completed',
+            '  ● write-greeting — started',
+            "[workflow 00:00] [write-greeting] Running: printf '%s\\n' 'hello world' > .workflow-artifacts/demo-auto-fix/broken-greeting/greeting.txt",
+            '  ✓ write-greeting — completed',
+            '  ● verify-greeting — started',
+            '[workflow 00:00] [verify-greeting] Running: test -f .workflow-artifacts/demo-auto-fix/broken-greeting/hello.txt',
+            '[workflow 00:00] [verify-greeting] Command failed (exit code 1)',
+            '  ✗ verify-greeting — FAILED: Command failed with exit code 1',
+            '  ○ emit-done — skipped',
+            '  ○ summary — skipped',
+            '[workflow] FAILED: Step "verify-greeting" failed: Step "verify-greeting" failed: Command failed with exit code 1',
+          ],
+          truncated: false,
+        },
+        side_effects: { files_written: [], commands_invoked: [] },
+        assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
+      },
+    },
+    exitCode: 2,
+  };
+}
+
 function workflowRepair(content: string) {
   return {
     applied: true,
@@ -272,6 +422,52 @@ function workflowRepair(content: string) {
 
 function workflowContent(): string {
   return 'import { workflow } from "@agent-relay/sdk/workflows";\nworkflow("foo").run({ cwd: process.cwd() });\n';
+}
+
+function demoArtifactDir(): string {
+  return '.workflow-artifacts/demo-auto-fix/broken-greeting';
+}
+
+function brokenDemoWorkflowContent(): string {
+  const artifactDir = demoArtifactDir();
+  return `
+import { workflow } from '@agent-relay/sdk/workflows';
+
+const artifactDir = '${artifactDir}';
+
+workflow('ricky-demo-broken-greeting')
+  .step('prepare', {
+    type: 'deterministic',
+    command: \`mkdir -p \${artifactDir}\`,
+    failOnError: true,
+  })
+  .step('write-greeting', {
+    type: 'deterministic',
+    dependsOn: ['prepare'],
+    command: \`printf '%s\\n' 'hello world' > \${artifactDir}/greeting.txt\`,
+    failOnError: true,
+  })
+  .step('verify-greeting', {
+    type: 'deterministic',
+    dependsOn: ['write-greeting'],
+    command: \`test -f \${artifactDir}/hello.txt\`,
+    failOnError: true,
+  })
+  .step('emit-done', {
+    type: 'deterministic',
+    dependsOn: ['verify-greeting'],
+    command: \`echo DONE\`,
+    failOnError: true,
+    verification: { type: 'output_contains', value: 'COMPLETE' },
+  })
+  .step('summary', {
+    type: 'deterministic',
+    dependsOn: ['emit-done'],
+    command: \`printf 'pipeline complete: %s\\n' '{{steps.write-message.output}}' > \${artifactDir}/summary.txt\`,
+    failOnError: true,
+  })
+  .run({ cwd: process.cwd() });
+`;
 }
 
 function execution(runId: string | undefined): NonNullable<LocalResponse['execution']>['execution'] {
