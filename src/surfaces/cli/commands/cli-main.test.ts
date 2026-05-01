@@ -152,6 +152,80 @@ describe('parseArgs', () => {
       errors: ['--spec requires a value.'],
     });
   });
+
+  it('parses quiet power-user local and cloud commands', () => {
+    expect(parseArgs(['local', '--spec', 'build a workflow', '--name', 'release-health', '--no-run'])).toMatchObject({
+      command: 'run',
+      surface: 'local',
+      mode: 'local',
+      spec: 'build a workflow',
+      workflowName: 'release-health',
+      noRun: true,
+      autoFix: 3,
+    });
+
+    expect(parseArgs(['cloud', '--workflow', 'workflows/generated/release-health.ts', '--run', '--yes', '--json'])).toMatchObject({
+      command: 'run',
+      surface: 'cloud',
+      mode: 'cloud',
+      artifact: 'workflows/generated/release-health.ts',
+      runRequested: true,
+      yes: true,
+      json: true,
+    });
+  });
+
+  it('parses power-user run modes, verbose output, and conflicting run-mode recovery', () => {
+    expect(parseArgs(['local', '--spec', 'build a workflow', '--run', '--background', '--verbose'])).toMatchObject({
+      command: 'run',
+      surface: 'local',
+      mode: 'local',
+      runRequested: true,
+      background: true,
+      verbose: true,
+    });
+
+    expect(parseArgs(['local', '--spec', 'build a workflow', '--run', '--foreground'])).toMatchObject({
+      foreground: true,
+    });
+
+    expect(parseArgs(['local', '--spec', 'build a workflow', '--background', '--foreground'])).toMatchObject({
+      errors: ['--background and --foreground cannot be combined.'],
+    });
+  });
+
+  it('parses --login and --connect-missing power-user recovery flags', () => {
+    expect(parseArgs(['cloud', '--spec', 'build a workflow', '--login'])).toMatchObject({
+      command: 'run',
+      surface: 'cloud',
+      login: true,
+    });
+    expect(parseArgs(['cloud', '--spec', 'build a workflow', '--connect-missing'])).toMatchObject({
+      command: 'run',
+      surface: 'cloud',
+      connectMissing: true,
+    });
+  });
+
+  it('parses status and connect commands', () => {
+    expect(parseArgs(['status', '--json'])).toEqual({
+      command: 'status',
+      surface: 'status',
+      json: true,
+    });
+    expect(parseArgs(['status', '--run', 'ricky-local-123', '--json'])).toEqual({
+      command: 'status',
+      surface: 'status',
+      runId: 'ricky-local-123',
+      json: true,
+    });
+    expect(parseArgs(['connect', 'agents', '--cloud', 'claude,codex'])).toMatchObject({
+      command: 'connect',
+      surface: 'connect',
+      connectTarget: 'agents',
+      cloudTargets: ['claude', 'codex'],
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -372,6 +446,61 @@ describe('cliMain', () => {
 
     expect(result.output).toHaveLength(2);
     expect(result.output[0]).toMatch(/Runtime handoff stall/);
+  });
+
+  it('prints the background monitor run id and status command after guided local background run', async () => {
+    const localResult = stagedLocalResult({
+      execution: {
+        ...stagedLocalResult().execution!,
+        execution: {
+          ...stagedLocalResult().execution!.execution,
+          workflow_id: 'wf-background',
+          run_id: 'relay-run-background',
+        },
+      },
+    });
+    const monitoredRun = {
+      runId: 'ricky-local-background',
+      status: 'completed',
+      artifactPath: 'workflows/generated/background.ts',
+      artifactDir: '/repo/.workflow-artifacts/ricky-local-runs/ricky-local-background',
+      statePath: '/repo/.workflow-artifacts/ricky-local-runs/ricky-local-background/state.json',
+      logPath: '/repo/.workflow-artifacts/ricky-local-runs/ricky-local-background/run.log',
+      evidencePath: '/repo/.workflow-artifacts/ricky-local-runs/ricky-local-background/evidence.json',
+      fixesPath: '/repo/.workflow-artifacts/ricky-local-runs/ricky-local-background/fixes.json',
+      reattachCommand: 'ricky status --run ricky-local-background',
+      response: localResult,
+    } as const;
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({
+      localResult,
+      localWorkflowResult: {
+        preflight: {} as never,
+        capture: {} as never,
+        generation: stagedLocalResult({ execution: undefined }),
+        summary: {
+          artifactPath: 'workflows/generated/background.ts',
+          goal: 'Background workflow',
+          agents: [],
+          jobs: [],
+          desiredOutcome: 'Complete locally.',
+          sideEffects: [],
+          missingLocalBlockers: [],
+          command: 'npx --no-install agent-relay run workflows/generated/background.ts',
+        },
+        confirmation: 'background',
+        monitoredRun,
+        command: 'npx --no-install agent-relay run workflows/generated/background.ts',
+      },
+    }));
+
+    const result = await cliMain({ argv: [], runInteractive: runner });
+    const output = result.output.join('\n');
+
+    expect(output).toContain('Background monitor');
+    expect(output).toContain('Workflow run id: ricky-local-background');
+    expect(output).toContain('Runtime workflow id: wf-background');
+    expect(output).toContain('Runtime run id: relay-run-background');
+    expect(output).toContain('Status command: ricky status --run ricky-local-background');
   });
 
   it('returns empty output array on successful run with no guidance', async () => {
@@ -843,6 +972,350 @@ describe('cliMain', () => {
     expect(result.output.join('\n')).toContain('CLI input blocker:');
     expect(result.output.join('\n')).toContain('--spec-file requires a value.');
     expect(result.output.join('\n')).toContain('provide one of --spec, --spec-file, or --stdin');
+  });
+
+  it('renders compact power-user local JSON with run command when --run is omitted', async () => {
+    const artifactOnly = stagedLocalResult({
+      execution: undefined,
+      nextActions: [
+        'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+      ],
+    });
+    const runner = vi.fn().mockResolvedValue(
+      fakeInteractiveResult({
+        ok: true,
+        localResult: artifactOnly,
+      }),
+    );
+
+    const result = await cliMain({
+      argv: ['local', '--spec', 'build a workflow', '--name', 'issue-3', '--json'],
+      runInteractive: runner,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'local',
+        handoff: expect.objectContaining({
+          stageMode: 'generate',
+          cliMetadata: expect.objectContaining({ workflowName: 'issue-3' }),
+        }),
+      }),
+    );
+    const parsed = JSON.parse(result.output.join('\n'));
+    expect(parsed).toMatchObject({
+      mode: 'local',
+      workflowName: 'issue-3',
+      workflowPath: 'workflows/generated/issue-3.ts',
+      status: 'ok',
+      warnings: [],
+      nextActions: expect.arrayContaining([
+        'Run the generated workflow locally: npx --no-install agent-relay run workflows/generated/issue-3.ts',
+      ]),
+    });
+  });
+
+  it('renders one-line --yes summary for power-user local run confirmation only', async () => {
+    const runner = vi.fn().mockResolvedValue(
+      fakeInteractiveResult({
+        ok: true,
+        localResult: stagedLocalResult(),
+      }),
+    );
+
+    const result = await cliMain({
+      argv: ['local', '--spec', 'build a workflow', '--run', '--yes', '--quiet'],
+      runInteractive: runner,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toEqual(['Ricky local: issue-3 run success.']);
+    expect(runner.mock.calls[0][0].handoff).toMatchObject({
+      stageMode: 'run',
+      cliMetadata: expect.objectContaining({ yes: 'non-destructive-confirmations-only' }),
+    });
+  });
+
+  it('threads power-user background and foreground run-mode metadata without unsafe approvals', async () => {
+    const runner = vi.fn().mockResolvedValue(
+      fakeInteractiveResult({
+        ok: true,
+        localResult: stagedLocalResult(),
+      }),
+    );
+
+    await cliMain({
+      argv: ['local', '--spec', 'build a workflow', '--run', '--background', '--yes'],
+      runInteractive: runner,
+    });
+    await cliMain({
+      argv: ['local', '--spec', 'build a workflow', '--run', '--foreground'],
+      runInteractive: runner,
+    });
+
+    expect(runner.mock.calls[0][0].handoff.cliMetadata).toMatchObject({
+      runMode: 'background',
+      yes: 'non-destructive-confirmations-only',
+    });
+    expect(runner.mock.calls[1][0].handoff.cliMetadata).toMatchObject({
+      runMode: 'foreground',
+    });
+  });
+
+  it('fails power-user cloud non-interactively with recovery commands when Cloud context is missing', async () => {
+    const result = await cliMain({
+      argv: ['cloud', '--spec', 'build a workflow', '--json'],
+      onboard: vi.fn().mockResolvedValue({
+        mode: 'cloud',
+        firstRun: false,
+        bannerShown: false,
+        output: 'mode=cloud',
+      }),
+    });
+
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.output.join('\n'));
+    expect(parsed).toMatchObject({
+      mode: 'cloud',
+      status: 'blocked',
+      warnings: expect.arrayContaining([
+        'Cloud mode selected but no Cloud request context was provided.',
+        'Recovery: run `ricky connect cloud`, then `ricky status`.',
+      ]),
+      nextActions: expect.arrayContaining(['ricky connect cloud', 'ricky status']),
+    });
+  });
+
+  it('ricky status derives Local block from runLocalPreflight rather than hard-coded constants', async () => {
+    const { mkdtemp, mkdir, rm, writeFile, chmod } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const repoWithAgentRelay = await mkdtemp(join(tmpdir(), 'ricky-status-found-'));
+    const repoWithoutAgentRelay = await mkdtemp(join(tmpdir(), 'ricky-status-missing-'));
+    const previousPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      await mkdir(join(repoWithAgentRelay, '.git'), { recursive: true });
+      await mkdir(join(repoWithAgentRelay, 'node_modules', '.bin'), { recursive: true });
+      await writeFile(join(repoWithAgentRelay, 'node_modules/.bin/agent-relay'), '#!/bin/sh\n', 'utf8');
+      await chmod(join(repoWithAgentRelay, 'node_modules/.bin/agent-relay'), 0o755);
+
+      await mkdir(join(repoWithoutAgentRelay, '.git'), { recursive: true });
+
+      const found = await cliMain({ argv: ['status', '--json'], cwd: repoWithAgentRelay });
+      const missing = await cliMain({ argv: ['status', '--json'], cwd: repoWithoutAgentRelay });
+
+      const foundJson = JSON.parse(found.output.join('\n'));
+      const missingJson = JSON.parse(missing.output.join('\n'));
+
+      expect(foundJson.local.repo).toBe(repoWithAgentRelay);
+      expect(foundJson.local.agentRelay).toMatch(/^found/);
+      expect(missingJson.local.repo).toBe(repoWithoutAgentRelay);
+      expect(missingJson.local.agentRelay).toBe('missing');
+    } finally {
+      process.env.PATH = previousPath;
+      await rm(repoWithAgentRelay, { recursive: true, force: true });
+      await rm(repoWithoutAgentRelay, { recursive: true, force: true });
+    }
+  });
+
+  it('ricky status --run reads persisted monitor progress by run id', async () => {
+    const { mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-status-run-'));
+    const runId = 'ricky-local-status-fixture';
+    const artifactDir = join(repo, '.workflow-artifacts', 'ricky-local-runs', runId);
+    const statePath = join(artifactDir, 'state.json');
+    const response = stagedLocalResult({
+      execution: {
+        ...stagedLocalResult().execution!,
+        execution: {
+          ...stagedLocalResult().execution!.execution,
+          workflow_id: 'wf-status-fixture',
+          run_id: 'relay-run-status-fixture',
+        },
+      },
+    });
+
+    try {
+      await mkdir(artifactDir, { recursive: true });
+      await writeFile(statePath, JSON.stringify({
+        runId,
+        status: 'running',
+        artifactPath: 'workflows/generated/status-fixture.ts',
+        artifactDir,
+        statePath,
+        logPath: join(artifactDir, 'run.log'),
+        evidencePath: join(artifactDir, 'evidence.json'),
+        fixesPath: join(artifactDir, 'fixes.json'),
+        reattachCommand: `ricky status --run ${runId}`,
+        response,
+      }), 'utf8');
+
+      const human = await cliMain({ argv: ['status', '--run', runId], cwd: repo });
+      expect(human.output.join('\n')).toContain(`Run id:    ${runId}`);
+      expect(human.output.join('\n')).toContain('Status:    running');
+      expect(human.output.join('\n')).toContain('workflow_id: wf-status-fixture');
+      expect(human.output.join('\n')).toContain('run_id: relay-run-status-fixture');
+      expect(human.output.join('\n')).toContain(`ricky status --run ${runId}`);
+
+      const json = await cliMain({ argv: ['status', '--run', runId, '--json'], cwd: repo });
+      expect(JSON.parse(json.output.join('\n'))).toMatchObject({
+        runId,
+        status: 'running',
+        response: {
+          execution: {
+            execution: {
+              workflow_id: 'wf-status-fixture',
+              run_id: 'relay-run-status-fixture',
+            },
+          },
+        },
+      });
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('ricky connect cloud invokes the Relay Cloud account login flow', async () => {
+    const connectProvider = vi.fn().mockResolvedValue({ provider: 'google', success: true });
+    const ensureCloudAuthenticated = vi.fn().mockResolvedValue({
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      apiUrl: 'https://cloud.example.test',
+    });
+
+    const result = await cliMain({
+      argv: ['connect', 'cloud', '--json'],
+      connectProvider,
+      ensureCloudAuthenticated,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(ensureCloudAuthenticated).toHaveBeenCalledTimes(1);
+    expect(connectProvider).not.toHaveBeenCalled();
+    const parsed = JSON.parse(result.output.join('\n'));
+    expect(parsed).toMatchObject({
+      target: 'cloud',
+      status: 'connected',
+      connectedProviders: ['cloud'],
+      nextActions: ['ricky status'],
+    });
+  });
+
+  it('ricky connect agents invokes the Relay Cloud connector for each requested provider', async () => {
+    const connectProvider = vi.fn(async (options: { provider: string }) => ({
+      provider: options.provider,
+      success: true,
+    }));
+
+    const result = await cliMain({
+      argv: ['connect', 'agents', '--cloud', 'claude,codex', '--json'],
+      connectProvider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(connectProvider.mock.calls.map(([options]) => options.provider)).toEqual(['claude', 'codex']);
+    const parsed = JSON.parse(result.output.join('\n'));
+    expect(parsed).toMatchObject({
+      target: 'agents',
+      status: 'connected',
+      connectedProviders: ['claude', 'codex'],
+    });
+  });
+
+  it('ricky connect reports failed Relay Cloud connector attempts without claiming success', async () => {
+    const connectProvider = vi.fn().mockRejectedValue(new Error('connectProvider requires an interactive terminal (TTY).'));
+
+    const result = await cliMain({
+      argv: ['connect', 'agents', '--cloud', 'claude', '--json'],
+      connectProvider,
+    });
+
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.output.join('\n'));
+    expect(parsed).toMatchObject({
+      target: 'agents',
+      status: 'failed',
+      failedProviders: [
+        {
+          provider: 'claude',
+          message: 'connectProvider requires an interactive terminal (TTY).',
+        },
+      ],
+      nextActions: expect.arrayContaining(['npx agent-relay cloud connect claude', 'ricky status']),
+    });
+  });
+
+  it('ricky connect integrations creates Nango connect links without using provider auth', async () => {
+    const connectProvider = vi.fn().mockResolvedValue({ provider: 'slack', success: true });
+    const connectCloudIntegrations = vi.fn().mockResolvedValue([
+      { integration: 'slack', status: 'link-opened', url: 'https://nango.example/slack' },
+      { integration: 'github', status: 'link-created', url: 'https://nango.example/github' },
+    ]);
+
+    const result = await cliMain({
+      argv: ['connect', 'integrations', '--cloud', 'slack,github', '--json'],
+      connectProvider,
+      connectCloudIntegrations,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(connectProvider).not.toHaveBeenCalled();
+    expect(connectCloudIntegrations).toHaveBeenCalledWith(['slack', 'github']);
+    const parsed = JSON.parse(result.output.join('\n'));
+    expect(parsed).toMatchObject({
+      target: 'integrations',
+      status: 'connected',
+      connectedProviders: ['slack', 'github'],
+      nextActions: ['ricky status'],
+    });
+  });
+
+  it('wires power-user --login recoverCloudLogin shim into interactive deps', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ mode: 'cloud' }));
+    await cliMain({
+      argv: ['cloud', '--spec', 'build a workflow', '--login'],
+      runInteractive: runner,
+    });
+    const deps = runner.mock.calls[0][0];
+    expect(typeof deps.recoverCloudLogin).toBe('function');
+  });
+
+  it('wires power-user --connect-missing connectCloudAgents shim into interactive deps', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ mode: 'cloud' }));
+    await cliMain({
+      argv: ['cloud', '--spec', 'build a workflow', '--connect-missing'],
+      runInteractive: runner,
+    });
+    const deps = runner.mock.calls[0][0];
+    expect(typeof deps.connectCloudAgents).toBe('function');
+  });
+
+  it('renders status and connect surfaces without invoking interactive runner', async () => {
+    const runner = vi.fn();
+    const ensureCloudAuthenticated = vi.fn().mockResolvedValue({
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      apiUrl: 'https://cloud.example.test',
+    });
+    const status = await cliMain({ argv: ['status', '--json'], cwd: '/repo-root', runInteractive: runner });
+    const connect = await cliMain({ argv: ['connect', 'cloud', '--quiet'], runInteractive: runner, ensureCloudAuthenticated });
+
+    expect(status.exitCode).toBe(0);
+    expect(JSON.parse(status.output.join('\n'))).toMatchObject({
+      mode: 'local',
+      local: { repo: '/repo-root' },
+      nextActions: expect.arrayContaining(['ricky connect cloud']),
+    });
+    expect(connect.exitCode).toBe(0);
+    expect(connect.output).toEqual(['Ricky connect cloud: connected.']);
+    expect(runner).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------

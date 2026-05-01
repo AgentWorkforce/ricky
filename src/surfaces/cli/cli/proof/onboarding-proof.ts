@@ -444,7 +444,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
     },
     {
       name: 'setup-journey',
-      description: 'Setup journey verifies first-run onboarding renders mode selector and all four choices.',
+      description: 'Setup journey verifies first-run onboarding renders mode selector and all five choices per the simplified CLI spec.',
       specSection: 'CLI command surface — setup journey',
       evaluate: () => {
         const output = renderOnboarding({ isFirstRun: true, isTTY: true, choice: 'local', env: {} });
@@ -457,13 +457,15 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             output.includes('How would you like to use Ricky?'),
             selector.includes('[1] Local / BYOH'),
             selector.includes('[2] Cloud'),
-            selector.includes('[3] Both'),
-            selector.includes('[4] Just explore'),
+            selector.includes('[3] Status'),
+            selector.includes('[4] Connect tools'),
+            selector.includes('[5] Exit'),
             selector.includes('Choice [1]:'),
           ],
           [
             `first-run includes welcome: true`,
             `selector has all 4 choices: true`,
+            `selector has all 5 simplified-CLI choices: true`,
             compactEvidence('selector', selector),
           ],
         );

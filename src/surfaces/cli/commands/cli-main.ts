@@ -12,30 +12,54 @@
  */
 
 import type { InteractiveCliDeps, InteractiveCliResult } from '../entrypoint/interactive-cli.js';
+import type { CloudIntegrationConnector } from '../entrypoint/interactive-cli.js';
 import type { RickyMode } from '../cli/mode-selector.js';
 import type { RawHandoff } from '../../../local/request-normalizer.js';
+import type { CloudGenerateRequest, CloudWorkflowSpecPayload } from '../../../cloud/api/request-types.js';
+import type { ConnectProviderOptions, ConnectProviderResult, StoredAuth } from '@agent-relay/cloud';
+import type { LocalRunMonitorState } from '../flows/local-run-monitor.js';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { isRickyMode } from '../cli/mode-selector.js';
-import { runInteractiveCli } from '../entrypoint/interactive-cli.js';
+import { defaultCloudIntegrationConnector, runInteractiveCli } from '../entrypoint/interactive-cli.js';
+import { parsePowerUserArgs, type ConnectTarget, type PowerUserSurface } from '../flows/power-user-parser.js';
+import {
+  cloudPowerUserWorkflowSummary,
+  localPowerUserWorkflowSummary,
+  renderPowerUserWorkflowJson,
+  renderPowerUserWorkflowSummary,
+} from '../flows/workflow-summary.js';
+import { runLocalPreflight, type LocalPreflightCheck, type LocalPreflightResult } from '../flows/local-workflow-flow.js';
 
 // ---------------------------------------------------------------------------
 // Parsed CLI arguments
 // ---------------------------------------------------------------------------
 
 export interface ParsedArgs {
-  command: 'run' | 'help' | 'version';
+  command: 'run' | 'help' | 'version' | 'status' | 'connect';
+  surface?: PowerUserSurface;
   mode?: RickyMode;
+  connectTarget?: ConnectTarget;
+  cloudTargets?: string[];
+  runId?: string;
   spec?: string;
   specFile?: string;
   artifact?: string;
   stdin?: boolean;
+  workflowName?: string;
   runRequested?: boolean;
+  noRun?: boolean;
+  background?: boolean;
+  foreground?: boolean;
+  yes?: boolean;
   json?: boolean;
+  quiet?: boolean;
+  verbose?: boolean;
   autoFix?: number;
   refine?: false | { model?: string };
+  login?: boolean;
+  connectMissing?: boolean;
   errors?: string[];
 }
 
@@ -52,6 +76,9 @@ export interface CliMainResult {
   interactiveResult?: InteractiveCliResult;
 }
 
+export type RelayCloudConnectProvider = (options: ConnectProviderOptions) => Promise<ConnectProviderResult>;
+export type RelayCloudAuthenticator = () => Promise<StoredAuth>;
+
 // ---------------------------------------------------------------------------
 // Injectable dependencies
 // ---------------------------------------------------------------------------
@@ -67,6 +94,16 @@ export interface CliMainDeps extends InteractiveCliDeps {
   readFileText?: (path: string) => Promise<string>;
   /** Package.json reader override for deterministic version tests. */
   readPackageJsonText?: (path: string) => string;
+  /** Relay Cloud connector override for deterministic connect command tests. */
+  connectProvider?: RelayCloudConnectProvider;
+  /** Relay Cloud account login override for deterministic connect command tests. */
+  ensureCloudAuthenticated?: RelayCloudAuthenticator;
+  /** Nango connect-link connector override for deterministic integration command tests. */
+  connectCloudIntegrations?: CloudIntegrationConnector;
+  /** Cloud API URL override passed through to the Relay Cloud connector. */
+  connectApiUrl?: string;
+  /** Provider auth timeout override passed through to the Relay Cloud connector. */
+  connectTimeoutMs?: number;
 }
 
 let cachedPackageVersion: string | undefined;
@@ -76,57 +113,32 @@ let cachedPackageVersion: string | undefined;
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const first = argv[0]?.trim().toLowerCase();
-
-  if (first === '--help' || first === '-h' || first === 'help') {
-    return { command: 'help' };
-  }
-
-  if (first === '--version' || first === '-v' || first === 'version') {
-    return { command: 'version' };
-  }
-
-  // Check for --mode flag anywhere in argv
-  const modeIdx = argv.indexOf('--mode');
-  let mode: RickyMode | undefined;
-  if (modeIdx !== -1 && argv[modeIdx + 1]) {
-    const candidate = argv[modeIdx + 1];
-    if (isRickyMode(candidate)) {
-      mode = candidate;
-    }
-  }
-
-  const spec = readFlagValue(argv, '--spec');
-  const specFile = readFlagValue(argv, '--spec-file') ?? readFlagValue(argv, '--file');
-  const artifact = readFlagValue(argv, '--artifact') ?? readRunArtifactPositional(argv);
-  const stdin = argv.includes('--stdin');
-  const runRequested = argv.includes('--run') || argv.includes('--generate-and-run') || artifact !== undefined;
-  const json = argv.includes('--json');
-  const autoFix = parseAutoFix(argv);
-  const refine = parseRefine(argv);
-
-  const errors: string[] = [];
-  for (const flag of ['--spec', '--spec-file', '--file', '--artifact']) {
-    if (argv.includes(flag) && readFlagValue(argv, flag) === undefined) {
-      errors.push(`${flag} requires a value.`);
-    }
-  }
-  if (artifact && (spec !== undefined || specFile !== undefined || stdin)) {
-    errors.push('Artifact execution cannot be combined with --spec, --spec-file, --file, or --stdin.');
-  }
-
-  const parsed: ParsedArgs = { command: 'run' };
-  if (mode) parsed.mode = mode;
-  if (spec !== undefined) parsed.spec = spec;
-  if (specFile !== undefined) parsed.specFile = specFile;
-  if (artifact !== undefined) parsed.artifact = artifact;
-  if (stdin) parsed.stdin = true;
-  if (runRequested) parsed.runRequested = true;
-  if (json) parsed.json = true;
-  if (autoFix !== undefined && autoFix > 0) parsed.autoFix = autoFix;
-  if (refine) parsed.refine = refine;
-  if (errors.length > 0) parsed.errors = errors;
-  return parsed;
+  const parsed = parsePowerUserArgs(argv);
+  const result: ParsedArgs = { command: parsed.command };
+  if (parsed.surface && parsed.surface !== 'legacy') result.surface = parsed.surface;
+  if (parsed.mode) result.mode = parsed.mode;
+  if (parsed.connectTarget) result.connectTarget = parsed.connectTarget;
+  if (parsed.cloudTargets) result.cloudTargets = parsed.cloudTargets;
+  if (parsed.runId) result.runId = parsed.runId;
+  if (parsed.spec !== undefined) result.spec = parsed.spec;
+  if (parsed.specFile !== undefined) result.specFile = parsed.specFile;
+  if (parsed.artifact !== undefined) result.artifact = parsed.artifact;
+  if (parsed.stdin) result.stdin = true;
+  if (parsed.workflowName !== undefined) result.workflowName = parsed.workflowName;
+  if (parsed.runRequested) result.runRequested = true;
+  if (parsed.noRun) result.noRun = true;
+  if (parsed.background) result.background = true;
+  if (parsed.foreground) result.foreground = true;
+  if (parsed.yes) result.yes = true;
+  if (parsed.json) result.json = true;
+  if (parsed.quiet) result.quiet = true;
+  if (parsed.verbose) result.verbose = true;
+  if (parsed.autoFix !== undefined && parsed.autoFix > 0) result.autoFix = parsed.autoFix;
+  if (parsed.refine) result.refine = parsed.refine;
+  if (parsed.login) result.login = true;
+  if (parsed.connectMissing) result.connectMissing = true;
+  if (parsed.errors && parsed.errors.length > 0) result.errors = parsed.errors;
+  return result;
 }
 
 function parseRefine(argv: string[]): false | { model?: string } {
@@ -254,6 +266,13 @@ export function renderHelp(): string[] {
     '',
     'Usage:',
     '  ricky                                               Interactive session (default)',
+    '  ricky local --spec <text>                           Generate a local workflow artifact',
+    '  ricky local --spec-file <path> --run                Generate, then run locally',
+    '  ricky cloud --spec <text>                           Generate with AgentWorkforce Cloud',
+    '  ricky status                                        Show local and Cloud readiness',
+    '  ricky connect cloud                                 Show Cloud connection recovery',
+    '  ricky connect agents --cloud                        Show Cloud agent connection recovery',
+    '  ricky connect integrations --cloud                  Show Cloud integration recovery',
     '  ricky --mode <mode>                                 Mode preset: local | cloud | both',
     '  ricky --mode local --spec <text>                    Generate artifact only',
     '  ricky --mode local --spec <text> --run              Generate, then execute',
@@ -267,15 +286,25 @@ export function renderHelp(): string[] {
     '  --mode <mode>       Set mode (local, cloud, both)',
     '  --spec <text>       Inline spec text',
     '  --spec-file <path>  Read spec from a file',
+    '  --workflow <path>   Run an existing workflow artifact',
+    '  --name <name>       Workflow name for summaries and metadata',
     '  --artifact <path>   Execute an existing artifact (implies --run)',
     '  --run               Execute the generated artifact after generation',
+    '  --no-run            Generate only and print the run command',
+    '  --background        Request detached/background monitoring metadata',
+    '  --foreground        Keep the local run attached to this process',
     '  --refine[=model]    Refine generated task text and gates with an LLM pass (default on)',
     '  --no-refine         Disable refinement; emit only the deterministic artifact',
     '  --with-llm[=model]  Alias for --refine',
     '  --auto-fix[=N]      Local diagnose/repair/resume loop (default 3 attempts, max 10)',
     '  --no-auto-fix       Disable the repair loop; first failure surfaces immediately',
     '  --repair[=N]        Alias for --auto-fix',
+    '  --login             Power-user Cloud: re-probe readiness after a real Cloud login',
+    '  --connect-missing   Power-user Cloud: re-probe readiness after connecting missing agents',
+    '  --yes               Skip non-destructive run confirmations only',
     '  --json              Print results as JSON',
+    '  --quiet             Print only essential output',
+    '  --verbose           Include diagnostic detail for unexpected failures',
     '  --stdin             Read spec from stdin',
     '  --help, -h          Show help',
     '  --version, -v       Show version',
@@ -328,7 +357,10 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
   }
 
   if (parsed.mode === 'cloud') {
-    throw new Error('Cloud mode does not accept CLI spec handoff in this local slice. Use --mode local or --mode both.');
+    if (parsed.surface === 'cloud') {
+      return undefined;
+    }
+    throw new Error('Cloud mode does not accept CLI spec handoff in this local slice. Use `ricky cloud --spec ...` for Cloud generation or --mode local for local generation.');
   }
 
   const handoffMode = parsed.mode ?? 'local';
@@ -344,7 +376,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode: 'run',
       ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
       ...(parsed.refine ? { refine: parsed.refine } : {}),
-      metadata: { handoff: 'artifact' },
+      metadata: cliMetadataFor(parsed, 'artifact'),
     };
   }
 
@@ -362,7 +394,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
       ...(parsed.refine ? { refine: parsed.refine } : {}),
-      cliMetadata: { handoff: 'inline-spec' },
+      cliMetadata: cliMetadataFor(parsed, 'inline-spec'),
     };
   }
 
@@ -379,7 +411,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
       ...(parsed.refine ? { refine: parsed.refine } : {}),
-      cliMetadata: { handoff: 'spec-file' },
+      cliMetadata: cliMetadataFor(parsed, 'spec-file'),
     };
   }
 
@@ -397,11 +429,21 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
       ...(parsed.refine ? { refine: parsed.refine } : {}),
-      cliMetadata: { handoff: 'stdin' },
+      cliMetadata: cliMetadataFor(parsed, 'stdin'),
     };
   }
 
   return undefined;
+}
+
+function cliMetadataFor(parsed: ParsedArgs, handoff: string): Record<string, unknown> {
+  return {
+    handoff,
+    ...(parsed.workflowName ? { workflowName: parsed.workflowName } : {}),
+    ...(parsed.background ? { runMode: 'background' } : {}),
+    ...(parsed.foreground ? { runMode: 'foreground' } : {}),
+    ...(parsed.yes ? { yes: 'non-destructive-confirmations-only' } : {}),
+  };
 }
 
 function resolveInvocationRoot(explicitCwd?: string): string {
@@ -422,6 +464,524 @@ function cliPackageRoot(): string {
 
 function resolveSpecFilePath(specFile: string, invocationRoot: string): string {
   return isAbsolute(specFile) ? specFile : resolve(invocationRoot, specFile);
+}
+
+async function buildCloudRequest(parsed: ParsedArgs, deps: CliMainDeps): Promise<CloudGenerateRequest | undefined> {
+  if (parsed.mode !== 'cloud' || !hasSpecHandoffArgs(parsed)) {
+    return deps.cloudRequest;
+  }
+
+  const cloudSpec = await readCloudSpec(parsed, deps);
+  if (!deps.cloudRequest) {
+    return undefined;
+  }
+
+  return {
+    ...deps.cloudRequest,
+    body: {
+      ...deps.cloudRequest.body,
+      spec: cloudSpec.spec,
+      ...(cloudSpec.specPath ? { specPath: cloudSpec.specPath } : {}),
+      mode: 'cloud',
+      metadata: {
+        ...deps.cloudRequest.body.metadata,
+        ...(parsed.workflowName ? { workflowName: parsed.workflowName } : {}),
+        cli: cliMetadataFor(parsed, cloudSpec.handoff),
+      },
+    },
+  };
+}
+
+async function readCloudSpec(
+  parsed: ParsedArgs,
+  deps: CliMainDeps,
+): Promise<{ spec: CloudWorkflowSpecPayload; specPath?: string; handoff: string }> {
+  const invocationRoot = resolveInvocationRoot(deps.cwd);
+
+  if (parsed.artifact !== undefined) {
+    return {
+      spec: {
+        kind: 'structured',
+        document: {
+          intent: 'execute',
+          workflowPath: parsed.artifact,
+          ...(parsed.workflowName ? { workflowName: parsed.workflowName } : {}),
+        },
+        format: 'ricky-workflow',
+      },
+      specPath: parsed.artifact,
+      handoff: 'artifact',
+    };
+  }
+
+  if (parsed.spec !== undefined) {
+    if (parsed.spec.trim().length === 0) {
+      throw new Error('Inline spec is empty.');
+    }
+    return { spec: parsed.spec, handoff: 'inline-spec' };
+  }
+
+  if (parsed.specFile) {
+    const readText = deps.readFileText ?? ((path: string) => readFile(path, 'utf8'));
+    const specFilePath = resolveSpecFilePath(parsed.specFile, invocationRoot);
+    const spec = await readText(specFilePath);
+    if (spec.trim().length === 0) {
+      throw new Error('Spec file is empty.');
+    }
+    return { spec, specPath: specFilePath, handoff: 'spec-file' };
+  }
+
+  if (parsed.stdin) {
+    const spec = await readStreamText(deps.input ?? process.stdin);
+    if (spec.trim().length === 0) {
+      throw new Error('Stdin spec is empty.');
+    }
+    return { spec, handoff: 'stdin' };
+  }
+
+  throw new Error('Provide one of --spec, --spec-file, --stdin, or --workflow.');
+}
+
+async function renderStatus(parsed: ParsedArgs, cwd: string): Promise<string[]> {
+  if (parsed.runId) {
+    return renderRunMonitorStatus(parsed.runId, cwd, parsed);
+  }
+
+  const status = await statusPayload(cwd);
+  if (parsed.json) {
+    return [JSON.stringify(status, null, 2)];
+  }
+  if (parsed.quiet) {
+    return [`Ricky status: local ${status.local.agentRelay}; cloud ${status.cloud.account}.`];
+  }
+  return [
+    'Ricky status',
+    '',
+    'Local',
+    `  Repo:        ${status.local.repo}`,
+    `  agent-relay: ${status.local.agentRelay}`,
+    `  Codex:       ${status.local.codex}`,
+    `  Claude:      ${status.local.claude}`,
+    '',
+    'Cloud',
+    `  Account:     ${status.cloud.account}`,
+    `  Workspace:   ${status.cloud.workspace}`,
+    `  Agents:      ${status.cloud.agents}`,
+    '',
+    'Integrations',
+    `  Slack:       ${status.integrations.slack}`,
+    `  GitHub:      ${status.integrations.github}`,
+    `  Notion:      ${status.integrations.notion}`,
+    `  Linear:      ${status.integrations.linear}`,
+    '',
+    'Next',
+    ...status.nextActions.map((action) => `  ${action}`),
+  ];
+}
+
+async function renderRunMonitorStatus(runId: string, cwd: string, parsed: ParsedArgs): Promise<string[]> {
+  const statePath = join(cwd, '.workflow-artifacts', 'ricky-local-runs', runId, 'state.json');
+  let state: LocalRunMonitorState;
+  try {
+    state = JSON.parse(await readFile(statePath, 'utf8')) as LocalRunMonitorState;
+  } catch {
+    const missing = {
+      runId,
+      status: 'not-found',
+      statePath,
+      recovery: [
+        'Check the run id printed after choosing background monitoring.',
+        'Run `ricky status` to inspect local readiness.',
+      ],
+    };
+    return parsed.json
+      ? [JSON.stringify(missing, null, 2)]
+      : [
+          'Ricky run status',
+          '',
+          `Run id: ${runId}`,
+          'Status: not found',
+          `State:  ${statePath}`,
+          '',
+          'Recovery',
+          ...missing.recovery.map((item) => `  ${item}`),
+        ];
+  }
+
+  if (parsed.json) {
+    return [JSON.stringify(state, null, 2)];
+  }
+  if (parsed.quiet) {
+    return [`Ricky run ${state.runId}: ${state.status}.`];
+  }
+
+  const lines = [
+    'Ricky run status',
+    '',
+    `Run id:    ${state.runId}`,
+    `Status:    ${state.status}`,
+    `Artifact:  ${state.artifactPath}`,
+    `State:     ${state.statePath}`,
+    `Logs:      ${state.logPath}`,
+    `Evidence:  ${state.evidencePath}`,
+    `Fixes:     ${state.fixesPath}`,
+  ];
+
+  const execution = state.response?.execution;
+  if (execution) {
+    lines.push(
+      '',
+      'Execution',
+      `  status: ${execution.status}`,
+      `  workflow_id: ${execution.execution.workflow_id}`,
+      `  run_id: ${execution.execution.run_id}`,
+      `  command: ${execution.execution.command}`,
+    );
+    if (execution.evidence?.outcome_summary) {
+      lines.push(`  outcome: ${execution.evidence.outcome_summary}`);
+    }
+  }
+
+  lines.push('', 'Refresh', `  ${state.reattachCommand}`);
+  return lines;
+}
+
+function statusValueFromCheck(checks: LocalPreflightCheck[], id: string): string {
+  const check = checks.find((entry) => entry.id === id);
+  if (!check) return 'unknown';
+  if (check.status === 'found') return check.path ? `found (${check.path})` : 'found';
+  if (check.status === 'missing') return 'missing';
+  return check.detail ?? 'unknown';
+}
+
+async function statusPayload(cwd: string): Promise<{
+  mode: RickyMode;
+  local: { repo: string; agentRelay: string; codex: string; claude: string };
+  cloud: { account: string; workspace: string; agents: string };
+  integrations: Record<'slack' | 'github' | 'notion' | 'linear', string>;
+  warnings: string[];
+  nextActions: string[];
+}> {
+  let preflight: LocalPreflightResult | null = null;
+  const warnings: string[] = [];
+  try {
+    preflight = await runLocalPreflight(cwd);
+  } catch (error) {
+    warnings.push(error instanceof Error ? error.message : String(error));
+  }
+  const checks = preflight?.checks ?? [];
+  const hasCloudToken = Boolean(process.env.AGENTWORKFORCE_CLOUD_TOKEN || process.env.RICKY_CLOUD_TOKEN);
+  const cloudWorkspace = process.env.AGENTWORKFORCE_CLOUD_WORKSPACE || process.env.RICKY_CLOUD_WORKSPACE || '';
+
+  return {
+    mode: 'local',
+    local: {
+      repo: preflight?.repoRoot ?? cwd,
+      agentRelay: statusValueFromCheck(checks, 'agent-relay'),
+      codex: statusValueFromCheck(checks, 'codex'),
+      claude: statusValueFromCheck(checks, 'claude'),
+    },
+    cloud: {
+      account: hasCloudToken ? 'configured' : 'not connected',
+      workspace: cloudWorkspace || 'not selected',
+      agents: hasCloudToken ? 'probe via Cloud readiness check' : 'not connected (login required)',
+    },
+    integrations: {
+      slack: hasCloudToken ? 'probe via Cloud readiness check' : 'not connected (Cloud login required)',
+      github: hasCloudToken ? 'probe via Cloud readiness check' : 'not connected (Cloud login required)',
+      notion: hasCloudToken ? 'probe via Cloud readiness check' : 'not connected (Cloud login required)',
+      linear: hasCloudToken ? 'probe via Cloud readiness check' : 'not connected (Cloud login required)',
+    },
+    warnings,
+    nextActions: [
+      'ricky local --spec-file ./spec.md --no-run',
+      'ricky connect cloud',
+    ],
+  };
+}
+
+interface ConnectPayload {
+  target: string;
+  status: 'connected' | 'failed' | 'input-required' | 'manual-dashboard' | 'connector-unavailable';
+  message: string;
+  warnings: string[];
+  nextActions: string[];
+  connectedProviders?: string[];
+  failedProviders?: Array<{ provider: string; message: string; endpoint?: string; statusCode?: number }>;
+}
+
+async function renderConnect(parsed: ParsedArgs, deps: CliMainDeps): Promise<{ exitCode: number; output: string[] }> {
+  const payload = await connectPayload(parsed, deps);
+  if (parsed.json) {
+    return {
+      exitCode: connectExitCode(payload),
+      output: [JSON.stringify(payload, null, 2)],
+    };
+  }
+  if (parsed.quiet) {
+    return {
+      exitCode: connectExitCode(payload),
+      output: [`Ricky connect ${parsed.connectTarget ?? 'cloud'}: ${payload.status}.`],
+    };
+  }
+
+  const output = [
+    `Ricky connect ${parsed.connectTarget ?? 'cloud'}`,
+    '',
+    payload.message,
+  ];
+  if (payload.connectedProviders && payload.connectedProviders.length > 0) {
+    output.push('', 'Connected', ...payload.connectedProviders.map((provider) => `  ${provider}`));
+  }
+  if (payload.failedProviders && payload.failedProviders.length > 0) {
+    output.push('', 'Failed', ...payload.failedProviders.map((failure) => `  ${failure.provider}: ${failure.message}`));
+  }
+  if (payload.warnings.length > 0) {
+    output.push('', 'Warnings', ...payload.warnings.map((warning) => `  ${warning}`));
+  }
+  output.push('', payload.status === 'connected' ? 'Next' : 'Recovery', ...payload.nextActions.map((action) => `  ${action}`));
+  return {
+    exitCode: connectExitCode(payload),
+    output,
+  };
+}
+
+function connectExitCode(payload: ConnectPayload): number {
+  return payload.status === 'connected' || payload.status === 'manual-dashboard' ? 0 : 1;
+}
+
+async function connectPayload(parsed: ParsedArgs, deps: CliMainDeps): Promise<ConnectPayload> {
+  if (parsed.connectTarget === 'agents') {
+    const providers = parsed.cloudTargets ?? [];
+    if (providers.length === 0) {
+      return {
+        target: 'agents',
+        status: 'input-required',
+        message: 'Choose at least one Cloud agent provider for Ricky to connect through Relay Cloud.',
+        warnings: [],
+        nextActions: [
+          'ricky connect agents --cloud claude',
+          'ricky connect agents --cloud claude,codex,gemini',
+          'ricky status',
+        ],
+      };
+    }
+    return connectProviders({
+      target: 'agents',
+      providers,
+      successMessage: 'Ricky connected the selected Cloud agent provider credentials through Relay Cloud.',
+      deps,
+      parsed,
+    });
+  }
+  if (parsed.connectTarget === 'integrations') {
+    return connectIntegrations(parsed, deps);
+  }
+
+  return connectCloudAccount(deps);
+}
+
+async function connectProviders(options: {
+  target: 'agents';
+  providers: string[];
+  successMessage: string;
+  deps: CliMainDeps;
+  parsed: ParsedArgs;
+}): Promise<ConnectPayload> {
+  const connector = options.deps.connectProvider ?? await loadRelayCloudConnectProvider();
+  const selected = options.providers.join(',');
+  const connectCommand = `npx agent-relay cloud connect ${selected}`;
+
+  if (!connector) {
+    return {
+      target: options.target,
+      status: 'connector-unavailable',
+      message:
+        'Ricky could not load the Relay Cloud connect package, so no connection was attempted and no success was claimed.',
+      warnings: ['Install @agent-relay/cloud or use the Agent Relay CLI command directly.'],
+      nextActions: [
+        connectCommand,
+        'ricky status',
+      ],
+    };
+  }
+
+  const connectedProviders: string[] = [];
+  const failedProviders: Array<{ provider: string; message: string }> = [];
+  for (const provider of options.providers) {
+    try {
+      const result = await connector({
+        provider,
+        ...(options.deps.connectApiUrl ? { apiUrl: options.deps.connectApiUrl } : {}),
+        ...(options.deps.connectTimeoutMs ? { timeoutMs: options.deps.connectTimeoutMs } : {}),
+        io: connectIo(options.parsed, Boolean(options.deps.connectProvider)),
+      });
+      connectedProviders.push(result.provider);
+    } catch (error) {
+      failedProviders.push({
+        provider,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (failedProviders.length > 0) {
+    return {
+      target: options.target,
+      status: 'failed',
+      message:
+        'Ricky attempted the Relay Cloud connect flow, but one or more provider connections did not complete. No missing provider was marked connected.',
+      warnings: [],
+      nextActions: [
+        connectCommand,
+        'ricky status',
+      ],
+      ...(connectedProviders.length > 0 ? { connectedProviders } : {}),
+      failedProviders,
+    };
+  }
+
+  return {
+    target: options.target,
+    status: 'connected',
+    message: options.successMessage,
+    warnings: [],
+    nextActions: ['ricky status'],
+    connectedProviders,
+  };
+}
+
+async function connectCloudAccount(deps: CliMainDeps): Promise<ConnectPayload> {
+  const authenticator = deps.ensureCloudAuthenticated ?? await loadRelayCloudAuthenticator();
+  if (!authenticator) {
+    return {
+      target: 'cloud',
+      status: 'connector-unavailable',
+      message:
+        'Ricky could not load the Relay Cloud login package, so no Cloud login was attempted and no success was claimed.',
+      warnings: ['Install @agent-relay/cloud or use the Agent Relay CLI command directly.'],
+      nextActions: [
+        'npx agent-relay cloud login',
+        'ricky status',
+      ],
+    };
+  }
+
+  try {
+    await authenticator();
+    return {
+      target: 'cloud',
+      status: 'connected',
+      message: 'Ricky connected your AgentWorkforce Cloud account through Relay Cloud login.',
+      warnings: [],
+      nextActions: ['ricky status'],
+      connectedProviders: ['cloud'],
+    };
+  } catch (error) {
+    return {
+      target: 'cloud',
+      status: 'failed',
+      message: 'Ricky attempted the Relay Cloud login flow, but Cloud login did not complete.',
+      warnings: [],
+      nextActions: [
+        'ricky connect cloud',
+        'ricky status',
+      ],
+      failedProviders: [
+        {
+          provider: 'cloud',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
+}
+
+async function connectIntegrations(parsed: ParsedArgs, deps: CliMainDeps): Promise<ConnectPayload> {
+  const integrations = (parsed.cloudTargets && parsed.cloudTargets.length > 0
+    ? parsed.cloudTargets
+    : ['slack', 'github', 'notion', 'linear']
+  ).filter((integration): integration is 'slack' | 'github' | 'notion' | 'linear' => (
+    integration === 'slack' || integration === 'github' || integration === 'notion' || integration === 'linear'
+  ));
+
+  if (integrations.length === 0) {
+    return {
+      target: 'integrations',
+      status: 'input-required',
+      message: 'Choose at least one optional integration for Ricky to authorize through Nango.',
+      warnings: [],
+      nextActions: [
+        'ricky connect integrations --cloud slack,github,notion,linear',
+        'ricky status',
+      ],
+    };
+  }
+
+  const connector = deps.connectCloudIntegrations ?? defaultCloudIntegrationConnector;
+  const results = await connector(integrations);
+  const failedProviders = results
+    .filter((result) => result.status === 'failed')
+    .map((result) => ({
+      provider: result.integration,
+      message: result.message ?? 'Could not create Nango connect link.',
+      ...(result.endpoint ? { endpoint: result.endpoint } : {}),
+      ...(result.statusCode ? { statusCode: result.statusCode } : {}),
+    }));
+
+  return {
+    target: 'integrations',
+    status: failedProviders.length > 0 ? 'failed' : 'connected',
+    message: failedProviders.length > 0
+      ? 'Ricky attempted to create Nango connect links, but one or more optional integrations did not start.'
+      : 'Ricky created Nango connect links for the selected optional integrations.',
+    warnings: ['Ricky does not claim an integration is connected until Cloud readiness confirms it.'],
+    nextActions: ['ricky status'],
+    ...(failedProviders.length > 0 ? { failedProviders } : { connectedProviders: results.map((result) => result.integration) }),
+  };
+}
+
+function connectIo(parsed: ParsedArgs, injectedConnector: boolean): ConnectProviderOptions['io'] {
+  if (injectedConnector) {
+    return {
+      log: () => undefined,
+      error: () => undefined,
+    };
+  }
+  if (parsed.json) {
+    return {
+      log: (...args: unknown[]) => console.error(...args),
+      error: (...args: unknown[]) => console.error(...args),
+    };
+  }
+  if (parsed.quiet) {
+    return {
+      log: () => undefined,
+      error: (...args: unknown[]) => console.error(...args),
+    };
+  }
+  return {
+    log: (...args: unknown[]) => console.log(...args),
+    error: (...args: unknown[]) => console.error(...args),
+  };
+}
+
+async function loadRelayCloudConnectProvider(): Promise<RelayCloudConnectProvider | undefined> {
+  try {
+    const relayCloud = await import('@agent-relay/cloud');
+    return relayCloud.connectProvider;
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadRelayCloudAuthenticator(): Promise<RelayCloudAuthenticator | undefined> {
+  try {
+    const relayCloud = await import('@agent-relay/cloud');
+    return () => relayCloud.ensureAuthenticated(relayCloud.defaultApiUrl());
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +1010,29 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     return { exitCode: 0, output: [`ricky ${version}`] };
   }
 
+  if (parsed.command === 'status') {
+    if (parsed.errors && parsed.errors.length > 0) {
+      return {
+        exitCode: 1,
+        output: renderCliArgumentRecovery(parsed.errors),
+      };
+    }
+    return {
+      exitCode: 0,
+      output: await renderStatus(parsed, resolveInvocationRoot(deps.cwd)),
+    };
+  }
+
+  if (parsed.command === 'connect') {
+    if (parsed.errors && parsed.errors.length > 0) {
+      return {
+        exitCode: 1,
+        output: renderCliArgumentRecovery(parsed.errors),
+      };
+    }
+    return renderConnect(parsed, deps);
+  }
+
   if (parsed.errors && parsed.errors.length > 0) {
     return {
       exitCode: 1,
@@ -470,24 +1053,129 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
 
   // Default: run interactive session
   const runner = deps.runInteractive ?? runInteractiveCli;
+  let cloudRequest: CloudGenerateRequest | undefined;
+  try {
+    cloudRequest = await buildCloudRequest(parsed, deps);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      exitCode: 1,
+      output: renderCliArgumentRecovery([`Could not read spec handoff: ${message}`]),
+    };
+  }
+
+  if (parsed.surface === 'cloud' && !cloudRequest && !parsed.login && !parsed.connectMissing) {
+    const guidance = [
+      'Cloud mode selected but no Cloud request context was provided.',
+      'Recovery: run `ricky connect cloud`, then `ricky status`.',
+      'To stay local: run `ricky local --spec-file ./spec.md --no-run`.',
+    ];
+    const summary = cloudPowerUserWorkflowSummary(undefined, {
+      mode: 'cloud',
+      workflowName: parsed.workflowName,
+      runRequested: parsed.runRequested,
+      yes: parsed.yes,
+      quiet: parsed.quiet,
+      guidance,
+    });
+    return {
+      exitCode: 1,
+      output: parsed.json
+        ? [renderPowerUserWorkflowJson(summary)]
+        : renderPowerUserWorkflowSummary(summary, {
+            mode: 'cloud',
+            workflowName: parsed.workflowName,
+            runRequested: parsed.runRequested,
+            yes: parsed.yes,
+            quiet: parsed.quiet,
+          }),
+    };
+  }
+
+  const cloudRecoveryDeps: Partial<InteractiveCliDeps> = {};
+  if (parsed.login && !deps.recoverCloudLogin) {
+    cloudRecoveryDeps.recoverCloudLogin = async () => {
+      // Power-user --login runs inside the existing interactive recovery
+      // contract. Direct provider auth is handled by `ricky connect ...`.
+    };
+  }
+  if (parsed.connectMissing && !deps.connectCloudAgents) {
+    cloudRecoveryDeps.connectCloudAgents = async () => {
+      // Power-user --connect-missing re-probes readiness after the user runs
+      // `ricky connect agents --cloud ...`; it never asserts fake success.
+    };
+  }
+
   const interactiveDeps: InteractiveCliDeps = {
     ...deps,
     cwd: resolveInvocationRoot(deps.cwd),
     ...(parsed.mode ? { mode: parsed.mode } : cliHandoff ? { mode: 'local' } : {}),
     ...(cliHandoff ? { handoff: cliHandoff } : {}),
+    ...(cloudRequest ? { cloudRequest } : {}),
+    ...cloudRecoveryDeps,
   };
 
   const interactiveResult = await runner(interactiveDeps);
   const output: string[] = [];
 
-  if (cliHandoff && interactiveResult.localResult) {
+  if (interactiveResult.localWorkflowResult) {
     if (parsed.json) {
+      output.push(renderLocalWorkflowJson(interactiveResult.localWorkflowResult));
+    } else {
+      output.push(...renderLocalWorkflowHuman(interactiveResult.localWorkflowResult));
+    }
+  } else if (cliHandoff && interactiveResult.localResult) {
+    if (parsed.json && parsed.surface === 'local') {
+      const summary = localPowerUserWorkflowSummary(interactiveResult.localResult, {
+        mode: parsed.mode ?? 'local',
+        workflowName: parsed.workflowName,
+        runRequested: parsed.runRequested,
+        yes: parsed.yes,
+        quiet: parsed.quiet,
+      });
+      output.push(renderPowerUserWorkflowJson(summary));
+    } else if (parsed.surface === 'local') {
+      const summary = localPowerUserWorkflowSummary(interactiveResult.localResult, {
+        mode: parsed.mode ?? 'local',
+        workflowName: parsed.workflowName,
+        runRequested: parsed.runRequested,
+        yes: parsed.yes,
+        quiet: parsed.quiet,
+      });
+      output.push(...renderPowerUserWorkflowSummary(summary, {
+        mode: parsed.mode ?? 'local',
+        workflowName: parsed.workflowName,
+        runRequested: parsed.runRequested,
+        yes: parsed.yes,
+        quiet: parsed.quiet,
+      }));
+    } else if (parsed.json) {
       output.push(renderLocalJson(interactiveResult.localResult));
     } else {
       output.push(...renderLocalHuman(interactiveResult.localResult));
       if (!interactiveResult.localResult.generation && interactiveResult.guidance.length > 0) {
         output.push(...interactiveResult.guidance);
       }
+    }
+  } else if (parsed.surface === 'cloud' || parsed.mode === 'cloud') {
+    const summary = cloudPowerUserWorkflowSummary(interactiveResult.cloudResult, {
+      mode: 'cloud',
+      workflowName: parsed.workflowName,
+      runRequested: parsed.runRequested,
+      yes: parsed.yes,
+      quiet: parsed.quiet,
+      guidance: interactiveResult.guidance,
+    });
+    if (parsed.json) {
+      output.push(renderPowerUserWorkflowJson(summary));
+    } else {
+      output.push(...renderPowerUserWorkflowSummary(summary, {
+        mode: 'cloud',
+        workflowName: parsed.workflowName,
+        runRequested: parsed.runRequested,
+        yes: parsed.yes,
+        quiet: parsed.quiet,
+      }));
     }
   } else if (interactiveResult.guidance.length > 0) {
     output.push(...interactiveResult.guidance);
@@ -498,6 +1186,58 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     output,
     interactiveResult,
   };
+}
+
+function renderLocalWorkflowJson(result: NonNullable<InteractiveCliResult['localWorkflowResult']>): string {
+  return JSON.stringify({
+    confirmation: result.confirmation,
+    command: result.command,
+    summary: result.summary,
+    generation: result.generation,
+    run: result.run,
+    monitoredRun: result.monitoredRun,
+  }, null, 2);
+}
+
+function renderLocalWorkflowHuman(result: NonNullable<InteractiveCliResult['localWorkflowResult']>): string[] {
+  const lines = [
+    'Ricky local workflow',
+    '',
+    `Goal: ${result.summary.goal}`,
+    `Artifact: ${result.summary.artifactPath}`,
+  ];
+
+  if (result.generation?.generation?.artifact?.workflow_id) {
+    lines.push(`Workflow id: ${result.generation.generation.artifact.workflow_id}`);
+  }
+
+  if (result.monitoredRun) {
+    const execution = result.monitoredRun.response?.execution?.execution;
+    lines.push(
+      '',
+      'Background monitor',
+      `  Workflow run id: ${result.monitoredRun.runId}`,
+      ...(execution?.workflow_id ? [`  Runtime workflow id: ${execution.workflow_id}`] : []),
+      ...(execution?.run_id ? [`  Runtime run id: ${execution.run_id}`] : []),
+      `  Status: ${result.monitoredRun.status}`,
+      `  Status command: ${result.monitoredRun.reattachCommand}`,
+      `  Logs: ${result.monitoredRun.logPath}`,
+      `  Evidence: ${result.monitoredRun.evidencePath}`,
+    );
+    return lines;
+  }
+
+  if (result.run) {
+    lines.push(...renderLocalHuman(result.run));
+    return lines;
+  }
+
+  lines.push(
+    '',
+    'Run command',
+    `  ${result.command}`,
+  );
+  return lines;
 }
 
 function renderLocalJson(localResult: NonNullable<InteractiveCliResult['localResult']>): string {

@@ -19,6 +19,11 @@ import {
   type RickyMode,
 } from './mode-selector.js';
 import { renderWelcome } from './welcome.js';
+import {
+  createInquirerPromptShell,
+  isPromptCancellation,
+  type PromptShell,
+} from '../prompts/index.js';
 
 export interface OnboardingContext {
   isFirstRun?: boolean;
@@ -45,12 +50,15 @@ export interface OnboardingOptions {
   output?: NodeJS.WritableStream;
   isTTY?: boolean;
   quiet?: boolean;
+  verbose?: boolean;
   noBanner?: boolean;
   mode?: RickyMode;
   showBanner?: boolean;
   columns?: number;
   env?: NodeJS.ProcessEnv;
   configStore?: RickyConfigStore;
+  promptShell?: PromptShell;
+  signal?: AbortSignal;
   firstRun?: boolean;
   skipFirstRunPersistence?: boolean;
   compactForExecution?: boolean;
@@ -131,6 +139,15 @@ function writeOutput(output: NodeJS.WritableStream | undefined, text: string): v
 
 function streamIsTTY(input: NodeJS.ReadableStream): boolean {
   return (input as NodeJS.ReadableStream & { isTTY?: boolean }).isTTY === true;
+}
+
+function shouldUsePromptShell(
+  options: OnboardingOptions,
+  input: NodeJS.ReadableStream,
+  output: NodeJS.WritableStream,
+): boolean {
+  if (options.promptShell) return true;
+  return options.input === undefined && options.output === undefined && input === process.stdin && output === process.stdout;
 }
 
 export function renderCloudGuidance(): string {
@@ -272,7 +289,8 @@ export function renderSuggestedNextAction(mode: RickyMode): string {
 
 export function renderOnboarding(context: OnboardingContext = {}): string {
   const firstRun = context.isFirstRun ?? true;
-  const mode = context.mode ?? (context.choice && context.choice !== 'explore' ? context.choice : 'local');
+  const requestedMode = context.mode ?? (context.choice && context.choice !== 'explore' ? context.choice : 'local');
+  const mode = isRickyMode(requestedMode) ? requestedMode : 'local';
   const choice = context.choice ?? mode;
   const isTTY = context.isTTY ?? true;
   const sections: string[] = [];
@@ -310,6 +328,7 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
   const isTTY = options.isTTY ?? streamIsTTY(input);
   const configStore = options.configStore ?? new FileConfigStore();
   const modeOverride = resolveModeOverride(options);
+  const resolvedEnv = options.env ?? process.env;
   const projectConfig = await configStore.readProjectConfig();
   const globalConfig = projectConfig ? null : await configStore.readGlobalConfig();
   const config = projectConfig ?? globalConfig ?? DEFAULT_CONFIG;
@@ -324,7 +343,7 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
     };
   }
 
-  if (firstRun && !isTTY && !modeOverride) {
+  if (firstRun && (!isTTY || resolvedEnv.CI !== undefined) && !modeOverride) {
     const text = `${renderNonInteractiveSetupError()}\n`;
     writeOutput(output, text);
     return {
@@ -336,7 +355,6 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
   }
 
   const sections: string[] = [];
-  const resolvedEnv = options.env ?? process.env;
   const bannerShown =
     (firstRun || options.showBanner === true) &&
     shouldShowBanner({ isTTY, quiet: options.quiet, noBanner: options.noBanner, env: resolvedEnv });
@@ -351,13 +369,48 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
   }
 
   if (!firstRun) {
-    const mode = modeOverride ?? config.mode;
-    sections.push(renderCompactHeader(mode, config.providers));
+    const fallbackMode = modeOverride ?? config.mode;
+    if (!modeOverride && options.compactForExecution !== true && shouldUsePromptShell(options, input, output)) {
+      const headerLines = [
+        renderCompactHeader(fallbackMode, config.providers),
+        renderWelcome({ isFirstRun: false }),
+      ];
+      const promptIntro = `${sections.concat(headerLines).join('\n\n')}`;
+      writeOutput(output, `${promptIntro}\n\n`);
+      try {
+        const promptShell = options.promptShell ?? createInquirerPromptShell();
+        const choice = await promptShell.selectFirstScreen({
+          input,
+          output,
+          signal: options.signal,
+        });
+        return {
+          mode: choice,
+          firstRun: false,
+          bannerShown,
+          output: `${promptIntro}\n${renderModeResult(choice)}\n`,
+        };
+      } catch (error) {
+        if (!isPromptCancellation(error) || options.verbose === true) {
+          throw error;
+        }
+        const text = '\nCancelled.\n';
+        writeOutput(output, text);
+        return {
+          mode: 'exit',
+          firstRun: false,
+          bannerShown,
+          output: `${promptIntro}${text}`,
+        };
+      }
+    }
+
+    sections.push(renderCompactHeader(fallbackMode, config.providers));
     sections.push(renderWelcome({ isFirstRun: false }));
-    sections.push(renderSuggestedNextAction(mode));
+    sections.push(renderSuggestedNextAction(fallbackMode));
     const text = `${sections.join('\n')}\n`;
     writeOutput(output, text);
-    return { mode, firstRun: false, bannerShown, output: text };
+    return { mode: fallbackMode, firstRun: false, bannerShown, output: text };
   }
 
   if (options.compactForExecution === true && modeOverride) {
@@ -377,12 +430,40 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
   if (isOverride) {
     choice = modeOverride;
   } else {
-    sections.push(renderModeSelection());
-    const promptText = `${sections.join('\n\n')} `;
-    writeOutput(output, promptText);
-    choice = await readChoice(input, output);
-    sections.length = 0;
-    sections.push(promptText.trimEnd());
+    if (shouldUsePromptShell(options, input, output)) {
+      const promptIntro = sections.join('\n\n');
+      writeOutput(output, `${promptIntro}\n\n`);
+      try {
+        const promptShell = options.promptShell ?? createInquirerPromptShell();
+        choice = await promptShell.selectFirstScreen({
+          input,
+          output,
+          signal: options.signal,
+        });
+      } catch (error) {
+        if (!isPromptCancellation(error) || options.verbose === true) {
+          throw error;
+        }
+
+        const text = '\nCancelled.\n';
+        writeOutput(output, text);
+        return {
+          mode: 'exit',
+          firstRun: true,
+          bannerShown,
+          output: `${promptIntro}${text}`,
+        };
+      }
+      sections.length = 0;
+      sections.push(promptIntro);
+    } else {
+      sections.push(renderModeSelection());
+      const promptText = `${sections.join('\n\n')} `;
+      writeOutput(output, promptText);
+      choice = await readChoice(input, output);
+      sections.length = 0;
+      sections.push(promptText.trimEnd());
+    }
   }
 
   sections.push(renderModeResult(choice));
@@ -391,7 +472,7 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
 
   // Only persist config for interactive selections, not per-invocation overrides
   // (options.mode, RICKY_MODE). Overrides are ephemeral execution context.
-  if (!isOverride && choice !== 'explore' && options.skipFirstRunPersistence !== true) {
+  if (!isOverride && isRickyMode(choice) && options.skipFirstRunPersistence !== true) {
     await configStore.writeProjectConfig({
       mode: toRickyMode(choice),
       firstRunComplete: true,
@@ -426,7 +507,7 @@ async function readChoice(input: NodeJS.ReadableStream, output: NodeJS.WritableS
         return choice;
       }
 
-      output.write('\nPlease choose 1, 2, 3, or 4.\n\n  Choice [1]: ');
+      output.write('\nPlease choose 1, 2, 3, 4, or 5.\n\n  Choice [1]: ');
     }
   } finally {
     readline.close();

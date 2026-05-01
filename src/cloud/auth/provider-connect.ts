@@ -15,14 +15,27 @@ export function getProviderConnectGuidance(provider: ProviderType): ProviderConn
     };
   }
 
+  if (provider === 'github') {
+    return {
+      provider: 'github',
+      dashboardUrl: '/dashboard/integrations',
+      instructions: [
+        'Open the Cloud dashboard integrations page.',
+        'Click "Connect GitHub" to start the Nango-backed GitHub App installation.',
+        'Select the repositories you want Ricky to access.',
+        'GitHub connection is managed through the Cloud dashboard, not the CLI.',
+      ],
+    };
+  }
+
   return {
-    provider: 'github',
+    provider,
     dashboardUrl: '/dashboard/integrations',
     instructions: [
       'Open the Cloud dashboard integrations page.',
-      'Click "Connect GitHub" to start the Nango-backed GitHub App installation.',
-      'Select the repositories you want Ricky to access.',
-      'GitHub connection is managed through the Cloud dashboard, not the CLI.',
+      `Choose ${provider} from optional integrations.`,
+      'Complete the hosted connection flow.',
+      `${provider} connection is managed through the Cloud dashboard, not the CLI.`,
     ],
   };
 }

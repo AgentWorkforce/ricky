@@ -20,6 +20,7 @@ import type {
   CloudValidationStatus,
   CloudWarning,
 } from './response-types.js';
+import type { WorkforcePersonaGenerationMetadata } from '../../product/generation/index.js';
 
 // ---------------------------------------------------------------------------
 // Route constant
@@ -38,6 +39,9 @@ export interface CloudGenerateResult {
   assumptions?: CloudAssumption[];
   validation?: CloudValidationStatus;
   runReceipt?: Omit<CloudRunReceipt, 'requestId'>;
+  generationMetadata?: {
+    workforcePersona?: WorkforcePersonaGenerationMetadata;
+  };
   followUpActions: CloudFollowUpAction[];
 }
 
@@ -262,10 +266,11 @@ export async function handleCloudGenerate(
     const result = await executor.generate(request);
     const resultValidation = result.validation ?? passedValidation();
     const validationPassed = resultValidation.ok !== false;
+    const artifacts = appendGenerationMetadataArtifacts(result.artifacts, result.generationMetadata);
     return {
       ok: validationPassed,
       status: validationPassed ? 200 : 422,
-      artifacts: result.artifacts,
+      artifacts,
       warnings: result.warnings,
       assumptions: result.assumptions ?? [],
       validation: resultValidation,
@@ -293,4 +298,21 @@ export async function handleCloudGenerate(
       requestId,
     };
   }
+}
+
+function appendGenerationMetadataArtifacts(
+  artifacts: CloudArtifact[],
+  metadata: CloudGenerateResult['generationMetadata'] | undefined,
+): CloudArtifact[] {
+  if (!metadata?.workforcePersona) return artifacts;
+  const workflowArtifact = artifacts.find((artifact) => artifact.type === 'text/typescript') ?? artifacts[0];
+  const basePath = workflowArtifact?.path.replace(/\.(?:ts|js|yaml|yml)$/i, '') ?? 'workflows/generated/workflow';
+  return [
+    ...artifacts,
+    {
+      path: `${basePath}.workforce-persona.json`,
+      type: 'application/json',
+      content: `${JSON.stringify(metadata.workforcePersona, null, 2)}\n`,
+    },
+  ];
 }

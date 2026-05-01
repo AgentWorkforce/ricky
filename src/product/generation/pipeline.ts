@@ -15,6 +15,11 @@ import { selectPattern } from './pattern-selector.js';
 import { refineWithLlm } from './refine-with-llm.js';
 import { loadSkills } from './skill-loader.js';
 import { renderWorkflow } from './template-renderer.js';
+import {
+  applyPersonaArtifactToRenderedArtifact,
+  writeWorkflowWithWorkforcePersona,
+  WorkforcePersonaWriterError,
+} from './workforce-persona-writer.js';
 
 export function generate(input: GenerationInput): GenerationResult {
   const patternDecision = selectPattern(input.spec, input.patternOverride);
@@ -49,6 +54,7 @@ export function generate(input: GenerationInput): GenerationResult {
       issues: [],
     },
     refinement,
+    workforcePersona: null,
     validation,
     dryRunCommand: input.dryRunEnabled === false ? null : dryRunCommand(finalArtifact.artifactPath),
     deterministicValidationCommands: plannedChecks
@@ -58,6 +64,85 @@ export function generate(input: GenerationInput): GenerationResult {
     executionRoute: resolveExecutionRoute(input.spec, finalArtifact),
     generatedAt: new Date().toISOString(),
   };
+}
+
+export async function generateWithWorkforcePersona(input: GenerationInput): Promise<GenerationResult> {
+  const baseResult = generate({ ...input, workforcePersonaWriter: false });
+  if (input.workforcePersonaWriter === false || !baseResult.artifact || !baseResult.success) {
+    return baseResult;
+  }
+
+  const artifact = baseResult.artifact;
+  const targetMode = input.workforcePersonaWriter?.targetMode ??
+    (input.spec.executionPreference === 'cloud' ? 'cloud' : 'local');
+
+  try {
+    const personaResult = await writeWorkflowWithWorkforcePersona(input.spec, {
+      repoRoot: input.workforcePersonaWriter?.repoRoot ?? process.cwd(),
+      workflowName: input.workforcePersonaWriter?.workflowName ?? artifact.workflowId,
+      targetMode,
+      outputPath: artifact.artifactPath,
+      relevantFiles: input.workforcePersonaWriter?.relevantFiles,
+      timeoutSeconds: input.workforcePersonaWriter?.timeoutSeconds,
+      installSkills: input.workforcePersonaWriter?.installSkills,
+      tier: input.workforcePersonaWriter?.tier,
+      personaIntentCandidates: input.workforcePersonaWriter?.personaIntentCandidates,
+      resolver: input.workforcePersonaWriter?.resolver,
+    });
+    const finalArtifact = applyPersonaArtifactToRenderedArtifact(artifact, personaResult);
+    const validation = validateGeneratedArtifact(finalArtifact, baseResult.patternDecision, baseResult.skillContext);
+    const plannedChecks = buildPlannedChecks(finalArtifact, input.dryRunEnabled !== false);
+
+    return {
+      ...baseResult,
+      success: validation.valid,
+      artifact: finalArtifact,
+      validation,
+      plannedChecks,
+      deterministicValidationCommands: plannedChecks
+        .filter((check) => check.stage !== 'dry_run')
+        .map((check) => check.command),
+      executionRoute: resolveExecutionRoute(input.spec, finalArtifact),
+      workforcePersona: personaResult.metadata,
+    };
+  } catch (error) {
+    const writerError = error instanceof WorkforcePersonaWriterError ? error : null;
+    const issue = blockingIssue(
+      'rendering',
+      'WORKFORCE_PERSONA_WRITER_FAILED',
+      writerError?.message ?? `Workforce persona writer failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    const validation = {
+      ...baseResult.validation,
+      valid: false,
+      errors: [...baseResult.validation.errors, issue.message],
+      issues: [...baseResult.validation.issues, issue],
+    };
+    return {
+      ...baseResult,
+      success: false,
+      validation,
+      workforcePersona: {
+        personaId: 'unresolved',
+        tier: 'unknown',
+        harness: 'unknown',
+        model: 'unknown',
+        promptDigest: '',
+        warnings: writerError?.warnings ?? [],
+        runId: null,
+        source: 'package',
+        selectedIntent: 'agent-relay-workflow',
+        responseFormat: 'structured-json',
+        outputPath: artifact.artifactPath,
+        promptInputs: {
+          workflowName: artifact.workflowId,
+          targetMode,
+          repoRoot: input.workforcePersonaWriter?.repoRoot ?? process.cwd(),
+          relevantFileCount: input.workforcePersonaWriter?.relevantFiles?.length ?? input.spec.targetFiles.length,
+        },
+      },
+    };
+  }
 }
 
 export function validateGeneratedArtifact(

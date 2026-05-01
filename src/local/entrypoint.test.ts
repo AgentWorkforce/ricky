@@ -124,7 +124,7 @@ function immediateCommandRunner(
 }
 
 function memoryLocalExecutorOptions(
-  runnerOptions?: { exitCode?: number; stdout?: string[]; stderr?: string[] },
+  runnerOptions?: { exitCode?: number; stdout?: string[]; stderr?: string[]; cwd?: string },
 ): LocalExecutorOptions & {
   writes: RecordedWrite[];
   runner: CommandRunner & { invocations: RecordedInvocation[] };
@@ -132,7 +132,7 @@ function memoryLocalExecutorOptions(
   const writes: RecordedWrite[] = [];
   const runner = immediateCommandRunner(runnerOptions);
   return {
-    cwd: '/repo',
+    cwd: runnerOptions?.cwd ?? '/repo',
     commandRunner: runner,
     runner,
     writes,
@@ -1238,46 +1238,54 @@ describe('runLocal', () => {
   });
 
   it('continues from generated artifact into execution evidence when run mode is explicit', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const tempCwd = await mkdtemp(`${tmpdir()}/ricky-local-evidence-`);
     const localExecutor = memoryLocalExecutorOptions({
       stdout: ['local run completed'],
       stderr: ['runtime note'],
+      cwd: tempCwd,
     });
-    const result = await runLocal(
-      {
-        source: 'cli',
-        spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
-        stageMode: 'run',
-      },
-      {
-        localExecutor,
-      },
-    );
+    try {
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'run',
+        },
+        {
+          localExecutor,
+        },
+      );
 
-    expect(result.ok).toBe(true);
-    expect(result.exitCode).toBe(0);
-    expect(result.generation).toMatchObject({ stage: 'generate', status: 'ok' });
-    expect(result.execution).toMatchObject({
-      stage: 'execute',
-      status: 'success',
-      execution: {
-        command: expect.stringContaining('npx --no-install agent-relay run'),
-        workflow_file: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
-        cwd: '/repo',
-      },
-      evidence: {
-        outcome_summary: expect.stringContaining('completed successfully'),
-        logs: {
-          stdout_path: expect.any(String),
-          stderr_path: expect.any(String),
-          truncated: false,
+      expect(result.ok).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.generation).toMatchObject({ stage: 'generate', status: 'ok' });
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'success',
+        execution: {
+          command: expect.stringContaining('npx --no-install agent-relay run'),
+          workflow_file: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+          cwd: tempCwd,
         },
-        side_effects: {
-          commands_invoked: [expect.stringContaining('npx --no-install agent-relay run')],
+        evidence: {
+          outcome_summary: expect.stringContaining('completed successfully'),
+          logs: {
+            stdout_path: expect.stringContaining(`${tempCwd}/.workflow-artifacts/ricky-local-runs/`),
+            stderr_path: expect.stringContaining(`${tempCwd}/.workflow-artifacts/ricky-local-runs/`),
+            truncated: false,
+          },
+          side_effects: {
+            commands_invoked: [expect.stringContaining('npx --no-install agent-relay run')],
+          },
         },
-      },
-    });
-    expect(result.execution?.blocker).toBeUndefined();
-    expect(localExecutor.runner.invocations).toHaveLength(1);
+      });
+      expect(result.execution?.blocker).toBeUndefined();
+      expect(localExecutor.runner.invocations).toHaveLength(1);
+    } finally {
+      await rm(tempCwd, { recursive: true, force: true });
+    }
   });
 
   it('treats generate-and-run stage mode as explicit run behavior', async () => {
@@ -1307,72 +1315,114 @@ describe('runLocal', () => {
 
   describe('regression: issue #3 local generation and execution stages', () => {
     it('returns concrete execution outcome and evidence after generated artifact execution succeeds', async () => {
+      const { mkdtemp, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const tempCwd = await mkdtemp(`${tmpdir()}/ricky-local-evidence-`);
       const localExecutor = memoryLocalExecutorOptions({
         stdout: ['package checks passed'],
         stderr: ['runtime note'],
+        cwd: tempCwd,
       });
-      const result = await runLocal(
-        {
-          source: 'cli',
-          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
-          stageMode: 'run',
-        },
-        { localExecutor },
-      );
-
-      const generatedPath = result.generation?.artifact?.path;
-
-      expect(result.ok).toBe(true);
-      expect(result.exitCode).toBe(0);
-      expect(result.generation).toMatchObject({
-        stage: 'generate',
-        status: 'ok',
-        artifact: {
-          path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
-          workflow_id: expect.any(String),
-          spec_digest: expect.any(String),
-        },
-      });
-      expect(result.execution).toMatchObject({
-        stage: 'execute',
-        status: 'success',
-        execution: {
-          artifact_path: generatedPath,
-          workflow_file: generatedPath,
-          command: `npx --no-install agent-relay run ${generatedPath}`,
-          steps_completed: 1,
-          steps_total: 1,
-        },
-        evidence: {
-          outcome_summary: expect.stringContaining('completed successfully'),
-          artifacts_produced: [
-            {
-              path: generatedPath,
-              kind: 'workflow',
-              bytes: expect.any(Number),
-            },
-          ],
-          logs: {
-            stdout_path: expect.stringContaining('/.workflow-artifacts/ricky-local-runs/'),
-            stderr_path: expect.stringContaining('/.workflow-artifacts/ricky-local-runs/'),
-            truncated: false,
+      try {
+        const result = await runLocal(
+          {
+            source: 'cli',
+            spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'run',
           },
-          side_effects: {
-            commands_invoked: [`npx --no-install agent-relay run ${generatedPath}`],
+          { localExecutor },
+        );
+
+        const generatedPath = result.generation?.artifact?.path;
+
+        expect(result.ok).toBe(true);
+        expect(result.exitCode).toBe(0);
+        expect(result.generation).toMatchObject({
+          stage: 'generate',
+          status: 'ok',
+          artifact: {
+            path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+            workflow_id: expect.any(String),
+            spec_digest: expect.any(String),
           },
-          assertions: [
-            {
-              name: 'runtime_exit_code',
-              status: 'pass',
-              detail: 'Runtime exited with code 0.',
+        });
+        expect(result.execution).toMatchObject({
+          stage: 'execute',
+          status: 'success',
+          execution: {
+            artifact_path: generatedPath,
+            workflow_file: generatedPath,
+            command: `npx --no-install agent-relay run ${generatedPath}`,
+            steps_completed: 1,
+            steps_total: 1,
+          },
+          evidence: {
+            outcome_summary: expect.stringContaining('completed successfully'),
+            artifacts_produced: [
+              {
+                path: generatedPath,
+                kind: 'workflow',
+                bytes: expect.any(Number),
+              },
+            ],
+            logs: {
+              stdout_path: expect.stringContaining(`${tempCwd}/.workflow-artifacts/ricky-local-runs/`),
+              stderr_path: expect.stringContaining(`${tempCwd}/.workflow-artifacts/ricky-local-runs/`),
+              truncated: false,
             },
-          ],
-        },
+            side_effects: {
+              commands_invoked: [`npx --no-install agent-relay run ${generatedPath}`],
+            },
+            assertions: [
+              {
+                name: 'runtime_exit_code',
+                status: 'pass',
+                detail: 'Runtime exited with code 0.',
+              },
+            ],
+          },
+        });
+        expect(result.execution?.evidence?.side_effects.files_written).toEqual(
+          expect.arrayContaining([generatedPath!]),
+        );
+        expect(result.execution?.blocker).toBeUndefined();
+      } finally {
+        await rm(tempCwd, { recursive: true, force: true });
+      }
+    });
+
+    it('writes runtime log evidence under result.cwd, not process.cwd()', async () => {
+      const { mkdtemp, rm, access } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const callerRepo = await mkdtemp(`${tmpdir()}/ricky-caller-cwd-`);
+      const localExecutor = memoryLocalExecutorOptions({
+        stdout: ['caller cwd run ok'],
+        stderr: [],
+        cwd: callerRepo,
       });
-      expect(result.execution?.evidence?.side_effects.files_written).toEqual(
-        expect.arrayContaining([generatedPath!]),
-      );
-      expect(result.execution?.blocker).toBeUndefined();
+      try {
+        expect(callerRepo).not.toBe(process.cwd());
+        const result = await runLocal(
+          {
+            source: 'cli',
+            spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'run',
+            invocationRoot: callerRepo,
+          },
+          { localExecutor },
+        );
+
+        const stdoutPath = result.execution?.evidence?.logs.stdout_path;
+        const stderrPath = result.execution?.evidence?.logs.stderr_path;
+        expect(stdoutPath).toBeDefined();
+        expect(stderrPath).toBeDefined();
+        expect(stdoutPath!.startsWith(`${callerRepo}/.workflow-artifacts/ricky-local-runs/`)).toBe(true);
+        expect(stderrPath!.startsWith(`${callerRepo}/.workflow-artifacts/ricky-local-runs/`)).toBe(true);
+        await expect(access(stdoutPath!)).resolves.toBeUndefined();
+        await expect(access(stderrPath!)).resolves.toBeUndefined();
+      } finally {
+        await rm(callerRepo, { recursive: true, force: true });
+      }
     });
 
     it('returns a classified blocker when generated artifact execution fails at runtime', async () => {

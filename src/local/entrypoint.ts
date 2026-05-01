@@ -15,8 +15,8 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { runWithAutoFix } from './auto-fix-loop.js';
-import { generate } from '../product/generation/index.js';
-import type { GenerationResult, RenderedArtifact } from '../product/generation/index.js';
+import { generate, generateWithWorkforcePersona } from '../product/generation/index.js';
+import type { GenerationInput, GenerationResult, RenderedArtifact } from '../product/generation/index.js';
 import { intake } from '../product/spec-intake/index.js';
 import type { ExecutionPreference, InputSurface, RawSpecPayload, RouteTarget } from '../product/spec-intake/index.js';
 import { defaultRepoDetector, type RepoDetector } from '../product/spec-intake/detect-current-repo.js';
@@ -210,6 +210,11 @@ export interface LocalExecutorOptions {
   route?: ExecutionRoute;
   /** When true, stop after writing/generated artifact and return it without launching local runtime. */
   returnGeneratedArtifactOnly?: boolean;
+  /** Optional Workforce persona writer integration for generated workflow artifacts. */
+  workforcePersonaWriter?: false | Omit<
+    NonNullable<GenerationInput['workforcePersonaWriter']>,
+    'repoRoot' | 'targetMode' | 'outputPath'
+  >;
 }
 
 /**
@@ -345,15 +350,24 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           ...intakeResult.routing.normalizedSpec,
           executionPreference,
         };
-        generationResult = generate({
+        const workforcePersonaWriter = resolveWorkforcePersonaWriterOptions(request, options, cwd, executionPreference);
+        const generationInput: GenerationInput = {
           spec: normalizedSpec,
           dryRunEnabled: true,
+          artifactPath: artifactPathOverrideFor(request),
           refine: request.refine,
-        });
+          ...(workforcePersonaWriter ? { workforcePersonaWriter } : {}),
+        };
+        generationResult = generationInput.workforcePersonaWriter
+          ? await generateWithWorkforcePersona(generationInput)
+          : generate(generationInput);
         artifact = generationResult.artifact;
 
         logs.push(`[local] workflow generation: ${generationResult.success ? 'passed' : 'failed'}`);
         logs.push(`[local] selected pattern: ${generationResult.patternDecision.pattern}`);
+        if (generationResult.workforcePersona) {
+          logs.push(`[local] workforce persona writer: ${generationResult.workforcePersona.personaId}@${generationResult.workforcePersona.tier}`);
+        }
         warnings.push(...generationResult.validation.warnings);
 
         if (artifact) {
@@ -732,6 +746,23 @@ function sourceToSurface(source: LocalInvocationRequest['source']): InputSurface
   }
 }
 
+function resolveWorkforcePersonaWriterOptions(
+  request: LocalInvocationRequest,
+  options: LocalExecutorOptions,
+  cwd: string,
+  executionPreference: ExecutionPreference,
+): GenerationInput['workforcePersonaWriter'] | undefined {
+  if (options.workforcePersonaWriter === false) return undefined;
+  const requestedByMetadata = request.metadata.workflowWriter === 'workforce' || request.metadata.workflow_writer === 'workforce';
+  if (!options.workforcePersonaWriter && !requestedByMetadata) return undefined;
+
+  return {
+    ...(options.workforcePersonaWriter || {}),
+    repoRoot: cwd,
+    targetMode: executionPreference === 'cloud' ? 'cloud' : 'local',
+  };
+}
+
 function workflowFileForRoute(
   request: LocalInvocationRequest,
   route: RouteTarget,
@@ -743,6 +774,14 @@ function workflowFileForRoute(
   const candidate = request.structuredSpec?.workflowFile ?? request.structuredSpec?.workflowPath;
   if (typeof candidate === 'string' && isExecutableWorkflowPath(candidate)) return candidate;
   return workflowFileHint && isExecutableWorkflowPath(workflowFileHint) ? workflowFileHint : null;
+}
+
+function artifactPathOverrideFor(request: LocalInvocationRequest): string | undefined {
+  const candidate =
+    request.structuredSpec?.artifactPath ??
+    request.structuredSpec?.workflowArtifactPath ??
+    request.structuredSpec?.outputPath;
+  return typeof candidate === 'string' && candidate.trim() ? candidate : undefined;
 }
 
 function isExecutableWorkflowPath(path: string): boolean {
@@ -821,6 +860,7 @@ function createGenerationStage(
             skill_matches: generationResult.skillContext.matches,
             tool_selection: generationResult.toolSelection.selections,
             ...(generationResult.refinement ? { refinement: generationResult.refinement } : {}),
+            ...(generationResult.workforcePersona ? { workforce_persona: generationResult.workforcePersona } : {}),
           },
         }
       : {}),
@@ -838,6 +878,9 @@ async function writeGenerationMetadataArtifacts(
   await artifactWriter.writeArtifact(`${artifact.artifactsDir}/tool-selection.json`, `${JSON.stringify(generationResult.toolSelection.selections, null, 2)}\n`, cwd);
   if (generationResult.refinement) {
     await artifactWriter.writeArtifact(`${artifact.artifactsDir}/refinement.json`, `${JSON.stringify(generationResult.refinement, null, 2)}\n`, cwd);
+  }
+  if (generationResult.workforcePersona) {
+    await artifactWriter.writeArtifact(`${artifact.artifactsDir}/workforce-persona.json`, `${JSON.stringify(generationResult.workforcePersona, null, 2)}\n`, cwd);
   }
 }
 
@@ -1257,7 +1300,10 @@ function extractMissingEnvVars(text: string): string[] {
 }
 
 async function writeRuntimeLogs(result: CoordinatorResult): Promise<LocalExecutionEvidence['logs']> {
-  const base = resolve(process.cwd(), '.workflow-artifacts', 'ricky-local-runs', result.runId);
+  // Use the coordinator-reported cwd (already the invocation root captured at
+  // the CLI boundary). Falling back to process.cwd() would write evidence into
+  // the wrong tree when Ricky is invoked from a linked package cwd.
+  const base = resolve(result.cwd ?? process.cwd(), '.workflow-artifacts', 'ricky-local-runs', result.runId);
   const { mkdir, writeFile } = await import('node:fs/promises');
   const stdoutPath = join(base, 'stdout.log');
   const stderrPath = join(base, 'stderr.log');

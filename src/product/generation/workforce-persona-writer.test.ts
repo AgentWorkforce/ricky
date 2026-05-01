@@ -1,0 +1,326 @@
+import { describe, expect, it } from 'vitest';
+
+import type { NormalizedWorkflowSpec, RawSpecPayload } from '../spec-intake/types.js';
+import { generate, generateWithWorkforcePersona } from './pipeline.js';
+import type { WorkforcePersonaExecution, WorkforcePersonaResolver } from './workforce-persona-writer.js';
+import {
+  buildWorkflowPersonaTask,
+  parsePersonaWorkflowResponse,
+  WORKFORCE_PERSONA_INTENT_CANDIDATES,
+} from './workforce-persona-writer.js';
+
+const RECEIVED_AT = '2026-04-30T00:00:00.000Z';
+
+describe('workforce persona workflow writer', () => {
+  it('builds the one-shot persona task with spec, mode, repo, standards, contract, constraints, and evidence rules', () => {
+    const task = buildWorkflowPersonaTask(spec(), {
+      workflowName: 'release-health',
+      targetMode: 'local',
+      repoRoot: '/repo',
+      outputPath: 'workflows/generated/release-health.ts',
+      relevantFiles: [{ path: 'src/product/generation/pipeline.ts', content: 'export function generate() {}' }],
+    });
+
+    expect(task).toContain('Normalized spec JSON');
+    expect(task).toContain('"workflowName": "release-health"');
+    expect(task).toContain('"targetMode": "local"');
+    expect(task).toContain('"repoRoot": "/repo"');
+    expect(task).toContain('Agent Relay workflow standards');
+    expect(task).toContain('80-to-100 fix loop');
+    expect(task).toContain('Structured response contract');
+    expect(task).toContain('fenced ```ts artifact block plus a fenced ```json metadata block');
+    expect(task).toContain('Evidence rules');
+    expect(task).toContain('Do not open an interactive Claude, Codex, or OpenCode terminal UI');
+  });
+
+  it('parses structured JSON persona output and validates metadata', () => {
+    const parsed = parsePersonaWorkflowResponse(JSON.stringify({
+      artifact: {
+        path: 'workflows/generated/persona.ts',
+        content: workflowSource(),
+      },
+      metadata: {
+        workflowName: 'persona',
+        agents: ['lead'],
+      },
+    }), 'workflows/generated/persona.ts');
+
+    expect(parsed.responseFormat).toBe('structured-json');
+    expect(parsed.content).toContain('workflow("persona")');
+    expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
+  });
+
+  it('parses fenced TypeScript artifact plus JSON metadata fallback', () => {
+    const parsed = parsePersonaWorkflowResponse([
+      '```ts',
+      workflowSource(),
+      '```',
+      '```json',
+      JSON.stringify({ path: 'workflows/generated/persona.ts', workflowName: 'persona' }),
+      '```',
+    ].join('\n'), 'workflows/generated/persona.ts');
+
+    expect(parsed.responseFormat).toBe('fenced-artifact');
+    expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
+    expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
+  });
+
+  it('invokes the spawned harness non-interactively (no TUI flag, structured-response contract)', async () => {
+    const base = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/non-interactive.ts',
+    });
+    expect(base.success).toBe(true);
+    const sendMessageOptions: Array<Record<string, unknown>> = [];
+    const resolver: WorkforcePersonaResolver = async () => ({
+      source: 'package',
+      intent: 'agent-relay-workflow',
+      warnings: [],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          runtime: { harness: 'codex', model: 'codex/test' },
+        },
+        sendMessage(_task, options) {
+          sendMessageOptions.push((options ?? {}) as Record<string, unknown>);
+          return execution(JSON.stringify({
+            artifact: {
+              path: 'workflows/generated/non-interactive.ts',
+              content: base.artifact!.content,
+            },
+            metadata: { workflowName: 'non-interactive' },
+          }));
+        },
+      },
+    });
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/non-interactive.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'non-interactive',
+        targetMode: 'local',
+        installSkills: false,
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(sendMessageOptions).toHaveLength(1);
+    const passed = sendMessageOptions[0];
+    expect(passed.workingDirectory).toBe('/repo');
+    expect(passed.installSkills).toBe(false);
+    // Non-interactive contract: no TUI / interactive flag set on sendMessage.
+    expect(passed).not.toHaveProperty('tty');
+    expect(passed).not.toHaveProperty('interactive');
+    expect(passed).not.toHaveProperty('stdio');
+    expect((passed.inputs as Record<string, unknown>).outputPath).toBe(
+      'workflows/generated/non-interactive.ts',
+    );
+  });
+
+  it('errors instead of writing a file when the harness returns malformed text', async () => {
+    const resolver: WorkforcePersonaResolver = async () => ({
+      source: 'package',
+      intent: 'agent-relay-workflow',
+      warnings: [],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          runtime: { harness: 'codex', model: 'codex/test' },
+        },
+        sendMessage() {
+          return execution('not a workflow at all — no fences, no JSON, no workflow() call');
+        },
+      },
+    });
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec(),
+      artifactPath: 'workflows/generated/malformed.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'malformed',
+        targetMode: 'local',
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    const errorText = result.validation.errors.join(' | ');
+    expect(errorText).toMatch(/workflow|persona|fenced|structured/i);
+  });
+
+  it('invokes the selected Workforce persona through usePersona sendMessage and persists metadata', async () => {
+    const base = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/workforce-writer.ts',
+    });
+    expect(base.success).toBe(true);
+
+    const calls: Array<{ intents: readonly string[]; task: string }> = [];
+    const resolver: WorkforcePersonaResolver = async (intents) => ({
+      source: 'local-dev',
+      intent: 'agent-relay-workflow',
+      warnings: ['using local ../workforce workload-router'],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          runtime: {
+            harness: 'codex',
+            model: 'openai-codex/gpt-5.3-codex',
+            harnessSettings: { timeoutSeconds: 1200, reasoning: 'high' },
+          },
+        },
+        sendMessage(task) {
+          calls.push({ intents, task });
+          return execution(JSON.stringify({
+            artifact: {
+              path: 'workflows/generated/workforce-writer.ts',
+              content: base.artifact!.content,
+            },
+            metadata: {
+              workflowName: 'workforce-writer',
+              evidence: ['typecheck', 'tests'],
+            },
+          }));
+        },
+      },
+    });
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/workforce-writer.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'workforce-writer',
+        targetMode: 'local',
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].intents).toEqual(WORKFORCE_PERSONA_INTENT_CANDIDATES);
+    expect(calls[0].task).toContain('"repoRoot": "/repo"');
+    expect(calls[0].task).toContain('"outputPath": "workflows/generated/workforce-writer.ts"');
+    expect(result.workforcePersona).toMatchObject({
+      personaId: 'agent-relay-workflow',
+      tier: 'best',
+      harness: 'codex',
+      model: 'openai-codex/gpt-5.3-codex',
+      runId: 'persona-run-001',
+      source: 'local-dev',
+      selectedIntent: 'agent-relay-workflow',
+      responseFormat: 'structured-json',
+      outputPath: 'workflows/generated/workforce-writer.ts',
+    });
+    expect(result.workforcePersona?.promptDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.workforcePersona?.warnings).toEqual(['using local ../workforce workload-router']);
+    expect(result.artifact?.content).toBe(base.artifact!.content);
+  });
+});
+
+function execution(output: string): WorkforcePersonaExecution {
+  const promise = Promise.resolve({
+    status: 'completed' as const,
+    output,
+    stderr: '',
+    exitCode: 0,
+    durationMs: 42,
+    workflowRunId: 'persona-run-001',
+    stepName: 'agent-relay-workflow',
+  }) as WorkforcePersonaExecution;
+  Object.defineProperty(promise, 'runId', { value: Promise.resolve('persona-run-001') });
+  promise.cancel = () => {};
+  return promise;
+}
+
+function workflowSource(): string {
+  return [
+    'import { workflow } from "@agent-relay/sdk/workflows";',
+    '',
+    'async function main() {',
+    '  await workflow("persona")',
+    '    .description("Persona generated workflow")',
+    '    .pattern("pipeline")',
+    '    .channel("wf-ricky-persona")',
+    '    .step("verify", { type: "deterministic", command: "echo ok", verification: { type: "exit_code" } })',
+    '    .run({ cwd: process.cwd() });',
+    '}',
+    '',
+    'main().catch((error) => {',
+    '  console.error(error);',
+    '  process.exitCode = 1;',
+    '});',
+    '',
+  ].join('\n');
+}
+
+function spec(overrides: { description?: string; targetFiles?: string[] } = {}): NormalizedWorkflowSpec {
+  const description = overrides.description ?? 'Generate a workflow for deterministic product work.';
+  const rawPayload: RawSpecPayload = {
+    kind: 'natural_language',
+    surface: 'cli',
+    receivedAt: RECEIVED_AT,
+    requestId: 'workforce-writer-test',
+    text: description,
+  };
+  const providerContext = {
+    surface: 'cli' as const,
+    requestId: rawPayload.requestId,
+    metadata: {},
+  };
+  const targetFiles = overrides.targetFiles ?? ['src/product/generation/workforce-persona-writer.ts'];
+  return {
+    intent: 'generate',
+    description,
+    targetRepo: null,
+    targetContext: null,
+    targetFiles,
+    desiredAction: {
+      kind: 'generate',
+      summary: description,
+      specText: description,
+      targetFiles,
+    },
+    constraints: [{ constraint: 'Must include deterministic validation.', category: 'quality' }],
+    evidenceRequirements: [{ requirement: 'Record typecheck and tests.', verificationType: 'output_contains' }],
+    requiredEvidence: [{ requirement: 'Record typecheck and tests.', verificationType: 'output_contains' }],
+    acceptanceGates: [{ gate: 'npx tsc --noEmit', kind: 'deterministic' }],
+    acceptanceCriteria: [{ gate: 'npx tsc --noEmit', kind: 'deterministic' }],
+    providerContext,
+    sourceSpec: {
+      surface: 'cli',
+      intent: { primary: 'generate', signals: ['test fixture'] },
+      description,
+      targetRepo: undefined,
+      targetContext: undefined,
+      targetFiles,
+      constraints: ['Must include deterministic validation.'],
+      evidenceRequirements: ['Record typecheck and tests.'],
+      acceptanceGates: ['npx tsc --noEmit'],
+      providerContext,
+      rawPayload,
+      parseConfidence: 'high',
+      parseWarnings: [],
+    },
+    executionPreference: 'auto',
+  };
+}
