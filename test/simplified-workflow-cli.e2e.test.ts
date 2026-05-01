@@ -24,6 +24,7 @@ describe('simplified workflow CLI E2E paths', () => {
     const result = await runOnboarding({
       output: new PassThrough(),
       isTTY: true,
+      env: {},
       configStore: configStore(),
       promptShell,
     });
