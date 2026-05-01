@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { repairWorkflowDeterministically, runWithAutoFix } from './auto-fix-loop.js';
@@ -232,6 +234,68 @@ describe('runWithAutoFix', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('routes semantic workflow failures to persona repair instead of deterministic repair', async () => {
+    const artifactPath = 'workflows/demo-persona-repair/semantic-contract.ts';
+    const artifactContent = await readFile(new URL('../../workflows/demo-persona-repair/semantic-contract.ts', import.meta.url), 'utf8');
+    const firstFailure = semanticContractBlockerResponse(artifactPath, artifactContent);
+    const deterministicRepair = repairWorkflowDeterministically({
+      artifactPath,
+      artifactContent,
+      evidence: semanticContractEvidence(firstFailure),
+    });
+    expect(deterministicRepair).toBeNull();
+
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(firstFailure)
+      .mockResolvedValueOnce(successResponse('semantic-run-2'));
+    const workflowRepairer = vi.fn().mockResolvedValue({
+      ...workflowRepair(artifactContent.replace("status: 'draft', approvals: 0", "status: 'ready', approvals: 1")),
+      artifactPath,
+      summary: 'persona repaired semantic contract state',
+      runId: 'persona-semantic-run-1',
+    });
+
+    const result = await runWithAutoFix({
+      ...baseRequest,
+      source: 'workflow-artifact',
+      spec: artifactContent,
+      specPath: artifactPath,
+    }, {
+      maxAttempts: 2,
+      runSingleAttempt,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(workflowRepairer).toHaveBeenCalledWith(expect.objectContaining({
+      artifactPath,
+      artifactContent,
+      failedStep: 'verify-contract-ready',
+      classification: expect.objectContaining({
+        failureClass: 'verification_failure',
+      }),
+    }));
+    expect(result.auto_fix?.attempts[0]).toMatchObject({
+      status: 'blocker',
+      blocker_code: 'INVALID_ARTIFACT',
+      failed_step: 'verify-contract-ready',
+      applied_fix: {
+        mode: 'workforce-persona',
+        artifact_path: artifactPath,
+        summary: 'persona repaired semantic contract state',
+        persona_run_id: 'persona-semantic-run-1',
+      },
+    });
+    expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
+      attempt: 2,
+      previousRunId: 'semantic-run-1',
+      retryOfRunId: 'semantic-run-1',
+      startFromStep: 'verify-contract-ready',
+    });
+  });
+
   it('stops after max attempts exhaustion', async () => {
     const runSingleAttempt = vi
       .fn()
@@ -407,6 +471,115 @@ function sdkRuntimeBlockerResponse(): LocalResponse {
       },
     },
     exitCode: 2,
+  };
+}
+
+function semanticContractBlockerResponse(artifactPath: string, artifactContent: string): LocalResponse {
+  const blocker: LocalClassifiedBlocker = {
+    code: 'INVALID_ARTIFACT',
+    category: 'workflow_invalid',
+    message: 'Workflow reported a failed run: verify-contract-ready failed the semantic contract readiness check.',
+    detected_at: '2026-04-28T00:00:00.000Z',
+    detected_during: 'launch',
+    recovery: {
+      actionable: true,
+      steps: ['Ask the Workforce persona to repair the workflow artifact.'],
+    },
+    context: {
+      missing: [],
+      found: [],
+    },
+  };
+  return {
+    ok: false,
+    artifacts: [{ path: artifactPath, content: artifactContent }],
+    logs: [],
+    warnings: [blocker.message],
+    nextActions: [...blocker.recovery.steps],
+    generation: {
+      stage: 'generate',
+      status: 'ok',
+      artifact: { path: artifactPath, workflow_id: 'wf-semantic-contract', spec_digest: 'semantic' },
+    },
+    execution: {
+      stage: 'execute',
+      status: 'blocker',
+      execution: {
+        ...execution('semantic-run-1'),
+        artifact_path: artifactPath,
+        workflow_file: artifactPath,
+      },
+      blocker,
+      evidence: {
+        outcome_summary: blocker.message,
+        logs: {
+          tail: [
+            '[workflow 00:00] Starting workflow "ricky-demo-persona-repair-semantic-contract" (3 steps)',
+            '[workflow] run semantic-run-1',
+            '[workflow 00:00] Executing 3 steps (pattern: pipeline)',
+            '  ● prepare-contract — started',
+            '[workflow 00:00] [prepare-contract] Running: mkdir -p .workflow-artifacts/demo-persona-repair/semantic-contract',
+            '  ✓ prepare-contract — completed',
+            '  ● write-contract — started',
+            '[workflow 00:00] [write-contract] Running: node -e "...write draft contract..."',
+            '  ✓ write-contract — completed',
+            '  ● verify-contract-ready — started',
+            '[workflow 00:00] [verify-contract-ready] Running: node -e "...verify contract ready..."',
+            '[workflow 00:00] [verify-contract-ready] Output:',
+            '```',
+            'contract must be ready with at least one approval; got status=draft, approvals=0',
+            '```',
+            '[workflow 00:00] [verify-contract-ready] Command failed (exit code 1)',
+            '  ✗ verify-contract-ready — FAILED: Command failed with exit code 1',
+            '[workflow] FAILED: Step "verify-contract-ready" failed: Command failed with exit code 1',
+          ],
+          truncated: false,
+        },
+        side_effects: { files_written: ['.workflow-artifacts/demo-persona-repair/semantic-contract/contract.json'], commands_invoked: [] },
+        assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
+      },
+    },
+    exitCode: 2,
+  };
+}
+
+function semanticContractEvidence(response: LocalResponse): WorkflowRunEvidence {
+  return {
+    runId: response.execution?.execution.run_id ?? 'semantic-run-1',
+    workflowId: 'wf-semantic-contract',
+    workflowName: 'ricky-demo-persona-repair-semantic-contract',
+    status: 'failed',
+    startedAt: '2026-04-28T00:00:00.000Z',
+    completedAt: '2026-04-28T00:00:01.000Z',
+    steps: [
+      {
+        stepId: 'verify-contract-ready',
+        stepName: 'verify-contract-ready',
+        status: 'failed',
+        startedAt: '2026-04-28T00:00:00.000Z',
+        completedAt: '2026-04-28T00:00:01.000Z',
+        verifications: [{
+          type: 'exit_code',
+          passed: false,
+          expected: '0',
+          actual: '1',
+          message: 'contract must be ready with at least one approval; got status=draft, approvals=0',
+          command: 'node -e "...verify contract ready..."',
+          exitCode: 1,
+        }],
+        deterministicGates: [],
+        logs: response.execution?.evidence?.logs.tail?.map((excerpt) => ({ stream: 'stdout' as const, excerpt })) ?? [],
+        artifacts: [{ path: 'workflows/demo-persona-repair/semantic-contract.ts', kind: 'file' }],
+        history: [],
+        retries: [],
+        narrative: [],
+      },
+    ],
+    deterministicGates: [],
+    artifacts: [{ path: 'workflows/demo-persona-repair/semantic-contract.ts', kind: 'file' }],
+    logs: [],
+    narrative: [],
+    routing: [],
   };
 }
 
