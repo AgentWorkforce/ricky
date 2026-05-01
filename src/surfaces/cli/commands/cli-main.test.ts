@@ -270,9 +270,10 @@ describe('renderHelp', () => {
   it('states that spec handoff returns an artifact unless execution is explicitly requested', () => {
     const helpText = renderHelp().join('\n');
 
-    expect(helpText).toContain('generate   Ricky writes a workflow artifact');
-    expect(helpText).toContain('This is the default. Nothing is executed.');
-    expect(helpText).toContain('Only with --run or `ricky run <artifact>`');
+    expect(helpText).toContain('Happy path:');
+    expect(helpText).toContain('ricky local --spec <text>');
+    expect(helpText).toContain('ricky run --artifact <path> --background');
+    expect(helpText).toContain('ricky status --run <run-id>');
     expect(helpText).toContain('Without --run:  artifact path on disk');
     expect(helpText).not.toMatch(/automatic execution/i);
     expect(helpText).not.toMatch(/automatically execute/i);

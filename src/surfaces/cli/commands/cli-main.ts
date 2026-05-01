@@ -269,23 +269,22 @@ function readPackageVersion(readPackageJsonText?: (path: string) => string): str
 
 export function renderHelp(): string[] {
   return [
-    'ricky CLI — workflow artifact generation',
+    'ricky CLI — workflow generation and runs',
     '',
-    'What Ricky does:',
-    '  generate   Ricky writes a workflow artifact into workflows/generated/ in your repo.',
-    '             This is the default. Nothing is executed.',
-    '  execute    Only with --run or `ricky run <artifact>`.',
-    '             Launches the artifact through the Relay SDK workflow runner.',
+    'Happy path:',
+    '  ricky                                               Start guided mode',
+    '  ricky local --spec <text>                           Write a workflow artifact',
+    '  ricky run --artifact <path> --background            Run it in the background',
+    '  ricky status --run <run-id>                         Check progress',
+    '',
+    'Common commands:',
+    '  ricky status                                        Show local and Cloud readiness',
+    '  ricky connect cloud                                 Connect AgentWorkforce Cloud',
+    '  ricky cloud --spec <text>                           Generate with Cloud',
+    '  ricky run --artifact <path>                         Run attached in this terminal',
     '',
     'Usage:',
-    '  ricky                                               Interactive session (default)',
-    '  ricky local --spec <text>                           Generate a local workflow artifact',
     '  ricky local --spec-file <path> --run                Generate, then run locally',
-    '  ricky cloud --spec <text>                           Generate with AgentWorkforce Cloud',
-    '  ricky status                                        Show local and Cloud readiness',
-    '  ricky connect cloud                                 Show Cloud connection recovery',
-    '  ricky connect agents --cloud                        Show Cloud agent connection recovery',
-    '  ricky connect integrations --cloud                  Show Cloud integration recovery',
     '  ricky --mode <mode>                                 Mode preset: local | cloud | both',
     '  ricky --mode local --spec <text>                    Generate artifact only',
     '  ricky --mode local --spec <text> --run              Generate, then execute',
@@ -295,41 +294,43 @@ export function renderHelp(): string[] {
     '  ricky help                                          This help text',
     '  ricky version                                       Version',
     '',
-    'Options:',
+    'Common options:',
     '  --mode <mode>       Set mode (local, cloud, both)',
     '  --spec <text>       Inline spec text',
     '  --spec-file <path>  Read spec from a file',
-    '  --workflow <path>   Run an existing workflow artifact',
-    '  --name <name>       Workflow name for summaries and metadata',
     '  --artifact <path>   Execute an existing artifact (implies --run)',
     '  --run               Execute the generated artifact after generation',
     '  --no-run            Generate only and print the run command',
-    '  --background        Request detached/background monitoring metadata',
+    '  --background        Return a run id immediately; use status --run to watch',
     '  --foreground        Keep the local run attached to this process',
-    '  --refine[=model]    Refine generated task text and gates with an LLM pass (default on)',
-    '  --no-refine         Disable refinement; emit only the deterministic artifact',
+    '  --json              Print results as JSON',
+    '  --help, -h          Show help',
+    '  --version, -v       Show version',
+    '',
+    'More options:',
+    '  --workflow <path>   Alias for --artifact',
+    '  --name <name>       Workflow name for summaries and metadata',
+    '  --refine[=model]    Refine generated task text and gates with an LLM pass',
     '  --with-llm[=model]  Alias for --refine',
-    '  --workforce-persona Use Workforce personas to author the workflow (default)',
-    '  --no-workforce-persona Disable Workforce persona authoring (overrides env)',
+    '  --workforce-persona Use Workforce personas to author the workflow',
+    '  --no-workforce-persona Disable Workforce persona authoring',
     '  --auto-fix[=N]      Local diagnose/repair/resume loop (default 3 attempts, max 10)',
     '  --no-auto-fix       Disable the repair loop; first failure surfaces immediately',
     '  --repair[=N]        Alias for --auto-fix',
     '  --login             Power-user Cloud: re-probe readiness after a real Cloud login',
     '  --connect-missing   Power-user Cloud: re-probe readiness after connecting missing agents',
     '  --yes               Skip non-destructive run confirmations only',
-    '  --json              Print results as JSON',
     '  --quiet             Print only essential output',
     '  --verbose           Include diagnostic detail for unexpected failures',
     '  --stdin             Read spec from stdin',
-    '  --help, -h          Show help',
-    '  --version, -v       Show version',
     '',
     'What you get back:',
     '  Without --run:  artifact path on disk, logs, warnings, and the exact',
-    '                  `ricky run --artifact ...` command to run it yourself.',
+    '                  run commands, including the background form.',
     '  With --run:     generation result + execution result. On failure, a classified',
     '                  blocker code (e.g. MISSING_BINARY, MISSING_ENV_VAR) with',
     '                  shell-ready recovery steps and exit code 2.',
+    '  Background:     a Ricky run id and `ricky status --run <run-id>` command.',
     '  Cloud mode:     generated artifact from AgentWorkforce Cloud. This CLI does',
     '                  not stream Cloud execution results.',
     '',
@@ -338,7 +339,7 @@ export function renderHelp(): string[] {
     '  ricky --mode local --spec "generate a workflow for package checks" --run',
     '  ricky --mode local --spec-file ./my-spec.md',
     '  printf "%s\\n" "run workflows/release.workflow.ts" | ricky --mode local --stdin',
-    '  ricky run workflows/generated/package-checks.ts',
+    '  ricky run --artifact workflows/generated/package-checks.ts --background',
   ];
 }
 
@@ -1580,8 +1581,10 @@ function renderLocalWorkflowHuman(result: NonNullable<InteractiveCliResult['loca
 
   lines.push(
     '',
-    'Run command',
+    'Run commands',
     `  ${result.command}`,
+    `  ${result.command} --background`,
+    '  ricky status --run <run-id>',
   );
   return lines;
 }
@@ -1636,6 +1639,8 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     }
     if (localResult.generation.next) {
       lines.push(`  To execute this artifact: ${localResult.generation.next.run_command}`);
+      lines.push(`  To run in background: ${localResult.generation.next.run_command} --background`);
+      lines.push('  Then check progress: ricky status --run <run-id>');
       lines.push(`  Or with linked CLI: ${localResult.generation.next.run_mode_hint}`);
     }
     if (localResult.generation.error) {
