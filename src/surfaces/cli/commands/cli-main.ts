@@ -1814,7 +1814,10 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
       lines.push(label);
       lines.push(`  status: ${status}${blocker}`);
       if (attempt.applied_fix && typeof attempt.applied_fix === 'object') {
-        const fix = attempt.applied_fix as { steps?: unknown; exit_code?: unknown };
+        const fix = attempt.applied_fix as { steps?: unknown; exit_code?: unknown; mode?: unknown; summary?: unknown; artifact_path?: unknown };
+        if (typeof fix.mode === 'string') lines.push(`  repair mode: ${fix.mode}`);
+        if (typeof fix.summary === 'string') lines.push(`  repair summary: ${fix.summary}`);
+        if (typeof fix.artifact_path === 'string') lines.push(`  repaired artifact: ${fix.artifact_path}`);
         if (Array.isArray(fix.steps)) lines.push(`  applied fix: ${fix.steps.join(' && ')}`);
         if (fix.exit_code !== undefined) lines.push(`  fix outcome: ${fix.exit_code === 0 ? 'ok' : `exit ${String(fix.exit_code)}`}`);
       }

@@ -1278,6 +1278,40 @@ describe('cliMain', () => {
     expect(output).toContain('ricky status --run ricky-local-options');
   });
 
+  it('renders auto-fix repair mode and summary for applied workflow repairs', async () => {
+    const localResult = stagedLocalResult({
+      auto_fix: {
+        max_attempts: 3,
+        final_status: 'ok',
+        resumed: true,
+        run_id: 'ricky-local-repaired',
+        attempts: [
+          { attempt: 1, status: 'blocker', blocker_code: 'INVALID_ARTIFACT' },
+          {
+            attempt: 2,
+            status: 'ok',
+            applied_fix: {
+              mode: 'deterministic',
+              artifact_path: 'workflows/generated/issue-3.ts',
+              summary: 'Aligned deterministic workflow checks.',
+            },
+          },
+        ],
+      },
+    });
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ ok: true, localResult }));
+
+    const result = await cliMain({
+      argv: ['run', '--artifact', 'workflows/generated/issue-3.ts'],
+      runInteractive: runner,
+    });
+
+    const output = result.output.join('\n');
+    expect(output).toContain('repair mode: deterministic');
+    expect(output).toContain('repair summary: Aligned deterministic workflow checks.');
+    expect(output).toContain('repaired artifact: workflows/generated/issue-3.ts');
+  });
+
   describe('regression: issues #4 and #7 user-facing contracts', () => {
     it('labels generated artifacts as generation output, not execution evidence', async () => {
       const artifactOnly = stagedLocalResult({

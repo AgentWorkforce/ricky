@@ -44,6 +44,7 @@ export interface WorkflowRepairResult {
   applied: boolean;
   content?: string;
   artifactPath?: string;
+  mode?: string;
   summary: string;
   warnings?: string[];
   runId?: string | null;
@@ -170,7 +171,7 @@ export async function runWithAutoFix(
         const repairedArtifactPath = repair.artifactPath ?? repairTarget.artifactPath;
         await artifactWriter(repairedArtifactPath, repair.content, repairTarget.cwd);
         attemptSummary.applied_fix = {
-          mode: 'workforce-persona',
+          mode: repair.mode ?? 'workforce-persona',
           artifact_path: repairedArtifactPath,
           summary: repair.summary,
           ...(repair.runId ? { persona_run_id: repair.runId } : {}),
@@ -358,6 +359,7 @@ export function repairWorkflowDeterministically(
   return {
     applied: true,
     artifactPath: input.artifactPath,
+    mode: 'deterministic',
     content,
     summary: `Applied bounded deterministic workflow repair: ${changes.join('; ')}.`,
     warnings: personaError

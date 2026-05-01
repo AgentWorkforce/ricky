@@ -164,6 +164,7 @@ describe('runWithAutoFix', () => {
     expect(repair).toMatchObject({
       applied: true,
       artifactPath: 'workflows/demo-auto-fix/broken-greeting.ts',
+      mode: 'deterministic',
       summary: expect.stringContaining('bounded deterministic workflow repair'),
       warnings: [expect.stringContaining('Workforce persona repair unavailable')],
     });
