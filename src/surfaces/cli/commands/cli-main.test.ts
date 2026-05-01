@@ -657,6 +657,67 @@ describe('cliMain', () => {
     expect(output).toContain('Status command: ricky status --run ricky-local-background');
   });
 
+  it('prints guided generation failure without run commands or handoff failure', async () => {
+    const failedGeneration = stagedLocalResult({
+      ok: false,
+      logs: ['[local] workflow generation: failed'],
+      warnings: ['Workforce persona writer did not complete: failed.'],
+      nextActions: ['Fix the generated workflow validation errors before local execution.'],
+      exitCode: 1,
+      generation: {
+        stage: 'generate',
+        status: 'error',
+        artifact: {
+          path: 'workflows/generated/docs-audit.ts',
+          workflow_id: 'ricky-docs-audit',
+          spec_digest: 'digest-docs',
+        },
+        error: 'WORKFORCE_PERSONA_WRITER_FAILED',
+        decisions: {
+          workforce_persona: {
+            personaId: 'unresolved',
+            tier: 'unknown',
+            harness: 'unknown',
+            model: 'unknown',
+          },
+        },
+      },
+      execution: undefined,
+    });
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({
+      ok: false,
+      localResult: failedGeneration,
+      localWorkflowResult: {
+        preflight: {} as never,
+        capture: {} as never,
+        generation: failedGeneration,
+        summary: {
+          artifactPath: 'workflows/generated/docs-audit.ts',
+          goal: 'Audit docs',
+          agents: [],
+          jobs: [],
+          desiredOutcome: 'Docs are ready.',
+          sideEffects: [],
+          missingLocalBlockers: [],
+          command: 'ricky run --artifact workflows/generated/docs-audit.ts',
+        },
+        command: 'ricky run --artifact workflows/generated/docs-audit.ts',
+      },
+    }));
+
+    const result = await cliMain({ argv: [], runInteractive: runner });
+    const output = result.output.join('\n');
+
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('Author: Workforce persona writer failed before authoring completed');
+    expect(output).toContain('Generation: failed (status: error).');
+    expect(output).toContain('Error: WORKFORCE_PERSONA_WRITER_FAILED');
+    expect(output).toContain('Next: Fix the generated workflow validation errors before local execution.');
+    expect(output).not.toContain('Local handoff failed.');
+    expect(output).not.toContain('Run commands');
+    expect(output).not.toContain('ricky status --run <run-id>');
+  });
+
   it('returns empty output array on successful run with no guidance', async () => {
     const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
     const result = await cliMain({ argv: [], runInteractive: runner });

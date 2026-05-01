@@ -1677,6 +1677,11 @@ function renderLocalWorkflowHuman(result: NonNullable<InteractiveCliResult['loca
     lines.push(`Author: ${localGenerationAuthor(result.generation.generation)}`);
   }
 
+  if (result.generation && !result.generation.ok) {
+    lines.push(...renderLocalHuman(result.generation));
+    return lines;
+  }
+
   if (result.monitoredRun) {
     const execution = result.monitoredRun.response?.execution?.execution;
     lines.push(
@@ -1858,6 +1863,7 @@ function localGenerationAuthor(generation: NonNullable<InteractiveCliResult['loc
   const persona = generation?.decisions?.workforce_persona;
   if (!persona || typeof persona !== 'object') return 'deterministic generator';
   const record = persona as { personaId?: unknown; tier?: unknown; harness?: unknown; model?: unknown };
+  if (record.personaId === 'unresolved') return 'Workforce persona writer failed before authoring completed';
   const personaId = typeof record.personaId === 'string' && record.personaId.trim()
     ? record.personaId.trim()
     : 'Workforce persona';

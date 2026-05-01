@@ -136,6 +136,69 @@ describe('local workflow flow', () => {
     }
   });
 
+  it('stops before run confirmation when guided generation fails', async () => {
+    const repo = await makeRepo();
+    const failedGeneration: LocalResponse = {
+      ok: false,
+      artifacts: [{
+        path: 'workflows/generated/docs-audit.ts',
+        type: 'text/typescript',
+        content: "workflow('docs-audit')",
+      }],
+      logs: ['[local] workflow generation: failed'],
+      warnings: ['Workforce persona writer did not complete: failed.'],
+      nextActions: ['Fix the generated workflow validation errors before local execution.'],
+      generation: {
+        stage: 'generate',
+        status: 'error',
+        artifact: {
+          path: 'workflows/generated/docs-audit.ts',
+          workflow_id: 'ricky-docs-audit',
+          spec_digest: 'digest-docs',
+        },
+        error: 'WORKFORCE_PERSONA_WRITER_FAILED',
+        decisions: {
+          workforce_persona: {
+            personaId: 'unresolved',
+            tier: 'unknown',
+            harness: 'unknown',
+            model: 'unknown',
+          },
+        },
+      },
+      exitCode: 1,
+    };
+    const runLocalFn = vi.fn().mockResolvedValue(failedGeneration);
+    const confirmRun = vi.fn();
+
+    try {
+      const result = await runLocalWorkflowFlow({
+        cwd: repo,
+        runLocalFn,
+        prompts: {
+          selectSpecSource: async () => 'goal',
+          inputSpecFilePath: async () => 'SPEC.md',
+          editSpec: async () => 'unused',
+          inputWorkflowName: async () => 'docs-audit',
+          inputGoal: async () => 'audit docs for OSS readiness',
+          approveGeneratedSpec: async () => 'approve',
+          inputWorkflowArtifactPath: async () => 'workflows/generated/docs-audit.ts',
+          confirmRun,
+        },
+      });
+
+      expect(runLocalFn).toHaveBeenCalledTimes(1);
+      expect(confirmRun).not.toHaveBeenCalled();
+      expect(result.generation).toBe(failedGeneration);
+      expect(result.run).toBeUndefined();
+      expect(result.monitoredRun).toBeUndefined();
+      expect(result.confirmation).toBeUndefined();
+      expect(result.command).toBe('ricky run --artifact workflows/generated/docs-audit.ts');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it('runs an existing workflow artifact directly through the foreground confirmation path', async () => {
     const repo = await makeRepo();
     const runResponse: LocalResponse = {
