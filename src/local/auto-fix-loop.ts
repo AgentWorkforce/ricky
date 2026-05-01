@@ -49,6 +49,16 @@ export interface WorkflowRepairResult {
   runId?: string | null;
 }
 
+interface AutoFixEscalationContext {
+  request: LocalInvocationRequest;
+  response: LocalResponse;
+  debuggerResult: DebuggerResult;
+  reason: string;
+  trackingRunId: string;
+  artifactPath?: string;
+  failedStep?: string;
+}
+
 export interface RunWithAutoFixOptions {
   maxAttempts: number;
   runSingleAttempt: (request: LocalInvocationRequest) => Promise<LocalResponse>;
@@ -145,6 +155,15 @@ export async function runWithAutoFix(
             debuggerResult.summary,
             ...debuggerResult.recommendation.steps.map((step) => step.description),
           ];
+          attachEscalationOptions(escalated, {
+            request: currentRequest,
+            response,
+            debuggerResult,
+            reason: attemptSummary.fix_error,
+            trackingRunId,
+            artifactPath: repairTarget.artifactPath,
+            ...(failedStep ? { failedStep } : {}),
+          });
           return escalated;
         }
 
@@ -187,6 +206,15 @@ export async function runWithAutoFix(
           debuggerResult.summary,
           ...debuggerResult.recommendation.steps.map((step) => step.description),
         ];
+        attachEscalationOptions(escalated, {
+          request: currentRequest,
+          response,
+          debuggerResult,
+          reason: attemptSummary.fix_error,
+          trackingRunId,
+          artifactPath: repairTarget.artifactPath,
+          ...(failedStep ? { failedStep } : {}),
+        });
         return escalated;
       }
     }
@@ -199,6 +227,14 @@ export async function runWithAutoFix(
         debuggerResult.summary,
         ...debuggerResult.recommendation.steps.map((step) => step.description),
       ];
+      attachEscalationOptions(guided, {
+        request: currentRequest,
+        response,
+        debuggerResult,
+        reason: 'Ricky could not identify a safe automatic workflow repair target.',
+        trackingRunId,
+        ...(failedStep ? { failedStep } : {}),
+      });
       return guided;
     }
 
@@ -216,6 +252,15 @@ export async function runWithAutoFix(
         ...escalated.nextActions,
         ...(response.execution?.blocker?.recovery.steps ?? []),
       ];
+      attachEscalationOptions(escalated, {
+        request: currentRequest,
+        response,
+        debuggerResult,
+        reason: attemptSummary.fix_error,
+        trackingRunId,
+        artifactPath: resolveArtifactPath(currentRequest, response),
+        ...(failedStep ? { failedStep } : {}),
+      });
       return escalated;
     }
 
@@ -369,6 +414,101 @@ function withAutoFix(
     },
     exitCode: finalStatus === 'ok' ? 0 : response.exitCode ?? 2,
   };
+}
+
+function attachEscalationOptions(target: LocalResponse, context: AutoFixEscalationContext): void {
+  if (!target.auto_fix) return;
+  const escalation = buildAutoFixEscalation(context);
+  target.auto_fix = {
+    ...target.auto_fix,
+    escalation,
+  };
+}
+
+function buildAutoFixEscalation(context: AutoFixEscalationContext): NonNullable<NonNullable<LocalResponse['auto_fix']>['escalation']> {
+  const recoverySteps = context.response.execution?.blocker?.recovery.steps ?? [];
+  const options: NonNullable<NonNullable<LocalResponse['auto_fix']>['escalation']>['options'] = [];
+  const artifactPath = context.artifactPath ?? resolveArtifactPath(context.request, context.response);
+  const runCommand = artifactPath ? `ricky run --artifact ${artifactPath}` : undefined;
+
+  if (runCommand) {
+    options.push({
+      label: 'Open the workflow and retry',
+      description: context.failedStep
+        ? `Inspect the workflow step "${context.failedStep}", apply the fix, then rerun attached so the full error is visible.`
+        : 'Inspect the workflow artifact, apply the fix, then rerun attached so the full error is visible.',
+      command: `${runCommand} --foreground --no-auto-fix`,
+    });
+  }
+
+  for (const step of recoverySteps.slice(0, 3)) {
+    options.push({
+      label: 'Try recovery step',
+      description: step,
+      command: isShellLikeRecoveryStep(step) ? step : undefined,
+    });
+  }
+
+  if (context.trackingRunId) {
+    options.push({
+      label: 'Check run status and saved logs',
+      description: 'Use the Ricky run id to inspect the persisted evidence, log paths, and auto-fix attempts.',
+      command: `ricky status --run ${context.trackingRunId}`,
+    });
+  }
+
+  if (runCommand) {
+    options.push({
+      label: 'Retry with auto-fix disabled',
+      description: 'Use this when you want the original blocker without another repair attempt.',
+      command: `${runCommand} --no-auto-fix`,
+    });
+  }
+
+  if (options.length === 0) {
+    options.push({
+      label: 'Inspect the logs',
+      description: 'Review the log tail and blocker message, then rerun after applying the missing prerequisite.',
+    });
+  }
+
+  return {
+    summary: [
+      'Ricky checked the run logs, classifier, and workflow debugger output, but could not choose one safe automatic fix.',
+      `Reason: ${context.reason}`,
+      `Debugger: ${context.debuggerResult.summary}`,
+    ].join(' '),
+    log_tail: relevantLogTail(context.response),
+    options: dedupeOptions(options).slice(0, 5),
+  };
+}
+
+function isShellLikeRecoveryStep(step: string): boolean {
+  return /^(?:npm|pnpm|yarn|bun|corepack|ricky|npx|agent-relay|export|test|command|gh)\b/.test(step.trim());
+}
+
+function relevantLogTail(response: LocalResponse): string[] {
+  const lines = [
+    ...(response.execution?.evidence?.logs.tail ?? []),
+    ...response.logs,
+    ...(response.warnings ?? []),
+    response.execution?.evidence?.outcome_summary,
+    response.execution?.blocker?.message,
+  ].filter((line): line is string => Boolean(line && line.trim()));
+
+  return [...new Set(lines)].slice(-8);
+}
+
+function dedupeOptions<T extends { label: string; description: string; command?: string }>(options: T[]): T[] {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const option of options) {
+    const key = `${option.label}\n${option.description}\n${option.command ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(option);
+  }
+  return deduped;
 }
 
 function failedBeforeAttempt(request: LocalInvocationRequest): LocalResponse {

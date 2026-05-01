@@ -107,6 +107,19 @@ describe('runWithAutoFix', () => {
     expect(result.auto_fix?.attempts[0]).toMatchObject({
       fix_error: 'persona could not safely patch the workflow',
     });
+    expect(result.auto_fix?.escalation).toMatchObject({
+      summary: expect.stringContaining('could not choose one safe automatic fix'),
+      log_tail: expect.arrayContaining(['MISSING_BINARY log tail']),
+      options: expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Open the workflow and retry',
+          command: 'ricky run --artifact workflows/generated/foo.ts --foreground --no-auto-fix',
+        }),
+        expect.objectContaining({
+          label: 'Check run status and saved logs',
+        }),
+      ]),
+    });
     expect(result.nextActions.join('\n')).toContain('Direct repair is available.');
   });
 
@@ -237,7 +250,7 @@ function blockerResponse(code: LocalClassifiedBlocker['code'], runId: string | u
         outcome_summary: blocker.message,
         failed_step: { id: failedStep, name: failedStep },
         exit_code: 1,
-        logs: { tail: [], truncated: false },
+        logs: { tail: [`${code} log tail`], truncated: false },
         side_effects: { files_written: [], commands_invoked: [] },
         assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
       },

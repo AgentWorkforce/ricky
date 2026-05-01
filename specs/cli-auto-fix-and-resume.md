@@ -17,6 +17,8 @@ What's missing is the orchestrator that ties them.
 
 Auto-fix is on by default whenever Ricky actually runs a local workflow, whether the run is foreground or background. Users can still disable it explicitly with `--no-auto-fix`; `--auto-fix=N` controls the bounded retry budget.
 
+Default-on is intentional. `--no-auto-fix` is the opt-out. Do not change this default without updating this spec and the parser/help/tests that enforce it.
+
 ```
 ricky run --artifact workflows/generated/foo.ts --auto-fix
 ricky run --artifact workflows/generated/foo.ts --auto-fix=5     # max 5 attempts

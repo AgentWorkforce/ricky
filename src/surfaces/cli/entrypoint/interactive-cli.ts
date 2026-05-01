@@ -19,6 +19,7 @@ import type {
   CloudWorkflowFlowDeps,
   CloudImplementationAgent,
   CloudOptionalIntegration,
+  CloudLoginRequirement,
   CloudReadinessSnapshot,
 } from '../flows/cloud-workflow-flow.js';
 import type { CloudWorkflowSummary } from '../flows/workflow-summary.js';
@@ -38,7 +39,7 @@ import type { ProviderStatus } from '../cli/mode-selector.js';
 import { handleCloudGenerate } from '../../../cloud/api/generate-endpoint.js';
 import { runLocal } from '../../../local/entrypoint.js';
 import { diagnose } from '../../../runtime/diagnostics/failure-diagnosis.js';
-import { runCloudWorkflowFlow } from '../flows/cloud-workflow-flow.js';
+import { prepareCloudWorkflowReadiness, runCloudWorkflowFlow } from '../flows/cloud-workflow-flow.js';
 import {
   createInquirerLocalWorkflowPrompts,
   runLocalPreflight,
@@ -961,19 +962,25 @@ async function executeCloudPath(
 }> {
   const guidance: string[] = [];
   let cloudRequest = deps.cloudRequest;
+  let cloudFlowDeps: InteractiveCliDeps = deps;
+  let guidedRequestPreparedReadiness = false;
 
   if (!cloudRequest) {
-    const guided = await buildGuidedCloudRequest(deps);
+    cloudFlowDeps = withDefaultGuidedCloudDeps(deps);
+    const guided = await buildGuidedCloudRequest(deps, cloudFlowDeps);
     if (!guided.ok) {
       guidance.push(...guided.guidance);
       return { ok: guided.awaitingInput !== false, guidance, awaitingInput: guided.awaitingInput };
     }
     cloudRequest = guided.request;
+    guidedRequestPreparedReadiness = true;
   }
 
   try {
-    const cloudFlowDeps = cloudRequest === deps.cloudRequest ? deps : withDefaultGuidedCloudDeps(deps);
-    const flow = await runCloudWorkflowFlow(cloudRequest, cloudFlowDeps);
+    const finalCloudFlowDeps = guidedRequestPreparedReadiness
+      ? withoutGuidedReadinessRecoveryPrompts(cloudFlowDeps)
+      : cloudFlowDeps;
+    const flow = await runCloudWorkflowFlow(cloudRequest, finalCloudFlowDeps);
     if (!flow.ok) {
       return {
         ok: false,
@@ -1036,7 +1043,10 @@ type GuidedCloudRequestResult =
   | { ok: true; request: CloudGenerateRequest }
   | { ok: false; guidance: string[]; awaitingInput?: boolean };
 
-async function buildGuidedCloudRequest(deps: InteractiveCliDeps): Promise<GuidedCloudRequestResult> {
+async function buildGuidedCloudRequest(
+  deps: InteractiveCliDeps,
+  readinessDeps: InteractiveCliDeps,
+): Promise<GuidedCloudRequestResult> {
   const promptDeps = cloudSpecPromptDeps(deps);
   if (!promptDeps) {
     return {
@@ -1049,6 +1059,21 @@ async function buildGuidedCloudRequest(deps: InteractiveCliDeps): Promise<Guided
   const context = await resolveGuidedCloudContext(deps);
   if (!context.ok) return context;
 
+  const readiness = await prepareCloudWorkflowReadiness(
+    guidedCloudSetupRequest(context.auth, context.workspaceId),
+    readinessDeps,
+  );
+  if (!readiness.ok) {
+    return {
+      ok: false,
+      guidance: [
+        ...readiness.guidance,
+        'Cloud readiness did not complete, so Ricky did not ask for a workflow spec.',
+      ],
+      awaitingInput: true,
+    };
+  }
+
   const preflight = await runLocalPreflight(resolveLocalInvocationRoot(deps));
   const capture = await runSpecIntakeFlow({
     prompts: promptDeps,
@@ -1059,6 +1084,25 @@ async function buildGuidedCloudRequest(deps: InteractiveCliDeps): Promise<Guided
   return {
     ok: true,
     request: cloudRequestFromCapture(capture, context.auth, context.workspaceId),
+  };
+}
+
+function guidedCloudSetupRequest(
+  auth: { token: string },
+  workspaceId: string,
+): CloudGenerateRequest {
+  return {
+    auth,
+    workspace: { workspaceId },
+    body: {
+      spec: 'Guided Cloud setup before workflow spec intake.',
+      mode: 'cloud',
+      metadata: {
+        cli: {
+          handoff: 'guided-cloud-readiness',
+        },
+      },
+    },
   };
 }
 
@@ -1084,35 +1128,51 @@ async function resolveGuidedCloudContext(
   const missingLogin = cloudLoginMissing(readiness);
 
   if (missingLogin.length > 0) {
-    const shouldLogin = await promptCloudLogin(deps, missingLogin);
-    if (!shouldLogin) {
-      return {
-        ok: false,
-        guidance: [
-          'Cloud setup returned to mode selection.',
-          'Run `ricky connect cloud` or choose local mode explicitly.',
-          'No local fallback was attempted.',
-        ],
-        awaitingInput: true,
-      };
-    }
+    if (deps.recoverCloudLogin) {
+      await deps.recoverCloudLogin({ missing: missingLogin, readiness });
+    } else {
+      const shouldLogin = await promptCloudLogin(deps, missingLogin.map((item) => CLOUD_LOGIN_LABELS[item]));
+      if (!shouldLogin) {
+        return {
+          ok: false,
+          guidance: [
+            'Cloud setup returned to mode selection.',
+            'Run `ricky connect cloud` or choose local mode explicitly.',
+            'No local fallback was attempted.',
+          ],
+          awaitingInput: true,
+        };
+      }
 
-    const login = await connectCloudAccount(deps);
-    if (!login.connected) {
-      return {
-        ok: false,
-        guidance: [
-          ...renderCloudAccountAttempt(login),
-          'Cloud login did not complete, so Ricky did not ask for a workflow spec.',
-          'Choose local mode explicitly if you want to continue without Cloud.',
-        ],
-        awaitingInput: true,
-      };
+      const login = await connectCloudAccount(deps);
+      if (!login.connected) {
+        return {
+          ok: false,
+          guidance: [
+            ...renderCloudAccountAttempt(login),
+            'Cloud login did not complete, so Ricky did not ask for a workflow spec.',
+            'Choose local mode explicitly if you want to continue without Cloud.',
+          ],
+          awaitingInput: true,
+        };
+      }
     }
 
     auth = await readCloudAuth(deps);
     workspaceId = await resolveCloudWorkspaceId(deps, auth);
     readiness = await readGuidedCloudReadiness(deps, auth, workspaceId);
+    const stillMissing = cloudLoginMissing(readiness);
+    if (stillMissing.length > 0) {
+      return {
+        ok: false,
+        guidance: [
+          `Cloud login is still incomplete after recovery: ${stillMissing.map((item) => CLOUD_LOGIN_LABELS[item]).join(', ')}.`,
+          'Cloud login did not complete, so Ricky did not ask for a workflow spec.',
+          'No local fallback was attempted.',
+        ],
+        awaitingInput: true,
+      };
+    }
   }
 
   if (!workspaceId) {
@@ -1170,10 +1230,17 @@ async function readGuidedCloudReadiness(
   };
 }
 
-function cloudLoginMissing(readiness: CloudReadinessSnapshot): string[] {
-  const missing: string[] = [];
-  if (!readiness.account.connected) missing.push('Cloud account');
-  if (!readiness.credentials.connected) missing.push('Cloud credentials');
+const CLOUD_LOGIN_LABELS: Record<CloudLoginRequirement, string> = {
+  account: 'Cloud account',
+  credentials: 'Cloud credentials',
+  workspace: 'Cloud workspace',
+};
+
+function cloudLoginMissing(readiness: CloudReadinessSnapshot): CloudLoginRequirement[] {
+  const missing: CloudLoginRequirement[] = [];
+  if (!readiness.account.connected) missing.push('account');
+  if (!readiness.credentials.connected) missing.push('credentials');
+  if (!readiness.workspace.connected) missing.push('workspace');
   return missing;
 }
 
@@ -1284,6 +1351,7 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDep
   const outputStream = deps.output ?? process.stdout;
   const interactive = ownsInteractiveTerminal(deps, inputStream, outputStream);
   const connectedAgents = new Set<string>();
+  const connectedIntegrations = new Set<CloudOptionalIntegration>();
 
   if (!next.checkCloudReadiness) {
     next.checkCloudReadiness = async () => {
@@ -1302,10 +1370,10 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDep
           gemini: { connected: connectedAgents.has('gemini'), capable: connectedAgents.has('gemini') },
         },
         integrations: {
-          slack: { connected: false },
-          github: { connected: false },
-          notion: { connected: false },
-          linear: { connected: false },
+          slack: { connected: connectedIntegrations.has('slack') },
+          github: { connected: connectedIntegrations.has('github') },
+          notion: { connected: connectedIntegrations.has('notion') },
+          linear: { connected: connectedIntegrations.has('linear') },
         },
       };
     };
@@ -1369,7 +1437,12 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDep
   if (!next.connectOptionalCloudIntegrations) {
     next.connectOptionalCloudIntegrations = async (integrations) => {
       if (integrations.length > 0) {
-        await connectCloudIntegrationsViaNango(integrations, deps);
+        const results = await connectCloudIntegrationsViaNango(integrations, deps);
+        for (const result of results) {
+          if (result.status === 'link-opened' || result.status === 'link-created') {
+            connectedIntegrations.add(result.integration);
+          }
+        }
       }
     };
   }
@@ -1391,6 +1464,18 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDep
   }
 
   return next;
+}
+
+function withoutGuidedReadinessRecoveryPrompts(deps: InteractiveCliDeps): InteractiveCliDeps {
+  const {
+    recoverCloudLogin: _recoverCloudLogin,
+    promptMissingCloudAgents: _promptMissingCloudAgents,
+    connectCloudAgents: _connectCloudAgents,
+    selectOptionalCloudIntegrations: _selectOptionalCloudIntegrations,
+    connectOptionalCloudIntegrations: _connectOptionalCloudIntegrations,
+    ...rest
+  } = deps;
+  return rest;
 }
 
 function ownsInteractiveTerminal(

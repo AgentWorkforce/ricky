@@ -14,6 +14,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 
 import { runWithAutoFix } from './auto-fix-loop.js';
 import { generate, generateWithWorkforcePersona } from '../product/generation/index.js';
@@ -176,6 +177,15 @@ export interface LocalResponse {
     final_status: 'ok' | 'blocker' | 'error';
     run_id?: string;
     resumed?: boolean;
+    escalation?: {
+      summary: string;
+      log_tail: string[];
+      options: Array<{
+        label: string;
+        description: string;
+        command?: string;
+      }>;
+    };
   };
 }
 
@@ -245,7 +255,7 @@ export interface ScriptWorkflowRunnerOptions {
   onStderr?: (line: string) => void;
 }
 
-export type ScriptWorkflowRunner = (workflowFile: string, options: ScriptWorkflowRunnerOptions) => Promise<void>;
+export type ScriptWorkflowRunner = (workflowFile: string, options: ScriptWorkflowRunnerOptions) => Promise<unknown>;
 
 /**
  * Default execution route for local runtime coordination. This names the
@@ -342,7 +352,7 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
     emit('started', 'SDK script workflow started', { workflowFile: request.workflowFile, cwd: request.cwd });
 
     try {
-      await withTimeout(
+      const runnerResult = await withTimeout(
         this.runner(request.workflowFile, {
           cwd: request.cwd,
           env: request.env,
@@ -360,6 +370,11 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
         }),
         request.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
       );
+      const reportedFailure =
+        failureFromScriptWorkflowResult(runnerResult) ?? failureFromScriptWorkflowOutput(stdout, stderr);
+      if (reportedFailure) {
+        throw new Error(reportedFailure);
+      }
       status = 'passed';
       emit('completed', 'SDK script workflow completed', { exitCode: 0 });
       return coordinatorResultFromSdkRun({
@@ -414,6 +429,56 @@ function normalizeCoordinatorRetry(retry: Partial<RunRetryMetadata> | undefined)
     ...(retry?.reason ? { reason: retry.reason } : {}),
     ...(retry?.backoffMs !== undefined ? { backoffMs: retry.backoffMs } : {}),
   };
+}
+
+function failureFromScriptWorkflowResult(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+
+  const record = result as Record<string, unknown>;
+  if (record.ok === false) return workflowResultFailureMessage(record, 'ok=false');
+  if (record.success === false) return workflowResultFailureMessage(record, 'success=false');
+
+  const status = stringValue(record.status ?? record.state ?? record.outcome)?.toLowerCase();
+  if (status && ['failed', 'failure', 'blocked', 'blocker', 'error', 'cancelled', 'canceled', 'timed_out', 'timeout'].includes(status)) {
+    return workflowResultFailureMessage(record, status);
+  }
+
+  const exitCode = numberValue(record.exitCode ?? record.exit_code);
+  if (exitCode !== undefined && exitCode !== 0) {
+    return workflowResultFailureMessage(record, `exit code ${exitCode}`);
+  }
+
+  return undefined;
+}
+
+function failureFromScriptWorkflowOutput(stdout: string[], stderr: string[]): string | undefined {
+  const failureLine = [...stdout, ...stderr].find((line) => {
+    const clean = stripAnsi(line).trim();
+    return (
+      /^\[workflow\]\s+FAILED:/i.test(clean) ||
+      /^FAILED:/i.test(clean) ||
+      /\bFAILED:\s+Command failed/i.test(clean)
+    );
+  });
+  if (!failureLine) return undefined;
+  return `Workflow runtime reported failure despite a zero process exit: ${stripAnsi(failureLine).trim()}`;
+}
+
+function workflowResultFailureMessage(record: Record<string, unknown>, reason: string): string {
+  const detail = stringValue(record.error ?? record.message ?? record.summary ?? record.outcome_summary);
+  return `Workflow runtime reported ${reason}${detail ? `: ${detail}` : ''}`;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001B\[[0-9;]*m/g, '');
 }
 
 function buildSdkInvocationSummary(request: RunRequest): CommandInvocationSummary {
@@ -497,31 +562,17 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 export function createSdkScriptWorkflowRunner(): ScriptWorkflowRunner {
   return async (workflowFile, options) => {
     const absoluteWorkflowFile = isAbsolute(workflowFile) ? workflowFile : resolve(options.cwd, workflowFile);
-    await ensureWorkflowSdkImportAvailable(options.cwd);
-    const workflowsModule = await import('@agent-relay/sdk/workflows') as unknown as {
-      runScriptWorkflow?: (filePath: string, options?: {
-        dryRun?: boolean;
-        resume?: string;
-        startFrom?: string;
-        previousRunId?: string;
-      }) => Promise<void>;
-    };
-
-    if (typeof workflowsModule.runScriptWorkflow === 'function') {
-      await withProcessContext(options.cwd, options.env, () =>
-        withCapturedProcessOutput(options, () =>
-          workflowsModule.runScriptWorkflow!(absoluteWorkflowFile, {
-            ...(options.resume ? { resume: options.resume } : {}),
-            ...(options.startFrom ? { startFrom: options.startFrom } : {}),
-            ...(options.previousRunId ? { previousRunId: options.previousRunId } : {}),
-          }),
-        ),
-      );
-      return;
+    const runtime = await resolveWorkflowSdkRuntime(options.cwd);
+    if (!runtime) {
+      throw new Error('Runtime dependency is unavailable: @agent-relay/sdk/workflows runtime.');
     }
-
     await runScriptWorkflowCompat(absoluteWorkflowFile, options);
   };
+}
+
+interface WorkflowSdkRuntime {
+  entryPath: string;
+  source: 'target-repo' | 'ricky-package';
 }
 
 async function withCapturedProcessOutput<T>(
@@ -579,30 +630,23 @@ async function withCapturedProcessOutput<T>(
   }
 }
 
-async function ensureWorkflowSdkImportAvailable(cwd: string): Promise<void> {
-  const { access, mkdir, symlink } = await import('node:fs/promises');
-  const localSdkPackage = resolve(cwd, 'node_modules', '@agent-relay', 'sdk', 'package.json');
+async function resolveWorkflowSdkRuntime(cwd: string): Promise<WorkflowSdkRuntime | null> {
+  const { access } = await import('node:fs/promises');
+  const targetRequire = createRequire(resolve(cwd, 'package.json'));
   try {
-    await access(localSdkPackage);
-    return;
+    const entryPath = targetRequire.resolve('@agent-relay/sdk/workflows');
+    await access(entryPath);
+    return { entryPath, source: 'target-repo' };
   } catch {
-    // Link Ricky's SDK dependency into the workflow cwd below.
+    // Fall through to Ricky's own installed SDK dependency.
   }
 
-  let sdkRoot: string;
   try {
-    sdkRoot = dirname(dirname(dirname(requireFromHere.resolve('@agent-relay/sdk/workflows'))));
+    const entryPath = requireFromHere.resolve('@agent-relay/sdk/workflows');
+    await access(entryPath);
+    return { entryPath, source: 'ricky-package' };
   } catch {
-    return;
-  }
-
-  const scopeDir = resolve(cwd, 'node_modules', '@agent-relay');
-  const linkPath = join(scopeDir, 'sdk');
-  await mkdir(scopeDir, { recursive: true });
-  try {
-    await symlink(sdkRoot, linkPath, 'dir');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    return null;
   }
 }
 
@@ -696,9 +740,11 @@ async function runScriptProcess(
   label: string,
   options: ScriptWorkflowRunnerOptions,
 ): Promise<void> {
+  const sdkNodeOptions = await workflowSdkLoaderNodeOption(options.cwd);
   const env = {
     ...process.env,
     ...(options.env ?? {}),
+    ...(sdkNodeOptions ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, options.env?.NODE_OPTIONS, sdkNodeOptions].filter(Boolean).join(' ') } : {}),
     ...(options.startFrom ? { START_FROM: options.startFrom } : {}),
     ...(options.previousRunId ? { PREVIOUS_RUN_ID: options.previousRunId } : {}),
     ...(options.resume ? { RESUME_RUN_ID: options.resume } : {}),
@@ -729,6 +775,28 @@ async function runScriptProcess(
       reject(new Error(`${label} exited with code ${code}`));
     });
   });
+}
+
+async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefined> {
+  const runtime = await resolveWorkflowSdkRuntime(cwd);
+  if (!runtime) return undefined;
+
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const loaderPath = join(localRunStateRoot(cwd), 'sdk-runtime-loader.mjs');
+  const runtimeUrl = pathToFileURL(runtime.entryPath).href;
+  const loaderSource = [
+    `const sdkWorkflowsUrl = ${JSON.stringify(runtimeUrl)};`,
+    'export async function resolve(specifier, context, nextResolve) {',
+    "  if (specifier === '@agent-relay/sdk/workflows') {",
+    '    return { url: sdkWorkflowsUrl, shortCircuit: true };',
+    '  }',
+    '  return nextResolve(specifier, context);',
+    '}',
+    '',
+  ].join('\n');
+  await mkdir(dirname(loaderPath), { recursive: true });
+  await writeFile(loaderPath, loaderSource, 'utf8');
+  return `--experimental-loader=${pathToFileURL(loaderPath).href}`;
 }
 
 export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalExecutor {
@@ -1403,7 +1471,22 @@ async function precheckRuntimeLaunch(
 
   const command = route.command ?? 'agent-relay';
   if (command === DEFAULT_LOCAL_ROUTE.command) {
-    return null;
+    if (options.scriptWorkflowRunner) return null;
+    const runtime = await resolveWorkflowSdkRuntime(cwd);
+    if (runtime) return null;
+    return blocker({
+      code: 'MISSING_BINARY',
+      category: 'dependency',
+      detectedDuring: 'precheck',
+      message: 'Runtime dependency is unavailable: @agent-relay/sdk/workflows runtime.',
+      missing: ['@agent-relay/sdk/workflows runtime'],
+      found: [`cwd=${cwd}`],
+      steps: [
+        'Install Ricky with its @agent-relay/sdk dependency available.',
+        'Run npm install in the Ricky package if using a linked development checkout.',
+        localRunCommand(artifactPath),
+      ],
+    });
   }
 
   const executable = await findExecutable(command);
@@ -1698,6 +1781,18 @@ function classifyCoordinatorBlocker(
   const signal = firstRuntimeSignal(result);
   const combined = [result.error, ...result.stderr, ...result.stdout].filter(Boolean).join('\n');
   const runtimePackage = npxNoInstallPackage(result.invocation.args);
+
+  if (/Workflow runtime reported failure despite a zero process exit|\[workflow\]\s+FAILED:/i.test(combined)) {
+    return blocker({
+      code: 'INVALID_ARTIFACT',
+      category: 'workflow_invalid',
+      detectedDuring: 'launch',
+      message: `Workflow reported a failed run: ${signal}.`,
+      missing: ['passing workflow run'],
+      found: [`cwd=${result.cwd}`, `status=${result.status}`],
+      steps: ['Inspect the captured workflow logs.', command],
+    });
+  }
 
   if (result.exitCode === 127 || /(?:command not found|enoent|not found)/i.test(combined)) {
     const isSdkScriptRoute = result.invocation.command === DEFAULT_LOCAL_ROUTE.command;

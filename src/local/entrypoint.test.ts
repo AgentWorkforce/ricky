@@ -2678,6 +2678,120 @@ describe('runLocal', () => {
     }
   });
 
+  it('treats SDK runner workflow failure output as a runtime blocker even when the process exits zero', async () => {
+    const { mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-failed-output-repo-'));
+    const artifactPath = 'workflows/generated/review-findings.workflow.ts';
+
+    try {
+      await mkdir(join(repo, 'workflows/generated'), { recursive: true });
+      await writeFile(join(repo, artifactPath), 'import { workflow } from "@agent-relay/sdk/workflows";\n', 'utf8');
+
+      const result = await runLocal(
+        { source: 'workflow-artifact', artifactPath, stageMode: 'run' },
+        {
+          artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          localExecutor: {
+            cwd: repo,
+            scriptWorkflowRunner: async (_workflowFile, options) => {
+              options.onStdout?.('[workflow] FAILED: Step "peer-review-pass-gate" failed');
+              options.onStderr?.('[agent-relay] runScriptWorkflow: runner node --experimental-strip-types completed exit=0');
+            },
+          },
+        },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'blocker',
+        blocker: {
+          code: 'INVALID_ARTIFACT',
+          category: 'workflow_invalid',
+        },
+      });
+      expect(result.execution?.evidence?.outcome_summary).toContain('Workflow runtime reported failure despite a zero process exit');
+      expect(result.logs).toContain('[stdout] [workflow] FAILED: Step "peer-review-pass-gate" failed');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('treats structured SDK runner failure results as runtime blockers', async () => {
+    const { mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-failed-result-repo-'));
+    const artifactPath = 'workflows/generated/failed-result.workflow.ts';
+
+    try {
+      await mkdir(join(repo, 'workflows/generated'), { recursive: true });
+      await writeFile(join(repo, artifactPath), 'import { workflow } from "@agent-relay/sdk/workflows";\n', 'utf8');
+
+      const result = await runLocal(
+        { source: 'workflow-artifact', artifactPath, stageMode: 'run' },
+        {
+          artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          localExecutor: {
+            cwd: repo,
+            scriptWorkflowRunner: async () => ({ status: 'failed', error: 'review gate failed' }),
+          },
+        },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.evidence?.outcome_summary).toContain('Workflow runtime reported failed: review gate failed');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('uses Ricky SDK runtime resolution without creating repo-local node_modules', async () => {
+    const { access, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-readonly-repo-'));
+    const stateHome = await mkdtemp(join(tmpdir(), 'ricky-sdk-readonly-state-'));
+    const artifactPath = 'workflows/generated/sdk-runtime.workflow.ts';
+    const previousStateHome = process.env.RICKY_STATE_HOME;
+
+    try {
+      process.env.RICKY_STATE_HOME = stateHome;
+      await mkdir(join(repo, 'workflows/generated'), { recursive: true });
+      await writeFile(
+        join(repo, artifactPath),
+        'import { workflow } from "@agent-relay/sdk/workflows";\nconsole.log(typeof workflow);\n',
+        'utf8',
+      );
+
+      const result = await runLocal(
+        { source: 'workflow-artifact', artifactPath, stageMode: 'run' },
+        {
+          artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          localExecutor: {
+            cwd: repo,
+            timeoutMs: 10_000,
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.execution?.status).toBe('success');
+      await expect(access(join(repo, 'node_modules'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(access(join(stateHome, 'ricky'))).resolves.toBeUndefined();
+    } finally {
+      if (previousStateHome === undefined) {
+        delete process.env.RICKY_STATE_HOME;
+      } else {
+        process.env.RICKY_STATE_HOME = previousStateHome;
+      }
+      await rm(repo, { recursive: true, force: true });
+      await rm(stateHome, { recursive: true, force: true });
+    }
+  });
+
   it('returns runtime blockers instead of hiding local execution failures', async () => {
     const result = await runLocal(
       { source: 'cli', spec: 'generate a local workflow for src/local/entrypoint.ts with tests', stageMode: 'run' },

@@ -76,6 +76,18 @@ export type CloudWorkflowFlowResult =
       guidance: string[];
     };
 
+export type CloudReadinessSetupResult =
+  | {
+      ok: true;
+      readiness: CloudReadinessSnapshot;
+      summary: CloudWorkflowSummary;
+      guidance: string[];
+    }
+  | {
+      ok: false;
+      guidance: string[];
+    };
+
 export const CLOUD_IMPLEMENTATION_AGENTS: CloudImplementationAgent[] = [
   'claude',
   'codex',
@@ -114,6 +126,52 @@ export async function runCloudWorkflowFlow(
   request: CloudGenerateRequest,
   deps: CloudWorkflowFlowDeps = {},
 ): Promise<CloudWorkflowFlowResult> {
+  const setup = await prepareCloudWorkflowReadiness(request, deps);
+  if (!setup.ok) return setup;
+
+  const { summary } = setup;
+
+  const confirmation = deps.confirmCloudRun
+    ? normalizeCloudConfirmation(await deps.confirmCloudRun(summary))
+    : ({ action: 'run-and-monitor' } as CloudRunConfirmation);
+
+  if (confirmation.action === 'show-command') {
+    return {
+      ok: false,
+      summary,
+      guidance: [
+        ...summary.lines,
+        'Cloud run command:',
+        `  ricky cloud --spec-file ./spec.md --no-run`,
+        'Run that command when ready. No local fallback was attempted.',
+      ],
+    };
+  }
+
+  if (confirmation.action === 'edit-first') {
+    return {
+      ok: false,
+      summary,
+      guidance: [
+        ...summary.lines,
+        'Cloud run paused so you can edit the workflow first.',
+        'Re-invoke `ricky cloud` after the edits to retry. No local fallback was attempted.',
+      ],
+    };
+  }
+
+  return {
+    ok: true,
+    request: withCloudMetadata(request, summary),
+    summary,
+    guidance: summary.caveats.length > 0 ? summary.lines : [],
+  };
+}
+
+export async function prepareCloudWorkflowReadiness(
+  request: CloudGenerateRequest,
+  deps: CloudWorkflowFlowDeps = {},
+): Promise<CloudReadinessSetupResult> {
   const checkReadiness = deps.checkCloudReadiness ?? (() => Promise.resolve(inferReadinessFromRequest(request)));
   let readiness = await checkReadiness();
 
@@ -149,38 +207,9 @@ export async function runCloudWorkflowFlow(
     relevantSkippedIntegrations: integrationGuidance.relevantSkippedIntegrations,
   });
 
-  const confirmation = deps.confirmCloudRun
-    ? normalizeCloudConfirmation(await deps.confirmCloudRun(summary))
-    : ({ action: 'run-and-monitor' } as CloudRunConfirmation);
-
-  if (confirmation.action === 'show-command') {
-    return {
-      ok: false,
-      summary,
-      guidance: [
-        ...summary.lines,
-        'Cloud run command:',
-        `  ricky cloud --spec-file ./spec.md --no-run`,
-        'Run that command when ready. No local fallback was attempted.',
-      ],
-    };
-  }
-
-  if (confirmation.action === 'edit-first') {
-    return {
-      ok: false,
-      summary,
-      guidance: [
-        ...summary.lines,
-        'Cloud run paused so you can edit the workflow first.',
-        'Re-invoke `ricky cloud` after the edits to retry. No local fallback was attempted.',
-      ],
-    };
-  }
-
   return {
     ok: true,
-    request: withCloudMetadata(request, summary),
+    readiness,
     summary,
     guidance: summary.caveats.length > 0 ? summary.lines : [],
   };

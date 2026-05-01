@@ -531,6 +531,164 @@ describe('runInteractiveCli', () => {
     }
   });
 
+  it('completes guided Cloud readiness recovery before reaching spec intake prompts', async () => {
+    const previousToken = process.env.AGENTWORKFORCE_CLOUD_TOKEN;
+    const previousWorkspace = process.env.AGENTWORKFORCE_CLOUD_WORKSPACE;
+    delete process.env.AGENTWORKFORCE_CLOUD_TOKEN;
+    delete process.env.AGENTWORKFORCE_CLOUD_WORKSPACE;
+
+    const order: string[] = [];
+    const state = {
+      loggedIn: false,
+      agentReady: false,
+      githubReady: false,
+    };
+    const auth = {
+      accessToken: 'token-after-recovery',
+      refreshToken: 'refresh-token',
+      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      apiUrl: 'https://cloud.example.test',
+    };
+    const readiness = (): CloudReadinessSnapshot => readyCloudReadiness({
+      account: { connected: state.loggedIn },
+      credentials: { connected: state.loggedIn },
+      workspace: { connected: state.loggedIn },
+      agents: {
+        claude: { connected: false, capable: false },
+        codex: { connected: state.agentReady, capable: state.agentReady },
+        opencode: { connected: false, capable: false },
+        gemini: { connected: false, capable: false },
+      },
+      integrations: {
+        slack: { connected: false },
+        github: { connected: state.githubReady },
+        notion: { connected: false },
+        linear: { connected: false },
+      },
+    });
+    const recoverCloudLogin = vi.fn().mockImplementation(async () => {
+      order.push('recover-login');
+      state.loggedIn = true;
+    });
+    const promptMissingCloudAgents = vi.fn().mockImplementation(async () => {
+      order.push('prompt-agents');
+      return { action: 'choose' as const, agents: ['codex' as const] };
+    });
+    const connectCloudAgents = vi.fn().mockImplementation(async () => {
+      order.push('connect-agents');
+      state.agentReady = true;
+    });
+    const selectOptionalCloudIntegrations = vi.fn().mockImplementation(async () => {
+      order.push('select-integrations');
+      return { action: 'connect' as const, integrations: ['github' as const] };
+    });
+    const connectCloudIntegrations = vi.fn().mockImplementation(async () => {
+      order.push('connect-integrations');
+      state.githubReady = true;
+      return [{ integration: 'github' as const, status: 'link-created' as const, url: 'https://nango.example/github' }];
+    });
+    const generate = vi.fn().mockResolvedValue({
+      artifacts: [{ path: 'cloud/generated/readiness-first.ts', type: 'text/typescript' }],
+      warnings: [],
+      followUpActions: [],
+    });
+
+    try {
+      const result = await runInteractiveCli({
+        onboard: vi.fn().mockResolvedValue(onboarding('cloud')),
+        cwd: process.cwd(),
+        readCloudAuth: vi.fn().mockImplementation(async () => state.loggedIn ? auth : null),
+        resolveCloudWorkspace: vi.fn().mockImplementation(async () => state.loggedIn ? 'workspace-after-recovery' : undefined),
+        checkCloudReadiness: vi.fn().mockImplementation(async () => readiness()),
+        recoverCloudLogin,
+        promptMissingCloudAgents,
+        connectCloudAgents,
+        selectOptionalCloudIntegrations,
+        connectCloudIntegrations,
+        confirmCloudRun: vi.fn().mockResolvedValue({ action: 'run-and-monitor' }),
+        cloudExecutor: { generate },
+        localWorkflow: {
+          prompts: {
+            selectSpecSource: async () => {
+              order.push('spec-source');
+              return 'editor';
+            },
+            inputSpecFilePath: async () => 'SPEC.md',
+            editSpec: async () => {
+              order.push('spec-edit');
+              return 'Use GitHub context after readiness finishes.';
+            },
+            inputWorkflowName: async () => 'readiness-first',
+            inputGoal: async () => 'generate cloud workflow',
+            approveGeneratedSpec: async () => 'approve',
+            inputWorkflowArtifactPath: async () => 'workflows/generated/cloud.ts',
+            confirmRun: async () => 'not-now',
+          },
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(order).toEqual(expect.arrayContaining([
+        'recover-login',
+        'prompt-agents',
+        'connect-agents',
+        'select-integrations',
+        'connect-integrations',
+        'spec-source',
+        'spec-edit',
+      ]));
+      expect(order.indexOf('recover-login')).toBeLessThan(order.indexOf('spec-source'));
+      expect(order.indexOf('connect-agents')).toBeLessThan(order.indexOf('spec-source'));
+      expect(order.indexOf('connect-integrations')).toBeLessThan(order.indexOf('spec-source'));
+      expect(selectOptionalCloudIntegrations).toHaveBeenCalledTimes(1);
+      expect(connectCloudIntegrations).toHaveBeenCalledWith(['github']);
+      expect(generate).toHaveBeenCalledWith(expect.objectContaining({
+        auth: { token: 'token-after-recovery' },
+        workspace: { workspaceId: 'workspace-after-recovery' },
+      }));
+    } finally {
+      if (previousToken === undefined) delete process.env.AGENTWORKFORCE_CLOUD_TOKEN;
+      else process.env.AGENTWORKFORCE_CLOUD_TOKEN = previousToken;
+      if (previousWorkspace === undefined) delete process.env.AGENTWORKFORCE_CLOUD_WORKSPACE;
+      else process.env.AGENTWORKFORCE_CLOUD_WORKSPACE = previousWorkspace;
+    }
+  });
+
+  it('does not reach guided Cloud spec intake when login recovery remains incomplete', async () => {
+    const selectSpecSource = vi.fn();
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('cloud')),
+      readCloudAuth: vi.fn().mockResolvedValue(null),
+      resolveCloudWorkspace: vi.fn().mockResolvedValue(undefined),
+      checkCloudReadiness: vi.fn().mockResolvedValue(
+        readyCloudReadiness({
+          account: { connected: false },
+          credentials: { connected: false },
+          workspace: { connected: false },
+        }),
+      ),
+      recoverCloudLogin: vi.fn().mockResolvedValue(undefined),
+      localWorkflow: {
+        prompts: {
+          selectSpecSource,
+          inputSpecFilePath: async () => 'SPEC.md',
+          editSpec: async () => 'Should not be requested.',
+          inputWorkflowName: async () => 'should-not-run',
+          inputGoal: async () => 'should not run',
+          approveGeneratedSpec: async () => 'approve',
+          inputWorkflowArtifactPath: async () => 'workflows/generated/cloud.ts',
+          confirmRun: async () => 'not-now',
+        },
+      },
+    });
+
+    expect(result.awaitingInput).toBe(true);
+    expect(result.guidance.join('\n')).toContain('Cloud login is still incomplete after recovery');
+    expect(result.guidance.join('\n')).toContain('Ricky did not ask for a workflow spec');
+    expect(selectSpecSource).not.toHaveBeenCalled();
+  });
+
   it('reconciles Cloud workspace from stored credentials instead of prompting for an id', async () => {
     const previousToken = process.env.AGENTWORKFORCE_CLOUD_TOKEN;
     const previousWorkspace = process.env.AGENTWORKFORCE_CLOUD_WORKSPACE;
@@ -817,7 +975,7 @@ describe('runInteractiveCli', () => {
       expect(result.ok).toBe(true);
       expect(selectOptionalCloudIntegrations).toHaveBeenCalledWith(expect.objectContaining({
         missingIntegrations: ['slack', 'github', 'notion', 'linear'],
-        relevantIntegrations: ['github'],
+        relevantIntegrations: [],
       }));
       expect(connectCloudIntegrations).toHaveBeenCalledWith(['github']);
       expect(connectProvider).not.toHaveBeenCalled();

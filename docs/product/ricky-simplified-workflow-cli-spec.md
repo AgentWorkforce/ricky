@@ -397,6 +397,8 @@ ricky connect integrations --cloud slack,github,notion,linear
 | `--foreground` | local | Keep process attached and stream full runner output. |
 | `--auto-fix <n>` | local, cloud | Maximum bounded repair attempts. Default 3. |
 | `--no-auto-fix` | local, cloud | Diagnose but do not apply fixes. |
+| `--refine[=<model>]` | local, cloud | Optional LLM refinement pass after deterministic generation. Off by default. |
+| `--no-refine` | local, cloud | Explicitly keep deterministic generation only. |
 | `--yes` | local, cloud | Accept non-destructive prompts. Never accepts destructive actions. |
 | `--json` | local, cloud, status | Emit machine-readable result. |
 | `--quiet` | all | Suppress non-essential output. |

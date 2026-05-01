@@ -134,15 +134,17 @@ describe('simplified workflow CLI E2E paths', () => {
         expect(result.summary.sideEffects.join('\n')).toContain('non-destructive auto-fixes');
 
         if (confirmation === 'background') {
-          expect(result.monitoredRun?.status).toBe('completed');
+          expect(result.monitoredRun?.status).toBe('running');
           expect(result.monitoredRun?.logPath).toContain(`${stateHome}/ricky/local-runs/`);
           expect(result.monitoredRun?.evidencePath).toContain('evidence.json');
           expect(result.monitoredRun?.reattachCommand).toMatch(/^ricky status --run /);
-          await expect(readFile(result.monitoredRun!.logPath, 'utf8')).resolves.toContain('generated');
-          await expect(readFile(result.monitoredRun!.evidencePath, 'utf8')).resolves.toContain(
-            'Workflow completed successfully with deterministic evidence.',
-          );
-          await expect(readFile(result.monitoredRun!.evidencePath, 'utf8')).resolves.toContain('final summary: passed');
+          await vi.waitFor(async () => {
+            await expect(readFile(result.monitoredRun!.logPath, 'utf8')).resolves.toContain('generated');
+            await expect(readFile(result.monitoredRun!.evidencePath, 'utf8')).resolves.toContain(
+              'Workflow completed successfully with deterministic evidence.',
+            );
+            await expect(readFile(result.monitoredRun!.evidencePath, 'utf8')).resolves.toContain('final summary: passed');
+          });
           expect(runLocalFn.mock.calls[1][0].autoFix).toEqual({ maxAttempts: 7 });
         } else if (confirmation === 'foreground') {
           expect(result.run?.execution?.status).toBe('success');
@@ -275,6 +277,7 @@ describe('simplified workflow CLI E2E paths', () => {
     const missingCloud = await cliMain({
       argv: ['cloud', '--spec', 'build a workflow', '--verbose'],
       onboard: vi.fn().mockResolvedValue(onboarding('cloud')),
+      readCloudAuth: vi.fn().mockResolvedValue(null),
     });
 
     expect(missingSpec.exitCode).toBe(1);

@@ -21,6 +21,8 @@ export interface PowerUserParsedArgs {
   noRun?: boolean;
   background?: boolean;
   foreground?: boolean;
+  startFromStep?: string;
+  previousRunId?: string;
   yes?: boolean;
   json?: boolean;
   quiet?: boolean;
@@ -85,6 +87,8 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const stdin = effectiveArgv.includes('--stdin');
   const noRun = effectiveArgv.includes('--no-run');
   const runRequested = (effectiveArgv.includes('--run') || effectiveArgv.includes('--generate-and-run') || artifact !== undefined) && !noRun;
+  const startFromStep = readFlagValue(effectiveArgv, '--start-from');
+  const previousRunId = readFlagValue(effectiveArgv, '--previous-run-id') ?? readFlagValue(effectiveArgv, '--resume-from-run');
   const autoFix = parseAutoFix(effectiveArgv);
   const refine = parseRefine(effectiveArgv);
   const login = effectiveArgv.includes('--login');
@@ -95,7 +99,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   if (effectiveArgv.includes('--workforce-persona') && effectiveArgv.includes('--no-workforce-persona')) {
     errors.push('--workforce-persona and --no-workforce-persona cannot be combined.');
   }
-  for (const flag of ['--spec', '--spec-file', '--file', '--artifact', '--workflow', '--name']) {
+  for (const flag of ['--spec', '--spec-file', '--file', '--artifact', '--workflow', '--name', '--start-from', '--previous-run-id', '--resume-from-run']) {
     if (effectiveArgv.includes(flag) && readFlagValue(effectiveArgv, flag) === undefined) {
       errors.push(`${flag} requires a value.`);
     }
@@ -119,6 +123,8 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
     ...(stdin ? { stdin: true } : {}),
     ...(runRequested ? { runRequested: true } : {}),
     ...(noRun ? { noRun: true } : {}),
+    ...(startFromStep !== undefined ? { startFromStep } : {}),
+    ...(previousRunId !== undefined ? { previousRunId } : {}),
     ...(autoFix !== undefined && autoFix > 0 ? { autoFix } : {}),
     ...(refine ? { refine } : {}),
     ...(login ? { login: true } : {}),
@@ -175,7 +181,7 @@ function readMode(argv: string[]): RickyMode | undefined {
   return candidate && isRickyMode(candidate) ? candidate : undefined;
 }
 
-function parseRefine(argv: string[]): false | { model?: string } {
+function parseRefine(argv: string[]): undefined | false | { model?: string } {
   if (argv.includes('--no-refine') || argv.includes('--no-with-llm')) return false;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -190,7 +196,7 @@ function parseRefine(argv: string[]): false | { model?: string } {
     const next = argv[index + 1];
     return next && !next.startsWith('--') ? { model: next } : {};
   }
-  return {};
+  return undefined;
 }
 
 function parseWorkforcePersonaWriterCliFlag(argv: string[]): boolean | undefined {
@@ -246,11 +252,17 @@ function readRunArtifactPositional(argv: string[]): string | undefined {
     const candidate = argv[index];
     const previous = argv[index - 1];
     if (!candidate || candidate.startsWith('--')) continue;
-    if ((previous === '--auto-fix' || previous === '--repair') && isAutoFixValue(candidate)) continue;
+    if (isValueForRunOption(previous, candidate)) continue;
     if (candidate === 'help' || candidate === 'version') continue;
     return candidate;
   }
   return undefined;
+}
+
+function isValueForRunOption(previous: string | undefined, candidate: string): boolean {
+  if (!previous) return false;
+  if ((previous === '--auto-fix' || previous === '--repair') && isAutoFixValue(candidate)) return true;
+  return previous === '--start-from' || previous === '--previous-run-id' || previous === '--resume-from-run';
 }
 
 function isAutoFixValue(value: string): boolean {

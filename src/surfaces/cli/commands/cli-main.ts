@@ -63,6 +63,8 @@ export interface ParsedArgs {
   noRun?: boolean;
   background?: boolean;
   foreground?: boolean;
+  startFromStep?: string;
+  previousRunId?: string;
   yes?: boolean;
   json?: boolean;
   quiet?: boolean;
@@ -141,6 +143,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.noRun) result.noRun = true;
   if (parsed.background) result.background = true;
   if (parsed.foreground) result.foreground = true;
+  if (parsed.startFromStep) result.startFromStep = parsed.startFromStep;
+  if (parsed.previousRunId) result.previousRunId = parsed.previousRunId;
   if (parsed.yes) result.yes = true;
   if (parsed.json) result.json = true;
   if (parsed.quiet) result.quiet = true;
@@ -154,7 +158,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return result;
 }
 
-function parseRefine(argv: string[]): false | { model?: string } {
+function parseRefine(argv: string[]): undefined | false | { model?: string } {
   // Explicit opt-out wins over everything.
   if (argv.includes('--no-refine') || argv.includes('--no-with-llm')) return false;
 
@@ -170,9 +174,8 @@ function parseRefine(argv: string[]): false | { model?: string } {
     const next = argv[index + 1];
     return next && !next.startsWith('--') ? { model: next } : {};
   }
-  // Default-on: refinement runs with the default model and falls back to the
-  // deterministic artifact when API creds / timeouts / token budgets fail.
-  return {};
+  // Opt-in: refinement runs only when --refine / --with-llm is set.
+  return undefined;
 }
 
 function readFlagValue(argv: string[], flag: string): string | undefined {
@@ -303,6 +306,8 @@ export function renderHelp(): string[] {
     '  --no-run            Generate only and print the run command',
     '  --background        Return a run id immediately; use status --run to watch',
     '  --foreground        Keep the local run attached to this process',
+    '  --start-from <step> Resume a workflow from a specific step',
+    '  --previous-run-id <id> Reuse prior run context when resuming',
     '  --json              Print results as JSON',
     '  --help, -h          Show help',
     '  --version, -v       Show version',
@@ -310,7 +315,8 @@ export function renderHelp(): string[] {
     'More options:',
     '  --workflow <path>   Alias for --artifact',
     '  --name <name>       Workflow name for summaries and metadata',
-    '  --refine[=model]    Refine generated task text and gates with an LLM pass',
+    '  --refine[=model]    Optional LLM pass; off by default',
+    '  --no-refine         Disable refinement; emit only the deterministic artifact',
     '  --with-llm[=model]  Alias for --refine',
     '  --workforce-persona Use Workforce personas to author the workflow',
     '  --no-workforce-persona Disable Workforce persona authoring',
@@ -385,6 +391,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
   const runAutoFix = parsed.autoFix && stageMode === 'run'
     ? { autoFix: { maxAttempts: parsed.autoFix } }
     : {};
+  const retry = retryMetadataFor(parsed);
 
   if (parsed.artifact !== undefined) {
     return {
@@ -395,6 +402,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode: 'run',
       ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(retry ? { retry } : {}),
       metadata: cliMetadataFor(parsed, 'artifact'),
     };
   }
@@ -413,6 +421,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'inline-spec'),
     };
   }
@@ -430,6 +439,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'spec-file'),
     };
   }
@@ -448,11 +458,22 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'stdin'),
     };
   }
 
   return undefined;
+}
+
+function retryMetadataFor(parsed: ParsedArgs): RawHandoff['retry'] | undefined {
+  if (!parsed.startFromStep && !parsed.previousRunId) return undefined;
+  return {
+    attempt: 1,
+    reason: 'manual resume requested from Ricky CLI',
+    ...(parsed.startFromStep ? { startFromStep: parsed.startFromStep } : {}),
+    ...(parsed.previousRunId ? { previousRunId: parsed.previousRunId, retryOfRunId: parsed.previousRunId } : {}),
+  };
 }
 
 function cliSpecInputFor(parsed: ParsedArgs, spec: string): SpecInput {
@@ -496,30 +517,85 @@ function resolveSpecFilePath(specFile: string, invocationRoot: string): string {
   return isAbsolute(specFile) ? specFile : resolve(invocationRoot, specFile);
 }
 
+class CloudPowerUserSetupError extends Error {
+  readonly guidance: string[];
+
+  constructor(guidance: string[]) {
+    super(guidance[0] ?? 'Cloud mode setup failed.');
+    this.name = 'CloudPowerUserSetupError';
+    this.guidance = guidance;
+  }
+}
+
 async function buildCloudRequest(parsed: ParsedArgs, deps: CliMainDeps): Promise<CloudGenerateRequest | undefined> {
   if (parsed.mode !== 'cloud' || !hasSpecHandoffArgs(parsed)) {
     return deps.cloudRequest;
   }
 
   const cloudSpec = await readCloudSpec(parsed, deps);
-  if (!deps.cloudRequest) {
-    return undefined;
+
+  if (deps.cloudRequest) {
+    return {
+      ...deps.cloudRequest,
+      body: {
+        ...deps.cloudRequest.body,
+        spec: cloudSpec.spec,
+        ...(cloudSpec.specPath ? { specPath: cloudSpec.specPath } : {}),
+        mode: 'cloud',
+        metadata: {
+          ...deps.cloudRequest.body.metadata,
+          ...(parsed.workflowName ? { workflowName: parsed.workflowName } : {}),
+          cli: cliMetadataFor(parsed, cloudSpec.handoff),
+        },
+      },
+    };
+  }
+
+  return buildStoredCredentialCloudRequest(parsed, deps, cloudSpec);
+}
+
+async function buildStoredCredentialCloudRequest(
+  parsed: ParsedArgs,
+  deps: CliMainDeps,
+  cloudSpec: Awaited<ReturnType<typeof readCloudSpec>>,
+): Promise<CloudGenerateRequest> {
+  const auth = await readStatusCloudAuth(deps);
+  const token = resolveCloudRequestToken(auth);
+  if (!token) {
+    throw new CloudPowerUserSetupError([
+      'Cloud mode requires a connected AgentWorkforce Cloud account.',
+      'Run `ricky connect cloud`, then retry the Cloud command.',
+      'No local fallback was attempted.',
+    ]);
+  }
+
+  const workspaceId = await resolveStatusCloudWorkspaceId(deps, auth);
+  if (!workspaceId) {
+    throw new CloudPowerUserSetupError([
+      'Cloud workspace could not be reconciled from your Cloud credentials.',
+      'Run `ricky connect cloud`, then `ricky status` so Ricky can read the current Cloud workspace automatically.',
+      'No local fallback was attempted.',
+    ]);
   }
 
   return {
-    ...deps.cloudRequest,
+    auth: { token },
+    workspace: { workspaceId },
     body: {
-      ...deps.cloudRequest.body,
       spec: cloudSpec.spec,
       ...(cloudSpec.specPath ? { specPath: cloudSpec.specPath } : {}),
       mode: 'cloud',
       metadata: {
-        ...deps.cloudRequest.body.metadata,
         ...(parsed.workflowName ? { workflowName: parsed.workflowName } : {}),
         cli: cliMetadataFor(parsed, cloudSpec.handoff),
       },
     },
   };
+}
+
+function resolveCloudRequestToken(auth: StoredAuth | null): string | undefined {
+  const token = process.env.AGENTWORKFORCE_CLOUD_TOKEN ?? process.env.RICKY_CLOUD_TOKEN ?? auth?.accessToken;
+  return token?.trim() || undefined;
 }
 
 async function readCloudSpec(
@@ -1395,6 +1471,28 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
   try {
     cloudRequest = await buildCloudRequest(parsed, deps);
   } catch (error) {
+    if (error instanceof CloudPowerUserSetupError) {
+      const summary = cloudPowerUserWorkflowSummary(undefined, {
+        mode: 'cloud',
+        workflowName: parsed.workflowName,
+        runRequested: parsed.runRequested,
+        yes: parsed.yes,
+        quiet: parsed.quiet,
+        guidance: error.guidance,
+      });
+      return {
+        exitCode: 1,
+        output: parsed.json
+          ? [renderPowerUserWorkflowJson(summary)]
+          : renderPowerUserWorkflowSummary(summary, {
+              mode: 'cloud',
+              workflowName: parsed.workflowName,
+              runRequested: parsed.runRequested,
+              yes: parsed.yes,
+              quiet: parsed.quiet,
+            }),
+      };
+    }
     const message = error instanceof Error ? error.message : String(error);
     return {
       exitCode: 1,
@@ -1705,6 +1803,21 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
       finalBlocker,
     );
     lines.push(final);
+    if (localResult.auto_fix.escalation) {
+      lines.push('Ricky reviewed the logs and could not choose one safe fix.');
+      lines.push(`  ${localResult.auto_fix.escalation.summary}`);
+      if (localResult.auto_fix.escalation.log_tail.length > 0) {
+        lines.push('Relevant logs:');
+        for (const tailLine of localResult.auto_fix.escalation.log_tail) {
+          lines.push(`  ${tailLine}`);
+        }
+      }
+      lines.push('Options:');
+      localResult.auto_fix.escalation.options.forEach((option, index) => {
+        lines.push(`  ${index + 1}. ${option.label}: ${option.description}`);
+        if (option.command) lines.push(`     ${option.command}`);
+      });
+    }
   }
 
   const shouldRenderNextActions =
