@@ -1287,6 +1287,7 @@ function resolveWorkforcePersonaWriterOptions(
     ...(options.workforcePersonaWriter || {}),
     repoRoot: cwd,
     targetMode: executionPreference === 'cloud' ? 'cloud' : 'local',
+    installRoot: join(localRunStateRoot(cwd), 'workforce-persona-skills'),
   };
 }
 

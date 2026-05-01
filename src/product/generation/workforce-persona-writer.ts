@@ -51,21 +51,34 @@ export interface WorkforcePersonaExecution extends Promise<WorkforcePersonaExecu
 
 export interface WorkforcePersonaContext {
   selection: WorkforcePersonaSelection;
-  install?: {
-    command?: readonly string[];
-    commandString?: string;
-    cleanupCommand?: readonly string[];
-    cleanupCommandString?: string;
-  };
   sendMessage(task: string, options?: WorkforcePersonaSendOptions): WorkforcePersonaExecution;
 }
 
 export interface WorkforcePersonaModule {
-  usePersona?: (intent: string, options?: { tier?: string; profile?: string; profileId?: string }) => unknown;
-  useSelection?: (selection: unknown, options?: { harness?: string }) => unknown;
-  resolvePersona?: (intent: string, profile?: unknown) => unknown;
-  resolvePersonaByTier?: (intent: string, tier?: string) => unknown;
-  PERSONA_INTENTS?: readonly string[];
+  useRunnablePersona?: (intent: string, options?: WorkforceRunnablePersonaOptions) => WorkforcePersonaContext;
+  useRunnableSelection?: (selection: unknown, options?: WorkforceRunnableSelectionOptions) => WorkforcePersonaContext;
+}
+
+export interface WorkforceSelectionModule {
+  usePersona(intent: string, options?: WorkforceSelectionOptions): { selection: unknown };
+}
+
+export interface WorkforceSelectionOptions {
+  tier?: string;
+  profile?: unknown;
+  profileId?: string;
+  installRoot?: string;
+}
+
+export interface WorkforceRunnablePersonaOptions extends WorkforceSelectionOptions {
+  harness?: string;
+  commandOverrides?: Record<string, string>;
+}
+
+export interface WorkforceRunnableSelectionOptions {
+  harness?: string;
+  installRoot?: string;
+  commandOverrides?: Record<string, string>;
 }
 
 export interface WorkforcePersonaSendOptions {
@@ -87,6 +100,7 @@ export interface WorkforcePersonaWriterOptions {
   relevantFiles?: Array<{ path: string; content?: string }>;
   timeoutSeconds?: number;
   installSkills?: boolean;
+  installRoot?: string;
   tier?: string;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
@@ -132,7 +146,7 @@ export interface ResolvedWorkforcePersonaContext {
 
 export type WorkforcePersonaResolver = (
   intents: readonly string[],
-  options: { tier?: string },
+  options: { tier?: string; installRoot?: string },
 ) => Promise<ResolvedWorkforcePersonaContext>;
 
 export class WorkforcePersonaWriterError extends Error {
@@ -158,9 +172,10 @@ export async function writeWorkflowWithWorkforcePersona(
   const workflowName = options.workflowName ?? workflowNameFromOutputPath(options.outputPath);
   const relevantFiles = await resolveRelevantFiles(options.repoRoot, spec, options.relevantFiles);
   const resolver = options.resolver ?? defaultWorkforcePersonaResolver;
-  const resolved = await resolver(options.personaIntentCandidates ?? WORKFORCE_PERSONA_INTENT_CANDIDATES, {
-    tier: options.tier,
-  });
+  const resolved = await resolver(
+    options.personaIntentCandidates ?? WORKFORCE_PERSONA_INTENT_CANDIDATES,
+    personaResolverOptions(options),
+  );
   const task = buildWorkflowPersonaTask(spec, {
     workflowName,
     targetMode: options.targetMode,
@@ -227,22 +242,97 @@ export async function writeWorkflowWithWorkforcePersona(
 
 export async function defaultWorkforcePersonaResolver(
   intents: readonly string[],
-  options: { tier?: string } = {},
+  options: { tier?: string; installRoot?: string } = {},
 ): Promise<ResolvedWorkforcePersonaContext> {
-  const moduleResults = await loadWorkforcePersonaModules();
-  const warnings: string[] = moduleResults.flatMap((moduleResult) => moduleResult.warnings);
+  const moduleResult = await loadWorkforcePersonaModule();
+  return resolveWorkforcePersonaContextWithModules(intents, options, moduleResult);
+}
+
+export async function resolveWorkforcePersonaContextWithModules(
+  intents: readonly string[],
+  options: { tier?: string; installRoot?: string },
+  moduleResult: {
+    module: WorkforcePersonaModule;
+    source: 'package' | 'local-dev';
+    warnings: string[];
+  },
+  loadSelectionModule: () => Promise<{
+    module: WorkforceSelectionModule;
+    source: 'package' | 'local-dev';
+    warnings: string[];
+  }> = loadWorkforceSelectionModule,
+): Promise<ResolvedWorkforcePersonaContext> {
+  const warnings: string[] = [...moduleResult.warnings];
 
   for (const intent of intents) {
-    for (const moduleResult of moduleResults) {
+    if (typeof moduleResult.module.useRunnableSelection === 'function') {
+      const selectionModule = await loadSelectionModule();
+      warnings.push(...selectionModule.warnings);
       try {
-        const context = resolvePersonaContext(moduleResult.module, intent, options);
-        if (context) {
+        const selected = selectionModule.module.usePersona(intent, selectionOptions({ tier: options.tier }));
+        const context = moduleResult.module.useRunnableSelection(
+          selected.selection,
+          runnableSelectionOptions(options, selected.selection),
+        );
+        if (isUsablePersonaContext(context)) {
+          return {
+            source: moduleResult.source === 'local-dev' || selectionModule.source === 'local-dev'
+              ? 'local-dev'
+              : 'package',
+            intent,
+            context,
+            warnings,
+          };
+        }
+        warnings.push(`Workforce useRunnableSelection(${intent}) returned an unusable context.`);
+      } catch (error) {
+        warnings.push(`Workforce useRunnableSelection(${intent}) failed: ${errorMessage(error)}`);
+      }
+    }
+
+    if (typeof moduleResult.module.useRunnablePersona === 'function') {
+      try {
+        const context = moduleResult.module.useRunnablePersona(
+          intent,
+          runnablePersonaOptions(options),
+        );
+        if (isUsablePersonaContext(context)) {
           return { source: moduleResult.source, intent, context, warnings };
         }
-        warnings.push(`Workforce persona router did not expose a usable ${intent} context.`);
+        warnings.push(`Workforce useRunnablePersona(${intent}) returned an unusable context.`);
       } catch (error) {
-        warnings.push(`Workforce persona resolution for ${intent} failed: ${errorMessage(error)}`);
+        const retry = retryWithoutInstallRoot(error, options);
+        if (retry) {
+          warnings.push(retry.warning);
+          try {
+            const context = moduleResult.module.useRunnablePersona?.(
+              intent,
+              runnablePersonaOptions({ tier: options.tier }),
+            );
+            if (isUsablePersonaContext(context)) {
+              return { source: moduleResult.source, intent, context, warnings };
+            }
+            warnings.push(`Workforce useRunnablePersona(${intent}) without installRoot returned an unusable context.`);
+          } catch (retryError) {
+            warnings.push(`Workforce useRunnablePersona(${intent}) without installRoot failed: ${errorMessage(retryError)}`);
+          }
+        } else {
+          warnings.push(`Workforce useRunnablePersona(${intent}) failed: ${errorMessage(error)}`);
+        }
       }
+    }
+
+    try {
+      const selectionModule = await loadSelectionModule();
+      warnings.push(...selectionModule.warnings);
+      const context = selectionModule.module.usePersona(intent, selectionOptions({ tier: options.tier }));
+      if (isRecord(context) && isRecord(context.selection)) {
+        warnings.push(`Workforce usePersona(${intent}) resolved metadata but did not provide a runnable sendMessage API.`);
+        continue;
+      }
+      warnings.push(`Workforce usePersona(${intent}) returned unusable selection metadata.`);
+    } catch (error) {
+      warnings.push(`Workforce selection metadata for ${intent} failed: ${errorMessage(error)}`);
     }
   }
 
@@ -257,58 +347,70 @@ export async function loadWorkforcePersonaModule(): Promise<{
   source: 'package' | 'local-dev';
   warnings: string[];
 }> {
-  const modules = await loadWorkforcePersonaModules();
-  return modules[0];
-}
-
-async function loadWorkforcePersonaModules(): Promise<Array<{
-  module: WorkforcePersonaModule;
-  source: 'package' | 'local-dev';
-  warnings: string[];
-}>> {
   const warnings: string[] = [];
-  const modules: Array<{
-    module: WorkforcePersonaModule;
-    source: 'package' | 'local-dev';
-    warnings: string[];
-  }> = [];
+  try {
+    const packageName = '@agentworkforce/harness-kit';
+    const module = await import(packageName) as WorkforcePersonaModule;
+    if (isRunnablePersonaModule(module)) return { module, source: 'package', warnings };
+    warnings.push('@agentworkforce/harness-kit did not export useRunnablePersona() or useRunnableSelection().');
+  } catch (error) {
+    warnings.push(`Package Workforce harness-kit unavailable: ${errorMessage(error)}`);
+  }
 
-  for (const candidate of await localWorkforceModuleCandidates()) {
+  for (const candidate of await localWorkforceHarnessKitModuleCandidates()) {
     try {
       await access(candidate);
       const module = await import(pathToFileURL(candidate).href) as WorkforcePersonaModule;
-      if (isWorkforcePersonaModule(module)) {
-        modules.push({ module, source: 'local-dev', warnings: [] });
-      } else {
-        warnings.push(`Local Workforce router at ${candidate} did not export persona resolver functions.`);
+      if (isRunnablePersonaModule(module)) {
+        return { module, source: 'local-dev', warnings };
       }
+      warnings.push(`Local Workforce harness-kit at ${candidate} did not export runnable persona APIs.`);
+    } catch (error) {
+      warnings.push(`Local Workforce harness-kit unavailable at ${candidate}: ${errorMessage(error)}`);
+    }
+  }
+
+  throw new WorkforcePersonaWriterError(
+    [
+      '@agentworkforce/harness-kit is bundled as a Ricky dependency but could not be loaded.',
+      'Try reinstalling @agentworkforce/ricky (`npm install` in this project).',
+      'If you develop Ricky locally with a sibling ../workforce clone, publish or link that harness-kit.',
+    ].join(' '),
+    warnings,
+  );
+}
+
+export async function loadWorkforceSelectionModule(): Promise<{
+  module: WorkforceSelectionModule;
+  source: 'package' | 'local-dev';
+  warnings: string[];
+}> {
+  const warnings: string[] = [];
+  try {
+    const packageName = '@agentworkforce/workload-router';
+    const module = await import(packageName) as WorkforceSelectionModule;
+    if (typeof module.usePersona === 'function') return { module, source: 'package', warnings };
+    warnings.push('@agentworkforce/workload-router did not export usePersona().');
+  } catch (error) {
+    warnings.push(`Package Workforce router unavailable: ${errorMessage(error)}`);
+  }
+
+  for (const candidate of await localWorkforceRouterModuleCandidates()) {
+    try {
+      await access(candidate);
+      const module = await import(pathToFileURL(candidate).href) as WorkforceSelectionModule;
+      if (typeof module.usePersona === 'function') {
+        return { module, source: 'local-dev', warnings };
+      }
+      warnings.push(`Local Workforce router at ${candidate} did not export usePersona().`);
     } catch (error) {
       warnings.push(`Local Workforce router unavailable at ${candidate}: ${errorMessage(error)}`);
     }
   }
 
-  try {
-    const packageName = '@agentworkforce/workload-router';
-    const module = await import(packageName) as WorkforcePersonaModule;
-    if (isWorkforcePersonaModule(module)) {
-      modules.push({ module, source: 'package', warnings });
-    } else {
-      warnings.push('@agentworkforce/workload-router did not export persona resolver functions.');
-    }
-  } catch (error) {
-    warnings.push(`Package Workforce router unavailable: ${errorMessage(error)}`);
-  }
-
-  if (modules.length > 0) {
-    if (warnings.length > 0) {
-      modules[0].warnings.push(...warnings);
-    }
-    return modules;
-  }
-
   throw new WorkforcePersonaWriterError(
     [
-      '@agentworkforce/workload-router is bundled as a Ricky dependency but no usable Workforce persona router could be loaded.',
+      '@agentworkforce/workload-router is bundled as a Ricky dependency but could not be loaded.',
       'Try reinstalling @agentworkforce/ricky (`npm install` in this project).',
       'If you develop Ricky locally with a sibling ../workforce clone, publish or link that workload-router.',
     ].join(' '),
@@ -498,10 +600,6 @@ function validateMetadata(metadata: Record<string, unknown>): void {
   if (Object.keys(metadata).length === 0) {
     throw new WorkforcePersonaWriterError('Workforce persona response metadata block is required.');
   }
-  const hasPurpose = ['workflowName', 'summary', 'goal'].some((key) => typeof metadata[key] === 'string' && metadata[key].trim());
-  if (!hasPurpose) {
-    throw new WorkforcePersonaWriterError('Workforce persona response metadata must include workflowName, summary, or goal.');
-  }
 }
 
 async function resolveRelevantFiles(
@@ -524,9 +622,19 @@ async function resolveRelevantFiles(
   return contexts;
 }
 
-async function localWorkforceModuleCandidates(): Promise<string[]> {
+async function localWorkforceHarnessKitModuleCandidates(): Promise<string[]> {
   const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, '../../../..');
+  const repoRoot = resolve(here, '../../..');
+  const siblingWorkforce = resolve(repoRoot, '../workforce/packages/harness-kit');
+  return [
+    join(siblingWorkforce, 'dist/index.js'),
+    join(siblingWorkforce, 'src/index.ts'),
+  ];
+}
+
+async function localWorkforceRouterModuleCandidates(): Promise<string[]> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = resolve(here, '../../..');
   const siblingWorkforce = resolve(repoRoot, '../workforce/packages/workload-router');
   return [
     join(siblingWorkforce, 'dist/index.js'),
@@ -534,223 +642,76 @@ async function localWorkforceModuleCandidates(): Promise<string[]> {
   ];
 }
 
-function isWorkforcePersonaModule(value: unknown): value is WorkforcePersonaModule {
+function isRunnablePersonaModule(value: WorkforcePersonaModule): boolean {
   return (
-    isRecord(value) &&
-    (
-      typeof value.usePersona === 'function' ||
-      typeof value.resolvePersona === 'function' ||
-      typeof value.resolvePersonaByTier === 'function'
-    )
+    typeof value.useRunnablePersona === 'function' ||
+    typeof value.useRunnableSelection === 'function'
   );
 }
 
-function resolvePersonaContext(
-  module: WorkforcePersonaModule,
-  intent: string,
-  options: { tier?: string },
-): WorkforcePersonaContext | null {
-  if (module.PERSONA_INTENTS && !module.PERSONA_INTENTS.includes(intent)) {
-    return null;
-  }
-
-  if (typeof module.usePersona === 'function') {
-    const value = module.usePersona(intent, options.tier ? { tier: options.tier } : undefined);
-    const context = normalizePersonaContext(value);
-    if (context) return context;
-  }
-
-  if (options.tier && typeof module.resolvePersonaByTier === 'function') {
-    const selection = module.resolvePersonaByTier(intent, options.tier);
-    const context = normalizePersonaContext(
-      typeof module.useSelection === 'function' ? module.useSelection(selection) : { selection },
-    );
-    if (context) return context;
-  }
-
-  if (typeof module.resolvePersona === 'function') {
-    const selection = module.resolvePersona(intent);
-    const context = normalizePersonaContext(
-      typeof module.useSelection === 'function' ? module.useSelection(selection) : { selection },
-    );
-    if (context) return context;
-  }
-
-  return null;
+function runnablePersonaOptions(
+  options: { tier?: string; installRoot?: string },
+): WorkforceRunnablePersonaOptions | undefined {
+  const resolved: WorkforceRunnablePersonaOptions = {};
+  if (options.tier) resolved.tier = options.tier;
+  if (options.installRoot) resolved.installRoot = options.installRoot;
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
 
-function normalizePersonaContext(value: unknown): WorkforcePersonaContext | null {
-  if (isUsablePersonaContext(value)) return value;
-  if (!isRecord(value) || !isPersonaSelection(value.selection)) return null;
-  const install = isRecord(value.install) ? value.install : undefined;
+function runnableSelectionOptions(
+  options: { installRoot?: string },
+  selection: unknown,
+): WorkforceRunnableSelectionOptions | undefined {
+  return options.installRoot && selectionHarness(selection) === 'claude'
+    ? { installRoot: options.installRoot }
+    : undefined;
+}
+
+function selectionOptions(
+  options: { tier?: string; installRoot?: string },
+): WorkforceSelectionOptions | undefined {
+  const resolved: WorkforceSelectionOptions = {};
+  if (options.tier) resolved.tier = options.tier;
+  if (options.installRoot) resolved.installRoot = options.installRoot;
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
+function personaResolverOptions(options: { tier?: string; installRoot?: string }): { tier?: string; installRoot?: string } {
+  const resolved: { tier?: string; installRoot?: string } = {};
+  if (options.tier) resolved.tier = options.tier;
+  if (options.installRoot) resolved.installRoot = options.installRoot;
+  return resolved;
+}
+
+function retryWithoutInstallRoot(
+  error: unknown,
+  options: { installRoot?: string },
+): { warning: string } | null {
+  if (!options.installRoot) return null;
+  if (!/installRoot is only supported for the claude harness/i.test(errorMessage(error))) return null;
   return {
-    selection: value.selection,
-    ...(install ? {
-      install: {
-        command: readonlyStringArray(install.command),
-        commandString: typeof install.commandString === 'string' ? install.commandString : undefined,
-        cleanupCommand: readonlyStringArray(install.cleanupCommand),
-        cleanupCommandString: typeof install.cleanupCommandString === 'string' ? install.cleanupCommandString : undefined,
-      },
-    } : {}),
-    sendMessage(task, options) {
-      return runPersonaWithHarness(value.selection as WorkforcePersonaSelection, task, options, install);
-    },
+    warning: 'Workforce persona selected a non-claude harness; retrying runnable context without installRoot.',
   };
+}
+
+function selectionHarness(selection: unknown): string | undefined {
+  if (!isRecord(selection)) return undefined;
+  const runtime = selection.runtime;
+  if (!isRecord(runtime)) return undefined;
+  return typeof runtime.harness === 'string' ? runtime.harness : undefined;
 }
 
 function isUsablePersonaContext(value: unknown): value is WorkforcePersonaContext {
   return (
     isRecord(value) &&
-    isPersonaSelection(value.selection) &&
+    isRecord(value.selection) &&
+    typeof value.selection.personaId === 'string' &&
+    typeof value.selection.tier === 'string' &&
+    isRecord(value.selection.runtime) &&
+    typeof value.selection.runtime.harness === 'string' &&
+    typeof value.selection.runtime.model === 'string' &&
     typeof value.sendMessage === 'function'
   );
-}
-
-function isPersonaSelection(value: unknown): value is WorkforcePersonaSelection {
-  return (
-    isRecord(value) &&
-    typeof value.personaId === 'string' &&
-    typeof value.tier === 'string' &&
-    isRecord(value.runtime) &&
-    typeof value.runtime.harness === 'string' &&
-    typeof value.runtime.model === 'string'
-  );
-}
-
-function runPersonaWithHarness(
-  selection: WorkforcePersonaSelection,
-  task: string,
-  options: WorkforcePersonaSendOptions | undefined,
-  install: Record<string, unknown> | undefined,
-): WorkforcePersonaExecution {
-  const startedAt = Date.now();
-  const timeoutSeconds = options?.timeoutSeconds ?? selection.runtime.harnessSettings?.timeoutSeconds ?? 1200;
-  const runName = options?.name ?? `ricky-workforce-${selection.personaId}-${digest(task).slice(0, 12)}`;
-  const runId = Promise.resolve(runName);
-  let cancelledReason: string | undefined;
-
-  const promise = (async (): Promise<WorkforcePersonaExecutionResult> => {
-    if (options?.signal?.aborted) {
-      return {
-        status: 'cancelled',
-        output: '',
-        stderr: 'Workforce persona run was cancelled before start.',
-        exitCode: null,
-        durationMs: Date.now() - startedAt,
-        workflowRunId: await runId,
-      };
-    }
-
-    const runner = await createHarnessCliRunner(selection.runtime.harness);
-    const prompt = buildHarnessPrompt(selection, task, install);
-    const result = await runner.run({
-      prompt,
-      timeoutMs: timeoutSeconds * 1000,
-      cwd: options?.workingDirectory,
-      env: {
-        ...process.env,
-        ...(selection.env ?? {}),
-        ...(options?.env ?? {}),
-      },
-      model: selection.runtime.model,
-    });
-
-    const workflowRunId = await runId;
-    if (cancelledReason) {
-      return {
-        status: 'cancelled',
-        output: '',
-        stderr: cancelledReason,
-        exitCode: null,
-        durationMs: Date.now() - startedAt,
-        workflowRunId,
-      };
-    }
-
-    if (result.status === 'failed') {
-      return {
-        status: result.error.toLowerCase().includes('timeout') ? 'timeout' : 'failed',
-        output: '',
-        stderr: [result.error, result.stderr].filter(Boolean).join('\n'),
-        exitCode: result.exitCode ?? null,
-        durationMs: Date.now() - startedAt,
-        workflowRunId,
-      };
-    }
-
-    return {
-      status: 'completed',
-      output: result.text,
-      stderr: '',
-      exitCode: 0,
-      durationMs: Date.now() - startedAt,
-      workflowRunId,
-    };
-  })() as WorkforcePersonaExecution;
-
-  Object.defineProperty(promise, 'runId', { value: runId });
-  promise.cancel = (reason?: string) => {
-    cancelledReason = reason ?? 'Workforce persona run cancelled.';
-  };
-  return promise;
-}
-
-async function createHarnessCliRunner(harness: string): Promise<{
-  run(input: {
-    prompt: string;
-    timeoutMs: number;
-    cwd?: string;
-    env?: NodeJS.ProcessEnv;
-    model?: string;
-  }): Promise<
-    | { status: 'completed'; text: string; metadata?: Record<string, unknown> }
-    | { status: 'failed'; error: string; stderr?: string; exitCode?: number }
-  >;
-}> {
-  const workerBridge = await import('@agent-assistant/harness/worker-bridge');
-  switch (harness) {
-    case 'claude':
-      return workerBridge.createClaudeCliRunner();
-    case 'codex':
-      return workerBridge.createCodexCliRunner();
-    case 'opencode':
-      return workerBridge.createOpenCodeCliRunner();
-    default:
-      throw new WorkforcePersonaWriterError(`Unsupported Workforce persona harness: ${harness}.`);
-  }
-}
-
-function buildHarnessPrompt(
-  selection: WorkforcePersonaSelection,
-  task: string,
-  install: Record<string, unknown> | undefined,
-): string {
-  const systemPrompt = selection.runtime.systemPrompt?.trim();
-  const skills = selection.skills?.length ? safeJson(selection.skills) : '[]';
-  const installPlan = install ? safeJson({
-    command: readonlyStringArray(install.command),
-    commandString: typeof install.commandString === 'string' ? install.commandString : undefined,
-    cleanupCommand: readonlyStringArray(install.cleanupCommand),
-    cleanupCommandString: typeof install.cleanupCommandString === 'string' ? install.cleanupCommandString : undefined,
-  }) : '{}';
-  return [
-    systemPrompt ? `Persona system prompt:\n${systemPrompt}` : null,
-    `Persona id: ${selection.personaId}`,
-    `Persona tier: ${selection.tier}`,
-    `Harness: ${selection.runtime.harness}`,
-    `Model: ${selection.runtime.model}`,
-    '',
-    'Run mode: non-interactive one-shot. Return only the requested structured artifact response. Do not launch an interactive TUI.',
-    '',
-    'Persona skills:',
-    skills,
-    '',
-    'Skill install plan metadata:',
-    installPlan,
-    '',
-    task,
-  ].filter((part): part is string => part !== null).join('\n');
 }
 
 function parseJsonObject(text: string): Record<string, unknown> | null {
@@ -760,14 +721,6 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-function safeJson(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-function readonlyStringArray(value: unknown): readonly string[] | undefined {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string') ? value : undefined;
 }
 
 function fencedBlock(text: string, language: string): string | null {

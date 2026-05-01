@@ -12,6 +12,7 @@ import { debugWorkflowRun as defaultDebugWorkflowRun } from '../product/speciali
 import type { DebuggerResult } from '../product/specialists/debugger/types.js';
 import type { WorkflowRunEvidence, WorkflowStepEvidence } from '../shared/models/workflow-evidence.js';
 import { repairWorkflowWithWorkforcePersona } from '../product/generation/workforce-persona-repairer.js';
+import { localRunStateRoot } from '../shared/state-paths.js';
 
 export interface AutoFixAttemptSummary {
   attempt: number;
@@ -294,6 +295,9 @@ function isV1DirectBlocker(code: string | undefined): boolean {
 }
 
 async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<WorkflowRepairResult> {
+  const deterministicRepair = repairWorkflowDeterministically(input);
+  if (deterministicRepair) return deterministicRepair;
+
   let result: Awaited<ReturnType<typeof repairWorkflowWithWorkforcePersona>>;
   try {
     result = await repairWorkflowWithWorkforcePersona({
@@ -308,10 +312,9 @@ async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<Work
       ...(input.runId ? { previousRunId: input.runId } : {}),
       attempt: input.attempt,
       maxAttempts: input.maxAttempts,
+      installRoot: join(localRunStateRoot(input.cwd), 'workforce-persona-repair-skills'),
     });
   } catch (error) {
-    const deterministicRepair = repairWorkflowDeterministically(input, error);
-    if (deterministicRepair) return deterministicRepair;
     throw error;
   }
 

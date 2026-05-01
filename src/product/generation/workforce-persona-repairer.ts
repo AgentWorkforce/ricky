@@ -25,6 +25,7 @@ export interface WorkforcePersonaRepairOptions {
   maxAttempts: number;
   timeoutSeconds?: number;
   installSkills?: boolean;
+  installRoot?: string;
   tier?: string;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
@@ -59,9 +60,10 @@ export async function repairWorkflowWithWorkforcePersona(
   options: WorkforcePersonaRepairOptions,
 ): Promise<WorkforcePersonaRepairResult> {
   const resolver = options.resolver ?? defaultWorkforcePersonaResolver;
-  const resolved = await resolver(options.personaIntentCandidates ?? WORKFORCE_PERSONA_INTENT_CANDIDATES, {
-    tier: options.tier,
-  });
+  const resolved = await resolver(
+    options.personaIntentCandidates ?? WORKFORCE_PERSONA_INTENT_CANDIDATES,
+    personaResolverOptions(options),
+  );
   const task = buildWorkflowRepairPersonaTask(options);
   const promptDigest = digest(task);
   const selection = resolved.context.selection;
@@ -187,4 +189,11 @@ function safeJson(value: unknown): string {
 
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function personaResolverOptions(options: { tier?: string; installRoot?: string }): { tier?: string; installRoot?: string } {
+  const resolved: { tier?: string; installRoot?: string } = {};
+  if (options.tier) resolved.tier = options.tier;
+  if (options.installRoot) resolved.installRoot = options.installRoot;
+  return resolved;
 }
