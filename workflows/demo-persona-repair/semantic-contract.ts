@@ -6,7 +6,7 @@
 //
 // Local manual run:
 //   npx tsx src/surfaces/cli/commands/cli-main.ts run \
-//     --artifact workflows/demo-persona-repair/semantic-contract.ts \
+//     workflows/demo-persona-repair/semantic-contract.ts \
 //     --foreground
 
 import { workflow } from '@agent-relay/sdk/workflows';

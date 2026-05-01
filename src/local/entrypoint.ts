@@ -1073,6 +1073,7 @@ export interface LocalEntrypointOptions {
   executor?: LocalExecutor;
   artifactReader?: ArtifactReader;
   localExecutor?: LocalExecutorOptions;
+  onProgress?: (message: string) => void;
 }
 
 export type LocalEntrypointInput = RawHandoff | LocalInvocationRequest;
@@ -1093,7 +1094,7 @@ export async function runLocal(
   handoff: LocalEntrypointInput,
   options: LocalEntrypointOptions = {},
 ): Promise<LocalResponse> {
-  const { executor, artifactReader, localExecutor } = options;
+  const { executor, artifactReader, localExecutor, onProgress } = options;
 
   // Normalize
   let request: LocalInvocationRequest;
@@ -1144,6 +1145,7 @@ export async function runLocal(
   if (request.autoFix && request.autoFix.maxAttempts > 0) {
     return runWithAutoFix(request, {
       maxAttempts: request.autoFix.maxAttempts,
+      ...(onProgress ? { onProgress } : {}),
       runSingleAttempt: (attemptRequest) =>
         resolvedExecutor.execute({
           ...attemptRequest,
@@ -1377,7 +1379,7 @@ function createGenerationStage(
       ? {
           next: {
             run_command: localRunCommand(artifact.artifactPath),
-            run_mode_hint: `ricky run --artifact ${artifact.artifactPath}`,
+            run_mode_hint: `ricky run ${artifact.artifactPath}`,
           },
         }
       : {}),
@@ -1427,13 +1429,13 @@ function createArtifactReferenceGenerationStage(
     },
     next: {
       run_command: localRunCommand(artifactPath),
-      run_mode_hint: `ricky run --artifact ${artifactPath}`,
+      run_mode_hint: `ricky run ${artifactPath}`,
     },
   };
 }
 
 function localRunCommand(artifactPath: string): string {
-  return `ricky run --artifact ${artifactPath}`;
+  return `ricky run ${artifactPath}`;
 }
 
 function digestSpec(spec: string): string {

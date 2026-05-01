@@ -39,6 +39,7 @@ export interface WorkflowRepairInput {
   runId?: string;
   attempt: number;
   maxAttempts: number;
+  onProgress?: (message: string) => void;
 }
 
 export interface WorkflowRepairResult {
@@ -73,6 +74,7 @@ export interface RunWithAutoFixOptions {
   artifactWriter?: (artifactPath: string, content: string, cwd: string) => Promise<void>;
   repairRunner?: (command: string, cwd: string) => Promise<{ exitCode: number }>;
   sleep?: (ms: number) => Promise<void>;
+  onProgress?: (message: string) => void;
 }
 
 const DEFAULT_BACKOFF_MS = 500;
@@ -88,6 +90,7 @@ export async function runWithAutoFix(
   const artifactWriter = options.artifactWriter ?? writeWorkflowArtifact;
   const repairRunner = options.repairRunner ?? runShellCommand;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const onProgress = options.onProgress;
   const attempts: AutoFixAttemptSummary[] = [];
   const warnings: string[] = [];
   const trackingRunId = resolveTrackingRunId(request) ?? `ricky-local-${randomUUID()}`;
@@ -96,6 +99,7 @@ export async function runWithAutoFix(
   let retryOfRunId: string | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    onProgress?.(`Running workflow (attempt ${attempt}/${maxAttempts})...`);
     const response = await options.runSingleAttempt(currentRequest);
     lastResponse = response;
 
@@ -131,6 +135,7 @@ export async function runWithAutoFix(
     const classification = classifyFailure(evidence);
     const debuggerResult = debugWorkflowRun({ evidence, classification });
     const repairTarget = await resolveWorkflowRepairTarget(currentRequest, response);
+    onProgress?.(`Workflow failed${failedStep ? ` at ${failedStep}` : ''}; preparing repair...`);
 
     if (repairTarget) {
       try {
@@ -147,6 +152,7 @@ export async function runWithAutoFix(
           ...(runId ? { runId } : {}),
           attempt,
           maxAttempts,
+          ...(onProgress ? { onProgress } : {}),
         });
 
         if (!repair.applied || !repair.content) {
@@ -198,6 +204,7 @@ export async function runWithAutoFix(
             reason: `auto-fix retry after Workforce workflow persona repair for ${blockerCode ?? 'local failure'}`,
           },
         };
+        onProgress?.(`Retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
         continue;
       } catch (error) {
         attemptSummary.fix_error = error instanceof Error ? error.message : String(error);
@@ -240,6 +247,7 @@ export async function runWithAutoFix(
       return guided;
     }
 
+    onProgress?.('Applying direct repair...');
     const fix = await applyDirectRepair(response.execution?.blocker, {
       cwd: response.execution?.execution.cwd ?? request.invocationRoot ?? process.cwd(),
       repairRunner,
@@ -285,6 +293,7 @@ export async function runWithAutoFix(
         reason: `auto-fix retry after ${blockerCode ?? 'local failure'}`,
       },
     };
+    onProgress?.(`Retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
   }
 
   return withAutoFix(lastResponse ?? failedBeforeAttempt(request), maxAttempts, attempts, 'error', warnings, trackingRunId);
@@ -296,10 +305,14 @@ function isV1DirectBlocker(code: string | undefined): boolean {
 
 async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<WorkflowRepairResult> {
   const deterministicRepair = repairWorkflowDeterministically(input);
-  if (deterministicRepair) return deterministicRepair;
+  if (deterministicRepair) {
+    input.onProgress?.('Applying deterministic workflow repair...');
+    return deterministicRepair;
+  }
 
   let result: Awaited<ReturnType<typeof repairWorkflowWithWorkforcePersona>>;
   try {
+    input.onProgress?.('Asking Workforce persona to repair the workflow...');
     result = await repairWorkflowWithWorkforcePersona({
       repoRoot: input.cwd,
       artifactPath: input.artifactPath,
@@ -629,7 +642,7 @@ function buildAutoFixEscalation(context: AutoFixEscalationContext): NonNullable<
   const recoverySteps = context.response.execution?.blocker?.recovery.steps ?? [];
   const options: NonNullable<NonNullable<LocalResponse['auto_fix']>['escalation']>['options'] = [];
   const artifactPath = context.artifactPath ?? resolveArtifactPath(context.request, context.response);
-  const runCommand = artifactPath ? `ricky run --artifact ${artifactPath}` : undefined;
+  const runCommand = artifactPath ? `ricky run ${artifactPath}` : undefined;
 
   if (runCommand) {
     options.push({

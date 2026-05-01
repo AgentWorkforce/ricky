@@ -1187,7 +1187,7 @@ describe('runLocal', () => {
         '[local] runtime launch skipped: returning generated artifact only',
       ]),
     );
-    expect(result.nextActions[0]).toMatch(/^Run the generated workflow locally: ricky run --artifact workflows\/generated\/.+\.ts$/);
+    expect(result.nextActions[0]).toMatch(/^Run the generated workflow locally: ricky run workflows\/generated\/.+\.ts$/);
     expect(result.nextActions).toContain('Inspect the generated workflow artifact and choose whether to run it locally.');
   });
 
@@ -1233,8 +1233,8 @@ describe('runLocal', () => {
         spec_digest: expect.any(String),
       },
       next: {
-        run_command: expect.stringMatching(/^ricky run --artifact workflows\/generated\/.+\.ts$/),
-        run_mode_hint: expect.stringMatching(/^ricky run --artifact workflows\/generated\/.+\.ts$/),
+        run_command: expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
+        run_mode_hint: expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
       },
     });
     expect(result.execution).toBeUndefined();
@@ -1471,7 +1471,7 @@ describe('runLocal', () => {
             actionable: true,
             steps: expect.arrayContaining([
               'npm install',
-              expect.stringMatching(/^ricky run --artifact workflows\/generated\/.+\.ts$/),
+              expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
             ]),
           },
           context: {
@@ -1553,7 +1553,7 @@ describe('runLocal', () => {
       cwd: '/caller-repo',
     });
     expect(result.nextActions).toContain(
-      `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+      `Run the generated workflow locally: ricky run ${artifactPath}`,
     );
     expect(localExecutor.runner.invocations).toHaveLength(0);
   });
@@ -1652,7 +1652,7 @@ describe('runLocal', () => {
         '[local] runtime launch skipped: returning generated artifact only',
       ]),
     );
-    expect(result.nextActions[0]).toBe(`Run the generated workflow locally: ricky run --artifact ${written.path}`);
+    expect(result.nextActions[0]).toBe(`Run the generated workflow locally: ricky run ${written.path}`);
     expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
   });
 
@@ -1919,7 +1919,7 @@ describe('runLocal', () => {
     ]);
     expect(result.nextActions).toEqual([
       'npm install',
-      `ricky run --artifact ${workflowFile}`,
+      `ricky run ${workflowFile}`,
     ]);
     expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
   });
@@ -2310,7 +2310,7 @@ describe('runLocal', () => {
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
     expect(result.nextActions).toEqual([
       'npm install',
-      'ricky run --artifact workflows/wave4-local-byoh/missing-runtime.workflow.ts',
+      'ricky run workflows/wave4-local-byoh/missing-runtime.workflow.ts',
     ]);
   });
 
@@ -2446,7 +2446,7 @@ describe('runLocal', () => {
 
         // Next action uses the exact same path
         expect(result.nextActions).toContain(
-          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+          `Run the generated workflow locally: ricky run ${artifactPath}`,
         );
 
         // And that path exists
@@ -2524,12 +2524,12 @@ describe('runLocal', () => {
 
         // Generation stage next.run_command points to same artifact
         expect(result.generation!.next!.run_command).toBe(
-          `ricky run --artifact ${artifactPath}`,
+          `ricky run ${artifactPath}`,
         );
 
         // Next action also points to same artifact
         expect(result.nextActions).toContain(
-          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+          `Run the generated workflow locally: ricky run ${artifactPath}`,
         );
 
         // Artifact does NOT exist in packages/cli/workflows/generated
@@ -2809,7 +2809,7 @@ describe('runLocal', () => {
     expect(result.warnings).toContain('Runtime dependency is unavailable: exited with code 127.');
     expect(result.nextActions).toEqual([
       'npm install',
-      expect.stringMatching(/^ricky run --artifact workflows\/generated\/.+\.ts$/),
+      expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
     ]);
   });
 
@@ -2872,12 +2872,12 @@ describe('runLocal', () => {
 
         // Generation stage next.run_command uses the same relative path
         expect(result.generation!.next!.run_command).toBe(
-          `ricky run --artifact ${artifactPath}`,
+          `ricky run ${artifactPath}`,
         );
 
         // Next action also uses the same relative path
         expect(result.nextActions).toContain(
-          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+          `Run the generated workflow locally: ricky run ${artifactPath}`,
         );
 
         // Artifact is NOT in packages/cli/workflows/generated
@@ -2963,7 +2963,7 @@ describe('runLocal', () => {
 
       // The next command references the same path
       expect(result.nextActions).toContain(
-        `Run the generated workflow locally: ricky run --artifact ${writes[0].path}`,
+        `Run the generated workflow locally: ricky run ${writes[0].path}`,
       );
     });
   });
@@ -3000,7 +3000,7 @@ describe('runLocal', () => {
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
     expect(result.nextActions).toEqual([
       'npm install',
-      'ricky run --artifact workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
+      'ricky run workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts',
     ]);
   });
 
@@ -3126,7 +3126,7 @@ describe('runLocal', () => {
       );
       expect(result.warnings).toEqual([]);
       expect(result.nextActions).toEqual([
-        `Run the generated workflow locally: ricky run --artifact ${result.generation?.artifact?.path}`,
+        `Run the generated workflow locally: ricky run ${result.generation?.artifact?.path}`,
         'Inspect the generated workflow artifact and choose whether to run it locally.',
       ]);
       expect(result.generation).toMatchObject({
@@ -3138,8 +3138,8 @@ describe('runLocal', () => {
           spec_digest: expect.any(String),
         },
         next: {
-          run_command: `ricky run --artifact ${result.generation?.artifact?.path}`,
-          run_mode_hint: `ricky run --artifact ${result.generation?.artifact?.path}`,
+          run_command: `ricky run ${result.generation?.artifact?.path}`,
+          run_mode_hint: `ricky run ${result.generation?.artifact?.path}`,
         },
       });
       expect(result.execution).toBeUndefined();
@@ -3181,7 +3181,7 @@ describe('runLocal', () => {
         ]),
         warnings: expect.any(Array),
         nextActions: [
-          `Run the generated workflow locally: ricky run --artifact ${result.generation?.artifact?.path}`,
+          `Run the generated workflow locally: ricky run ${result.generation?.artifact?.path}`,
           'Inspect the generated workflow artifact and choose whether to run it locally.',
         ],
         generation: {
@@ -3193,8 +3193,8 @@ describe('runLocal', () => {
             spec_digest: expect.any(String),
           },
           next: {
-            run_command: `ricky run --artifact ${result.generation?.artifact?.path}`,
-            run_mode_hint: `ricky run --artifact ${result.generation?.artifact?.path}`,
+            run_command: `ricky run ${result.generation?.artifact?.path}`,
+            run_mode_hint: `ricky run ${result.generation?.artifact?.path}`,
           },
         },
         exitCode: 0,
@@ -3381,7 +3381,7 @@ describe('runLocal', () => {
             actionable: true,
             steps: [
               'npm install',
-              'ricky run --artifact workflows/issue-11/missing-runtime.workflow.ts',
+              'ricky run workflows/issue-11/missing-runtime.workflow.ts',
             ],
           },
           context: {

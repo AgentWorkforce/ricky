@@ -94,8 +94,8 @@ describe('local workflow flow', () => {
           spec_digest: 'digest',
         },
         next: {
-          run_command: 'ricky run --artifact workflows/generated/release-health.ts',
-          run_mode_hint: 'ricky run --artifact workflows/generated/release-health.ts',
+          run_command: 'ricky run workflows/generated/release-health.ts',
+          run_mode_hint: 'ricky run workflows/generated/release-health.ts',
         },
       },
       exitCode: 0,
@@ -129,7 +129,7 @@ describe('local workflow flow', () => {
       expect(result.confirmation).toBe('not-now');
       expect(result.summary.artifactPath).toBe('workflows/generated/release-health.ts');
       expect(result.summary.agents).toEqual([{ name: 'codex', job: 'Run local checks' }]);
-      expect(result.command).toBe('ricky run --artifact workflows/generated/release-health.ts');
+      expect(result.command).toBe('ricky run workflows/generated/release-health.ts');
       expect(result.run).toBeUndefined();
     } finally {
       await rm(repo, { recursive: true, force: true });
@@ -193,7 +193,7 @@ describe('local workflow flow', () => {
       expect(result.run).toBeUndefined();
       expect(result.monitoredRun).toBeUndefined();
       expect(result.confirmation).toBeUndefined();
-      expect(result.command).toBe('ricky run --artifact workflows/generated/docs-audit.ts');
+      expect(result.command).toBe('ricky run workflows/generated/docs-audit.ts');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -269,9 +269,9 @@ describe('local workflow flow', () => {
           'workflows/generated/existing.ts',
         ],
         evidencePath: `${repo}/.workflow-artifacts/ricky-local-runs/foreground-existing/stdout.log`,
-        nextCommand: 'ricky run --artifact workflows/generated/existing.ts',
+        nextCommand: 'ricky run workflows/generated/existing.ts',
       });
-      expect(result.command).toBe('ricky run --artifact workflows/generated/existing.ts');
+      expect(result.command).toBe('ricky run workflows/generated/existing.ts');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

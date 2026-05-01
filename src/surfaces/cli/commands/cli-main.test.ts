@@ -307,7 +307,7 @@ describe('renderHelp', () => {
 
     expect(helpText).toContain('Happy path:');
     expect(helpText).toContain('ricky local --spec <text>');
-    expect(helpText).toContain('ricky run --artifact <path> --background');
+    expect(helpText).toContain('ricky run <path> --background');
     expect(helpText).toContain('ricky status --run <run-id>');
     expect(helpText).toContain('Without --run:  artifact path on disk');
     expect(helpText).not.toMatch(/automatic execution/i);
@@ -339,7 +339,7 @@ function fakeInteractiveResult(overrides: Partial<InteractiveCliResult> = {}): I
 
 function stagedLocalResult(overrides: Partial<LocalResponse> = {}): LocalResponse {
   const artifactPath = 'workflows/generated/issue-3.ts';
-  const runCommand = `ricky run --artifact ${artifactPath}`;
+  const runCommand = `ricky run ${artifactPath}`;
   const sdkCommand = `@agent-relay/sdk/workflows runScriptWorkflow ${artifactPath}`;
   return {
     ok: true,
@@ -639,11 +639,11 @@ describe('cliMain', () => {
           desiredOutcome: 'Complete locally.',
           sideEffects: [],
           missingLocalBlockers: [],
-          command: 'ricky run --artifact workflows/generated/background.ts',
+          command: 'ricky run workflows/generated/background.ts',
         },
         confirmation: 'background',
         monitoredRun,
-        command: 'ricky run --artifact workflows/generated/background.ts',
+        command: 'ricky run workflows/generated/background.ts',
       },
     }));
 
@@ -699,9 +699,9 @@ describe('cliMain', () => {
           desiredOutcome: 'Docs are ready.',
           sideEffects: [],
           missingLocalBlockers: [],
-          command: 'ricky run --artifact workflows/generated/docs-audit.ts',
+          command: 'ricky run workflows/generated/docs-audit.ts',
         },
-        command: 'ricky run --artifact workflows/generated/docs-audit.ts',
+        command: 'ricky run workflows/generated/docs-audit.ts',
       },
     }));
 
@@ -711,7 +711,7 @@ describe('cliMain', () => {
     expect(result.exitCode).toBe(1);
     expect(output).toContain('Author: Workforce persona writer failed before authoring completed');
     expect(output).toContain('Generation: failed (status: error).');
-    expect(output).toContain('Error: WORKFORCE_PERSONA_WRITER_FAILED');
+    expect(output).toContain('Reason: WORKFORCE_PERSONA_WRITER_FAILED');
     expect(output).toContain('Next: Fix the generated workflow validation errors before local execution.');
     expect(output).not.toContain('Local handoff failed.');
     expect(output).not.toContain('Run commands');
@@ -1028,8 +1028,8 @@ describe('cliMain', () => {
 
     const output = result.output.join('\n');
     expect(result.exitCode).toBe(0);
-    expect(output).toContain('Artifact returned.');
     expect(output).toContain('Artifact: out/workflow.ts');
+    expect(output).toContain('Execution: not requested.');
     expect(output).toContain('Next: Review workflow');
     expect(output).not.toMatch(/rerun.*later/i);
     expect(result.interactiveResult?.awaitingInput).toBe(false);
@@ -1055,8 +1055,8 @@ describe('cliMain', () => {
             spec_digest: 'abc123',
           },
           next: {
-            run_command: 'ricky run --artifact workflows/generated/example.ts',
-            run_mode_hint: 'ricky run --artifact workflows/generated/example.ts',
+            run_command: 'ricky run workflows/generated/example.ts',
+            run_mode_hint: 'ricky run workflows/generated/example.ts',
           },
         },
         execution: {
@@ -1124,25 +1124,17 @@ describe('cliMain', () => {
       });
 
       const output = result.output.join('\n');
-      const generationIndex = result.output.indexOf('stage: generate');
-      const executionIndex = result.output.indexOf('--- execution ---');
 
       expect(result.exitCode).toBe(0);
-      expect(output).toContain('Generation: ok — artifact written to disk.');
-      expect(output).toContain('Execution: success — artifact ran through the Relay SDK workflow runner.');
-      expect(output).toContain('  Author: deterministic generator');
-      expect(generationIndex).toBeGreaterThan(-1);
-      expect(executionIndex).toBeGreaterThan(generationIndex);
-      expect(output).toContain('  Artifact: workflows/generated/issue-3.ts');
-      expect(output).toContain('  workflow_id: wf-issue-3');
-      expect(output).toContain('--- execution ---');
-      expect(output).toContain('stage: execute');
-      expect(output).toContain('status: success');
-      expect(output).toContain('  command: @agent-relay/sdk/workflows runScriptWorkflow workflows/generated/issue-3.ts');
-      expect(output).toContain('  outcome_summary: Workflow completed successfully with deterministic evidence.');
+      expect(output).toContain('Generation: ok — workflows/generated/issue-3.ts');
+      expect(output).toContain('Execution: success');
+      expect(output).toContain('Stdout: /repo/.workflow-artifacts/ricky-local-runs/run-1/stdout.log');
+      expect(output).toContain('Stderr: /repo/.workflow-artifacts/ricky-local-runs/run-1/stderr.log');
+      expect(output).not.toContain('--- execution ---');
+      expect(output).not.toContain('outcome_summary:');
     });
 
-    it('prints Workforce persona author metadata when the workflow was persona-authored', async () => {
+    it('prints concise run commands when the workflow was persona-authored', async () => {
       const personaResult = stagedLocalResult({
         generation: {
           ...stagedLocalResult().generation!,
@@ -1167,14 +1159,17 @@ describe('cliMain', () => {
         runInteractive: runner,
       });
 
-      expect(result.output.join('\n')).toContain('  Author: agent-relay-workflow@pro (gpt-5.5) via codex');
+      const output = result.output.join('\n');
+      expect(output).toContain('Generation: ok — workflows/generated/issue-3.ts');
+      expect(output).toContain('Run: ricky run workflows/generated/issue-3.ts');
+      expect(output).not.toContain('Author:');
     });
 
     it('keeps stop-after-generation human output artifact-only when no execution stage is returned', async () => {
       const artifactOnly = stagedLocalResult({
         execution: undefined,
         nextActions: [
-          'Run the generated workflow locally: ricky run --artifact workflows/generated/issue-3.ts',
+          'Run the generated workflow locally: ricky run workflows/generated/issue-3.ts',
           'Inspect the generated workflow artifact and choose whether to run it locally.',
         ],
       });
@@ -1192,12 +1187,9 @@ describe('cliMain', () => {
 
       const output = result.output.join('\n');
       expect(result.exitCode).toBe(0);
-      expect(output).toContain('stage: generate');
-      expect(output).toContain('status: ok');
-      expect(output).toContain('  Artifact: workflows/generated/issue-3.ts');
-      expect(output).toContain(
-        '  To execute this artifact: ricky run --artifact workflows/generated/issue-3.ts',
-      );
+      expect(output).toContain('Generation: ok — workflows/generated/issue-3.ts');
+      expect(output).toContain('Run: ricky run workflows/generated/issue-3.ts');
+      expect(output).toContain('Background: ricky run workflows/generated/issue-3.ts --background');
       expect(output).not.toContain('--- execution ---');
       expect(output).not.toContain('outcome_summary:');
       expect(output).not.toContain('blocker_code:');
@@ -1269,13 +1261,12 @@ describe('cliMain', () => {
     });
 
     const output = result.output.join('\n');
-    expect(output).toContain('Ricky reviewed the logs and could not choose one safe fix.');
-    expect(output).toContain('Relevant logs:');
-    expect(output).toContain('missing TEST_TOKEN in step runtime-launch');
-    expect(output).toContain('Options:');
-    expect(output).toContain('1. Try recovery step: export TEST_TOKEN=...');
-    expect(output).toContain('export TEST_TOKEN=...');
-    expect(output).toContain('ricky status --run ricky-local-options');
+    expect(output).toContain('Ricky reviewed the logs but could not safely finish the repair.');
+    expect(output).toContain('Auto-fix: blocker after 1/3 attempt(s) (MISSING_ENV_VAR)');
+    expect(output).toContain('Try: export TEST_TOKEN=...');
+    expect(output).toContain('Try: ricky status --run ricky-local-options');
+    expect(output).not.toContain('Relevant logs:');
+    expect(output).not.toContain('Options:');
   });
 
   it('renders auto-fix repair mode and summary for applied workflow repairs', async () => {
@@ -1307,9 +1298,8 @@ describe('cliMain', () => {
     });
 
     const output = result.output.join('\n');
-    expect(output).toContain('repair mode: deterministic');
-    expect(output).toContain('repair summary: Aligned deterministic workflow checks.');
-    expect(output).toContain('repaired artifact: workflows/generated/issue-3.ts');
+    expect(output).toContain('Auto-fix: ok after 2/3 attempt(s)');
+    expect(output).toContain('Repair: deterministic — Aligned deterministic workflow checks.');
   });
 
   describe('regression: issues #4 and #7 user-facing contracts', () => {
@@ -1331,18 +1321,11 @@ describe('cliMain', () => {
       });
 
       const output = result.output.join('\n');
-      const generationIndex = result.output.indexOf('stage: generate');
-      const artifactIndex = result.output.indexOf('  Artifact: workflows/generated/issue-3.ts');
-      const linkedCliIndex = result.output.indexOf('  Or with linked CLI: ricky run --artifact workflows/generated/issue-3.ts');
 
       expect(result.exitCode).toBe(0);
-      expect(output).toContain('Generation: ok — artifact written to disk.');
-      expect(output).toContain('Execution: not requested.');
-      expect(generationIndex).toBeGreaterThan(-1);
-      expect(artifactIndex).toBeGreaterThan(generationIndex);
-      expect(linkedCliIndex).toBeGreaterThan(artifactIndex);
-      expect(output).toContain('  workflow_id: wf-issue-3');
-      expect(output).toContain('  spec_digest: digest-issue-3');
+      expect(output).toContain('Generation: ok — workflows/generated/issue-3.ts');
+      expect(output).toContain('Run: ricky run workflows/generated/issue-3.ts');
+      expect(output).toContain('Background: ricky run workflows/generated/issue-3.ts --background');
       expect(output).not.toContain('--- execution ---');
       expect(output).not.toContain('Execution: success');
       expect(output).not.toContain('outcome_summary:');
@@ -1379,7 +1362,7 @@ describe('cliMain', () => {
           logs: ['[local] workflow generation: passed'],
           warnings: [],
           nextActions: [
-            'Run the generated workflow locally: ricky run --artifact workflows/generated/package-checks.ts',
+            'Run the generated workflow locally: ricky run workflows/generated/package-checks.ts',
             'Inspect the generated workflow artifact and choose whether to run it locally.',
           ],
         }),
@@ -1388,9 +1371,9 @@ describe('cliMain', () => {
 
     const output = result.output.join('\n');
     expect(result.exitCode).toBe(0);
-    expect(output).toContain('Artifact returned.');
     expect(output).toContain('Artifact: workflows/generated/package-checks.ts');
-    expect(output).toContain('Next: Run the generated workflow locally: ricky run --artifact workflows/generated/package-checks.ts');
+    expect(output).toContain('Execution: not requested.');
+    expect(output).toContain('Next: Run the generated workflow locally: ricky run workflows/generated/package-checks.ts');
     expect(output).toContain('Next: Inspect the generated workflow artifact and choose whether to run it locally.');
   });
 
@@ -1444,7 +1427,7 @@ describe('cliMain', () => {
     const artifactOnly = stagedLocalResult({
       execution: undefined,
       nextActions: [
-        'Run the generated workflow locally: ricky run --artifact workflows/generated/issue-3.ts',
+        'Run the generated workflow locally: ricky run workflows/generated/issue-3.ts',
       ],
     });
     const runner = vi.fn().mockResolvedValue(
@@ -1477,7 +1460,7 @@ describe('cliMain', () => {
       status: 'ok',
       warnings: [],
       nextActions: expect.arrayContaining([
-        'Run the generated workflow locally: ricky run --artifact workflows/generated/issue-3.ts',
+        'Run the generated workflow locally: ricky run workflows/generated/issue-3.ts',
       ]),
     });
   });
@@ -2488,7 +2471,7 @@ describe('cliMain', () => {
 
         // Next action command points to the same relative path
         const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
-          a.includes('ricky run --artifact'),
+          a.includes('ricky run'),
         );
         expect(runAction).toContain(artifact?.path);
 
@@ -2538,7 +2521,7 @@ describe('cliMain', () => {
 
         // Next action command points to the same relative path
         const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
-          a.includes('ricky run --artifact'),
+          a.includes('ricky run'),
         );
         expect(runAction).toContain(artifact?.path);
 
@@ -2590,7 +2573,7 @@ describe('cliMain', () => {
 
         // Next action command points to the same relative path
         const runAction = result.interactiveResult?.localResult?.nextActions.find((a) =>
-          a.includes('ricky run --artifact'),
+          a.includes('ricky run'),
         );
         expect(runAction).toContain(artifact?.path);
 

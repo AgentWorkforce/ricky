@@ -189,7 +189,7 @@ export function renderHandoffGuidance(): string {
     '  $ printf "%s\\n" "run workflows/release.workflow.ts" | ricky --mode local --stdin',
     '',
     '  Run an existing artifact:',
-    '  $ ricky run --artifact workflows/generated/<file>.ts',
+    '  $ ricky run workflows/generated/<file>.ts',
     '',
     '  MCP handoff:',
     '  Use `ricky.generate` with the same spec payload; Ricky normalizes it like CLI input.',
@@ -371,6 +371,14 @@ export async function runOnboarding(options: OnboardingOptions = {}): Promise<On
 
   if (!firstRun) {
     const fallbackMode = modeOverride ?? config.mode;
+    if (options.compactForExecution === true && modeOverride) {
+      return {
+        mode: fallbackMode,
+        firstRun: false,
+        bannerShown: false,
+        output: '',
+      };
+    }
     if (!modeOverride && options.compactForExecution !== true && shouldUsePromptShell(options, input, output)) {
       const headerLines = [
         renderCompactHeader(fallbackMode, providerStatus),

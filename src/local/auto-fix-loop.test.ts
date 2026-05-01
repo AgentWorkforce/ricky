@@ -90,6 +90,31 @@ describe('runWithAutoFix', () => {
     });
   });
 
+  it('emits concise foreground progress during repair and retry', async () => {
+    const progress: string[] = [];
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(blockerResponse('MISSING_BINARY', 'run-1', 'install-deps'))
+      .mockResolvedValueOnce(successResponse('run-2'));
+
+    await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('repaired workflow')),
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+      onProgress: (message) => progress.push(message),
+    });
+
+    expect(progress).toEqual([
+      'Running workflow (attempt 1/3)...',
+      'Workflow failed at install-deps; preparing repair...',
+      'Retrying workflow from install-deps...',
+      'Running workflow (attempt 2/3)...',
+    ]);
+  });
+
   it('extracts SDK workflow failed-step evidence from log tails for repair and resume', async () => {
     const runSingleAttempt = vi
       .fn()
@@ -203,7 +228,7 @@ describe('runWithAutoFix', () => {
       options: expect.arrayContaining([
         expect.objectContaining({
           label: 'Open the workflow and retry',
-          command: 'ricky run --artifact workflows/generated/foo.ts --foreground --no-auto-fix',
+          command: 'ricky run workflows/generated/foo.ts --foreground --no-auto-fix',
         }),
         expect.objectContaining({
           label: 'Check run status and saved logs',

@@ -31,10 +31,9 @@ describe('Ricky external CLI proof', () => {
     const artifactContent = await readFile(result.artifactFullPath, 'utf8');
     expect(artifactContent).toContain('workflow(');
 
-    expect(result.cliOutput).toContain('Generation: ok — artifact written to disk.');
-    expect(result.cliOutput).toContain(`Artifact: ${result.artifactPath}`);
-    expect(result.cliOutput).toContain(`To execute this artifact: ${result.nextCommand}`);
-    expect(result.nextCommand).toBe(`ricky run --artifact ${result.artifactPath}`);
+    expect(result.cliOutput).toContain(`Generation: ok — ${result.artifactPath}`);
+    expect(result.cliOutput).toContain(`Run: ${result.nextCommand}`);
+    expect(result.nextCommand).toBe(`ricky run ${result.artifactPath}`);
     expect(result.nextCommandOutput).toContain('Execution: success');
     },
   );

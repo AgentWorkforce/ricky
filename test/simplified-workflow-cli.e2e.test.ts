@@ -88,7 +88,7 @@ describe('simplified workflow CLI E2E paths', () => {
           expect(result.capture.artifactPath).toBe('workflows/generated/existing.ts');
         } else {
           expect(runLocalFn).toHaveBeenCalledTimes(1);
-          expect(result.summary.command).toContain('ricky run --artifact');
+          expect(result.summary.command).toContain('ricky run');
         }
       }
 
@@ -338,8 +338,8 @@ function localResponse(label: string): LocalResponse {
         spec_digest: 'digest-release-health',
       },
       next: {
-        run_command: 'ricky run --artifact workflows/generated/release-health.ts',
-        run_mode_hint: 'ricky run --artifact workflows/generated/release-health.ts',
+        run_command: 'ricky run workflows/generated/release-health.ts',
+        run_mode_hint: 'ricky run workflows/generated/release-health.ts',
       },
     },
     exitCode: 0,

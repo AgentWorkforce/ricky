@@ -98,8 +98,9 @@ export async function runExternalCliProof(
     }
 
     const cliOutput = normalizeOutput(cliInvocation.stdout);
-    const artifactPath = parseLabeledValue(cliOutput, 'Artifact');
-    const nextCommandText = parseLabeledValue(cliOutput, 'To execute this artifact');
+    const artifactPath = parseArtifactPath(cliOutput);
+    const nextCommandText = parseOptionalLabeledValue(cliOutput, 'To execute this artifact')
+      ?? parseLabeledValue(cliOutput, 'Run');
     const nextCommand = nextCommandText.trim();
 
     if (isAbsolute(artifactPath) || !artifactPath.startsWith('workflows/generated/')) {
@@ -230,12 +231,25 @@ function normalizeOutput(output: string): string {
 }
 
 function parseLabeledValue(output: string, label: string): string {
-  const pattern = new RegExp(`^\\s*${escapeRegExp(label)}:\\s+(.+)$`, 'm');
-  const match = output.match(pattern);
-  if (!match) {
+  const value = parseOptionalLabeledValue(output, label);
+  if (!value) {
     throw new Error(`Could not find "${label}:" in CLI output.\n${output}`);
   }
-  return match[1].trim();
+  return value;
+}
+
+function parseOptionalLabeledValue(output: string, label: string): string | undefined {
+  const pattern = new RegExp(`^\\s*${escapeRegExp(label)}:\\s+(.+)$`, 'm');
+  const match = output.match(pattern);
+  return match?.[1]?.trim();
+}
+
+function parseArtifactPath(output: string): string {
+  const labeled = parseOptionalLabeledValue(output, 'Artifact');
+  if (labeled) return labeled;
+  const compactGeneration = output.match(/^Generation:\s+ok\s+[—-]\s+(.+)$/m);
+  if (compactGeneration?.[1]) return compactGeneration[1].trim();
+  throw new Error(`Could not find generated artifact path in CLI output.\n${output}`);
 }
 
 function escapeRegExp(value: string): string {

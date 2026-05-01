@@ -277,14 +277,15 @@ export function renderHelp(): string[] {
     'Happy path:',
     '  ricky                                               Start guided mode',
     '  ricky local --spec <text>                           Write a workflow artifact',
-    '  ricky run --artifact <path> --background            Run it in the background',
+    '  ricky run <path>                                  Run attached in this terminal',
+    '  ricky run <path> --background                     Run it in the background',
     '  ricky status --run <run-id>                         Check progress',
     '',
     'Common commands:',
     '  ricky status                                        Show local and Cloud readiness',
     '  ricky connect cloud                                 Connect AgentWorkforce Cloud',
     '  ricky cloud --spec <text>                           Generate with Cloud',
-    '  ricky run --artifact <path>                         Run attached in this terminal',
+    '  ricky run <path>                                  Run attached in this terminal',
     '',
     'Usage:',
     '  ricky local --spec-file <path> --run                Generate, then run locally',
@@ -301,7 +302,7 @@ export function renderHelp(): string[] {
     '  --mode <mode>       Set mode (local, cloud, both)',
     '  --spec <text>       Inline spec text',
     '  --spec-file <path>  Read spec from a file',
-    '  --artifact <path>   Execute an existing artifact (implies --run)',
+    '  --artifact <path>   Alias for `ricky run <path>`',
     '  --run               Execute the generated artifact after generation',
     '  --no-run            Generate only and print the run command',
     '  --background        Return a run id immediately; use status --run to watch',
@@ -345,7 +346,7 @@ export function renderHelp(): string[] {
     '  ricky --mode local --spec "generate a workflow for package checks" --run',
     '  ricky --mode local --spec-file ./my-spec.md',
     '  printf "%s\\n" "run workflows/release.workflow.ts" | ricky --mode local --stdin',
-    '  ricky run --artifact workflows/generated/package-checks.ts --background',
+    '  ricky run workflows/generated/package-checks.ts --background',
   ];
 }
 
@@ -1563,6 +1564,11 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     };
   }
 
+  const localProgress = deps.localProgress ??
+    (shouldStreamLocalProgress(parsed, cliHandoff)
+      ? (message: string) => (deps.output ?? process.stdout).write(`${message}\n`)
+      : undefined);
+
   const interactiveDeps: InteractiveCliDeps = {
     ...deps,
     cwd: resolveInvocationRoot(deps.cwd),
@@ -1570,6 +1576,7 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     ...(parsed.mode ? { mode: parsed.mode } : cliHandoff ? { mode: 'local' } : {}),
     ...(cliHandoff ? { handoff: cliHandoff } : {}),
     ...(cloudRequest ? { cloudRequest } : {}),
+    ...(localProgress ? { localProgress } : {}),
     ...cloudRecoveryDeps,
     preferWorkforcePersonaWorkflowWriter:
       deps.preferWorkforcePersonaWorkflowWriter ??
@@ -1726,140 +1733,117 @@ function renderLocalJson(localResult: NonNullable<InteractiveCliResult['localRes
 
 function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localResult']>): string[] {
   const lines: string[] = [];
+  const artifactPath = localResult.generation?.artifact?.path ?? localResult.artifacts[0]?.path;
   if (localResult.ok) {
     if (localResult.execution?.status === 'success') {
-      lines.push('Generation: ok — artifact written to disk.');
-      lines.push('Execution: success — artifact ran through the Relay SDK workflow runner.');
+      lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
+      lines.push(`Execution: success${localResult.execution.execution.run_id ? ` — run ${localResult.execution.execution.run_id}` : ''}`);
     } else if (localResult.generation) {
-      lines.push('Generation: ok — artifact written to disk.');
-      lines.push('Execution: not requested. Pass --run to execute, or run the command printed below.');
+      lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
+      if (localResult.generation.next) {
+        lines.push(`Run: ${localResult.generation.next.run_command}`);
+        lines.push(`Background: ${localResult.generation.next.run_command} --background`);
+      } else {
+        lines.push('Execution: not requested.');
+      }
     } else {
-      lines.push('Artifact returned. No execution was attempted.');
+      lines.push(`Artifact: ${artifactPath ?? 'returned'}`);
+      lines.push('Execution: not requested.');
     }
   } else {
     if (localResult.execution) {
-      lines.push('Generation: ok — artifact written to disk.');
-      lines.push(`Execution: failed (status: ${localResult.execution.status}).`);
+      lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
+      lines.push(executionFailureSummary(localResult));
     } else if (localResult.generation) {
       lines.push(`Generation: failed (status: ${localResult.generation.status}).`);
-      lines.push('No artifact was written. Nothing was executed.');
+      if (localResult.generation.error) lines.push(`Reason: ${localResult.generation.error}`);
     } else {
       lines.push('Local handoff failed.');
     }
   }
 
-  if (localResult.generation) {
-    lines.push(`stage: ${localResult.generation.stage}`);
-    lines.push(`status: ${localResult.generation.status}`);
-    lines.push(`  Author: ${localGenerationAuthor(localResult.generation)}`);
-    if (localResult.generation.artifact) {
-      lines.push(`  Artifact: ${localResult.generation.artifact.path}`);
-      lines.push(`  workflow_id: ${localResult.generation.artifact.workflow_id}`);
-      lines.push(`  spec_digest: ${localResult.generation.artifact.spec_digest}`);
-    } else {
-      for (const artifact of localResult.artifacts) {
-        lines.push(`  Artifact: ${artifact.path}`);
-      }
-    }
-    if (localResult.generation.next) {
-      lines.push(`  To execute this artifact: ${localResult.generation.next.run_command}`);
-      lines.push(`  To run in background: ${localResult.generation.next.run_command} --background`);
-      lines.push('  Then check progress: ricky status --run <run-id>');
-      lines.push(`  Or with linked CLI: ${localResult.generation.next.run_mode_hint}`);
-    }
-    if (localResult.generation.error) {
-      lines.push(`  Error: ${localResult.generation.error}`);
-    }
-  } else {
-    for (const artifact of localResult.artifacts) {
-      lines.push(`  Artifact: ${artifact.path}`);
-    }
-  }
-
   if (localResult.execution) {
-    lines.push('--- execution ---');
-    lines.push(`stage: ${localResult.execution.stage}`);
-    lines.push(`status: ${localResult.execution.status}`);
-    lines.push(`  command: ${localResult.execution.execution.command}`);
-    lines.push(`  workflow_file: ${localResult.execution.execution.workflow_file}`);
-    lines.push(`  cwd: ${localResult.execution.execution.cwd}`);
     if (localResult.execution.evidence) {
-      lines.push(`  outcome_summary: ${localResult.execution.evidence.outcome_summary}`);
       if (localResult.execution.evidence.logs.stdout_path) {
-        lines.push(`  stdout_path: ${localResult.execution.evidence.logs.stdout_path}`);
+        lines.push(`Stdout: ${localResult.execution.evidence.logs.stdout_path}`);
       }
       if (localResult.execution.evidence.logs.stderr_path) {
-        lines.push(`  stderr_path: ${localResult.execution.evidence.logs.stderr_path}`);
-      }
-      for (const tailLine of localResult.execution.evidence.logs.tail ?? []) {
-        lines.push(`  tail: ${tailLine}`);
+        lines.push(`Stderr: ${localResult.execution.evidence.logs.stderr_path}`);
       }
     }
     if (localResult.execution.blocker) {
-      lines.push(`  blocker_code: ${localResult.execution.blocker.code}`);
-      lines.push(`  blocker_category: ${localResult.execution.blocker.category}`);
-      lines.push(`  blocker_message: ${localResult.execution.blocker.message}`);
-      for (const step of localResult.execution.blocker.recovery.steps) {
-        lines.push(`  Recovery: ${step}`);
-      }
+      lines.push(`Reason: ${compactSentence(localResult.execution.blocker.message)}`);
     }
   }
 
   if (localResult.auto_fix) {
-    lines.push('--- auto-fix ---');
-    for (const attempt of localResult.auto_fix.attempts) {
-      const status = String(attempt.status ?? 'unknown');
-      const label = `attempt ${String(attempt.attempt)}/${localResult.auto_fix.max_attempts}:`;
-      const blocker = attempt.blocker_code ? ` (${String(attempt.blocker_code)})` : '';
-      lines.push(label);
-      lines.push(`  status: ${status}${blocker}`);
-      if (attempt.applied_fix && typeof attempt.applied_fix === 'object') {
-        const fix = attempt.applied_fix as { steps?: unknown; exit_code?: unknown; mode?: unknown; summary?: unknown; artifact_path?: unknown };
-        if (typeof fix.mode === 'string') lines.push(`  repair mode: ${fix.mode}`);
-        if (typeof fix.summary === 'string') lines.push(`  repair summary: ${fix.summary}`);
-        if (typeof fix.artifact_path === 'string') lines.push(`  repaired artifact: ${fix.artifact_path}`);
-        if (Array.isArray(fix.steps)) lines.push(`  applied fix: ${fix.steps.join(' && ')}`);
-        if (fix.exit_code !== undefined) lines.push(`  fix outcome: ${fix.exit_code === 0 ? 'ok' : `exit ${String(fix.exit_code)}`}`);
-      }
-      if (attempt.warning) lines.push(`  warning: ${String(attempt.warning)}`);
-    }
     const finalAttempt = localResult.auto_fix.attempts.at(-1);
-    const finalBlocker = finalAttempt?.blocker_code ? ` Final blocker: ${String(finalAttempt.blocker_code)}.` : '';
-    const final = autoFixFinalMessage(
-      localResult.auto_fix.final_status,
-      localResult.auto_fix.attempts.length,
-      localResult.auto_fix.max_attempts,
-      finalBlocker,
-    );
-    lines.push(final);
+    const finalBlocker = finalAttempt?.blocker_code ? ` (${String(finalAttempt.blocker_code)})` : '';
+    lines.push(`Auto-fix: ${localResult.auto_fix.final_status} after ${localResult.auto_fix.attempts.length}/${localResult.auto_fix.max_attempts} attempt(s)${finalBlocker}`);
+    const fixError = typeof finalAttempt?.fix_error === 'string' ? finalAttempt.fix_error : undefined;
+    if (fixError) lines.push(`Repair issue: ${compactSentence(fixError)}`);
+    const appliedFix = finalAttempt?.applied_fix;
+    if (appliedFix && typeof appliedFix === 'object') {
+      const fix = appliedFix as { mode?: unknown; summary?: unknown; artifact_path?: unknown };
+      const summary = typeof fix.summary === 'string' ? compactSentence(fix.summary) : undefined;
+      const mode = typeof fix.mode === 'string' ? fix.mode : undefined;
+      if (mode || summary) lines.push(`Repair: ${[mode, summary].filter(Boolean).join(' — ')}`);
+    }
     if (localResult.auto_fix.escalation) {
-      lines.push('Ricky reviewed the logs and could not choose one safe fix.');
-      lines.push(`  ${localResult.auto_fix.escalation.summary}`);
-      if (localResult.auto_fix.escalation.log_tail.length > 0) {
-        lines.push('Relevant logs:');
-        for (const tailLine of localResult.auto_fix.escalation.log_tail) {
-          lines.push(`  ${tailLine}`);
-        }
+      lines.push(`Ricky reviewed the logs but could not safely finish the repair.`);
+      for (const option of localResult.auto_fix.escalation.options.slice(0, 3)) {
+        lines.push(option.command ? `Try: ${option.command}` : `Try: ${option.description}`);
       }
-      lines.push('Options:');
-      localResult.auto_fix.escalation.options.forEach((option, index) => {
-        lines.push(`  ${index + 1}. ${option.label}: ${option.description}`);
-        if (option.command) lines.push(`     ${option.command}`);
-      });
     }
   }
 
   const shouldRenderNextActions =
-    !localResult.generation ||
-    localResult.generation.status !== 'ok' ||
-    localResult.execution?.status === 'blocker';
+    !localResult.auto_fix &&
+    (
+      !localResult.generation ||
+      localResult.generation.status !== 'ok' ||
+      localResult.execution?.status === 'blocker'
+    );
 
   if (shouldRenderNextActions) {
-    for (const action of localResult.nextActions) {
-      lines.push(`  Next: ${action}`);
+    for (const action of localResult.nextActions.slice(0, 2)) {
+      lines.push(`Next: ${action}`);
     }
   }
   return lines;
+}
+
+function shouldStreamLocalProgress(parsed: ParsedArgs, handoff: RawHandoff | undefined): boolean {
+  return Boolean(
+    handoff &&
+    !parsed.json &&
+    !parsed.quiet &&
+    parsed.background !== true,
+  );
+}
+
+function executionFailureSummary(localResult: NonNullable<InteractiveCliResult['localResult']>): string {
+  const execution = localResult.execution;
+  if (!execution) return 'Execution: failed.';
+  const blocker = execution.blocker?.code ? ` — ${execution.blocker.code}` : '';
+  const failedStep = failedStepFromTail(execution.evidence?.logs.tail ?? [])
+    ?? execution.evidence?.failed_step?.id;
+  return `Execution: ${execution.status}${blocker}${failedStep ? ` at ${failedStep}` : ''}`;
+}
+
+function failedStepFromTail(tail: string[]): string | undefined {
+  for (const line of tail) {
+    const failed = line.match(/[✗x]\s+([^\s]+)\s+[—-]\s+FAILED/i)
+      ?? line.match(/Step "([^"]+)" failed/i);
+    if (failed?.[1]) return failed[1];
+  }
+  return undefined;
+}
+
+function compactSentence(value: string, maxLength = 220): string {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
 function localGenerationAuthor(generation: NonNullable<InteractiveCliResult['localResult']>['generation']): string {
@@ -1878,16 +1862,6 @@ function localGenerationAuthor(generation: NonNullable<InteractiveCliResult['loc
 
 function isAutoFixValue(value: string): boolean {
   return /^-?\d+$/.test(value);
-}
-
-function autoFixFinalMessage(finalStatus: string, attempts: number, maxAttempts: number, finalBlocker: string): string {
-  if (finalStatus === 'ok') {
-    return `Auto-fix loop succeeded on attempt ${attempts}/${maxAttempts}.`;
-  }
-  if (attempts >= maxAttempts) {
-    return `Auto-fix loop exhausted ${maxAttempts} attempts.${finalBlocker}`;
-  }
-  return `Auto-fix loop stopped with status ${finalStatus}.${finalBlocker}`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
