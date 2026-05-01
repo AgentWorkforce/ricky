@@ -1907,6 +1907,11 @@ describe('cliMain', () => {
     await cliMain({
       argv: ['cloud', '--spec', 'build a workflow', '--login'],
       runInteractive: runner,
+      cloudRequest: {
+        auth: { token: 'stored-token' },
+        workspace: { workspaceId: 'workspace-from-test' },
+        body: { spec: 'placeholder', mode: 'cloud' },
+      },
     });
     const deps = runner.mock.calls[0][0];
     expect(typeof deps.recoverCloudLogin).toBe('function');
@@ -1917,6 +1922,11 @@ describe('cliMain', () => {
     await cliMain({
       argv: ['cloud', '--spec', 'build a workflow', '--connect-missing'],
       runInteractive: runner,
+      cloudRequest: {
+        auth: { token: 'stored-token' },
+        workspace: { workspaceId: 'workspace-from-test' },
+        body: { spec: 'placeholder', mode: 'cloud' },
+      },
     });
     const deps = runner.mock.calls[0][0];
     expect(typeof deps.connectCloudAgents).toBe('function');
