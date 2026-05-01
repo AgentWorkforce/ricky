@@ -67,7 +67,7 @@ export async function startLocalRunMonitor(options: LocalRunMonitorOptions): Pro
   };
   await persistState(initialState);
 
-  const handoff = withSafeRunOptions(options.handoff, options.autoFixAttempts);
+  const handoff = withSafeRunOptions(options.handoff, options.autoFixAttempts, runId);
   const runningState = { ...initialState, status: 'running' as const };
   await persistState(runningState);
   await options.onMonitorStarted?.(runningState);
@@ -89,7 +89,11 @@ export async function startLocalRunMonitor(options: LocalRunMonitorOptions): Pro
   return finalState;
 }
 
-export function withSafeRunOptions(handoff: RawHandoff, autoFixAttempts: number | undefined): RawHandoff {
+export function withSafeRunOptions(
+  handoff: RawHandoff,
+  autoFixAttempts: number | undefined,
+  trackingRunId?: string,
+): RawHandoff {
   const maxAttempts = clampAutoFixAttempts(autoFixAttempts ?? 3);
   return {
     ...handoff,
@@ -99,6 +103,7 @@ export function withSafeRunOptions(handoff: RawHandoff, autoFixAttempts: number 
     metadata: {
       ...(handoff.metadata ?? {}),
       autoFixPolicy: 'bounded-safe-only',
+      ...(trackingRunId ? { rickyRunId: trackingRunId } : {}),
       destructiveActionsApproved: false,
       commitsApproved: false,
     },

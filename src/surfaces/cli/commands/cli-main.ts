@@ -381,6 +381,9 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
   const handoffMode = parsed.mode ?? 'local';
   const invocationRoot = resolveInvocationRoot(deps.cwd);
   const stageMode = parsed.runRequested ? 'run' : 'generate';
+  const runAutoFix = parsed.autoFix && stageMode === 'run'
+    ? { autoFix: { maxAttempts: parsed.autoFix } }
+    : {};
 
   if (parsed.artifact !== undefined) {
     return {
@@ -407,7 +410,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...(parsed.specFile ? { specFile: parsed.specFile } : {}),
       mode: handoffMode,
       stageMode,
-      ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
+      ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       cliMetadata: cliMetadataFor(parsed, 'inline-spec'),
     };
@@ -424,7 +427,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       invocationRoot,
       mode: handoffMode,
       stageMode,
-      ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
+      ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       cliMetadata: cliMetadataFor(parsed, 'spec-file'),
     };
@@ -442,7 +445,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       invocationRoot,
       mode: handoffMode,
       stageMode,
-      ...(parsed.autoFix ? { autoFix: { maxAttempts: parsed.autoFix } } : {}),
+      ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       cliMetadata: cliMetadataFor(parsed, 'stdin'),
     };

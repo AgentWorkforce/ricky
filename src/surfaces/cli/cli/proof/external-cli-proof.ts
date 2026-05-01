@@ -86,7 +86,7 @@ export async function runExternalCliProof(
     const linkedCliPath = await linkRickyCliIntoExternalRepo(repoRoot, repoDir);
     await installAgentRelayFixture(repoDir);
 
-    const cliInvocation = await runner.run(linkedCliPath, ['--mode', 'local', '--spec', spec], {
+    const cliInvocation = await runner.run(linkedCliPath, ['--mode', 'local', '--spec', spec, '--no-workforce-persona'], {
       cwd: repoDir,
       env: { INIT_CWD: repoDir },
     });

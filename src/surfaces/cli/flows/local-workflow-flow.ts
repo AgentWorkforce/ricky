@@ -14,7 +14,7 @@ import {
   type CapturedWorkflowSpec,
   type SpecIntakePrompts,
 } from './spec-intake-flow.js';
-import { startLocalRunMonitor, type LocalRunMonitorState } from './local-run-monitor.js';
+import { startLocalRunMonitor, withSafeRunOptions, type LocalRunMonitorState } from './local-run-monitor.js';
 
 export interface LocalPreflightCheck {
   id: string;
@@ -285,7 +285,7 @@ export async function runLocalWorkflowFlow(deps: LocalWorkflowFlowDeps): Promise
     return { preflight, capture, generation, summary, confirmation, monitoredRun, command };
   }
 
-  const run = await runLocalFn(runHandoff, deps.localOptions);
+  const run = await runLocalFn(withSafeRunOptions(runHandoff, deps.autoFixAttempts), deps.localOptions);
   return { preflight, capture, generation, summary, confirmation, run, command };
 }
 

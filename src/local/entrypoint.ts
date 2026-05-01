@@ -174,6 +174,8 @@ export interface LocalResponse {
     max_attempts: number;
     attempts: Array<Record<string, unknown>>;
     final_status: 'ok' | 'blocker' | 'error';
+    run_id?: string;
+    resumed?: boolean;
   };
 }
 
@@ -416,9 +418,19 @@ function normalizeCoordinatorRetry(retry: Partial<RunRetryMetadata> | undefined)
 
 function buildSdkInvocationSummary(request: RunRequest): CommandInvocationSummary {
   const route = request.route ?? DEFAULT_LOCAL_ROUTE;
+  const retry = normalizeCoordinatorRetry(request.retry);
+  const retryArgs = [
+    ...(retry.startFromStep ? ['--start-from', retry.startFromStep] : []),
+    ...(retry.previousRunId ? ['--previous-run-id', retry.previousRunId] : []),
+  ];
   return {
     command: route.command ?? DEFAULT_LOCAL_ROUTE.command!,
-    args: [...(route.baseArgs ?? DEFAULT_LOCAL_ROUTE.baseArgs ?? []), request.workflowFile, ...(request.extraArgs ?? [])],
+    args: [
+      ...(route.baseArgs ?? DEFAULT_LOCAL_ROUTE.baseArgs ?? []),
+      request.workflowFile,
+      ...retryArgs,
+      ...(request.extraArgs ?? []),
+    ],
     cwd: request.cwd,
     ...(request.env ? { env: request.env } : {}),
   };
@@ -898,6 +910,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         timeoutMs: options.timeoutMs,
         route,
         env: { AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
+        ...stableRunIdFor(request),
         retry: request.retry,
         metadata: {
           requestId: intakeResult.requestId,
@@ -1184,6 +1197,12 @@ function sourceToSurface(source: LocalInvocationRequest['source']): InputSurface
     case 'workflow-artifact':
       return 'cli';
   }
+}
+
+function stableRunIdFor(request: LocalInvocationRequest): Pick<RunRequest, 'runId'> {
+  const fromMetadata = request.metadata.rickyRunId ?? request.metadata.runId;
+  if (typeof fromMetadata === 'string' && fromMetadata.trim()) return { runId: fromMetadata };
+  return request.requestId ? { runId: request.requestId } : {};
 }
 
 function resolveWorkforcePersonaWriterOptions(

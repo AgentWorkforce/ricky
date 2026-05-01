@@ -1,7 +1,8 @@
-import { access } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { delimiter, isAbsolute, join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 
 import type { LocalInvocationRequest } from './request-normalizer.js';
 import type { LocalClassifiedBlocker, LocalResponse } from './entrypoint.js';
@@ -10,16 +11,42 @@ import type { FailureClassification } from '../runtime/failure/types.js';
 import { debugWorkflowRun as defaultDebugWorkflowRun } from '../product/specialists/debugger/debugger.js';
 import type { DebuggerResult } from '../product/specialists/debugger/types.js';
 import type { WorkflowRunEvidence, WorkflowStepEvidence } from '../shared/models/workflow-evidence.js';
+import { repairWorkflowWithWorkforcePersona } from '../product/generation/workforce-persona-repairer.js';
 
 export interface AutoFixAttemptSummary {
   attempt: number;
   status: 'ok' | 'blocker' | 'error';
   blocker_code?: string;
   run_id?: string;
+  tracking_run_id?: string;
   failed_step?: string;
-  applied_fix?: { steps: string[]; exit_code: number };
+  applied_fix?: Record<string, unknown>;
   fix_error?: string;
   warning?: string;
+}
+
+export interface WorkflowRepairInput {
+  request: LocalInvocationRequest;
+  response: LocalResponse;
+  evidence: WorkflowRunEvidence;
+  classification: FailureClassification;
+  debuggerResult: DebuggerResult;
+  artifactPath: string;
+  artifactContent: string;
+  cwd: string;
+  failedStep?: string;
+  runId?: string;
+  attempt: number;
+  maxAttempts: number;
+}
+
+export interface WorkflowRepairResult {
+  applied: boolean;
+  content?: string;
+  artifactPath?: string;
+  summary: string;
+  warnings?: string[];
+  runId?: string | null;
 }
 
 export interface RunWithAutoFixOptions {
@@ -30,6 +57,8 @@ export interface RunWithAutoFixOptions {
     evidence: WorkflowRunEvidence;
     classification: FailureClassification;
   }) => DebuggerResult;
+  workflowRepairer?: (input: WorkflowRepairInput) => Promise<WorkflowRepairResult>;
+  artifactWriter?: (artifactPath: string, content: string, cwd: string) => Promise<void>;
   repairRunner?: (command: string, cwd: string) => Promise<{ exitCode: number }>;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -43,10 +72,13 @@ export async function runWithAutoFix(
   const maxAttempts = clampAttempts(options.maxAttempts);
   const classifyFailure = options.classifyFailure ?? defaultClassifyFailure;
   const debugWorkflowRun = options.debugWorkflowRun ?? defaultDebugWorkflowRun;
+  const workflowRepairer = options.workflowRepairer ?? defaultWorkflowRepairer;
+  const artifactWriter = options.artifactWriter ?? writeWorkflowArtifact;
   const repairRunner = options.repairRunner ?? runShellCommand;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const attempts: AutoFixAttemptSummary[] = [];
   const warnings: string[] = [];
+  const trackingRunId = resolveTrackingRunId(request) ?? `ricky-local-${randomUUID()}`;
   let currentRequest: LocalInvocationRequest = { ...request, autoFix: undefined };
   let lastResponse: LocalResponse | undefined;
   let retryOfRunId: string | undefined;
@@ -59,10 +91,11 @@ export async function runWithAutoFix(
       const summary: AutoFixAttemptSummary = {
         attempt,
         status: 'ok',
+        ...(trackingRunId ? { tracking_run_id: trackingRunId } : {}),
         ...runIdPart(resolveRunId(response)),
       };
       attempts.push(summary);
-      return withAutoFix(response, maxAttempts, attempts, 'ok', warnings);
+      return withAutoFix(response, maxAttempts, attempts, 'ok', warnings, trackingRunId);
     }
 
     const evidence = localResponseToWorkflowRunEvidence(response, attempt);
@@ -74,20 +107,93 @@ export async function runWithAutoFix(
       status: response.execution?.status === 'blocker' ? 'blocker' : 'error',
       ...(blockerCode ? { blocker_code: blockerCode } : {}),
       ...(failedStep ? { failed_step: failedStep } : {}),
+      ...(trackingRunId ? { tracking_run_id: trackingRunId } : {}),
       ...runIdPart(runId),
     };
     attempts.push(attemptSummary);
 
     if (attempt >= maxAttempts) {
-      return withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings);
+      return withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
     }
 
     const classification = classifyFailure(evidence);
     const debuggerResult = debugWorkflowRun({ evidence, classification });
+    const repairTarget = await resolveWorkflowRepairTarget(currentRequest, response);
+
+    if (repairTarget) {
+      try {
+        const repair = await workflowRepairer({
+          request: currentRequest,
+          response,
+          evidence,
+          classification,
+          debuggerResult,
+          artifactPath: repairTarget.artifactPath,
+          artifactContent: repairTarget.artifactContent,
+          cwd: repairTarget.cwd,
+          ...(failedStep ? { failedStep } : {}),
+          ...(runId ? { runId } : {}),
+          attempt,
+          maxAttempts,
+        });
+
+        if (!repair.applied || !repair.content) {
+          attemptSummary.fix_error = repair.summary || 'Workforce persona repair did not return a repaired workflow artifact.';
+          const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+          escalated.nextActions = [
+            ...escalated.nextActions,
+            debuggerResult.summary,
+            ...debuggerResult.recommendation.steps.map((step) => step.description),
+          ];
+          return escalated;
+        }
+
+        const repairedArtifactPath = repair.artifactPath ?? repairTarget.artifactPath;
+        await artifactWriter(repairedArtifactPath, repair.content, repairTarget.cwd);
+        attemptSummary.applied_fix = {
+          mode: 'workforce-persona',
+          artifact_path: repairedArtifactPath,
+          summary: repair.summary,
+          ...(repair.runId ? { persona_run_id: repair.runId } : {}),
+        };
+        warnings.push(...(repair.warnings ?? []));
+
+        if (!runId) {
+          const warning = 'Auto-fix retry could not resolve a previous run id; retrying without step-level resume.';
+          attemptSummary.warning = warning;
+          warnings.push(warning);
+        } else if (!retryOfRunId) {
+          retryOfRunId = runId;
+        }
+
+        currentRequest = {
+          ...retryBaseRequest(currentRequest, response, repairedArtifactPath, repair.content),
+          autoFix: undefined,
+          retry: {
+            attempt: attempt + 1,
+            maxAttempts,
+            ...(runId ? { previousRunId: runId, retryOfRunId: retryOfRunId ?? runId } : {}),
+            ...(failedStep ? { startFromStep: failedStep } : {}),
+            reason: `auto-fix retry after Workforce workflow persona repair for ${blockerCode ?? 'local failure'}`,
+          },
+        };
+        continue;
+      } catch (error) {
+        attemptSummary.fix_error = error instanceof Error ? error.message : String(error);
+        const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+        escalated.nextActions = [
+          ...escalated.nextActions,
+          'Ricky could not apply the Workforce workflow persona repair automatically.',
+          debuggerResult.summary,
+          ...debuggerResult.recommendation.steps.map((step) => step.description),
+        ];
+        return escalated;
+      }
+    }
 
     const repairMode = isV1DirectBlocker(blockerCode) ? 'direct' : debuggerResult.repairMode;
     if (repairMode !== 'direct') {
-      const guided = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings);
+      const guided = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
       guided.nextActions = [
         ...guided.nextActions,
         debuggerResult.summary,
@@ -101,11 +207,11 @@ export async function runWithAutoFix(
       repairRunner,
       sleep,
     });
-    attemptSummary.applied_fix = { steps: fix.steps, exit_code: fix.exitCode };
+    attemptSummary.applied_fix = { mode: 'direct', steps: fix.steps, exit_code: fix.exitCode };
 
     if (fix.exitCode !== 0) {
       attemptSummary.fix_error = fix.error ?? 'direct repair failed';
-      const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings);
+      const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
       escalated.nextActions = [
         ...escalated.nextActions,
         ...(response.execution?.blocker?.recovery.steps ?? []),
@@ -122,7 +228,7 @@ export async function runWithAutoFix(
     }
 
     currentRequest = {
-      ...retryBaseRequest(request, response),
+      ...retryBaseRequest(currentRequest, response),
       autoFix: undefined,
       retry: {
         attempt: attempt + 1,
@@ -134,22 +240,101 @@ export async function runWithAutoFix(
     };
   }
 
-  return withAutoFix(lastResponse ?? failedBeforeAttempt(request), maxAttempts, attempts, 'error', warnings);
+  return withAutoFix(lastResponse ?? failedBeforeAttempt(request), maxAttempts, attempts, 'error', warnings, trackingRunId);
 }
 
 function isV1DirectBlocker(code: string | undefined): boolean {
   return code === 'MISSING_BINARY' || code === 'NETWORK_TRANSIENT';
 }
 
-function retryBaseRequest(request: LocalInvocationRequest, response: LocalResponse): LocalInvocationRequest {
-  const artifactPath = response.generation?.artifact?.path;
+async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<WorkflowRepairResult> {
+  const result = await repairWorkflowWithWorkforcePersona({
+    repoRoot: input.cwd,
+    artifactPath: input.artifactPath,
+    artifactContent: input.artifactContent,
+    evidence: input.evidence,
+    classification: input.classification,
+    debuggerResult: input.debuggerResult,
+    blocker: input.response.execution?.blocker,
+    ...(input.failedStep ? { failedStep: input.failedStep } : {}),
+    ...(input.runId ? { previousRunId: input.runId } : {}),
+    attempt: input.attempt,
+    maxAttempts: input.maxAttempts,
+  });
+
+  return {
+    applied: true,
+    artifactPath: input.artifactPath,
+    content: result.artifact.content,
+    summary: summaryFromRepairMetadata(result.artifact.metadata),
+    warnings: result.metadata.warnings,
+    runId: result.metadata.runId,
+  };
+}
+
+function summaryFromRepairMetadata(metadata: Record<string, unknown>): string {
+  const summary = metadata.summary;
+  return typeof summary === 'string' && summary.trim()
+    ? summary
+    : 'Workforce workflow persona repaired the workflow artifact.';
+}
+
+async function resolveWorkflowRepairTarget(
+  request: LocalInvocationRequest,
+  response: LocalResponse,
+): Promise<{ artifactPath: string; artifactContent: string; cwd: string } | null> {
+  const artifactPath = resolveArtifactPath(request, response);
+  if (!artifactPath) return null;
+
+  const cwd = response.execution?.execution.cwd ?? request.invocationRoot ?? process.cwd();
+  const inlineArtifact = response.artifacts.find((candidate) => candidate.path === artifactPath && candidate.content);
+  if (inlineArtifact?.content) {
+    return { artifactPath, artifactContent: inlineArtifact.content, cwd };
+  }
+
+  if (request.source === 'workflow-artifact' && request.specPath === artifactPath && request.spec.trim()) {
+    return { artifactPath, artifactContent: request.spec, cwd };
+  }
+
+  try {
+    const absolutePath = isAbsolute(artifactPath) ? artifactPath : resolve(cwd, artifactPath);
+    const artifactContent = await readFile(absolutePath, 'utf8');
+    return { artifactPath, artifactContent, cwd };
+  } catch {
+    return null;
+  }
+}
+
+function resolveArtifactPath(request: LocalInvocationRequest, response: LocalResponse): string | undefined {
+  return (
+    response.execution?.execution.workflow_file ??
+    response.execution?.execution.artifact_path ??
+    response.generation?.artifact?.path ??
+    response.artifacts[0]?.path ??
+    request.specPath
+  );
+}
+
+async function writeWorkflowArtifact(artifactPath: string, content: string, cwd: string): Promise<void> {
+  const absolutePath = isAbsolute(artifactPath) ? artifactPath : resolve(cwd, artifactPath);
+  await mkdir(dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, content, 'utf8');
+}
+
+function retryBaseRequest(
+  request: LocalInvocationRequest,
+  response: LocalResponse,
+  overrideArtifactPath?: string,
+  overrideArtifactContent?: string,
+): LocalInvocationRequest {
+  const artifactPath = overrideArtifactPath ?? resolveArtifactPath(request, response);
   if (!artifactPath) return request;
 
   const artifact = response.artifacts.find((candidate) => candidate.path === artifactPath);
   return {
     ...request,
     source: 'workflow-artifact',
-    spec: artifact?.content ?? request.spec,
+    spec: overrideArtifactContent ?? artifact?.content ?? request.spec,
     structuredSpec: undefined,
     specPath: artifactPath,
     stageMode: 'run',
@@ -170,6 +355,7 @@ function withAutoFix(
   attempts: AutoFixAttemptSummary[],
   finalStatus: 'ok' | 'blocker' | 'error',
   warnings: string[],
+  trackingRunId: string | undefined,
 ): LocalResponse {
   return {
     ...response,
@@ -178,6 +364,8 @@ function withAutoFix(
       max_attempts: maxAttempts,
       attempts: attempts.map((attempt) => ({ ...attempt })),
       final_status: finalStatus,
+      ...(trackingRunId ? { run_id: trackingRunId } : {}),
+      resumed: attempts.length > 1,
     },
     exitCode: finalStatus === 'ok' ? 0 : response.exitCode ?? 2,
   };
@@ -345,4 +533,10 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
 
 function runIdPart(runId: string | undefined): { run_id?: string } {
   return runId ? { run_id: runId } : {};
+}
+
+function resolveTrackingRunId(request: LocalInvocationRequest): string | undefined {
+  const fromMetadata = request.metadata.rickyRunId ?? request.metadata.runId;
+  if (typeof fromMetadata === 'string' && fromMetadata.trim()) return fromMetadata;
+  return request.requestId;
 }
