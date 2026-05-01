@@ -341,6 +341,21 @@ describe('workflow generation pipeline', () => {
     expect(result.validation.errors).toEqual([]);
   });
 
+  it('uses the explicit artifact path basename for workflow identity', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Goal: I want to clean up the codebase to remove outdated and unused files.',
+      }),
+      artifactPath: 'workflows/generated/repo-tidying.ts',
+    });
+
+    expect(result.artifact).toMatchObject({
+      artifactPath: 'workflows/generated/repo-tidying.ts',
+      workflowId: 'ricky-repo-tidying',
+      channel: 'wf-ricky-repo-tidying',
+    });
+  });
+
   it('renders the required workflow structure and deterministic gates', () => {
     const result = generate({
       spec: spec({
@@ -832,7 +847,7 @@ describe('workflow generation pipeline', () => {
     expect(result.success).toBe(true);
     const content = artifact(result).content;
 
-    const slug = 'verify-artifact-directory-scoping-for-generated';
+    const slug = 'scoped-paths';
     const artifactsDir = `.workflow-artifacts/generated/${slug}`;
     expect(content).toContain(`${artifactsDir}/lead-plan.md`);
     expect(content).toContain(`${artifactsDir}/review-claude.md`);

@@ -67,7 +67,7 @@ For pre-22.6 Node, the route falls back to `tsx`. Detection is best-effort: try 
 2. `node --experimental-strip-types -e "1"` — sanity-check the local Node version.
 3. End-to-end on a real generated workflow:
    ```
-   node packages/cli/dist/bin/ricky.js --mode local --spec-file specs/cli-version-from-package-json.md --run
+   node dist/ricky.js --mode local --spec-file specs/cli-version-from-package-json.md --run
    ```
    The artifact should generate AND execute without `agent-relay` on PATH; the spawn line in the runtime evidence should read `node --experimental-strip-types --no-warnings=ExperimentalWarning workflows/generated/<file>.ts`.
 

@@ -40,23 +40,31 @@ describe('runWithAutoFix', () => {
     });
   });
 
-  it('direct repair retries with start-from and previous-run-id', async () => {
+  it('repairs the workflow with the Workforce persona and resumes with start-from and previous-run-id', async () => {
     const runSingleAttempt = vi
       .fn()
       .mockResolvedValueOnce(blockerResponse('MISSING_BINARY', 'run-1', 'install-deps'))
       .mockResolvedValueOnce(successResponse('run-2'));
-    const repairRunner = vi.fn().mockResolvedValue({ exitCode: 0 });
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired workflow'));
+    const artifactWriter = vi.fn().mockResolvedValue(undefined);
 
     const result = await runWithAutoFix(baseRequest, {
       maxAttempts: 3,
       runSingleAttempt,
       classifyFailure: fakeClassification,
       debugWorkflowRun: directDebugger,
-      repairRunner,
+      workflowRepairer,
+      artifactWriter,
     });
 
     expect(result.ok).toBe(true);
-    expect(repairRunner).toHaveBeenCalledWith('npm install', '/repo');
+    expect(workflowRepairer).toHaveBeenCalledWith(expect.objectContaining({
+      artifactPath: 'workflows/generated/foo.ts',
+      artifactContent: expect.stringContaining('workflow'),
+      failedStep: 'install-deps',
+      runId: 'run-1',
+    }));
+    expect(artifactWriter).toHaveBeenCalledWith('workflows/generated/foo.ts', 'repaired workflow', '/repo');
     expect(runSingleAttempt).toHaveBeenCalledTimes(2);
     expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
       attempt: 2,
@@ -68,11 +76,19 @@ describe('runWithAutoFix', () => {
     expect(runSingleAttempt.mock.calls[1][0]).toMatchObject({
       source: 'workflow-artifact',
       specPath: 'workflows/generated/foo.ts',
+      spec: 'repaired workflow',
       stageMode: 'run',
+    });
+    expect(result.auto_fix?.attempts[0]).toMatchObject({
+      applied_fix: {
+        mode: 'workforce-persona',
+        artifact_path: 'workflows/generated/foo.ts',
+        summary: 'persona patched the workflow',
+      },
     });
   });
 
-  it('repair failure escalates without retrying', async () => {
+  it('persona repair failure escalates without retrying', async () => {
     const runSingleAttempt = vi.fn().mockResolvedValue(blockerResponse('MISSING_BINARY', 'run-1', 'install-deps'));
 
     const result = await runWithAutoFix(baseRequest, {
@@ -80,31 +96,52 @@ describe('runWithAutoFix', () => {
       runSingleAttempt,
       classifyFailure: fakeClassification,
       debugWorkflowRun: directDebugger,
-      repairRunner: vi.fn().mockResolvedValue({ exitCode: 42 }),
+      workflowRepairer: vi.fn().mockResolvedValue({
+        applied: false,
+        summary: 'persona could not safely patch the workflow',
+      }),
     });
 
     expect(runSingleAttempt).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(false);
     expect(result.auto_fix?.attempts[0]).toMatchObject({
-      applied_fix: { steps: ['npm install'], exit_code: 42 },
-      fix_error: 'repair command failed: npm install',
+      fix_error: 'persona could not safely patch the workflow',
     });
-    expect(result.nextActions).toContain('npm install');
+    expect(result.auto_fix?.escalation).toMatchObject({
+      summary: expect.stringContaining('could not choose one safe automatic fix'),
+      log_tail: expect.arrayContaining(['MISSING_BINARY log tail']),
+      options: expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Open the workflow and retry',
+          command: 'ricky run --artifact workflows/generated/foo.ts --foreground --no-auto-fix',
+        }),
+        expect.objectContaining({
+          label: 'Check run status and saved logs',
+        }),
+      ]),
+    });
+    expect(result.nextActions.join('\n')).toContain('Direct repair is available.');
   });
 
-  it('guided repairMode never retries', async () => {
-    const runSingleAttempt = vi.fn().mockResolvedValue(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'));
+  it('uses the persona repair path even when the debugger recommends guided repair', async () => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'))
+      .mockResolvedValueOnce(successResponse('run-2'));
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('guided repair workflow'));
 
     const result = await runWithAutoFix(baseRequest, {
       maxAttempts: 3,
       runSingleAttempt,
       classifyFailure: fakeClassification,
       debugWorkflowRun: guidedDebugger,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
     });
 
-    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
-    expect(result.ok).toBe(false);
-    expect(result.nextActions.join('\n')).toContain('Set TEST_TOKEN');
+    expect(runSingleAttempt).toHaveBeenCalledTimes(2);
+    expect(workflowRepairer).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
   });
 
   it('stops after max attempts exhaustion', async () => {
@@ -119,7 +156,8 @@ describe('runWithAutoFix', () => {
       runSingleAttempt,
       classifyFailure: fakeClassification,
       debugWorkflowRun: directDebugger,
-      sleep: vi.fn().mockResolvedValue(undefined),
+      workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('still broken')),
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(runSingleAttempt).toHaveBeenCalledTimes(3);
@@ -141,7 +179,8 @@ describe('runWithAutoFix', () => {
       runSingleAttempt,
       classifyFailure: fakeClassification,
       debugWorkflowRun: directDebugger,
-      sleep: vi.fn().mockResolvedValue(undefined),
+      workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('retry without prior run')),
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
@@ -157,7 +196,7 @@ describe('runWithAutoFix', () => {
 function successResponse(runId: string): LocalResponse {
   return {
     ok: true,
-    artifacts: [{ path: 'workflows/generated/foo.ts' }],
+    artifacts: [{ path: 'workflows/generated/foo.ts', content: workflowContent() }],
     logs: [],
     warnings: [],
     nextActions: [],
@@ -193,7 +232,7 @@ function blockerResponse(code: LocalClassifiedBlocker['code'], runId: string | u
   };
   return {
     ok: false,
-    artifacts: [{ path: 'workflows/generated/foo.ts' }],
+    artifacts: [{ path: 'workflows/generated/foo.ts', content: workflowContent() }],
     logs: [],
     warnings: [blocker.message],
     nextActions: [...blocker.recovery.steps],
@@ -211,13 +250,28 @@ function blockerResponse(code: LocalClassifiedBlocker['code'], runId: string | u
         outcome_summary: blocker.message,
         failed_step: { id: failedStep, name: failedStep },
         exit_code: 1,
-        logs: { tail: [], truncated: false },
+        logs: { tail: [`${code} log tail`], truncated: false },
         side_effects: { files_written: [], commands_invoked: [] },
         assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
       },
     },
     exitCode: 2,
   };
+}
+
+function workflowRepair(content: string) {
+  return {
+    applied: true,
+    artifactPath: 'workflows/generated/foo.ts',
+    content,
+    summary: 'persona patched the workflow',
+    warnings: [],
+    runId: 'persona-run-1',
+  };
+}
+
+function workflowContent(): string {
+  return 'import { workflow } from "@agent-relay/sdk/workflows";\nworkflow("foo").run({ cwd: process.cwd() });\n';
 }
 
 function execution(runId: string | undefined): NonNullable<LocalResponse['execution']>['execution'] {

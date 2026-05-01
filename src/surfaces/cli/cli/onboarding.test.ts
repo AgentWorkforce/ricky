@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { readFile } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   CLOUD_MODE,
@@ -54,6 +54,9 @@ describe('Ricky CLI onboarding', () => {
     expect(CLOUD_MODE.nextAction).toContain('npx agent-relay cloud connect google');
     expect(output).toContain('Local / BYOH');
     expect(output).toContain('Cloud');
+    expect(output).toContain('Status');
+    expect(output).toContain('Connect tools');
+    expect(output).toContain('Exit');
     expect(localIndex).toBeGreaterThanOrEqual(0);
     expect(cloudIndex).toBeGreaterThan(localIndex);
     expect(output).toContain('Ready to hand over a spec.');
@@ -63,8 +66,11 @@ describe('Ricky CLI onboarding', () => {
   it('keeps local/BYOH as the default first-run contract without subordinating it to Cloud', () => {
     const output = renderOnboarding({ isFirstRun: true, isTTY: true, env: {} });
 
-    expect(output).toContain('  > [1] Local / BYOH  — generate workflow artifacts for your local repo');
-    expect(output).toContain('    [2] Cloud         — generate workflow artifacts through AgentWorkforce Cloud');
+    expect(output).toContain('  > [1] Local / BYOH   — generate workflow artifacts for your local repo');
+    expect(output).toContain('    [2] Cloud          — generate workflow artifacts through AgentWorkforce Cloud');
+    expect(output).toContain('    [3] Status         — show local readiness and known provider state');
+    expect(output).toContain('    [4] Connect tools  — show provider setup commands and dashboard guidance');
+    expect(output).toContain('    [5] Exit           — leave without generating or executing anything');
     expect(output).toContain('  Choice [1]:');
     expect(output.indexOf('  > [1] Local / BYOH')).toBeLessThan(output.indexOf('    [2] Cloud'));
     expect(output.indexOf('Local / BYOH mode selected.')).toBeLessThan(output.indexOf('Cloud provider guidance:'));
@@ -109,8 +115,7 @@ describe('Ricky CLI onboarding', () => {
     expect(output).toContain('ricky --mode local --stdin');
     expect(output).toContain('MCP handoff:');
     expect(output).toContain('Use `ricky.generate` with the same spec payload');
-    expect(output).toContain('npx --no-install agent-relay run workflows/generated/<file>.ts');
-    expect(output).toContain('Or with linked CLI: ricky run');
+    expect(output).toContain('ricky run --artifact workflows/generated/<file>.ts');
     expect(output).not.toContain('Or without linking: ricky run');
     expect(output).not.toContain('npx ricky generate --spec');
     expect(output).not.toContain('npx ricky generate --spec-file');
@@ -311,7 +316,7 @@ describe('runOnboarding', () => {
     const output = new PassThrough();
 
     const result = await runOnboarding({
-      input: inputStream('4'),
+      input: inputStream('explore'),
       output,
       isTTY: true,
       configStore: store,
@@ -340,6 +345,30 @@ describe('runOnboarding', () => {
     expect(result.mode).toBe('local');
     expect(result.output).toContain('ricky · local mode · ready');
     expect(result.output).toContain('Ricky is ready.');
+  });
+
+  it('presents the compact first-screen menu for returning users when an interactive prompt shell is available', async () => {
+    const store = mockConfigStore({
+      mode: 'local',
+      firstRunComplete: true,
+      providers: { google: { connected: false }, github: { connected: false } },
+    });
+    const output = new PassThrough();
+    const promptShell = {
+      selectFirstScreen: vi.fn().mockResolvedValue('cloud' as const),
+    };
+
+    const result = await runOnboarding({
+      output,
+      isTTY: true,
+      configStore: store,
+      promptShell,
+    });
+
+    expect(result.firstRun).toBe(false);
+    expect(result.mode).toBe('cloud');
+    expect(promptShell.selectFirstScreen).toHaveBeenCalledTimes(1);
+    expect(store.written).toBeNull();
   });
 
   it('renders non-interactive setup error when TTY is false and no override', async () => {
@@ -415,6 +444,68 @@ describe('runOnboarding', () => {
     expect(result.mode).toBe('cloud');
     expect(store.written).not.toBeNull();
     expect(store.written!.mode).toBe('cloud');
+  });
+
+  it('uses an injected prompt shell for the compact first screen', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+    const promptShell = {
+      selectFirstScreen: vi.fn().mockResolvedValue('status' as const),
+    };
+
+    const result = await runOnboarding({
+      output,
+      isTTY: true,
+      configStore: store,
+      promptShell,
+    });
+
+    expect(promptShell.selectFirstScreen).toHaveBeenCalledWith(
+      expect.objectContaining({ output }),
+    );
+    expect(result.mode).toBe('status');
+    expect(result.output).toContain('Status');
+    expect(result.output).toContain('Local generation: ready');
+    expect(store.written).toBeNull();
+  });
+
+  it('handles prompt cancellation with a concise line by default', async () => {
+    const store = mockConfigStore();
+    const output = new PassThrough();
+    const promptShell = {
+      selectFirstScreen: vi.fn().mockRejectedValue(
+        Object.assign(new Error('User force closed the prompt'), { name: 'ExitPromptError' }),
+      ),
+    };
+
+    const result = await runOnboarding({
+      output,
+      isTTY: true,
+      configStore: store,
+      promptShell,
+    });
+
+    expect(result.mode).toBe('exit');
+    expect(result.output).toContain('Cancelled.');
+    expect(store.written).toBeNull();
+  });
+
+  it('rethrows prompt cancellation in verbose mode', async () => {
+    const promptShell = {
+      selectFirstScreen: vi.fn().mockRejectedValue(
+        Object.assign(new Error('User force closed the prompt'), { name: 'ExitPromptError' }),
+      ),
+    };
+
+    await expect(
+      runOnboarding({
+        output: new PassThrough(),
+        isTTY: true,
+        configStore: mockConfigStore(),
+        promptShell,
+        verbose: true,
+      }),
+    ).rejects.toThrow('User force closed the prompt');
   });
 
   it('honors NO_COLOR from resolved env (injected or ambient process.env)', async () => {

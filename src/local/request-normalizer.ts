@@ -47,7 +47,7 @@ export interface BaseHandoff {
   executionPreference?: LocalExecutionPreference;
   metadata?: Record<string, unknown>;
   requestId?: string;
-  /** Opt-in local repair loop. Undefined means one attempt with current behavior. */
+  /** Bounded local repair loop. Undefined means one attempt with current behavior. */
   autoFix?: { maxAttempts: number };
   /** Retry metadata supplied by an orchestrator wrapping local execution. */
   retry?: Partial<RunRetryMetadata>;
@@ -143,7 +143,7 @@ export interface LocalInvocationRequest {
   sourceMetadata?: LocalSourceMetadata;
   /** Stable request id when the caller supplied one. */
   requestId?: string;
-  /** Opt-in local repair loop. Undefined means one attempt with current behavior. */
+  /** Bounded local repair loop. Undefined means one attempt with current behavior. */
   autoFix?: { maxAttempts: number };
   /** Retry metadata supplied by an orchestrator wrapping local execution. */
   retry?: Partial<RunRetryMetadata>;

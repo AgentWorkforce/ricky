@@ -42,6 +42,17 @@ export interface GenerationInput {
   dryRunEnabled?: boolean;
   artifactPath?: string;
   refine?: false | { model?: string };
+  workforcePersonaWriter?: false | {
+    repoRoot?: string;
+    workflowName?: string;
+    targetMode?: WorkflowExecutionTarget;
+    relevantFiles?: Array<{ path: string; content?: string }>;
+    timeoutSeconds?: number;
+    installSkills?: boolean;
+    tier?: string;
+    personaIntentCandidates?: readonly string[];
+    resolver?: import('./workforce-persona-writer.js').WorkforcePersonaResolver;
+  };
 }
 
 export interface PatternDecision {
@@ -180,6 +191,26 @@ export interface RefinementMetadata {
   warning?: string;
 }
 
+export interface WorkforcePersonaGenerationMetadata {
+  personaId: string;
+  tier: string;
+  harness: string;
+  model: string;
+  promptDigest: string;
+  warnings: string[];
+  runId: string | null;
+  source: 'package' | 'local-dev';
+  selectedIntent: string;
+  responseFormat: 'structured-json' | 'fenced-artifact';
+  outputPath: string;
+  promptInputs: {
+    workflowName: string;
+    targetMode: WorkflowExecutionTarget;
+    repoRoot: string;
+    relevantFileCount: number;
+  };
+}
+
 export interface GenerationValidationResult {
   valid: boolean;
   errors: string[];
@@ -205,6 +236,7 @@ export interface GenerationResult {
   skillContext: SkillContext;
   toolSelection: ToolSelectionContext;
   refinement: RefinementMetadata | null;
+  workforcePersona: WorkforcePersonaGenerationMetadata | null;
   validation: GenerationValidationResult;
   dryRunCommand: string | null;
   deterministicValidationCommands: string[];

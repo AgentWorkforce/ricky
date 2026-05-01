@@ -184,7 +184,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
           [
             containsAll(welcome, ['Ricky is ready']),
             localHeader === 'ricky · local mode · ready',
-            cloudHeader === 'ricky · cloud mode · google connected',
+            cloudHeader === 'ricky · cloud mode · cloud connected',
             !returningOutput.includes(RICKY_BANNER),
           ],
           [
@@ -444,7 +444,7 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
     },
     {
       name: 'setup-journey',
-      description: 'Setup journey verifies first-run onboarding renders mode selector and all four choices.',
+      description: 'Setup journey verifies first-run onboarding renders mode selector and all five choices per the simplified CLI spec.',
       specSection: 'CLI command surface — setup journey',
       evaluate: () => {
         const output = renderOnboarding({ isFirstRun: true, isTTY: true, choice: 'local', env: {} });
@@ -457,13 +457,15 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
             output.includes('How would you like to use Ricky?'),
             selector.includes('[1] Local / BYOH'),
             selector.includes('[2] Cloud'),
-            selector.includes('[3] Both'),
-            selector.includes('[4] Just explore'),
+            selector.includes('[3] Status'),
+            selector.includes('[4] Connect tools'),
+            selector.includes('[5] Exit'),
             selector.includes('Choice [1]:'),
           ],
           [
             `first-run includes welcome: true`,
             `selector has all 4 choices: true`,
+            `selector has all 5 simplified-CLI choices: true`,
             compactEvidence('selector', selector),
           ],
         );
@@ -508,8 +510,8 @@ export function getOnboardingProofCases(): OnboardingProofCase[] {
           'status-journey',
           [
             localHeader === 'ricky · local mode · ready',
-            cloudConnected.includes('google connected'),
-            cloudDisconnected.includes('google not connected'),
+            cloudConnected.includes('cloud connected'),
+            cloudDisconnected.includes('cloud not connected'),
             bothConnected.includes('cloud connected'),
             bothDisconnected.includes('cloud not connected'),
           ],

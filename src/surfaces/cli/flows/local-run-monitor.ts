@@ -1,0 +1,203 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+import type { RawHandoff } from '../../../local/request-normalizer.js';
+import type { LocalEntrypointOptions, LocalResponse } from '../../../local/entrypoint.js';
+import { runLocal } from '../../../local/entrypoint.js';
+export { legacyLocalRunStatePath, localRunStatePath, localRunStateRoot } from '../../../shared/state-paths.js';
+import { localRunArtifactDir, localRunStateRoot } from '../../../shared/state-paths.js';
+
+export type LocalRunMode = 'background' | 'foreground';
+
+export interface LocalRunMonitorState {
+  runId: string;
+  status: 'queued' | 'running' | 'completed' | 'blocked' | 'failed';
+  artifactPath: string;
+  artifactDir: string;
+  statePath: string;
+  logPath: string;
+  evidencePath: string;
+  fixesPath: string;
+  reattachCommand: string;
+  response?: LocalResponse;
+}
+
+export interface LocalRunMonitorOptions {
+  cwd: string;
+  artifactPath: string;
+  handoff: RawHandoff;
+  mode: LocalRunMode;
+  autoFixAttempts?: number;
+  localOptions?: LocalEntrypointOptions;
+  runLocalFn?: typeof runLocal;
+  onMonitorStarted?: (state: LocalRunMonitorState) => void | Promise<void>;
+  /** Override where Ricky stores run reattachment state. Defaults outside the repo. */
+  stateRoot?: string;
+  /**
+   * Inject a deterministic run-id factory for tests. The factory must return
+   * a stable id given the artifactPath and mode so reattach paths and
+   * `ricky status --run <id>` reproduce exactly across invocations.
+   */
+  runIdFactory?: (input: { artifactPath: string; mode: LocalRunMode }) => string;
+}
+
+export async function startLocalRunMonitor(options: LocalRunMonitorOptions): Promise<LocalRunMonitorState> {
+  const runId = options.runIdFactory
+    ? options.runIdFactory({ artifactPath: options.artifactPath, mode: options.mode })
+    : `ricky-local-${randomUUID()}`;
+  const artifactDir = options.stateRoot ? join(options.stateRoot, runId) : localRunArtifactDir(options.cwd, runId);
+  const statePath = join(artifactDir, 'state.json');
+  const logPath = join(artifactDir, 'run.log');
+  const evidencePath = join(artifactDir, 'evidence.json');
+  const fixesPath = join(artifactDir, 'fixes.json');
+  const reattachCommand = `ricky status --run ${runId}`;
+
+  await mkdir(artifactDir, { recursive: true });
+  const initialState: LocalRunMonitorState = {
+    runId,
+    status: 'queued',
+    artifactPath: options.artifactPath,
+    artifactDir,
+    statePath,
+    logPath,
+    evidencePath,
+    fixesPath,
+    reattachCommand,
+  };
+  await persistState(initialState);
+
+  const handoff = withSafeRunOptions(options.handoff, options.autoFixAttempts, runId);
+  const runningState = { ...initialState, status: 'running' as const };
+  await persistState(runningState);
+  await options.onMonitorStarted?.(runningState);
+
+  if (options.mode === 'background') {
+    void executeLocalRunMonitor(options, handoff, runningState).catch(async (error: unknown) => {
+      try {
+        await persistFailedRunState(runningState, error);
+      } catch {
+        // The monitor has no caller in background mode. Best-effort persistence
+        // already failed, so avoid surfacing an unhandled rejection.
+      }
+    });
+    return runningState;
+  }
+
+  return executeLocalRunMonitor(options, handoff, runningState);
+}
+
+async function executeLocalRunMonitor(
+  options: LocalRunMonitorOptions,
+  handoff: RawHandoff,
+  runningState: LocalRunMonitorState,
+): Promise<LocalRunMonitorState> {
+  const runLocalFn = options.runLocalFn ?? runLocal;
+  try {
+    const response = await runLocalFn(handoff, options.localOptions);
+    const finalState: LocalRunMonitorState = {
+      ...runningState,
+      status: statusFromResponse(response),
+      response,
+    };
+
+    await writeFile(runningState.logPath, `${response.logs.join('\n')}\n`, 'utf8');
+    await writeFile(runningState.evidencePath, `${JSON.stringify(response.execution?.evidence ?? {}, null, 2)}\n`, 'utf8');
+    await writeFile(runningState.fixesPath, `${JSON.stringify(response.auto_fix ?? { attempts: [] }, null, 2)}\n`, 'utf8');
+    await copyGeneratedArtifacts(response, runningState.artifactDir, options.cwd);
+    await persistState(finalState);
+
+    return finalState;
+  } catch (error) {
+    return persistFailedRunState(runningState, error);
+  }
+}
+
+export function withSafeRunOptions(
+  handoff: RawHandoff,
+  autoFixAttempts: number | undefined,
+  trackingRunId?: string,
+): RawHandoff {
+  const maxAttempts = clampAutoFixAttempts(autoFixAttempts ?? 3);
+  return {
+    ...handoff,
+    stageMode: 'run',
+    mode: 'local',
+    autoFix: { maxAttempts },
+    metadata: {
+      ...(handoff.metadata ?? {}),
+      autoFixPolicy: 'bounded-safe-only',
+      ...(trackingRunId ? { rickyRunId: trackingRunId } : {}),
+      destructiveActionsApproved: false,
+      commitsApproved: false,
+    },
+  } as RawHandoff;
+}
+
+function clampAutoFixAttempts(value: number): number {
+  return Math.min(10, Math.max(1, Math.trunc(value)));
+}
+
+function statusFromResponse(response: LocalResponse): LocalRunMonitorState['status'] {
+  if (response.ok) return 'completed';
+  if (response.execution?.status === 'blocker') return 'blocked';
+  return 'failed';
+}
+
+async function persistState(state: LocalRunMonitorState): Promise<void> {
+  await mkdir(dirname(state.statePath), { recursive: true });
+  await writeFile(state.statePath, `${JSON.stringify({
+    runId: state.runId,
+    status: state.status,
+    artifactPath: state.artifactPath,
+    artifactDir: state.artifactDir,
+    logPath: state.logPath,
+    evidencePath: state.evidencePath,
+    fixesPath: state.fixesPath,
+    reattachCommand: state.reattachCommand,
+    response: state.response,
+  }, null, 2)}\n`, 'utf8');
+}
+
+async function persistFailedRunState(
+  runningState: LocalRunMonitorState,
+  error: unknown,
+): Promise<LocalRunMonitorState> {
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  const failedState: LocalRunMonitorState = {
+    ...runningState,
+    status: 'failed',
+    response: {
+      ok: false,
+      artifacts: [],
+      logs: [`[local] background run failed: ${message}`],
+      warnings: [message],
+      nextActions: ['Inspect the persisted run log and rerun once the blocker is fixed.'],
+      exitCode: 1,
+    },
+  };
+
+  await mkdir(runningState.artifactDir, { recursive: true });
+  await Promise.allSettled([
+    writeFile(runningState.logPath, `${message}\n`, 'utf8'),
+    writeFile(runningState.evidencePath, `${JSON.stringify({ error: message }, null, 2)}\n`, 'utf8'),
+    writeFile(runningState.fixesPath, `${JSON.stringify({ attempts: [] }, null, 2)}\n`, 'utf8'),
+  ]);
+  await persistState(failedState);
+  return failedState;
+}
+
+async function copyGeneratedArtifacts(response: LocalResponse, artifactDir: string, cwd: string): Promise<void> {
+  const generatedDir = join(artifactDir, 'generated-artifacts');
+  await mkdir(generatedDir, { recursive: true });
+  for (const artifact of response.artifacts) {
+    const safeName = artifact.path.replace(/[^a-zA-Z0-9._-]+/g, '__');
+    const target = join(generatedDir, safeName);
+    if (artifact.content !== undefined) {
+      await writeFile(target, artifact.content, 'utf8');
+      continue;
+    }
+    const sourcePath = isAbsolute(artifact.path) ? artifact.path : resolve(cwd, artifact.path);
+    await writeFile(target, `Artifact reference: ${sourcePath}\n`, 'utf8');
+  }
+}

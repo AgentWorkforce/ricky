@@ -1,5 +1,5 @@
 export type RickyMode = 'local' | 'cloud' | 'both';
-export type OnboardingChoice = RickyMode | 'explore';
+export type OnboardingChoice = RickyMode | 'explore' | 'status' | 'connect' | 'exit';
 
 export interface ProviderStatus {
   google: { connected: boolean };
@@ -13,7 +13,7 @@ export interface RickyConfig {
 }
 
 export interface ModeOption {
-  choice: '1' | '2' | '3' | '4';
+  choice: '1' | '2' | '3' | '4' | '5';
   value: OnboardingChoice;
   title: string;
   description: string;
@@ -71,15 +71,21 @@ export const MODE_OPTIONS: ModeOption[] = [
   },
   {
     choice: '3',
-    value: RICKY_MODE_DEFINITIONS.both.value,
-    title: 'Both',
-    description: 'set up local generation now, connect Cloud later',
+    value: 'status',
+    title: 'Status',
+    description: 'show local readiness and known provider state',
   },
   {
     choice: '4',
-    value: 'explore',
-    title: 'Just explore',
-    description: 'skip setup, see what Ricky generates today',
+    value: 'connect',
+    title: 'Connect tools',
+    description: 'show provider setup commands and dashboard guidance',
+  },
+  {
+    choice: '5',
+    value: 'exit',
+    title: 'Exit',
+    description: 'leave without generating or executing anything',
   },
 ];
 
@@ -105,8 +111,23 @@ export function parseModeChoice(input: string): OnboardingChoice | null {
     return 'local';
   }
 
-  if (normalized === 'cloud' || normalized === 'both' || normalized === 'explore') {
+  if (
+    normalized === 'cloud' ||
+    normalized === 'both' ||
+    normalized === 'explore' ||
+    normalized === 'status' ||
+    normalized === 'connect' ||
+    normalized === 'exit'
+  ) {
     return normalized;
+  }
+
+  if (normalized === 'connect tools' || normalized === 'connect-tools') {
+    return 'connect';
+  }
+
+  if (normalized === 'quit') {
+    return 'exit';
   }
 
   if (normalized === 'just explore') {
@@ -121,17 +142,21 @@ export function isRickyMode(value: string | undefined): value is RickyMode {
 }
 
 export function toRickyMode(choice: OnboardingChoice): RickyMode {
-  return choice === 'explore' ? 'local' : choice;
+  if (choice === 'explore' || choice === 'status' || choice === 'connect' || choice === 'exit') {
+    return 'local';
+  }
+  return choice;
 }
 
 export function renderModeSelection(): string {
   return [
     '  How would you like to use Ricky?',
     '',
-    '  > [1] Local / BYOH  — generate workflow artifacts for your local repo',
-    '    [2] Cloud         — generate workflow artifacts through AgentWorkforce Cloud',
-    '    [3] Both          — set up local generation now, connect Cloud later',
-    '    [4] Just explore  — skip setup, see what Ricky generates today',
+    '  > [1] Local / BYOH   — generate workflow artifacts for your local repo',
+    '    [2] Cloud          — generate workflow artifacts through AgentWorkforce Cloud',
+    '    [3] Status         — show local readiness and known provider state',
+    '    [4] Connect tools  — show provider setup commands and dashboard guidance',
+    '    [5] Exit           — leave without generating or executing anything',
     '',
     '  Choice [1]:',
   ].join('\n');
@@ -154,8 +179,8 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '    Nothing is executed at this stage.',
         '',
         '  Execution (opt-in only):',
-        '    Pass --run with a spec, or use `ricky run <artifact>` (requires npm-linked CLI).',
-        '    Execution launches the artifact through local agent-relay.',
+        '    Pass --run with a spec, or use `ricky run <artifact>`.',
+        '    Execution launches the artifact through the Relay SDK workflow runner.',
         '    On failure, Ricky prints a classified blocker code and shell-ready recovery steps.',
         '',
         '  No Cloud credentials required.',
@@ -233,13 +258,39 @@ export function renderModeResult(choice: OnboardingChoice): string {
         '  CLI help:    ricky --help',
         '  Cloud setup: npx agent-relay cloud connect google',
       ].join('\n');
+    case 'status':
+      return [
+        '  Status',
+        '',
+        '  Local generation: ready',
+        '  Cloud generation: requires AgentWorkforce Cloud credentials and provider setup',
+        '',
+        '  Ricky only reports provider state already present in local config.',
+        '  It does not create Cloud credentials or infer dashboard state.',
+      ].join('\n');
+    case 'connect':
+      return [
+        '  Connect tools',
+        '',
+        '  Google:',
+        '    npx agent-relay cloud connect google',
+        '',
+        '  GitHub:',
+        '    Open AgentWorkforce Cloud settings -> Integrations -> GitHub',
+        '',
+        '  Ricky does not store or invent Cloud credentials in this prompt.',
+      ].join('\n');
+    case 'exit':
+      return [
+        '  Cancelled. Nothing was generated or executed.',
+      ].join('\n');
   }
 }
 
 export function renderCompactHeader(mode: RickyMode, providerStatus: ProviderStatus = DEFAULT_PROVIDER_STATUS): string {
   if (mode === 'cloud') {
-    const googleStatus = providerStatus.google.connected ? 'google connected' : 'google not connected';
-    return `ricky · cloud mode · ${googleStatus}`;
+    const cloudStatus = providerStatus.google.connected ? 'cloud connected' : 'cloud not connected';
+    return `ricky · cloud mode · ${cloudStatus}`;
   }
 
   if (mode === 'both') {

@@ -47,6 +47,7 @@ function mockExecutor(
         assumptions: result?.assumptions,
         validation: result?.validation,
         runReceipt: result?.runReceipt,
+        generationMetadata: result?.generationMetadata,
         followUpActions: result?.followUpActions ?? [],
       };
     },
@@ -291,6 +292,50 @@ describe('handleCloudGenerate — success path', () => {
       action: 'review-artifacts',
       label: 'Review Artifacts',
     });
+  });
+
+  it('appends Workforce persona generation metadata as a cloud artifact when provided', async () => {
+    const executor = mockExecutor({
+      artifacts: [
+        {
+          path: 'workflows/generated-workflow.ts',
+          type: 'text/typescript',
+          content: 'workflow("generated")',
+        },
+      ],
+      generationMetadata: {
+        workforcePersona: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          harness: 'codex',
+          model: 'openai-codex/gpt-5.3-codex',
+          promptDigest: 'a'.repeat(64),
+          warnings: [],
+          runId: 'run-persona-001',
+          source: 'package',
+          selectedIntent: 'agent-relay-workflow',
+          responseFormat: 'structured-json',
+          outputPath: 'workflows/generated-workflow.ts',
+          promptInputs: {
+            workflowName: 'generated-workflow',
+            targetMode: 'cloud',
+            repoRoot: '/repo',
+            relevantFileCount: 2,
+          },
+        },
+      },
+    });
+
+    const response = await handleCloudGenerate(validRequest(), testOptions(executor));
+
+    expect(response.artifacts).toHaveLength(2);
+    expect(response.artifacts[1]).toMatchObject({
+      path: 'workflows/generated-workflow.workforce-persona.json',
+      type: 'application/json',
+      content: expect.stringContaining('"personaId": "agent-relay-workflow"'),
+    });
+    expect(response.artifacts[1].content).toContain('"runId": "run-persona-001"');
+    expect(response.artifacts[1].content).toContain('"promptDigest": "aaaaaaaa');
   });
 
   it('represents executor validation failures as top-level failure with 422 status', async () => {

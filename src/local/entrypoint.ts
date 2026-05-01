@@ -10,25 +10,36 @@ import type { ArtifactReader, LocalInvocationRequest, LocalStageMode, RawHandoff
 import { assembleRickyTurnContext } from './assistant-turn-context-adapter.js';
 import { normalizeRequest } from './request-normalizer.js';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 
 import { runWithAutoFix } from './auto-fix-loop.js';
-import { generate } from '../product/generation/index.js';
-import type { GenerationResult, RenderedArtifact } from '../product/generation/index.js';
+import { generate, generateWithWorkforcePersona } from '../product/generation/index.js';
+import type { GenerationInput, GenerationResult, RenderedArtifact } from '../product/generation/index.js';
 import { intake } from '../product/spec-intake/index.js';
 import type { ExecutionPreference, InputSurface, RawSpecPayload, RouteTarget } from '../product/spec-intake/index.js';
 import { defaultRepoDetector, type RepoDetector } from '../product/spec-intake/detect-current-repo.js';
 import { LocalCoordinator } from '../runtime/local-coordinator.js';
+import { DEFAULT_RUN_TIMEOUT_MS } from '../shared/constants.js';
+import { localRunArtifactDir, localRunStateRoot } from '../shared/state-paths.js';
 import type {
   CommandInvocation,
+  CommandInvocationSummary,
   CommandRunner,
   CommandRunnerOptions,
   CoordinatorResult,
   ExecutionRoute,
+  LifecycleEvent,
+  LogSnippet,
   RunRequest,
+  RunRetryMetadata,
+  RunStatus,
 } from '../runtime/types.js';
+
+const requireFromHere = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // Local response contract
@@ -63,6 +74,7 @@ export interface LocalGenerationStageResult {
     skill_matches?: unknown;
     tool_selection?: unknown;
     refinement?: unknown;
+    workforce_persona?: unknown;
   };
 }
 
@@ -163,6 +175,17 @@ export interface LocalResponse {
     max_attempts: number;
     attempts: Array<Record<string, unknown>>;
     final_status: 'ok' | 'blocker' | 'error';
+    run_id?: string;
+    resumed?: boolean;
+    escalation?: {
+      summary: string;
+      log_tail: string[];
+      options: Array<{
+        label: string;
+        description: string;
+        command?: string;
+      }>;
+    };
   };
 }
 
@@ -172,7 +195,7 @@ export interface LocalResponse {
 
 /**
  * The executor is the seam between the entrypoint and actual work.
- * Inject a fake in tests; wire the real agent-relay runtime in production.
+ * Inject a fake in tests; wire the Relay SDK workflow runner in production.
  */
 export interface LocalExecutor {
   /**
@@ -208,18 +231,39 @@ export interface LocalExecutorOptions {
   artifactWriter?: ArtifactWriter;
   /** Override the default execution route for the local runtime. */
   route?: ExecutionRoute;
+  /** Override the SDK-backed script workflow runner used by the default local route. */
+  scriptWorkflowRunner?: ScriptWorkflowRunner;
   /** When true, stop after writing/generated artifact and return it without launching local runtime. */
   returnGeneratedArtifactOnly?: boolean;
+  /** When true, persist generator metadata sidecars beside workflow runtime artifacts. Defaults to false. */
+  persistGenerationMetadataArtifacts?: boolean;
+  /** Optional Workforce persona writer integration for generated workflow artifacts. */
+  workforcePersonaWriter?: false | Omit<
+    NonNullable<GenerationInput['workforcePersonaWriter']>,
+    'repoRoot' | 'targetMode' | 'outputPath'
+  >;
 }
 
+export interface ScriptWorkflowRunnerOptions {
+  cwd: string;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+  startFrom?: string;
+  previousRunId?: string;
+  resume?: string;
+  onStdout?: (line: string) => void;
+  onStderr?: (line: string) => void;
+}
+
+export type ScriptWorkflowRunner = (workflowFile: string, options: ScriptWorkflowRunnerOptions) => Promise<unknown>;
+
 /**
- * Default execution route for local runtime coordination.
- * Uses `npx --no-install` to ensure the CLI is resolved from the project
- * dependency tree rather than silently fetched from the registry.
+ * Default execution route for local runtime coordination. This names the
+ * programmatic SDK script runner rather than the agent-relay CLI binary.
  */
 export const DEFAULT_LOCAL_ROUTE: ExecutionRoute = {
-  command: 'npx',
-  baseArgs: ['--no-install', 'agent-relay', 'run'],
+  command: '@agent-relay/sdk/workflows',
+  baseArgs: ['runScriptWorkflow'],
 };
 
 const defaultArtifactWriter: ArtifactWriter = {
@@ -279,6 +323,482 @@ export function createProcessCommandRunner(): CommandRunner {
   };
 }
 
+class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
+  constructor(private readonly runner: ScriptWorkflowRunner) {}
+
+  async launch(request: RunRequest): Promise<CoordinatorResult> {
+    const runId = request.runId ?? cryptoRunId();
+    const startedMs = Date.now();
+    const startedAt = new Date(startedMs).toISOString();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const events: LifecycleEvent[] = [];
+    const retry = normalizeCoordinatorRetry(request.retry);
+    const invocation = buildSdkInvocationSummary(request);
+    const snippetLimit = request.logSnippetLineLimit ?? 40;
+    let status: RunStatus = 'running';
+
+    const emit = (kind: LifecycleEvent['kind'], message?: string, data?: Record<string, unknown>): void => {
+      events.push({
+        kind,
+        runId,
+        timestamp: new Date().toISOString(),
+        status,
+        message,
+        data,
+      });
+    };
+
+    emit('started', 'SDK script workflow started', { workflowFile: request.workflowFile, cwd: request.cwd });
+
+    try {
+      const runnerResult = await withTimeout(
+        this.runner(request.workflowFile, {
+          cwd: request.cwd,
+          env: request.env,
+          timeoutMs: request.timeoutMs,
+          startFrom: retry.startFromStep,
+          previousRunId: retry.previousRunId,
+          onStdout: (line) => {
+            stdout.push(line);
+            emit('stdout', line, { stream: 'stdout' });
+          },
+          onStderr: (line) => {
+            stderr.push(line);
+            emit('stderr', line, { stream: 'stderr' });
+          },
+        }),
+        request.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+      );
+      const reportedFailure =
+        failureFromScriptWorkflowResult(runnerResult) ?? failureFromScriptWorkflowOutput(stdout, stderr);
+      if (reportedFailure) {
+        throw new Error(reportedFailure);
+      }
+      status = 'passed';
+      emit('completed', 'SDK script workflow completed', { exitCode: 0 });
+      return coordinatorResultFromSdkRun({
+        request,
+        runId,
+        status,
+        exitCode: 0,
+        startedAt,
+        startedMs,
+        stdout,
+        stderr,
+        events,
+        retry,
+        invocation,
+        snippetLimit,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      status = message.startsWith('timed out after ') ? 'timed_out' : 'failed';
+      stderr.push(message);
+      emit(status === 'timed_out' ? 'timeout' : 'error', message, { error: message });
+      return coordinatorResultFromSdkRun({
+        request,
+        runId,
+        status,
+        exitCode: null,
+        startedAt,
+        startedMs,
+        stdout,
+        stderr,
+        events,
+        retry,
+        invocation,
+        snippetLimit,
+        error: message,
+      });
+    }
+  }
+}
+
+function cryptoRunId(): string {
+  return randomUUID();
+}
+
+function normalizeCoordinatorRetry(retry: Partial<RunRetryMetadata> | undefined): RunRetryMetadata {
+  return {
+    attempt: retry?.attempt ?? 1,
+    ...(retry?.maxAttempts !== undefined ? { maxAttempts: retry.maxAttempts } : {}),
+    ...(retry?.retryOfRunId ? { retryOfRunId: retry.retryOfRunId } : {}),
+    ...(retry?.previousRunId ? { previousRunId: retry.previousRunId } : {}),
+    ...(retry?.startFromStep ? { startFromStep: retry.startFromStep } : {}),
+    ...(retry?.reason ? { reason: retry.reason } : {}),
+    ...(retry?.backoffMs !== undefined ? { backoffMs: retry.backoffMs } : {}),
+  };
+}
+
+function failureFromScriptWorkflowResult(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+
+  const record = result as Record<string, unknown>;
+  if (record.ok === false) return workflowResultFailureMessage(record, 'ok=false');
+  if (record.success === false) return workflowResultFailureMessage(record, 'success=false');
+
+  const status = stringValue(record.status ?? record.state ?? record.outcome)?.toLowerCase();
+  if (status && ['failed', 'failure', 'blocked', 'blocker', 'error', 'cancelled', 'canceled', 'timed_out', 'timeout'].includes(status)) {
+    return workflowResultFailureMessage(record, status);
+  }
+
+  const exitCode = numberValue(record.exitCode ?? record.exit_code);
+  if (exitCode !== undefined && exitCode !== 0) {
+    return workflowResultFailureMessage(record, `exit code ${exitCode}`);
+  }
+
+  return undefined;
+}
+
+function failureFromScriptWorkflowOutput(stdout: string[], stderr: string[]): string | undefined {
+  const failureLine = [...stdout, ...stderr].find((line) => {
+    const clean = stripAnsi(line).trim();
+    return (
+      /^\[workflow\]\s+FAILED:/i.test(clean) ||
+      /^FAILED:/i.test(clean) ||
+      /\bFAILED:\s+Command failed/i.test(clean)
+    );
+  });
+  if (!failureLine) return undefined;
+  return `Workflow runtime reported failure despite a zero process exit: ${stripAnsi(failureLine).trim()}`;
+}
+
+function workflowResultFailureMessage(record: Record<string, unknown>, reason: string): string {
+  const detail = stringValue(record.error ?? record.message ?? record.summary ?? record.outcome_summary);
+  return `Workflow runtime reported ${reason}${detail ? `: ${detail}` : ''}`;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001B\[[0-9;]*m/g, '');
+}
+
+function buildSdkInvocationSummary(request: RunRequest): CommandInvocationSummary {
+  const route = request.route ?? DEFAULT_LOCAL_ROUTE;
+  const retry = normalizeCoordinatorRetry(request.retry);
+  const retryArgs = [
+    ...(retry.startFromStep ? ['--start-from', retry.startFromStep] : []),
+    ...(retry.previousRunId ? ['--previous-run-id', retry.previousRunId] : []),
+  ];
+  return {
+    command: route.command ?? DEFAULT_LOCAL_ROUTE.command!,
+    args: [
+      ...(route.baseArgs ?? DEFAULT_LOCAL_ROUTE.baseArgs ?? []),
+      request.workflowFile,
+      ...retryArgs,
+      ...(request.extraArgs ?? []),
+    ],
+    cwd: request.cwd,
+    ...(request.env ? { env: request.env } : {}),
+  };
+}
+
+function coordinatorResultFromSdkRun(params: {
+  request: RunRequest;
+  runId: string;
+  status: RunStatus;
+  exitCode: number | null;
+  startedAt: string;
+  startedMs: number;
+  stdout: string[];
+  stderr: string[];
+  events: LifecycleEvent[];
+  retry: RunRetryMetadata;
+  invocation: CommandInvocationSummary;
+  snippetLimit: number;
+  error?: string;
+}): CoordinatorResult {
+  const completedMs = Date.now();
+  const completedAt = new Date(completedMs).toISOString();
+  return {
+    runId: params.runId,
+    workflowFile: params.request.workflowFile,
+    cwd: params.request.cwd,
+    status: params.status,
+    exitCode: params.exitCode,
+    startedAt: params.startedAt,
+    completedAt,
+    endedAt: completedAt,
+    durationMs: Math.max(0, completedMs - params.startedMs),
+    stdout: params.stdout,
+    stderr: params.stderr,
+    stdoutSnippet: buildLocalSnippet(params.stdout, params.snippetLimit),
+    stderrSnippet: buildLocalSnippet(params.stderr, params.snippetLimit),
+    events: params.events,
+    retry: params.retry,
+    invocation: params.invocation,
+    metadata: params.request.metadata,
+    ...(params.error ? { error: params.error } : {}),
+  };
+}
+
+function buildLocalSnippet(lines: string[], maxLines: number): LogSnippet {
+  return {
+    lines: lines.slice(Math.max(0, lines.length - maxLines)),
+    totalLines: lines.length,
+    maxLines,
+    truncated: lines.length > maxLines,
+  };
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
+export function createSdkScriptWorkflowRunner(): ScriptWorkflowRunner {
+  return async (workflowFile, options) => {
+    const absoluteWorkflowFile = isAbsolute(workflowFile) ? workflowFile : resolve(options.cwd, workflowFile);
+    const runtime = await resolveWorkflowSdkRuntime(options.cwd);
+    if (!runtime) {
+      throw new Error('Runtime dependency is unavailable: @agent-relay/sdk/workflows runtime.');
+    }
+    await runScriptWorkflowCompat(absoluteWorkflowFile, options);
+  };
+}
+
+interface WorkflowSdkRuntime {
+  entryPath: string;
+  source: 'target-repo' | 'ricky-package';
+}
+
+async function withCapturedProcessOutput<T>(
+  options: Pick<ScriptWorkflowRunnerOptions, 'onStdout' | 'onStderr'>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const originalStdoutWrite = process.stdout.write;
+  const originalStderrWrite = process.stderr.write;
+  let stdoutBuffer = '';
+  let stderrBuffer = '';
+
+  const capture = (chunk: unknown, stream: 'stdout' | 'stderr'): void => {
+    const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+    const emit = stream === 'stdout' ? options.onStdout : options.onStderr;
+    if (!emit) return;
+
+    const combined = (stream === 'stdout' ? stdoutBuffer : stderrBuffer) + text;
+    const lines = combined.split(/\r?\n/);
+    const remainder = lines.pop() ?? '';
+    if (stream === 'stdout') {
+      stdoutBuffer = remainder;
+    } else {
+      stderrBuffer = remainder;
+    }
+    for (const line of lines) emit(line);
+  };
+
+  process.stdout.write = function writeStdout(
+    this: NodeJS.WriteStream,
+    chunk: Uint8Array | string,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    callback?: (error?: Error | null) => void,
+  ): boolean {
+    capture(chunk, 'stdout');
+    return originalStdoutWrite.call(this, chunk, encodingOrCallback as BufferEncoding, callback);
+  } as typeof process.stdout.write;
+
+  process.stderr.write = function writeStderr(
+    this: NodeJS.WriteStream,
+    chunk: Uint8Array | string,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    callback?: (error?: Error | null) => void,
+  ): boolean {
+    capture(chunk, 'stderr');
+    return originalStderrWrite.call(this, chunk, encodingOrCallback as BufferEncoding, callback);
+  } as typeof process.stderr.write;
+
+  try {
+    return await fn();
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+    if (stdoutBuffer) options.onStdout?.(stdoutBuffer);
+    if (stderrBuffer) options.onStderr?.(stderrBuffer);
+  }
+}
+
+async function resolveWorkflowSdkRuntime(cwd: string): Promise<WorkflowSdkRuntime | null> {
+  const { access } = await import('node:fs/promises');
+  const targetRequire = createRequire(resolve(cwd, 'package.json'));
+  try {
+    const entryPath = targetRequire.resolve('@agent-relay/sdk/workflows');
+    await access(entryPath);
+    return { entryPath, source: 'target-repo' };
+  } catch {
+    // Fall through to Ricky's own installed SDK dependency.
+  }
+
+  try {
+    const entryPath = requireFromHere.resolve('@agent-relay/sdk/workflows');
+    await access(entryPath);
+    return { entryPath, source: 'ricky-package' };
+  } catch {
+    return null;
+  }
+}
+
+async function withProcessContext<T>(
+  cwd: string,
+  env: Record<string, string> | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previousCwd = process.cwd();
+  const previousEnv = new Map<string, string | undefined>();
+  try {
+    process.chdir(cwd);
+    for (const [key, value] of Object.entries(env ?? {})) {
+      previousEnv.set(key, process.env[key]);
+      process.env[key] = value;
+    }
+    return await fn();
+  } finally {
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    process.chdir(previousCwd);
+  }
+}
+
+async function runScriptWorkflowCompat(workflowFile: string, options: ScriptWorkflowRunnerOptions): Promise<void> {
+  const { access } = await import('node:fs/promises');
+  try {
+    await access(workflowFile);
+  } catch {
+    throw new Error(`File not found: ${workflowFile}`);
+  }
+
+  const ext = workflowFile.slice(workflowFile.lastIndexOf('.')).toLowerCase();
+  if (ext === '.ts' || ext === '.tsx' || ext === '.mts' || ext === '.cts') {
+    await runFirstAvailableScriptRunner([
+      { label: 'node --experimental-strip-types', command: process.execPath, args: ['--experimental-strip-types', '--no-warnings=ExperimentalWarning', workflowFile] },
+      { label: 'tsx', command: 'tsx', args: [workflowFile] },
+      { label: 'npx tsx', command: 'npx', args: ['tsx', workflowFile] },
+    ], options);
+    return;
+  }
+  if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
+    await runFirstAvailableScriptRunner([
+      { label: 'node', command: process.execPath, args: [workflowFile] },
+    ], options);
+    return;
+  }
+  if (ext === '.py') {
+    await runFirstAvailableScriptRunner([
+      { label: 'python3', command: 'python3', args: [workflowFile] },
+      { label: 'python', command: 'python', args: [workflowFile] },
+    ], options);
+    return;
+  }
+  throw new Error(`Unsupported file type: ${ext}. Use .ts, .tsx, .js, or .py`);
+}
+
+async function runFirstAvailableScriptRunner(
+  runners: Array<{ label: string; command: string; args: string[] }>,
+  options: ScriptWorkflowRunnerOptions,
+): Promise<void> {
+  let lastError: Error | undefined;
+  for (const runner of runners) {
+    try {
+      await runScriptProcess(runner.command, runner.args, runner.label, options);
+      return;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      if ((err as Error & { code?: string }).code === 'ENOENT') {
+        lastError = err;
+        continue;
+      }
+      if (runner.label === 'node --experimental-strip-types' && /exited with code 9\b/.test(err.message)) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError ?? new Error('No compatible workflow script runner is available.');
+}
+
+async function runScriptProcess(
+  command: string,
+  args: string[],
+  label: string,
+  options: ScriptWorkflowRunnerOptions,
+): Promise<void> {
+  const sdkNodeOptions = await workflowSdkLoaderNodeOption(options.cwd);
+  const env = {
+    ...process.env,
+    ...(options.env ?? {}),
+    ...(sdkNodeOptions ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, options.env?.NODE_OPTIONS, sdkNodeOptions].filter(Boolean).join(' ') } : {}),
+    ...(options.startFrom ? { START_FROM: options.startFrom } : {}),
+    ...(options.previousRunId ? { PREVIOUS_RUN_ID: options.previousRunId } : {}),
+    ...(options.resume ? { RESUME_RUN_ID: options.resume } : {}),
+  };
+
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.once('error', reject);
+    if (child.stdout) {
+      createInterface({ input: child.stdout }).on('line', (line) => options.onStdout?.(line));
+    }
+    if (child.stderr) {
+      createInterface({ input: child.stderr }).on('line', (line) => options.onStderr?.(line));
+    }
+    child.once('exit', (code, signal) => {
+      if (code === 0) {
+        resolvePromise();
+        return;
+      }
+      if (code === null) {
+        reject(new Error(`${label} exited from signal ${signal ?? 'unknown'}`));
+        return;
+      }
+      reject(new Error(`${label} exited with code ${code}`));
+    });
+  });
+}
+
+async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefined> {
+  const runtime = await resolveWorkflowSdkRuntime(cwd);
+  if (!runtime) return undefined;
+
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const loaderPath = join(localRunStateRoot(cwd), 'sdk-runtime-loader.mjs');
+  const runtimeUrl = pathToFileURL(runtime.entryPath).href;
+  const loaderSource = [
+    `const sdkWorkflowsUrl = ${JSON.stringify(runtimeUrl)};`,
+    'export async function resolve(specifier, context, nextResolve) {',
+    "  if (specifier === '@agent-relay/sdk/workflows') {",
+    '    return { url: sdkWorkflowsUrl, shortCircuit: true };',
+    '  }',
+    '  return nextResolve(specifier, context);',
+    '}',
+    '',
+  ].join('\n');
+  await mkdir(dirname(loaderPath), { recursive: true });
+  await writeFile(loaderPath, loaderSource, 'utf8');
+  return `--experimental-loader=${pathToFileURL(loaderPath).href}`;
+}
+
 export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalExecutor {
   return {
     async execute(request: LocalInvocationRequest): Promise<LocalResponse> {
@@ -289,7 +809,10 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       const cwd = request.invocationRoot ?? options.cwd ?? process.cwd();
       const artifactWriter = options.artifactWriter ?? defaultArtifactWriter;
       const coordinator =
-        options.coordinator ?? new LocalCoordinator(options.commandRunner ?? createProcessCommandRunner());
+        options.coordinator ??
+        (options.commandRunner || options.route
+          ? new LocalCoordinator(options.commandRunner ?? createProcessCommandRunner())
+          : new SdkScriptWorkflowCoordinator(options.scriptWorkflowRunner ?? createSdkScriptWorkflowRunner()));
       const stageMode = resolveStageMode(request.stageMode, options.returnGeneratedArtifactOnly);
       const includeStageContract = true;
       const specDigest = digestSpec(request.spec);
@@ -345,15 +868,24 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           ...intakeResult.routing.normalizedSpec,
           executionPreference,
         };
-        generationResult = generate({
+        const workforcePersonaWriter = resolveWorkforcePersonaWriterOptions(request, options, cwd, executionPreference);
+        const generationInput: GenerationInput = {
           spec: normalizedSpec,
           dryRunEnabled: true,
+          artifactPath: artifactPathOverrideFor(request),
           refine: request.refine,
-        });
+          ...(workforcePersonaWriter ? { workforcePersonaWriter } : {}),
+        };
+        generationResult = generationInput.workforcePersonaWriter
+          ? await generateWithWorkforcePersona(generationInput)
+          : generate(generationInput);
         artifact = generationResult.artifact;
 
         logs.push(`[local] workflow generation: ${generationResult.success ? 'passed' : 'failed'}`);
         logs.push(`[local] selected pattern: ${generationResult.patternDecision.pattern}`);
+        if (generationResult.workforcePersona) {
+          logs.push(`[local] workforce persona writer: ${generationResult.workforcePersona.personaId}@${generationResult.workforcePersona.tier}`);
+        }
         warnings.push(...generationResult.validation.warnings);
 
         if (artifact) {
@@ -372,7 +904,9 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         }
 
         await artifactWriter.writeArtifact(artifact.artifactPath, artifact.content, cwd);
-        await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
+        if (options.persistGenerationMetadataArtifacts === true) {
+          await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
+        }
         logs.push(`[local] wrote workflow artifact: ${artifact.artifactPath}`);
         generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult);
       }
@@ -401,7 +935,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           });
         }
         logs.push('[local] runtime launch skipped: returning generated artifact only');
-        nextActions.push(`Run the generated workflow locally: npx --no-install agent-relay run ${runTarget}`);
+        nextActions.push(`Run the generated workflow locally: ${localRunCommand(runTarget)}`);
         nextActions.push('Inspect the generated workflow artifact and choose whether to run it locally.');
         return {
           ok: true,
@@ -413,7 +947,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         };
       }
 
-      const route = options.route ?? DEFAULT_LOCAL_ROUTE;
+      const route = await resolveLocalRuntimeRoute(cwd, options.route ?? DEFAULT_LOCAL_ROUTE, options);
       const workflowId = artifact?.workflowId ?? generationStage.artifact?.workflow_id ?? workflowIdForPath(runTarget);
       const precheckBlocker = await precheckRuntimeLaunch(runTarget, cwd, route, options);
       if (precheckBlocker) {
@@ -444,6 +978,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         timeoutMs: options.timeoutMs,
         route,
         env: { AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
+        ...stableRunIdFor(request),
         retry: request.retry,
         metadata: {
           requestId: intakeResult.requestId,
@@ -732,6 +1267,29 @@ function sourceToSurface(source: LocalInvocationRequest['source']): InputSurface
   }
 }
 
+function stableRunIdFor(request: LocalInvocationRequest): Pick<RunRequest, 'runId'> {
+  const fromMetadata = request.metadata.rickyRunId ?? request.metadata.runId;
+  if (typeof fromMetadata === 'string' && fromMetadata.trim()) return { runId: fromMetadata };
+  return request.requestId ? { runId: request.requestId } : {};
+}
+
+function resolveWorkforcePersonaWriterOptions(
+  request: LocalInvocationRequest,
+  options: LocalExecutorOptions,
+  cwd: string,
+  executionPreference: ExecutionPreference,
+): GenerationInput['workforcePersonaWriter'] | undefined {
+  if (options.workforcePersonaWriter === false) return undefined;
+  const requestedByMetadata = request.metadata.workflowWriter === 'workforce' || request.metadata.workflow_writer === 'workforce';
+  if (!options.workforcePersonaWriter && !requestedByMetadata) return undefined;
+
+  return {
+    ...(options.workforcePersonaWriter || {}),
+    repoRoot: cwd,
+    targetMode: executionPreference === 'cloud' ? 'cloud' : 'local',
+  };
+}
+
 function workflowFileForRoute(
   request: LocalInvocationRequest,
   route: RouteTarget,
@@ -743,6 +1301,14 @@ function workflowFileForRoute(
   const candidate = request.structuredSpec?.workflowFile ?? request.structuredSpec?.workflowPath;
   if (typeof candidate === 'string' && isExecutableWorkflowPath(candidate)) return candidate;
   return workflowFileHint && isExecutableWorkflowPath(workflowFileHint) ? workflowFileHint : null;
+}
+
+function artifactPathOverrideFor(request: LocalInvocationRequest): string | undefined {
+  const candidate =
+    request.structuredSpec?.artifactPath ??
+    request.structuredSpec?.workflowArtifactPath ??
+    request.structuredSpec?.outputPath;
+  return typeof candidate === 'string' && candidate.trim() ? candidate : undefined;
 }
 
 function isExecutableWorkflowPath(path: string): boolean {
@@ -809,7 +1375,7 @@ function createGenerationStage(
     ...(status === 'ok' && artifact
       ? {
           next: {
-            run_command: `npx --no-install agent-relay run ${artifact.artifactPath}`,
+            run_command: localRunCommand(artifact.artifactPath),
             run_mode_hint: `ricky run --artifact ${artifact.artifactPath}`,
           },
         }
@@ -821,6 +1387,7 @@ function createGenerationStage(
             skill_matches: generationResult.skillContext.matches,
             tool_selection: generationResult.toolSelection.selections,
             ...(generationResult.refinement ? { refinement: generationResult.refinement } : {}),
+            ...(generationResult.workforcePersona ? { workforce_persona: generationResult.workforcePersona } : {}),
           },
         }
       : {}),
@@ -839,6 +1406,9 @@ async function writeGenerationMetadataArtifacts(
   if (generationResult.refinement) {
     await artifactWriter.writeArtifact(`${artifact.artifactsDir}/refinement.json`, `${JSON.stringify(generationResult.refinement, null, 2)}\n`, cwd);
   }
+  if (generationResult.workforcePersona) {
+    await artifactWriter.writeArtifact(`${artifact.artifactsDir}/workforce-persona.json`, `${JSON.stringify(generationResult.workforcePersona, null, 2)}\n`, cwd);
+  }
 }
 
 function createArtifactReferenceGenerationStage(
@@ -855,10 +1425,14 @@ function createArtifactReferenceGenerationStage(
       spec_digest: specDigest,
     },
     next: {
-      run_command: `npx --no-install agent-relay run ${artifactPath}`,
+      run_command: localRunCommand(artifactPath),
       run_mode_hint: `ricky run --artifact ${artifactPath}`,
     },
   };
+}
+
+function localRunCommand(artifactPath: string): string {
+  return `ricky run --artifact ${artifactPath}`;
 }
 
 function digestSpec(spec: string): string {
@@ -896,6 +1470,25 @@ async function precheckRuntimeLaunch(
   }
 
   const command = route.command ?? 'agent-relay';
+  if (command === DEFAULT_LOCAL_ROUTE.command) {
+    if (options.scriptWorkflowRunner) return null;
+    const runtime = await resolveWorkflowSdkRuntime(cwd);
+    if (runtime) return null;
+    return blocker({
+      code: 'MISSING_BINARY',
+      category: 'dependency',
+      detectedDuring: 'precheck',
+      message: 'Runtime dependency is unavailable: @agent-relay/sdk/workflows runtime.',
+      missing: ['@agent-relay/sdk/workflows runtime'],
+      found: [`cwd=${cwd}`],
+      steps: [
+        'Install Ricky with its @agent-relay/sdk dependency available.',
+        'Run npm install in the Ricky package if using a linked development checkout.',
+        localRunCommand(artifactPath),
+      ],
+    });
+  }
+
   const executable = await findExecutable(command);
   if (!executable) {
     return blocker({
@@ -934,6 +1527,38 @@ async function precheckRuntimeLaunch(
   }
 
   return null;
+}
+
+async function resolveLocalRuntimeRoute(
+  cwd: string,
+  route: ExecutionRoute,
+  options: LocalExecutorOptions,
+): Promise<ExecutionRoute> {
+  if (options.commandRunner || options.coordinator) return route;
+
+  const command = route.command ?? 'agent-relay';
+  const baseArgs = route.baseArgs ?? [];
+  const npxPackage = command === 'npx' ? npxNoInstallPackage(baseArgs) : undefined;
+  if (npxPackage !== 'agent-relay') return route;
+
+  const localBin = resolve(cwd, 'node_modules', '.bin', npxPackage);
+  if (await isExecutable(localBin)) return route;
+
+  const pathExecutable = await findExecutable(npxPackage);
+  if (!pathExecutable) return route;
+
+  return { command: npxPackage, baseArgs: ['run'] };
+}
+
+async function isExecutable(path: string): Promise<boolean> {
+  const { access } = await import('node:fs/promises');
+  const { constants } = await import('node:fs');
+  try {
+    await access(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function blocker(params: {
@@ -1119,7 +1744,7 @@ async function createExecutionStageFromCoordinatorResult(
 }
 
 function runtimeRunIdFilePath(cwd: string, workflowId: string): string {
-  return resolve(cwd, '.workflow-artifacts', 'ricky-local-runs', `${workflowId}-run-id.txt`);
+  return join(localRunStateRoot(cwd), `${workflowId}-run-id.txt`);
 }
 
 async function ensureParentDir(path: string): Promise<void> {
@@ -1157,18 +1782,33 @@ function classifyCoordinatorBlocker(
   const combined = [result.error, ...result.stderr, ...result.stdout].filter(Boolean).join('\n');
   const runtimePackage = npxNoInstallPackage(result.invocation.args);
 
+  if (/Workflow runtime reported failure despite a zero process exit|\[workflow\]\s+FAILED:/i.test(combined)) {
+    return blocker({
+      code: 'INVALID_ARTIFACT',
+      category: 'workflow_invalid',
+      detectedDuring: 'launch',
+      message: `Workflow reported a failed run: ${signal}.`,
+      missing: ['passing workflow run'],
+      found: [`cwd=${result.cwd}`, `status=${result.status}`],
+      steps: ['Inspect the captured workflow logs.', command],
+    });
+  }
+
   if (result.exitCode === 127 || /(?:command not found|enoent|not found)/i.test(combined)) {
+    const isSdkScriptRoute = result.invocation.command === DEFAULT_LOCAL_ROUTE.command;
     return blocker({
       code: 'MISSING_BINARY',
       category: 'dependency',
       detectedDuring: 'launch',
       message: `Runtime dependency is unavailable: ${signal}.`,
-      missing: [runtimePackage ?? result.invocation.command],
+      missing: [runtimePackage ?? (isSdkScriptRoute ? '@agent-relay/sdk/workflows runtime' : result.invocation.command)],
       found: [`cwd=${result.cwd}`],
       steps: [
         'npm install',
         runtimePackage
           ? `npx --no-install ${shellQuote(runtimePackage)} run ${shellQuote(result.workflowFile)}`
+          : isSdkScriptRoute
+            ? localRunCommand(result.workflowFile)
           : `command -v ${shellQuote(result.invocation.command)}`,
       ],
     });
@@ -1257,7 +1897,10 @@ function extractMissingEnvVars(text: string): string[] {
 }
 
 async function writeRuntimeLogs(result: CoordinatorResult): Promise<LocalExecutionEvidence['logs']> {
-  const base = resolve(process.cwd(), '.workflow-artifacts', 'ricky-local-runs', result.runId);
+  // Use the coordinator-reported cwd (already the invocation root captured at
+  // the CLI boundary). Log capture is Ricky state, so keep it outside the
+  // target repo by default and key it by the repo path.
+  const base = localRunArtifactDir(result.cwd ?? process.cwd(), result.runId);
   const { mkdir, writeFile } = await import('node:fs/promises');
   const stdoutPath = join(base, 'stdout.log');
   const stderrPath = join(base, 'stderr.log');

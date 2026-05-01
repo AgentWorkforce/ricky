@@ -85,7 +85,7 @@ describe('Ricky CLI onboarding proof', () => {
       ['local-journey', ['mode=local', 'spec=build a workflow']],
       ['setup-journey', ['all 4 choices']],
       ['welcome-journey', ['Welcome to Ricky', 'Ricky is ready']],
-      ['status-journey', ['local mode', 'google connected', 'cloud connected']],
+      ['status-journey', ['local mode', 'cloud connected', 'cloud not connected']],
       ['generate-journey', ['generate a workflow for package checks']],
     ] satisfies Array<[ProofCaseName, string[]]>)('%s proves the journey contract', (name, expectedEvidence) => {
       const result = evaluateOnboardingProofCase(name);

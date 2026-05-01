@@ -11,7 +11,7 @@ Minimal live reproducers proved that Codex worker steps can:
 So the Ricky problem is not a universal Codex edit/exit failure.
 
 ### 2. The real failure was specific to Ricky product-surface file steps
-The problematic behavior appeared when Codex was asked to perform tiny bounded edits inside real Ricky product files such as `src/cli/*`.
+The problematic behavior appeared when Codex was asked to perform tiny bounded edits inside real Ricky product files such as `src/surfaces/cli/*`.
 
 Observed behavior in that path:
 - worker would roam through neighboring implementation files and tests
@@ -24,7 +24,7 @@ Conclusion:
 ### 3. Prompt-only hardening was not enough
 Several prompt-level fixes were attempted, including explicitly telling workers that file-writing steps are not report-writing steps and should emit minimal stdout.
 
-Those changes did not reliably solve the live Ricky `src/cli/*` issue.
+Those changes did not reliably solve the live Ricky `src/surfaces/cli/*` issue.
 
 Conclusion:
 - execution-path change was a better fix direction than more prompt tuning
@@ -66,7 +66,7 @@ After the helper-script change, live reruns of `04` progressed through:
 
 Validation output reached:
 - `npx tsc --noEmit`
-- `npx vitest run src/cli/`
+- `npx vitest run src/surfaces/cli/`
 - 22 passing tests across onboarding + proof coverage in the current run context
 
 The workflow then advanced into review-stage execution.

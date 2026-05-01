@@ -8,9 +8,9 @@ This is real shared reuse, but it is intentionally narrow. The adapter proves th
 
 ## Real shared reuse
 
-Ricky now depends on `@agent-assistant/turn-context` in `packages/local/package.json`, with the resolved package captured in `package-lock.json`.
+Ricky now depends on `@agent-assistant/turn-context` in the root `package.json`, with the resolved package captured in `package-lock.json`.
 
-The shared runtime package is used by `packages/local/src/assistant-turn-context-adapter.ts`. The adapter maps Ricky's normalized local request into a `TurnContextInput` through `toRickyTurnContextInput()`, then assembles it through `createTurnContextAssembler()` in `assembleRickyTurnContext()`.
+The shared runtime package is used by `src/local/assistant-turn-context-adapter.ts`. The adapter maps Ricky's normalized local request into a `TurnContextInput` through `toRickyTurnContextInput()`, then assembles it through `createTurnContextAssembler()` in `assembleRickyTurnContext()`.
 
 The real local executor path calls `assembleRickyTurnContext(request)` before product intake, workflow generation, artifact selection, runtime prechecks, or coordinator launch. That means the adoption is runtime behavior, not copied local types or documentation-only alignment.
 

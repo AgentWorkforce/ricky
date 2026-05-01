@@ -34,8 +34,8 @@ describe('Ricky external CLI proof', () => {
     expect(result.cliOutput).toContain('Generation: ok — artifact written to disk.');
     expect(result.cliOutput).toContain(`Artifact: ${result.artifactPath}`);
     expect(result.cliOutput).toContain(`To execute this artifact: ${result.nextCommand}`);
-    expect(result.nextCommand).toBe(`npx --no-install agent-relay run ${result.artifactPath}`);
-    expect(result.nextCommandOutput).toContain(`[fixture-agent-relay] ran ${result.artifactPath}`);
+    expect(result.nextCommand).toBe(`ricky run --artifact ${result.artifactPath}`);
+    expect(result.nextCommandOutput).toContain('Execution: success');
     },
   );
 });
