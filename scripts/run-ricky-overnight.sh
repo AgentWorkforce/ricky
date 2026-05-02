@@ -489,6 +489,47 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+sync_repo_with_origin_main_if_safe() {
+  local branch=""
+  local ahead=0
+  local behind=0
+
+  branch="$(git branch --show-current 2>/dev/null || true)"
+  if [[ "$branch" != "main" ]]; then
+    log "skipping origin/main sync because current branch is ${branch:-detached}"
+    return 0
+  fi
+
+  if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+    log "skipping origin/main sync because repo has tracked local modifications"
+    return 0
+  fi
+
+  if ! git fetch origin main >/dev/null 2>&1; then
+    log "warning: failed to fetch origin/main before queue filtering"
+    return 0
+  fi
+
+  read -r behind ahead < <(git rev-list --left-right --count HEAD...origin/main)
+
+  if (( ahead > 0 )); then
+    log "skipping origin/main fast-forward because local main has ${ahead} unpushed commit(s)"
+    return 0
+  fi
+
+  if (( behind == 0 )); then
+    log "origin/main sync check: local main already current"
+    return 0
+  fi
+
+  if git merge --ff-only origin/main >/dev/null 2>&1; then
+    log "fast-forwarded local main to origin/main before queue filtering (${behind} commit(s))"
+    return 0
+  fi
+
+  log "warning: failed to fast-forward local main to origin/main before queue filtering"
+}
+
 workflow_has_stale_package_targets() {
   local workflow_path="$1"
 
@@ -1315,6 +1356,7 @@ fi
 cd "$REPO_ROOT"
 quarantine_repo_runtime_state
 reconcile_stale_state_dirs
+sync_repo_with_origin_main_if_safe
 
 echo "running" > "$STATUS_FILE"
 git rev-parse HEAD > "$LAST_COMMIT_FILE"
