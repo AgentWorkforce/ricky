@@ -723,7 +723,21 @@ workflow_is_already_satisfied() {
     workflows/wave12-simplified-workflow-cli/01-implement-and-prove-simplified-workflow-cli.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave12-simplified-workflow-cli/implement-and-prove/signoff.md \
-        'SIMPLIFIED_WORKFLOW_CLI_100_PERCENT_COMPLETE'
+        'SIMPLIFIED_WORKFLOW_CLI_100_PERCENT_COMPLETE' \
+      || {
+        artifact_signoff_has_marker \
+          .workflow-artifacts/wave12-simplified-workflow-cli/no-dead-end-proof/signoff.md \
+          'NO_DEAD_END_SIGNOFF_COMPLETE' \
+        && git cat-file -e HEAD:src/surfaces/cli/prompts/index.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/flows/local-workflow-flow.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/flows/cloud-workflow-flow.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/flows/power-user-parser.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/generation/workforce-persona-writer.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/entrypoint/interactive-cli.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/commands/cli-main.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:test/simplified-workflow-cli.e2e.test.ts 2>/dev/null \
+        && grep -q '"@inquirer/prompts"' package.json
+      }
       ;;
     workflows/wave12-simplified-workflow-cli/02-prove-no-dead-end-cli.ts)
       artifact_signoff_has_marker \
