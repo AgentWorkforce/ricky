@@ -5,7 +5,6 @@ import { generate, generateWithWorkforcePersona } from './pipeline.js';
 import type { WorkforcePersonaExecution, WorkforcePersonaResolver } from './workforce-persona-writer.js';
 import {
   buildWorkflowPersonaTask,
-  defaultWorkforcePersonaResolver,
   parsePersonaWorkflowResponse,
   resolveWorkforcePersonaContextWithModules,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
@@ -37,11 +36,26 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('Do not open an interactive Claude, Codex, or OpenCode terminal UI');
   });
 
-  it('defaults to the Agent Relay workflow-writing persona when the packaged router exposes it', async () => {
-    const resolved = await defaultWorkforcePersonaResolver(WORKFORCE_PERSONA_INTENT_CANDIDATES);
+  it('defaults to the Agent Relay workflow-writing persona when harness-kit exposes runnable APIs', async () => {
+    const calls: string[] = [];
+    const resolved = await resolveWorkforcePersonaContextWithModules(
+      WORKFORCE_PERSONA_INTENT_CANDIDATES,
+      { tier: 'best' },
+      {
+        source: 'package',
+        warnings: [],
+        module: {
+          useRunnablePersona(intent) {
+            calls.push(intent);
+            return runnableContext({ personaId: intent });
+          },
+        },
+      },
+    );
 
+    expect(calls[0]).toBe('agent-relay-workflow');
     expect(resolved.intent).toBe('agent-relay-workflow');
-    expect(resolved.context.selection.personaId).toBeTruthy();
+    expect(resolved.context.selection.personaId).toBe('agent-relay-workflow');
     expect(resolved.context.selection.runtime.harness).toMatch(/^(claude|codex|opencode)$/);
     expect(typeof resolved.context.sendMessage).toBe('function');
   });
