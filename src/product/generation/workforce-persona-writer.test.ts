@@ -5,6 +5,8 @@ import { generate, generateWithWorkforcePersona } from './pipeline.js';
 import type { WorkforcePersonaExecution, WorkforcePersonaResolver } from './workforce-persona-writer.js';
 import {
   buildWorkflowPersonaTask,
+  loadWorkforcePersonaModule,
+  loadWorkforceSelectionModule,
   parsePersonaWorkflowResponse,
   resolveWorkforcePersonaContextWithModules,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
@@ -272,9 +274,9 @@ describe('workforce persona workflow writer', () => {
 
     const calls: Array<{ intents: readonly string[]; task: string }> = [];
     const resolver: WorkforcePersonaResolver = async (intents) => ({
-      source: 'local-dev',
+      source: 'package',
       intent: 'agent-relay-workflow',
-      warnings: ['using local ../workforce workload-router'],
+      warnings: ['resolver warning'],
       context: {
         selection: {
           personaId: 'agent-relay-workflow',
@@ -326,13 +328,13 @@ describe('workforce persona workflow writer', () => {
       harness: 'codex',
       model: 'openai-codex/gpt-5.3-codex',
       runId: 'persona-run-001',
-      source: 'local-dev',
+      source: 'package',
       selectedIntent: 'agent-relay-workflow',
       responseFormat: 'structured-json',
       outputPath: 'workflows/generated/workforce-writer.ts',
     });
     expect(result.workforcePersona?.promptDigest).toMatch(/^[a-f0-9]{64}$/);
-    expect(result.workforcePersona?.warnings).toEqual(['using local ../workforce workload-router']);
+    expect(result.workforcePersona?.warnings).toEqual(['resolver warning']);
     expect(result.artifact?.content).toBe(base.artifact!.content);
   });
 
@@ -346,8 +348,8 @@ describe('workforce persona workflow writer', () => {
         module: {},
       },
       async () => ({
-        source: 'local-dev',
-        warnings: ['using local ../workforce workload-router'],
+        source: 'package',
+        warnings: ['using packaged workload-router fallback'],
         module: {
           usePersona(intent, options) {
             return runnableContext({ personaId: intent, tier: options?.tier ?? 'minimum' });
@@ -356,7 +358,7 @@ describe('workforce persona workflow writer', () => {
       }),
     );
 
-    expect(resolved.source).toBe('local-dev');
+    expect(resolved.source).toBe('package');
     expect(resolved.intent).toBe('agent-relay-workflow');
     expect(resolved.context.selection).toMatchObject({
       personaId: 'agent-relay-workflow',
@@ -364,10 +366,62 @@ describe('workforce persona workflow writer', () => {
     });
     expect(resolved.warnings).toEqual([
       'harness-kit unavailable',
-      'using local ../workforce workload-router',
+      'using packaged workload-router fallback',
     ]);
     const result = await resolved.context.sendMessage('task');
     expect(result.status).toBe('completed');
+  });
+
+  it('preserves npm load failure wording when harness-kit cannot be imported', async () => {
+    const failImport = async () => {
+      throw new Error('simulated package load failure');
+    };
+
+    await expect(loadWorkforcePersonaModule(failImport)).rejects.toMatchObject({
+      name: 'WorkforcePersonaWriterError',
+      message: expect.stringContaining('@agentworkforce/harness-kit could not be loaded'),
+      warnings: [expect.stringContaining('simulated package load failure')],
+    });
+  });
+
+  it('preserves missing-export wording when harness-kit imports but lacks runnable APIs', async () => {
+    const importWrongShape = async () => ({
+      buildInteractiveSpec() {
+        return {};
+      },
+    });
+
+    await expect(loadWorkforcePersonaModule(importWrongShape)).rejects.toMatchObject({
+      name: 'WorkforcePersonaWriterError',
+      message: expect.stringContaining('does not expose the runnable persona API'),
+      warnings: [expect.stringContaining('exports: buildInteractiveSpec')],
+    });
+  });
+
+  it('preserves npm load failure wording when workload-router cannot be imported', async () => {
+    const failImport = async () => {
+      throw new Error('simulated router load failure');
+    };
+
+    await expect(loadWorkforceSelectionModule(failImport)).rejects.toMatchObject({
+      name: 'WorkforcePersonaWriterError',
+      message: expect.stringContaining('@agentworkforce/workload-router could not be loaded'),
+      warnings: [expect.stringContaining('simulated router load failure')],
+    });
+  });
+
+  it('preserves missing-export wording when workload-router imports but lacks usePersona', async () => {
+    const importWrongShape = async () => ({
+      resolvePersona() {
+        return {};
+      },
+    });
+
+    await expect(loadWorkforceSelectionModule(importWrongShape)).rejects.toMatchObject({
+      name: 'WorkforcePersonaWriterError',
+      message: expect.stringContaining('does not expose the persona selection API'),
+      warnings: [expect.stringContaining('exports: resolvePersona')],
+    });
   });
 });
 

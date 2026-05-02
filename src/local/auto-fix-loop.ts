@@ -208,6 +208,7 @@ export async function runWithAutoFix(
         continue;
       } catch (error) {
         attemptSummary.fix_error = error instanceof Error ? error.message : String(error);
+        warnings.push(...warningsFromError(error));
         const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
         escalated.nextActions = [
           ...escalated.nextActions,
@@ -515,6 +516,14 @@ function levenshtein(a: string, b: string): number {
     previous.splice(0, previous.length, ...current);
   }
   return previous[b.length];
+}
+
+function warningsFromError(error: unknown): string[] {
+  if (!error || typeof error !== 'object' || !('warnings' in error)) return [];
+  const warnings = (error as { warnings?: unknown }).warnings;
+  return Array.isArray(warnings)
+    ? warnings.filter((warning): warning is string => typeof warning === 'string' && warning.trim().length > 0)
+    : [];
 }
 
 function cleanShellPath(value: string | undefined): string | null {

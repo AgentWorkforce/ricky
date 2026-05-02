@@ -1304,9 +1304,9 @@ describe('cliMain', () => {
 
     const output = result.output.join('\n');
     expect(output).toContain('Ricky reviewed the logs but could not safely finish the repair.');
-    expect(output).toContain('Auto-fix: blocker after 1/3 attempt(s) (MISSING_ENV_VAR)');
-    expect(output).toContain('Try: export TEST_TOKEN=...');
-    expect(output).toContain('Try: ricky status --run ricky-local-options');
+    expect(output).toContain('Auto-fix: stopped after 1/3 attempt(s) (MISSING_ENV_VAR)');
+    expect(output).toContain('Next:\n  export TEST_TOKEN=...');
+    expect(output).toContain('  ricky status --run ricky-local-options');
     expect(output).not.toContain('Relevant logs:');
     expect(output).not.toContain('Options:');
   });
@@ -1340,7 +1340,7 @@ describe('cliMain', () => {
     });
 
     const output = result.output.join('\n');
-    expect(output).toContain('Auto-fix: ok after 2/3 attempt(s)');
+    expect(output).toContain('Auto-fix: repaired after 2/3 attempt(s)');
     expect(output).toContain('Repair: deterministic — Aligned deterministic workflow checks.');
   });
 

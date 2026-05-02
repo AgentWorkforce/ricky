@@ -29,7 +29,7 @@ import type {
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { defaultCloudIntegrationConnector, runInteractiveCli } from '../entrypoint/interactive-cli.js';
 import { parsePowerUserArgs, type ConnectTarget, type PowerUserSurface } from '../flows/power-user-parser.js';
 import {
@@ -1772,16 +1772,20 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
       }
     }
     if (localResult.execution.blocker) {
-      lines.push(`Reason: ${compactSentence(localResult.execution.blocker.message)}`);
+      lines.push(`Cause: ${compactSentence(executionCause(localResult), 300)}`);
     }
   }
 
   if (localResult.auto_fix) {
     const finalAttempt = localResult.auto_fix.attempts.at(-1);
     const finalBlocker = finalAttempt?.blocker_code ? ` (${String(finalAttempt.blocker_code)})` : '';
-    lines.push(`Auto-fix: ${localResult.auto_fix.final_status} after ${localResult.auto_fix.attempts.length}/${localResult.auto_fix.max_attempts} attempt(s)${finalBlocker}`);
+    lines.push(`Auto-fix: ${autoFixStatusLabel(localResult.auto_fix.final_status)} after ${localResult.auto_fix.attempts.length}/${localResult.auto_fix.max_attempts} attempt(s)${finalBlocker}`);
     const fixError = typeof finalAttempt?.fix_error === 'string' ? finalAttempt.fix_error : undefined;
-    if (fixError) lines.push(`Repair issue: ${compactSentence(fixError)}`);
+    if (fixError) {
+      lines.push(`Repair blocked: ${compactSentence(repairIssueSummary(fixError), 300)}`);
+      const detail = repairIssueDetail(localResult.warnings);
+      if (detail) lines.push(`Repair detail: ${compactSentence(detail, 300)}`);
+    }
     const appliedFix = finalAttempt?.applied_fix;
     if (appliedFix && typeof appliedFix === 'object') {
       const fix = appliedFix as { mode?: unknown; summary?: unknown; artifact_path?: unknown };
@@ -1791,8 +1795,9 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     }
     if (localResult.auto_fix.escalation) {
       lines.push(`Ricky reviewed the logs but could not safely finish the repair.`);
+      lines.push('Next:');
       for (const option of localResult.auto_fix.escalation.options.slice(0, 3)) {
-        lines.push(option.command ? `Try: ${option.command}` : `Try: ${option.description}`);
+        lines.push(`  ${option.command ?? option.description}`);
       }
     }
   }
@@ -1828,7 +1833,8 @@ function executionFailureSummary(localResult: NonNullable<InteractiveCliResult['
   const blocker = execution.blocker?.code ? ` — ${execution.blocker.code}` : '';
   const failedStep = failedStepFromTail(execution.evidence?.logs.tail ?? [])
     ?? execution.evidence?.failed_step?.id;
-  return `Execution: ${execution.status}${blocker}${failedStep ? ` at ${failedStep}` : ''}`;
+  const status = execution.status === 'blocker' ? 'blocked' : execution.status;
+  return `Execution: ${status}${blocker}${failedStep ? ` at ${failedStep}` : ''}`;
 }
 
 function failedStepFromTail(tail: string[]): string | undefined {
@@ -1844,6 +1850,43 @@ function compactSentence(value: string, maxLength = 220): string {
   const compact = value.replace(/\s+/g, ' ').trim();
   if (compact.length <= maxLength) return compact;
   return `${compact.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function executionCause(localResult: NonNullable<InteractiveCliResult['localResult']>): string {
+  const tailCause = conciseFailureFromTail(localResult.execution?.evidence?.logs.tail ?? []);
+  return tailCause ?? localResult.execution?.blocker?.message ?? 'Workflow execution failed.';
+}
+
+function conciseFailureFromTail(tail: string[]): string | undefined {
+  for (const line of [...tail].reverse()) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^\[/.test(trimmed)) continue;
+    if (/^[✓●]/.test(trimmed)) continue;
+    if (/^failed$/i.test(trimmed)) continue;
+    const commandFailure = trimmed.match(/Command failed with exit code \d+:\s*(.+)$/i);
+    if (commandFailure?.[1]) return commandFailure[1].replace(/\.+$/, '.');
+    if (/Workflow runtime reported failure|Workflow reported a failed run|Shutting down broker/i.test(trimmed)) continue;
+    return trimmed.replace(/\.+$/, '.');
+  }
+  return undefined;
+}
+
+function autoFixStatusLabel(status: 'ok' | 'blocker' | 'error'): string {
+  if (status === 'ok') return 'repaired';
+  if (status === 'blocker') return 'stopped';
+  return 'errored';
+}
+
+function repairIssueSummary(issue: string): string {
+  if (/@agentworkforce\/harness-kit/i.test(issue) && /runnable persona API|useRunnablePersona|useRunnableSelection/i.test(issue)) {
+    return 'npm @agentworkforce/harness-kit does not expose the runnable persona APIs Ricky needs.';
+  }
+  return issue;
+}
+
+function repairIssueDetail(warnings: string[]): string | undefined {
+  return warnings.find((warning) => /@agentworkforce\/harness-kit/i.test(warning) && /exports:/i.test(warning));
 }
 
 function localGenerationAuthor(generation: NonNullable<InteractiveCliResult['localResult']>['generation']): string {
@@ -1864,7 +1907,7 @@ function isAutoFixValue(value: string): boolean {
   return /^-?\d+$/.test(value);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isDirectCliMainInvocation()) {
   cliMain()
     .then((result) => {
       if (result.output.length > 0) {
@@ -1877,4 +1920,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       process.stderr.write(`${message}\n`);
       process.exitCode = 1;
     });
+}
+
+function isDirectCliMainInvocation(): boolean {
+  if (!process.argv[1]) return false;
+  const entryPath = resolve(process.argv[1]);
+  const modulePath = fileURLToPath(import.meta.url);
+  if (resolve(modulePath) !== entryPath) return false;
+  return /(?:^|[/\\])commands[/\\]cli-main\.(?:ts|js)$/.test(modulePath);
 }
