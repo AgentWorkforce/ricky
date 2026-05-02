@@ -741,6 +741,14 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (error) {
+    return JSON.stringify({ error: errorMessage(error) }, null, 2);
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
