@@ -21,6 +21,8 @@ export const DEFAULT_STEP_TIMEOUT_MS = 300_000;
 
 export const DEFAULT_RETRY_MAX_ATTEMPTS = 2;
 
+export const DEFAULT_AUTO_FIX_ATTEMPTS = 7;
+
 export const DEFAULT_RETRY_BACKOFF_MS = 1_000;
 
 export const DEFAULT_VALIDATION_POLICY = {

@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { RawHandoff } from '../../../local/request-normalizer.js';
 import type { LocalEntrypointOptions, LocalResponse } from '../../../local/entrypoint.js';
 import { runLocal } from '../../../local/entrypoint.js';
+import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
 export { legacyLocalRunStatePath, localRunStatePath, localRunStateRoot } from '../../../shared/state-paths.js';
 
 export type LocalRunMode = 'background' | 'foreground';
@@ -121,7 +122,7 @@ export function withSafeRunOptions(
   autoFixAttempts: number | undefined,
   trackingRunId?: string,
 ): RawHandoff {
-  const maxAttempts = clampAutoFixAttempts(autoFixAttempts ?? 3);
+  const maxAttempts = clampAutoFixAttempts(autoFixAttempts ?? DEFAULT_AUTO_FIX_ATTEMPTS);
   return {
     ...handoff,
     stageMode: 'run',

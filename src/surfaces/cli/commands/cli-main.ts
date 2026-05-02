@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ora from 'ora';
 import { defaultCloudIntegrationConnector, runInteractiveCli } from '../entrypoint/interactive-cli.js';
 import { parsePowerUserArgs, type ConnectTarget, type PowerUserSurface } from '../flows/power-user-parser.js';
 import {
@@ -42,6 +43,7 @@ import { runLocalPreflight, type LocalPreflightCheck, type LocalPreflightResult 
 import { defaultArtifactPathForWorkflowName } from '../flows/spec-intake-flow.js';
 import { CLOUD_IMPLEMENTATION_AGENTS, CLOUD_OPTIONAL_INTEGRATIONS } from '../flows/cloud-workflow-flow.js';
 import { resolvePreferWorkforcePersonaWorkflowWriter } from '../flows/workforce-persona-cli-preference.js';
+import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
 
 // ---------------------------------------------------------------------------
 // Parsed CLI arguments
@@ -93,6 +95,18 @@ export interface CliMainResult {
 export type RelayCloudConnectProvider = (options: ConnectProviderOptions) => Promise<ConnectProviderResult>;
 export type RelayCloudAuthenticator = () => Promise<StoredAuth>;
 
+export interface CliProgressSpinner {
+  text: string;
+  start(text?: string): CliProgressSpinner;
+  stop(): CliProgressSpinner;
+  fail?(text?: string): CliProgressSpinner;
+}
+
+export type CliProgressSpinnerFactory = (options: {
+  text: string;
+  stream: NodeJS.WritableStream;
+}) => CliProgressSpinner;
+
 // ---------------------------------------------------------------------------
 // Injectable dependencies
 // ---------------------------------------------------------------------------
@@ -118,6 +132,8 @@ export interface CliMainDeps extends InteractiveCliDeps {
   connectApiUrl?: string;
   /** Provider auth timeout override passed through to the Relay Cloud connector. */
   connectTimeoutMs?: number;
+  /** Spinner factory override for focused progress tests. */
+  createProgressSpinner?: CliProgressSpinnerFactory;
 }
 
 let cachedPackageVersion: string | undefined;
@@ -223,14 +239,13 @@ function parseAutoFix(argv: string[]): number | undefined {
       rawValue = next && !next.startsWith('--') ? next : undefined;
     }
 
-    if (rawValue === undefined || rawValue === '') return 3;
+    if (rawValue === undefined || rawValue === '') return DEFAULT_AUTO_FIX_ATTEMPTS;
     const parsed = Number.parseInt(rawValue, 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
     return Math.min(10, Math.max(1, parsed));
   }
-  // Default-on: 3 attempts of diagnose/repair/resume on directly-fixable
-  // blockers (MISSING_BINARY, NETWORK_TRANSIENT). Disable with --no-auto-fix.
-  return 3;
+  // Default-on diagnose/repair/resume loop. Disable with --no-auto-fix.
+  return DEFAULT_AUTO_FIX_ATTEMPTS;
 }
 
 function readPackageVersion(readPackageJsonText?: (path: string) => string): string | undefined {
@@ -321,7 +336,7 @@ export function renderHelp(): string[] {
     '  --with-llm[=model]  Alias for --refine',
     '  --workforce-persona Use Workforce personas to author the workflow',
     '  --no-workforce-persona Disable Workforce persona authoring',
-    '  --auto-fix[=N]      Local diagnose/repair/resume loop (default 3 attempts, max 10)',
+    `  --auto-fix[=N]      Local diagnose/repair/resume loop (default ${DEFAULT_AUTO_FIX_ATTEMPTS} attempts, max 10)`,
     '  --no-auto-fix       Disable the repair loop; first failure surfaces immediately',
     '  --repair[=N]        Alias for --auto-fix',
     '  --login             Power-user Cloud: re-probe readiness after a real Cloud login',
@@ -1564,10 +1579,12 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     };
   }
 
-  const localProgress = deps.localProgress ??
-    (shouldStreamLocalProgress(parsed, cliHandoff)
-      ? (message: string) => (deps.output ?? process.stdout).write(`${message}\n`)
-      : undefined);
+  const progressReporter = deps.localProgress
+    ? undefined
+    : createLocalProgressReporter(parsed, cliHandoff, deps);
+  const localProgress = deps.localProgress ?? progressReporter?.onProgress;
+  const localRuntimeOutput = deps.localRuntimeOutput ??
+    createLocalRuntimeOutputReporter(parsed, cliHandoff, deps, progressReporter);
 
   const interactiveDeps: InteractiveCliDeps = {
     ...deps,
@@ -1577,13 +1594,21 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     ...(cliHandoff ? { handoff: cliHandoff } : {}),
     ...(cloudRequest ? { cloudRequest } : {}),
     ...(localProgress ? { localProgress } : {}),
+    ...(localRuntimeOutput ? { localRuntimeOutput } : {}),
     ...cloudRecoveryDeps,
     preferWorkforcePersonaWorkflowWriter:
       deps.preferWorkforcePersonaWorkflowWriter ??
       resolvePreferWorkforcePersonaWorkflowWriter({ workforcePersonaWriterCli: parsed.workforcePersonaWriterCli }),
   };
 
-  const interactiveResult = await runner(interactiveDeps);
+  let interactiveResult: InteractiveCliResult;
+  try {
+    interactiveResult = await runner(interactiveDeps);
+    progressReporter?.stop();
+  } catch (error) {
+    progressReporter?.stop();
+    throw error;
+  }
   const output: string[] = [];
 
   if (interactiveResult.onboarding.mode === 'status') {
@@ -1675,6 +1700,7 @@ function renderLocalWorkflowHuman(result: NonNullable<InteractiveCliResult['loca
     '',
     `Goal: ${result.summary.goal}`,
     `Artifact: ${result.summary.artifactPath}`,
+    `Status: ${localWorkflowStatus(result)}`,
   ];
 
   if (result.generation?.generation?.artifact?.workflow_id) {
@@ -1718,6 +1744,22 @@ function renderLocalWorkflowHuman(result: NonNullable<InteractiveCliResult['loca
     '  ricky status --run <run-id>',
   );
   return lines;
+}
+
+function localWorkflowStatus(result: NonNullable<InteractiveCliResult['localWorkflowResult']>): string {
+  if (result.generation && !result.generation.ok) {
+    return 'failed — generation did not complete';
+  }
+  if (result.monitoredRun) {
+    return `${result.monitoredRun.status} — background monitor`;
+  }
+  if (result.run) {
+    if (result.run.ok && result.run.execution?.status === 'success') {
+      return 'success — workflow executed';
+    }
+    return 'failed — workflow execution did not complete';
+  }
+  return 'ready — workflow generated';
 }
 
 function renderLocalJson(localResult: NonNullable<InteractiveCliResult['localResult']>): string {
@@ -1818,12 +1860,71 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
   return lines;
 }
 
-function shouldStreamLocalProgress(parsed: ParsedArgs, handoff: RawHandoff | undefined): boolean {
+function createLocalProgressReporter(
+  parsed: ParsedArgs,
+  handoff: RawHandoff | undefined,
+  deps: CliMainDeps,
+): { onProgress: (message: string) => void; stop: () => void } | undefined {
+  if (!shouldStreamLocalProgress(parsed, handoff, deps)) return undefined;
+
+  const stream = deps.output ?? process.stdout;
+  const createSpinner: CliProgressSpinnerFactory = deps.createProgressSpinner ??
+    ((options) => ora({
+      text: options.text,
+      stream: options.stream,
+      isEnabled: true,
+      discardStdin: false,
+    }));
+  let spinner: CliProgressSpinner | undefined;
+
+  return {
+    onProgress(message: string): void {
+      const text = progressSpinnerText(message);
+      if (!spinner) {
+        spinner = createSpinner({ text, stream });
+        spinner.start();
+        return;
+      }
+      spinner.text = text;
+    },
+    stop(): void {
+      spinner?.stop();
+      spinner = undefined;
+    },
+  };
+}
+
+function progressSpinnerText(message: string): string {
+  return message.replace(/\s+/g, ' ').trim() || 'Ricky is working...';
+}
+
+function createLocalRuntimeOutputReporter(
+  parsed: ParsedArgs,
+  handoff: RawHandoff | undefined,
+  deps: CliMainDeps,
+  progressReporter: { stop: () => void } | undefined,
+): ((stream: 'stdout' | 'stderr', line: string) => void) | undefined {
+  if (!shouldStreamLocalProgress(parsed, handoff, deps)) return undefined;
+
+  const output = deps.output ?? process.stdout;
+  return (_stream, line) => {
+    progressReporter?.stop();
+    output.write(`${line}\n`);
+  };
+}
+
+function shouldStreamLocalProgress(parsed: ParsedArgs, handoff: RawHandoff | undefined, deps: CliMainDeps): boolean {
+  const stream = deps.output ?? process.stdout;
+  const isTTY = deps.isTTY ?? ((stream as NodeJS.WritableStream & { isTTY?: boolean }).isTTY === true);
+  const injectedOutputExplicitlyCovered = deps.output === undefined || (deps.createProgressSpinner !== undefined && deps.isTTY === true);
+
   return Boolean(
     handoff &&
     !parsed.json &&
     !parsed.quiet &&
-    parsed.background !== true,
+    parsed.background !== true &&
+    isTTY &&
+    injectedOutputExplicitlyCovered,
   );
 }
 

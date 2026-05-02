@@ -197,6 +197,9 @@ export interface InteractiveCliDeps extends CloudWorkflowFlowDeps {
 
   /** Concise local-run progress updates for foreground CLI execution. */
   localProgress?: (message: string) => void;
+
+  /** Foreground local workflow stdout/stderr passthrough. */
+  localRuntimeOutput?: (stream: 'stdout' | 'stderr', line: string) => void;
 }
 
 function applyCliWorkforcePersonaPreferenceToLocalExecutor(
@@ -282,6 +285,7 @@ async function executeLocalPath(
   const localResult = await runLocal(handoff, {
     executor: deps.localExecutor,
     ...(deps.localProgress ? { onProgress: deps.localProgress } : {}),
+    ...(deps.localRuntimeOutput ? { onRuntimeOutput: deps.localRuntimeOutput } : {}),
     localExecutor: deps.localExecutor
       ? undefined
       : applyCliWorkforcePersonaPreferenceToLocalExecutor(deps.preferWorkforcePersonaWorkflowWriter, {

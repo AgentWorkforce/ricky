@@ -73,7 +73,7 @@ describe('local run monitor', () => {
       expect(await readFile(join(state.artifactDir, 'generated-artifacts', 'workflows__generated__release-health.ts'), 'utf8')).toContain('workflow("x")');
       expect(runLocalFn.mock.calls[0][0]).toMatchObject({
         stageMode: 'run',
-        autoFix: { maxAttempts: 3 },
+        autoFix: { maxAttempts: 7 },
         metadata: {
           autoFixPolicy: 'bounded-safe-only',
           destructiveActionsApproved: false,

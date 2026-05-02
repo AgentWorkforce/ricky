@@ -12,7 +12,7 @@ describe('power user parser defaults', () => {
       mode: 'local',
       spec: 'build a workflow',
       runRequested: true,
-      autoFix: 3,
+      autoFix: 7,
     });
     expect(parsed).not.toHaveProperty('refine');
   });
