@@ -26,6 +26,7 @@ describe('workforce persona workflow repairer', () => {
     expect(task).toContain('"previousRunId": "relay-run-1"');
     expect(task).toContain('--start-from');
     expect(task).toContain('Structured response contract');
+    expect(task).toContain('Do not echo the schema, do not return a patch');
   });
 
   it('invokes the workflow persona and returns a full repaired artifact', async () => {
@@ -95,7 +96,7 @@ describe('workforce persona workflow repairer', () => {
         maxAttempts: 3,
       },
     });
-    expect(resolverOptions).toEqual([{ installRoot: '/state/ricky/persona-repair-skills' }]);
+    expect(resolverOptions).toEqual([{ tier: 'best', installRoot: '/state/ricky/persona-repair-skills' }]);
   });
 });
 

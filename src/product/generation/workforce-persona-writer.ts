@@ -14,6 +14,7 @@ export const WORKFORCE_PERSONA_INTENT_CANDIDATES = [
   'architecture-plan',
   'documentation',
 ] as const;
+export const DEFAULT_WORKFORCE_PERSONA_TIER = 'best';
 
 export interface WorkforcePersonaRuntime {
   harness: string;
@@ -677,8 +678,7 @@ function selectionOptions(
 }
 
 function personaResolverOptions(options: { tier?: string; installRoot?: string }): { tier?: string; installRoot?: string } {
-  const resolved: { tier?: string; installRoot?: string } = {};
-  if (options.tier) resolved.tier = options.tier;
+  const resolved: { tier?: string; installRoot?: string } = { tier: options.tier ?? DEFAULT_WORKFORCE_PERSONA_TIER };
   if (options.installRoot) resolved.installRoot = options.installRoot;
   return resolved;
 }
