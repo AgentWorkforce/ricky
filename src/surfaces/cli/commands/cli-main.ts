@@ -1332,6 +1332,27 @@ async function connectIntegrations(parsed: ParsedArgs, deps: CliMainDeps): Promi
     };
   }
 
+  if (parsed.json) {
+    const auth = await readStatusCloudAuth(deps);
+    if (!hasStatusCloudToken(auth)) {
+      return {
+        target: 'integrations',
+        status: 'failed',
+        message: 'Cloud login is required before Ricky can request Nango connect links for optional integrations.',
+        warnings: ['JSON mode stays non-interactive, so Ricky did not open a browser or claim success.'],
+        nextActions: [
+          'ricky connect cloud',
+          'ricky connect integrations --cloud slack,github,notion,linear',
+          'ricky status',
+        ],
+        failedProviders: integrations.map((integration) => ({
+          provider: integration,
+          message: 'Cloud login is required before Ricky can request a Nango connect link.',
+        })),
+      };
+    }
+  }
+
   const connector = deps.connectCloudIntegrations ?? defaultCloudIntegrationConnector;
   const results = await connector(integrations);
   const failedProviders = results

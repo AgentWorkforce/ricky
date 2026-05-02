@@ -1919,6 +1919,12 @@ describe('cliMain', () => {
     const result = await cliMain({
       argv: ['connect', 'integrations', '--cloud', '--json'],
       connectCloudIntegrations,
+      readCloudAuth: async () => ({
+        accessToken: 'stored-token',
+        refreshToken: 'stored-refresh',
+        accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        apiUrl: 'https://cloud.example',
+      }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -1964,6 +1970,12 @@ describe('cliMain', () => {
       argv: ['connect', 'integrations', '--cloud', 'slack,github', '--json'],
       connectProvider,
       connectCloudIntegrations,
+      readCloudAuth: async () => ({
+        accessToken: 'stored-token',
+        refreshToken: 'stored-refresh',
+        accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        apiUrl: 'https://cloud.example',
+      }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -1975,6 +1987,34 @@ describe('cliMain', () => {
       status: 'connected',
       connectedProviders: ['slack', 'github'],
       nextActions: ['ricky status'],
+    });
+  });
+
+  it('fails ricky connect integrations --json without stored Cloud auth instead of opening login flow', async () => {
+    const connectCloudIntegrations = vi.fn();
+
+    const result = await cliMain({
+      argv: ['connect', 'integrations', '--cloud', 'slack,github', '--json'],
+      connectCloudIntegrations,
+      readCloudAuth: async () => null,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(connectCloudIntegrations).not.toHaveBeenCalled();
+    expect(JSON.parse(result.output.join('\n'))).toMatchObject({
+      target: 'integrations',
+      status: 'failed',
+      nextActions: ['ricky connect cloud', 'ricky connect integrations --cloud slack,github,notion,linear', 'ricky status'],
+      failedProviders: [
+        {
+          provider: 'slack',
+          message: 'Cloud login is required before Ricky can request a Nango connect link.',
+        },
+        {
+          provider: 'github',
+          message: 'Cloud login is required before Ricky can request a Nango connect link.',
+        },
+      ],
     });
   });
 
