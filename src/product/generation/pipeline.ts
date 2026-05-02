@@ -85,6 +85,7 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       relevantFiles: input.workforcePersonaWriter?.relevantFiles,
       timeoutSeconds: input.workforcePersonaWriter?.timeoutSeconds,
       installSkills: input.workforcePersonaWriter?.installSkills,
+      installRoot: input.workforcePersonaWriter?.installRoot,
       tier: input.workforcePersonaWriter?.tier,
       personaIntentCandidates: input.workforcePersonaWriter?.personaIntentCandidates,
       resolver: input.workforcePersonaWriter?.resolver,

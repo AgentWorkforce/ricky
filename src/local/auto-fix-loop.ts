@@ -2,7 +2,7 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 
 import type { LocalInvocationRequest } from './request-normalizer.js';
 import type { LocalClassifiedBlocker, LocalResponse } from './entrypoint.js';
@@ -12,6 +12,7 @@ import { debugWorkflowRun as defaultDebugWorkflowRun } from '../product/speciali
 import type { DebuggerResult } from '../product/specialists/debugger/types.js';
 import type { WorkflowRunEvidence, WorkflowStepEvidence } from '../shared/models/workflow-evidence.js';
 import { repairWorkflowWithWorkforcePersona } from '../product/generation/workforce-persona-repairer.js';
+import { localRunStateRoot } from '../shared/state-paths.js';
 
 export interface AutoFixAttemptSummary {
   attempt: number;
@@ -38,12 +39,14 @@ export interface WorkflowRepairInput {
   runId?: string;
   attempt: number;
   maxAttempts: number;
+  onProgress?: (message: string) => void;
 }
 
 export interface WorkflowRepairResult {
   applied: boolean;
   content?: string;
   artifactPath?: string;
+  mode?: string;
   summary: string;
   warnings?: string[];
   runId?: string | null;
@@ -71,6 +74,7 @@ export interface RunWithAutoFixOptions {
   artifactWriter?: (artifactPath: string, content: string, cwd: string) => Promise<void>;
   repairRunner?: (command: string, cwd: string) => Promise<{ exitCode: number }>;
   sleep?: (ms: number) => Promise<void>;
+  onProgress?: (message: string) => void;
 }
 
 const DEFAULT_BACKOFF_MS = 500;
@@ -86,6 +90,7 @@ export async function runWithAutoFix(
   const artifactWriter = options.artifactWriter ?? writeWorkflowArtifact;
   const repairRunner = options.repairRunner ?? runShellCommand;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const onProgress = options.onProgress;
   const attempts: AutoFixAttemptSummary[] = [];
   const warnings: string[] = [];
   const trackingRunId = resolveTrackingRunId(request) ?? `ricky-local-${randomUUID()}`;
@@ -94,6 +99,7 @@ export async function runWithAutoFix(
   let retryOfRunId: string | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    onProgress?.(`Running workflow (attempt ${attempt}/${maxAttempts})...`);
     const response = await options.runSingleAttempt(currentRequest);
     lastResponse = response;
 
@@ -129,6 +135,7 @@ export async function runWithAutoFix(
     const classification = classifyFailure(evidence);
     const debuggerResult = debugWorkflowRun({ evidence, classification });
     const repairTarget = await resolveWorkflowRepairTarget(currentRequest, response);
+    onProgress?.(`Workflow failed${failedStep ? ` at ${failedStep}` : ''}; preparing repair...`);
 
     if (repairTarget) {
       try {
@@ -145,6 +152,7 @@ export async function runWithAutoFix(
           ...(runId ? { runId } : {}),
           attempt,
           maxAttempts,
+          ...(onProgress ? { onProgress } : {}),
         });
 
         if (!repair.applied || !repair.content) {
@@ -170,7 +178,7 @@ export async function runWithAutoFix(
         const repairedArtifactPath = repair.artifactPath ?? repairTarget.artifactPath;
         await artifactWriter(repairedArtifactPath, repair.content, repairTarget.cwd);
         attemptSummary.applied_fix = {
-          mode: 'workforce-persona',
+          mode: repair.mode ?? 'workforce-persona',
           artifact_path: repairedArtifactPath,
           summary: repair.summary,
           ...(repair.runId ? { persona_run_id: repair.runId } : {}),
@@ -196,6 +204,7 @@ export async function runWithAutoFix(
             reason: `auto-fix retry after Workforce workflow persona repair for ${blockerCode ?? 'local failure'}`,
           },
         };
+        onProgress?.(`Retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
         continue;
       } catch (error) {
         attemptSummary.fix_error = error instanceof Error ? error.message : String(error);
@@ -238,6 +247,7 @@ export async function runWithAutoFix(
       return guided;
     }
 
+    onProgress?.('Applying direct repair...');
     const fix = await applyDirectRepair(response.execution?.blocker, {
       cwd: response.execution?.execution.cwd ?? request.invocationRoot ?? process.cwd(),
       repairRunner,
@@ -283,6 +293,7 @@ export async function runWithAutoFix(
         reason: `auto-fix retry after ${blockerCode ?? 'local failure'}`,
       },
     };
+    onProgress?.(`Retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
   }
 
   return withAutoFix(lastResponse ?? failedBeforeAttempt(request), maxAttempts, attempts, 'error', warnings, trackingRunId);
@@ -293,19 +304,32 @@ function isV1DirectBlocker(code: string | undefined): boolean {
 }
 
 async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<WorkflowRepairResult> {
-  const result = await repairWorkflowWithWorkforcePersona({
-    repoRoot: input.cwd,
-    artifactPath: input.artifactPath,
-    artifactContent: input.artifactContent,
-    evidence: input.evidence,
-    classification: input.classification,
-    debuggerResult: input.debuggerResult,
-    blocker: input.response.execution?.blocker,
-    ...(input.failedStep ? { failedStep: input.failedStep } : {}),
-    ...(input.runId ? { previousRunId: input.runId } : {}),
-    attempt: input.attempt,
-    maxAttempts: input.maxAttempts,
-  });
+  const deterministicRepair = repairWorkflowDeterministically(input);
+  if (deterministicRepair) {
+    input.onProgress?.('Applying deterministic workflow repair...');
+    return deterministicRepair;
+  }
+
+  let result: Awaited<ReturnType<typeof repairWorkflowWithWorkforcePersona>>;
+  try {
+    input.onProgress?.('Asking Workforce persona to repair the workflow...');
+    result = await repairWorkflowWithWorkforcePersona({
+      repoRoot: input.cwd,
+      artifactPath: input.artifactPath,
+      artifactContent: input.artifactContent,
+      evidence: input.evidence,
+      classification: input.classification,
+      debuggerResult: input.debuggerResult,
+      blocker: input.response.execution?.blocker,
+      ...(input.failedStep ? { failedStep: input.failedStep } : {}),
+      ...(input.runId ? { previousRunId: input.runId } : {}),
+      attempt: input.attempt,
+      maxAttempts: input.maxAttempts,
+      installRoot: join(localRunStateRoot(input.cwd), 'workforce-persona-repair-skills'),
+    });
+  } catch (error) {
+    throw error;
+  }
 
   return {
     applied: true,
@@ -317,11 +341,200 @@ async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<Work
   };
 }
 
+export function repairWorkflowDeterministically(
+  input: Pick<WorkflowRepairInput, 'artifactPath' | 'artifactContent' | 'evidence'>,
+  personaError?: unknown,
+): WorkflowRepairResult | null {
+  let content = input.artifactContent;
+  const changes: string[] = [];
+
+  const missingFileRepair = missingFileRepairFromEvidence(input.evidence)
+    ?? missingFileRepairFromArtifactContent(content, input.evidence);
+  if (missingFileRepair) {
+    const repaired = replacePathReference(content, missingFileRepair.expectedPath, missingFileRepair.materializedPath);
+    if (repaired !== content) {
+      content = repaired;
+      changes.push(`aligned missing file check ${missingFileRepair.expectedPath} -> ${missingFileRepair.materializedPath}`);
+    }
+  }
+
+  const outputRepair = repairOutputContainsEchoMismatches(content);
+  if (outputRepair.content !== content) {
+    content = outputRepair.content;
+    changes.push(...outputRepair.changes);
+  }
+
+  const templateRepair = repairUnknownStepTemplateRefs(content);
+  if (templateRepair.content !== content) {
+    content = templateRepair.content;
+    changes.push(...templateRepair.changes);
+  }
+
+  if (content === input.artifactContent || changes.length === 0) return null;
+
+  return {
+    applied: true,
+    artifactPath: input.artifactPath,
+    mode: 'deterministic',
+    content,
+    summary: `Applied bounded deterministic workflow repair: ${changes.join('; ')}.`,
+    warnings: personaError
+      ? [`Workforce persona repair unavailable (${errorMessage(personaError)}); used deterministic workflow repair fallback.`]
+      : ['Used deterministic workflow repair fallback.'],
+  };
+}
+
 function summaryFromRepairMetadata(metadata: Record<string, unknown>): string {
   const summary = metadata.summary;
   return typeof summary === 'string' && summary.trim()
     ? summary
     : 'Workforce workflow persona repaired the workflow artifact.';
+}
+
+function missingFileRepairFromEvidence(
+  evidence: WorkflowRunEvidence,
+): { expectedPath: string; materializedPath: string } | null {
+  for (const step of evidence.steps) {
+    if (step.status !== 'failed') continue;
+    const failedFile = step.verifications.find((verification) =>
+      !verification.passed && verification.type === 'file_exists' && verification.expected.trim(),
+    );
+    if (!failedFile) continue;
+    const expectedPath = failedFile.expected.trim();
+    const materializedPath = nearestMaterializedPath(evidence, expectedPath);
+    if (materializedPath && materializedPath !== expectedPath) {
+      return { expectedPath, materializedPath };
+    }
+  }
+  return null;
+}
+
+function missingFileRepairFromArtifactContent(
+  content: string,
+  evidence: WorkflowRunEvidence,
+): { expectedPath: string; materializedPath: string } | null {
+  for (const step of evidence.steps) {
+    if (step.status !== 'failed') continue;
+    const failedFile = step.verifications.find((verification) =>
+      !verification.passed && verification.type === 'file_exists' && verification.expected.trim(),
+    );
+    if (!failedFile) continue;
+    const expectedPath = failedFile.expected.trim();
+    const expectedDir = dirname(expectedPath);
+    const candidates = materializedPathsFromCommand(content)
+      .filter((candidate) => dirname(candidate) === expectedDir && candidate !== expectedPath)
+      .sort((a, b) => basenameDistance(a, expectedPath) - basenameDistance(b, expectedPath));
+    if (candidates[0]) return { expectedPath, materializedPath: candidates[0] };
+  }
+  return null;
+}
+
+function nearestMaterializedPath(evidence: WorkflowRunEvidence, expectedPath: string): string | null {
+  const expectedDir = dirname(expectedPath);
+  const candidates = evidence.steps
+    .filter((step) => step.status === 'passed')
+    .flatMap((step) => [
+      ...step.verifications.map((verification) => verification.command ?? ''),
+      ...step.deterministicGates.map((gate) => gate.command ?? ''),
+    ])
+    .flatMap(materializedPathsFromCommand)
+    .filter((candidate) => dirname(candidate) === expectedDir);
+
+  if (candidates.length === 0) return null;
+  return candidates.sort((a, b) => basenameDistance(a, expectedPath) - basenameDistance(b, expectedPath))[0];
+}
+
+function materializedPathsFromCommand(command: string): string[] {
+  const paths: string[] = [];
+  const redirect = /(?:^|\s)(?:>|>>)\s*([^;&|]+)/g;
+  for (const match of command.matchAll(redirect)) {
+    const path = cleanShellPath(match[1]);
+    if (path) paths.push(path);
+  }
+  return paths;
+}
+
+function repairOutputContainsEchoMismatches(content: string): { content: string; changes: string[] } {
+  const changes: string[] = [];
+  const next = content.replace(
+    /command:\s*`echo\s+([^`]+)`([\s\S]*?verification:\s*{\s*type:\s*['"]output_contains['"]\s*,\s*value:\s*['"]([^'"]+)['"]\s*})/g,
+    (match, actual: string, rest: string, expected: string) => {
+      const actualValue = actual.trim();
+      const expectedValue = expected.trim();
+      if (!actualValue || !expectedValue || actualValue === expectedValue) return match;
+      changes.push(`aligned output_contains sentinel ${actualValue} -> ${expectedValue}`);
+      return `command: \`echo ${expectedValue}\`${rest}`;
+    },
+  );
+  return { content: next, changes };
+}
+
+function repairUnknownStepTemplateRefs(content: string): { content: string; changes: string[] } {
+  const stepIds = [...content.matchAll(/\.step\(\s*['"`]([^'"`]+)['"`]/g)].map((match) => match[1]);
+  if (stepIds.length === 0) return { content, changes: [] };
+
+  const changes: string[] = [];
+  const next = content.replace(/\{\{steps\.([^.}]+)\.output}}/g, (match, referencedStep: string) => {
+    if (stepIds.includes(referencedStep)) return match;
+    const replacement = nearestStepId(referencedStep, stepIds);
+    if (!replacement) return match;
+    changes.push(`rewired template reference ${referencedStep} -> ${replacement}`);
+    return `{{steps.${replacement}.output}}`;
+  });
+
+  return { content: next, changes };
+}
+
+function nearestStepId(value: string, candidates: string[]): string | null {
+  const prefix = value.split('-')[0];
+  const ranked = candidates
+    .map((candidate) => ({ candidate, distance: levenshtein(value, candidate) }))
+    .sort((a, b) => a.distance - b.distance);
+  const best = ranked[0];
+  if (!best) return null;
+  const sharesPrefix = prefix.length > 0 && best.candidate.startsWith(`${prefix}-`);
+  const closeEnough = best.distance <= Math.max(4, Math.ceil(value.length * 0.6));
+  return sharesPrefix || closeEnough ? best.candidate : null;
+}
+
+function basenameDistance(a: string, b: string): number {
+  return levenshtein(a.split('/').pop() ?? a, b.split('/').pop() ?? b);
+}
+
+function levenshtein(a: string, b: string): number {
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 0; i < a.length; i += 1) {
+    const current = [i + 1];
+    for (let j = 0; j < b.length; j += 1) {
+      current[j + 1] = Math.min(
+        current[j] + 1,
+        previous[j + 1] + 1,
+        previous[j] + (a[i] === b[j] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[b.length];
+}
+
+function cleanShellPath(value: string | undefined): string | null {
+  if (!value) return null;
+  const cleaned = value.trim().replace(/^['"]|['"]$/g, '').replace(/[),.;]+$/g, '');
+  return cleaned || null;
+}
+
+function replacePathReference(content: string, expectedPath: string, materializedPath: string): string {
+  if (content.includes(expectedPath)) {
+    return content.split(expectedPath).join(materializedPath);
+  }
+  const expectedName = expectedPath.split('/').pop();
+  const materializedName = materializedPath.split('/').pop();
+  if (!expectedName || !materializedName || expectedName === materializedName) return content;
+  return content.replaceAll(`/${expectedName}`, `/${materializedName}`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function resolveWorkflowRepairTarget(
@@ -429,7 +642,7 @@ function buildAutoFixEscalation(context: AutoFixEscalationContext): NonNullable<
   const recoverySteps = context.response.execution?.blocker?.recovery.steps ?? [];
   const options: NonNullable<NonNullable<LocalResponse['auto_fix']>['escalation']>['options'] = [];
   const artifactPath = context.artifactPath ?? resolveArtifactPath(context.request, context.response);
-  const runCommand = artifactPath ? `ricky run --artifact ${artifactPath}` : undefined;
+  const runCommand = artifactPath ? `ricky run ${artifactPath}` : undefined;
 
   if (runCommand) {
     options.push({
@@ -615,7 +828,7 @@ function resolveRunId(response: LocalResponse): string | undefined {
     ...response.logs,
     ...(response.execution?.evidence?.logs.tail ?? []),
   ].join('\n');
-  return text.match(/\bRun ID:\s*([^\s]+)/i)?.[1];
+  return text.match(/\bRun ID:\s*([^\s]+)/i)?.[1] ?? text.match(/^\[workflow]\s+run\s+([^\s]+)$/im)?.[1];
 }
 
 function failedStepFromEvidence(evidence: WorkflowRunEvidence): string | undefined {
@@ -626,9 +839,11 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
   const execution = response.execution;
   const startedAt = execution?.execution.started_at ?? new Date().toISOString();
   const completedAt = execution?.execution.finished_at;
+  const tail = execution?.evidence?.logs.tail ?? [];
+  const runtimeSteps = runtimeStepsFromLogTail(tail, startedAt, completedAt);
   const failedStepId = execution?.evidence?.failed_step?.id;
   const failedStepName = execution?.evidence?.failed_step?.name ?? failedStepId ?? 'local runtime';
-  const step: WorkflowStepEvidence = {
+  const fallbackStep: WorkflowStepEvidence = {
     stepId: failedStepId ?? 'local-runtime',
     stepName: failedStepName,
     status: response.ok ? 'passed' : 'failed',
@@ -643,20 +858,21 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
       message: assertion.detail,
     })),
     deterministicGates: [],
-    logs: (execution?.evidence?.logs.tail ?? []).map((excerpt) => ({ stream: 'stderr', excerpt })),
+    logs: tail.map((excerpt) => ({ stream: 'stderr', excerpt })),
     artifacts: response.artifacts.map((artifact) => ({ path: artifact.path, kind: 'file' })),
     history: [],
     retries: [],
     narrative: [],
     ...(response.ok ? {} : { error: execution?.blocker?.message ?? response.warnings[0] }),
   };
+  const steps = runtimeSteps.length > 0 ? runtimeSteps : [fallbackStep];
 
   return {
     runId: resolveRunId(response) ?? `ricky-auto-fix-attempt-${attempt}`,
     workflowId: execution?.execution.workflow_id ?? 'ricky-local',
     workflowName: execution?.execution.workflow_file ?? response.generation?.artifact?.path ?? 'ricky-local',
     status: response.ok ? 'passed' : 'failed',
-    steps: [step],
+    steps,
     startedAt,
     ...(completedAt ? { completedAt } : {}),
     durationMs: execution?.execution.duration_ms,
@@ -664,10 +880,138 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
     artifacts: response.artifacts.map((artifact) => ({ path: artifact.path, kind: 'file' })),
     logs: [
       ...response.logs.map((excerpt) => ({ stream: 'system' as const, excerpt })),
-      ...(execution?.evidence?.logs.tail ?? []).map((excerpt) => ({ stream: 'stderr' as const, excerpt })),
+      ...tail.map((excerpt) => ({ stream: 'stderr' as const, excerpt })),
     ],
     narrative: [],
     routing: [],
+  };
+}
+
+function runtimeStepsFromLogTail(
+  tail: string[],
+  startedAt: string,
+  completedAt: string | undefined,
+): WorkflowStepEvidence[] {
+  const steps = new Map<string, WorkflowStepEvidence>();
+  const commandByStep = new Map<string, string>();
+  const exitCodeByStep = new Map<string, number>();
+
+  for (const line of tail) {
+    const state = line.match(/^\s*[●✓✗○]\s+(.+?)\s+—\s+(started|completed|skipped|FAILED:\s*(.+))$/);
+    if (state) {
+      const stepId = state[1].trim();
+      const statusText = state[2];
+      const failure = state[3]?.trim();
+      const status = statusText === 'completed'
+        ? 'passed'
+        : statusText === 'skipped'
+          ? 'skipped'
+          : statusText.startsWith('FAILED:')
+            ? 'failed'
+            : 'running';
+      const step = ensureRuntimeStep(steps, stepId, startedAt);
+      step.status = status;
+      if (status === 'passed' || status === 'failed' || status === 'skipped') step.completedAt = completedAt;
+      if (failure) step.error = failure;
+      continue;
+    }
+
+    const command = line.match(/^\[workflow[^\]]*]\s+\[([^\]]+)]\s+Running:\s+(.+)$/);
+    if (command) {
+      const stepId = command[1].trim();
+      const value = command[2].trim();
+      commandByStep.set(stepId, value);
+      ensureRuntimeStep(steps, stepId, startedAt).logs.push({ stream: 'stdout', excerpt: line });
+      continue;
+    }
+
+    const commandFailed = line.match(/^\[workflow[^\]]*]\s+\[([^\]]+)]\s+Command failed\s+\(exit code\s+(\d+)\)/i);
+    if (commandFailed) {
+      const stepId = commandFailed[1].trim();
+      exitCodeByStep.set(stepId, Number(commandFailed[2]));
+      ensureRuntimeStep(steps, stepId, startedAt).logs.push({ stream: 'stdout', excerpt: line });
+      continue;
+    }
+
+    const bracketed = line.match(/^\[workflow[^\]]*]\s+\[([^\]]+)]\s+(.+)$/);
+    if (bracketed) {
+      ensureRuntimeStep(steps, bracketed[1].trim(), startedAt).logs.push({ stream: 'stdout', excerpt: line });
+    }
+  }
+
+  for (const step of steps.values()) {
+    const command = commandByStep.get(step.stepId);
+    const exitCode = exitCodeByStep.get(step.stepId);
+    if (!command) continue;
+    const passed = step.status === 'passed';
+    const verification = verificationFromRuntimeCommand(command, passed, exitCode, step.error);
+    const gate = {
+      gateName: step.stepId,
+      passed,
+      command,
+      ...(exitCode !== undefined ? { exitCode } : {}),
+      verifications: [verification],
+      recordedAt: completedAt ?? new Date().toISOString(),
+    };
+    step.deterministicGates = [gate];
+    step.verifications = [verification];
+  }
+
+  return [...steps.values()];
+}
+
+function ensureRuntimeStep(
+  steps: Map<string, WorkflowStepEvidence>,
+  stepId: string,
+  startedAt: string,
+): WorkflowStepEvidence {
+  const existing = steps.get(stepId);
+  if (existing) return existing;
+  const step: WorkflowStepEvidence = {
+    stepId,
+    stepName: stepId,
+    status: 'pending',
+    startedAt,
+    verifications: [],
+    deterministicGates: [],
+    logs: [],
+    artifacts: [],
+    history: [],
+    retries: [],
+    narrative: [],
+  };
+  steps.set(stepId, step);
+  return step;
+}
+
+function verificationFromRuntimeCommand(
+  command: string,
+  passed: boolean,
+  exitCode: number | undefined,
+  error: string | undefined,
+): WorkflowStepEvidence['verifications'][number] {
+  const fileCheck = command.match(/(?:^|&&|\|\|)\s*test\s+-f\s+(.+?)(?:\s*(?:&&|\|\|)|$)/);
+  if (fileCheck) {
+    const expected = fileCheck[1].trim().replace(/^['"]|['"]$/g, '');
+    return {
+      type: 'file_exists',
+      passed,
+      expected,
+      actual: passed ? expected : `missing or unreadable; exit code ${exitCode ?? 'unknown'}`,
+      message: error ?? (passed ? 'File exists.' : `Expected file was not found: ${expected}`),
+      command,
+      ...(exitCode !== undefined ? { exitCode } : {}),
+    };
+  }
+
+  return {
+    type: 'exit_code',
+    passed,
+    expected: '0',
+    actual: String(exitCode ?? (passed ? 0 : 'unknown')),
+    message: error ?? (passed ? 'Command exited successfully.' : 'Command failed.'),
+    command,
+    ...(exitCode !== undefined ? { exitCode } : {}),
   };
 }
 

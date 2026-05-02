@@ -130,7 +130,7 @@ describe('runInteractiveCli', () => {
         ]),
       );
       expect(result.localResult?.nextActions).toContain(
-        'Run the generated workflow locally: ricky run --artifact workflows/generated/ricky-generate-a-workflow-for-package-checks.ts',
+        'Run the generated workflow locally: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks.ts',
       );
       await expect(access(join(tempRepo, 'workflows/generated/ricky-generate-a-workflow-for-package-checks.ts'))).resolves.toBeUndefined();
     } finally {
@@ -214,7 +214,7 @@ describe('runInteractiveCli', () => {
       expect(result.ok).toBe(true);
       expect(result.localResult?.artifacts[0].path).toBe(artifactPath);
       expect(result.localResult?.nextActions).toContain(
-        `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+        `Run the generated workflow locally: ricky run ${artifactPath}`,
       );
       await expect(access(join(tempRepo, artifactPath))).resolves.toBeUndefined();
     } finally {
@@ -288,8 +288,8 @@ describe('runInteractiveCli', () => {
           spec_digest: 'digest-guided',
         },
         next: {
-          run_command: 'ricky run --artifact workflows/generated/guided.ts',
-          run_mode_hint: 'ricky run --artifact workflows/generated/guided.ts',
+          run_command: 'ricky run workflows/generated/guided.ts',
+          run_mode_hint: 'ricky run workflows/generated/guided.ts',
         },
       },
       exitCode: 0,
@@ -344,8 +344,8 @@ describe('runInteractiveCli', () => {
           spec_digest: 'digest-guided',
         },
         next: {
-          run_command: 'ricky run --artifact workflows/generated/guided.ts',
-          run_mode_hint: 'ricky run --artifact workflows/generated/guided.ts',
+          run_command: 'ricky run workflows/generated/guided.ts',
+          run_mode_hint: 'ricky run workflows/generated/guided.ts',
         },
       },
       exitCode: 0,
@@ -1348,7 +1348,7 @@ describe('runInteractiveCli', () => {
           artifacts: [{ path: 'workflows/generated/issue-3.ts', type: 'text/typescript' }],
           logs: [],
           warnings: [],
-          nextActions: ['npm install', 'ricky run --artifact workflows/generated/issue-3.ts'],
+          nextActions: ['npm install', 'ricky run workflows/generated/issue-3.ts'],
           exitCode: 2,
           generation: {
             stage: 'generate',
@@ -1359,8 +1359,8 @@ describe('runInteractiveCli', () => {
               spec_digest: 'digest-issue-3',
             },
             next: {
-              run_command: 'ricky run --artifact workflows/generated/issue-3.ts',
-              run_mode_hint: 'ricky run --artifact workflows/generated/issue-3.ts',
+              run_command: 'ricky run workflows/generated/issue-3.ts',
+              run_mode_hint: 'ricky run workflows/generated/issue-3.ts',
             },
           },
           execution: {
@@ -1386,7 +1386,7 @@ describe('runInteractiveCli', () => {
               detected_during: 'launch',
               recovery: {
                 actionable: true,
-                steps: ['npm install', 'ricky run --artifact workflows/generated/issue-3.ts'],
+                steps: ['npm install', 'ricky run workflows/generated/issue-3.ts'],
               },
               context: {
                 missing: ['@agent-relay/sdk/workflows runtime'],
@@ -1825,7 +1825,7 @@ describe('runInteractiveCli', () => {
 
         // Next action uses the same relative path
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+          `Run the generated workflow locally: ricky run ${artifactPath}`,
         );
       } finally {
         await rm(tempRepo, { recursive: true, force: true });
@@ -1862,7 +1862,7 @@ describe('runInteractiveCli', () => {
 
         // Next action uses the same relative path
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+          `Run the generated workflow locally: ricky run ${artifactPath}`,
         );
       } finally {
         await rm(tempRepo, { recursive: true, force: true });
@@ -1894,7 +1894,7 @@ describe('runInteractiveCli', () => {
         await expect(access(join(tempRepo, artifactPath))).resolves.toBeUndefined();
         await expect(access(join(tempPackageCwd, artifactPath))).rejects.toThrow();
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+          `Run the generated workflow locally: ricky run ${artifactPath}`,
         );
       } finally {
         await rm(tempRepo, { recursive: true, force: true });
@@ -1958,7 +1958,7 @@ describe('runInteractiveCli', () => {
         expect(content).toContain('workflow(');
 
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+          `Run the generated workflow locally: ricky run ${artifactPath}`,
         );
 
         // Artifact is NOT in packages/cli/workflows/generated
@@ -1999,7 +1999,7 @@ describe('runInteractiveCli', () => {
         expect(content).toContain('workflow(');
 
         expect(result.localResult?.nextActions).toContain(
-          `Run the generated workflow locally: ricky run --artifact ${artifactPath}`,
+          `Run the generated workflow locally: ricky run ${artifactPath}`,
         );
 
         // Artifact is NOT in packages/cli/workflows/generated
@@ -2028,7 +2028,7 @@ describe('runInteractiveCli', () => {
 
         const artifactPath = result.localResult!.artifacts[0].path;
         const physicalPath = join(tempRepo, artifactPath);
-        const runCommand = `ricky run --artifact ${artifactPath}`;
+        const runCommand = `ricky run ${artifactPath}`;
 
         // All three point to the same location
         await expect(access(physicalPath)).resolves.toBeUndefined();

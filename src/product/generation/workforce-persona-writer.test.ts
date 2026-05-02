@@ -7,6 +7,7 @@ import {
   buildWorkflowPersonaTask,
   defaultWorkforcePersonaResolver,
   parsePersonaWorkflowResponse,
+  resolveWorkforcePersonaContextWithModules,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
 } from './workforce-persona-writer.js';
 
@@ -172,7 +173,78 @@ describe('workforce persona workflow writer', () => {
     expect(errorText).toMatch(/workflow|persona|fenced|structured/i);
   });
 
-  it('invokes the selected Workforce persona through usePersona sendMessage and persists metadata', async () => {
+  it('adapts harness-kit useRunnablePersona into the sendMessage context Ricky expects', async () => {
+    const calls: Array<{ intent: string; options: Record<string, unknown> | undefined }> = [];
+    const resolved = await resolveWorkforcePersonaContextWithModules(
+      ['agent-relay-workflow'],
+      { tier: 'best', installRoot: '/state/ricky/persona-skills' },
+      {
+        source: 'package',
+        warnings: [],
+        module: {
+          useRunnablePersona(intent, options) {
+            calls.push({ intent, options: options as Record<string, unknown> | undefined });
+            return runnableContext();
+          },
+        },
+      },
+    );
+
+    expect(resolved.source).toBe('package');
+    expect(resolved.intent).toBe('agent-relay-workflow');
+    expect(calls).toEqual([
+      {
+        intent: 'agent-relay-workflow',
+        options: { tier: 'best', installRoot: '/state/ricky/persona-skills' },
+      },
+    ]);
+    const result = await resolved.context.sendMessage('task');
+    expect(result.status).toBe('completed');
+  });
+
+  it('uses workload-router only for selection metadata when harness-kit needs useRunnableSelection', async () => {
+    const selections: unknown[] = [];
+    const resolved = await resolveWorkforcePersonaContextWithModules(
+      ['relay-orchestrator'],
+      { installRoot: '/state/ricky/persona-skills' },
+      {
+        source: 'package',
+        warnings: [],
+        module: {
+          useRunnableSelection(selection, options) {
+            selections.push({ selection, options });
+            return runnableContext({ personaId: 'relay-orchestrator' });
+          },
+        },
+      },
+      async () => ({
+        source: 'package',
+        warnings: [],
+        module: {
+          usePersona(intent) {
+            return {
+              selection: {
+                personaId: intent,
+                tier: 'best',
+                runtime: { harness: 'claude', model: 'claude/test' },
+                skills: [],
+                rationale: 'test metadata',
+              },
+            };
+          },
+        },
+      }),
+    );
+
+    expect(resolved.context.selection.personaId).toBe('relay-orchestrator');
+    expect(selections).toHaveLength(1);
+    expect(selections[0]).toMatchObject({
+      selection: { personaId: 'relay-orchestrator' },
+      options: { installRoot: '/state/ricky/persona-skills' },
+    });
+  });
+
+  it('invokes the selected Workforce persona through runnable sendMessage and persists metadata', async () => {
     const base = generate({
       spec: spec({
         description: 'Implement a strict Agent Relay workflow with tests and review.',
@@ -248,6 +320,33 @@ describe('workforce persona workflow writer', () => {
     expect(result.artifact?.content).toBe(base.artifact!.content);
   });
 });
+
+function runnableContext(overrides: Partial<{
+  personaId: string;
+  tier: string;
+  harness: string;
+  model: string;
+}> = {}) {
+  return {
+    selection: {
+      personaId: overrides.personaId ?? 'agent-relay-workflow',
+      tier: overrides.tier ?? 'best',
+      runtime: {
+        harness: overrides.harness ?? 'codex',
+        model: overrides.model ?? 'codex/test',
+      },
+    },
+    sendMessage() {
+      return execution(JSON.stringify({
+        artifact: {
+          path: 'workflows/generated/persona.ts',
+          content: workflowSource(),
+        },
+        metadata: { workflowName: 'persona' },
+      }));
+    },
+  };
+}
 
 function execution(output: string): WorkforcePersonaExecution {
   const promise = Promise.resolve({

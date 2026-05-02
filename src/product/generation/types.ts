@@ -49,6 +49,7 @@ export interface GenerationInput {
     relevantFiles?: Array<{ path: string; content?: string }>;
     timeoutSeconds?: number;
     installSkills?: boolean;
+    installRoot?: string;
     tier?: string;
     personaIntentCandidates?: readonly string[];
     resolver?: import('./workforce-persona-writer.js').WorkforcePersonaResolver;

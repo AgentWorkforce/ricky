@@ -49,7 +49,7 @@ export function buildWorkflowSummary(input: {
     desiredOutcome: 'A completed local Agent Relay run with evidence, logs, artifacts, and a final outcome summary.',
     sideEffects,
     missingLocalBlockers: blockers,
-    command: `ricky run --artifact ${artifactPath}`,
+    command: `ricky run ${artifactPath}`,
   };
 }
 
@@ -114,7 +114,7 @@ export function localWorkflowSummary(
       ? ['Write workflow artifact', 'Run local SDK workflow execution', 'Write local run evidence and logs']
       : ['Write workflow artifact only'],
     missingLocalBlockers: localResult.ok ? [] : localResult.warnings,
-    command: localResult.generation?.next?.run_command ?? `ricky run --artifact ${artifactPath}`,
+    command: localResult.generation?.next?.run_command ?? `ricky run ${artifactPath}`,
   };
 }
 
@@ -201,7 +201,7 @@ export function localPowerUserWorkflowSummary(
   const evidencePath = localResult.execution?.evidence?.logs.stdout_path
     ?? localResult.execution?.evidence?.logs.stderr_path;
   const runCommand = localResult.generation?.next?.run_command
-    ?? (workflowPath ? `ricky run --artifact ${workflowPath}` : undefined);
+    ?? (workflowPath ? `ricky run ${workflowPath}` : undefined);
 
   return {
     mode: options.mode,

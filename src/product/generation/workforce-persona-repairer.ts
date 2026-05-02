@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import {
   defaultWorkforcePersonaResolver,
+  DEFAULT_WORKFORCE_PERSONA_TIER,
   parsePersonaWorkflowResponse,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
   WorkforcePersonaWriterError,
@@ -25,6 +26,7 @@ export interface WorkforcePersonaRepairOptions {
   maxAttempts: number;
   timeoutSeconds?: number;
   installSkills?: boolean;
+  installRoot?: string;
   tier?: string;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
@@ -59,9 +61,10 @@ export async function repairWorkflowWithWorkforcePersona(
   options: WorkforcePersonaRepairOptions,
 ): Promise<WorkforcePersonaRepairResult> {
   const resolver = options.resolver ?? defaultWorkforcePersonaResolver;
-  const resolved = await resolver(options.personaIntentCandidates ?? WORKFORCE_PERSONA_INTENT_CANDIDATES, {
-    tier: options.tier,
-  });
+  const resolved = await resolver(
+    options.personaIntentCandidates ?? WORKFORCE_PERSONA_INTENT_CANDIDATES,
+    personaResolverOptions(options),
+  );
   const task = buildWorkflowRepairPersonaTask(options);
   const promptDigest = digest(task);
   const selection = resolved.context.selection;
@@ -164,6 +167,7 @@ export function buildWorkflowRepairPersonaTask(options: WorkforcePersonaRepairOp
     }),
     '',
     'Repair requirements:',
+    '- Return only the final response object or fallback fenced artifact blocks. Do not echo the schema, do not return a patch, and do not describe the patch outside metadata.',
     '- Return the full repaired TypeScript workflow artifact, not a diff.',
     '- Preserve the artifact path and keep the workflow runnable from the same file.',
     '- Fix the workflow artifact itself; do not ask the user to run manual recovery unless the workflow cannot safely express the prerequisite.',
@@ -187,4 +191,10 @@ function safeJson(value: unknown): string {
 
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function personaResolverOptions(options: { tier?: string; installRoot?: string }): { tier?: string; installRoot?: string } {
+  const resolved: { tier?: string; installRoot?: string } = { tier: options.tier ?? DEFAULT_WORKFORCE_PERSONA_TIER };
+  if (options.installRoot) resolved.installRoot = options.installRoot;
+  return resolved;
 }

@@ -26,35 +26,40 @@ describe('workforce persona workflow repairer', () => {
     expect(task).toContain('"previousRunId": "relay-run-1"');
     expect(task).toContain('--start-from');
     expect(task).toContain('Structured response contract');
+    expect(task).toContain('Do not echo the schema, do not return a patch');
   });
 
   it('invokes the workflow persona and returns a full repaired artifact', async () => {
     const sendMessageOptions: Array<Record<string, unknown>> = [];
-    const resolver: WorkforcePersonaResolver = async () => ({
-      source: 'package',
-      intent: 'agent-relay-workflow',
-      warnings: ['resolver warning'],
-      context: {
-        selection: {
-          personaId: 'agent-relay-workflow',
-          tier: 'best',
-          runtime: { harness: 'codex', model: 'codex/test' },
+    const resolverOptions: Array<Record<string, unknown>> = [];
+    const resolver: WorkforcePersonaResolver = async (_intents, options) => {
+      resolverOptions.push(options);
+      return {
+        source: 'package',
+        intent: 'agent-relay-workflow',
+        warnings: ['resolver warning'],
+        context: {
+          selection: {
+            personaId: 'agent-relay-workflow',
+            tier: 'best',
+            runtime: { harness: 'codex', model: 'codex/test' },
+          },
+          sendMessage(_task, options) {
+            sendMessageOptions.push((options ?? {}) as Record<string, unknown>);
+            return execution(JSON.stringify({
+              artifact: {
+                path: 'workflows/generated/failing.ts',
+                content: workflowSource('after'),
+              },
+              metadata: {
+                summary: 'patched failing setup step',
+                failedStep: 'install-deps',
+              },
+            }));
+          },
         },
-        sendMessage(_task, options) {
-          sendMessageOptions.push((options ?? {}) as Record<string, unknown>);
-          return execution(JSON.stringify({
-            artifact: {
-              path: 'workflows/generated/failing.ts',
-              content: workflowSource('after'),
-            },
-            metadata: {
-              summary: 'patched failing setup step',
-              failedStep: 'install-deps',
-            },
-          }));
-        },
-      },
-    });
+      };
+    };
 
     const result = await repairWorkflowWithWorkforcePersona({
       repoRoot: '/repo',
@@ -68,6 +73,7 @@ describe('workforce persona workflow repairer', () => {
       attempt: 1,
       maxAttempts: 3,
       installSkills: false,
+      installRoot: '/state/ricky/persona-repair-skills',
       resolver,
     });
 
@@ -90,6 +96,7 @@ describe('workforce persona workflow repairer', () => {
         maxAttempts: 3,
       },
     });
+    expect(resolverOptions).toEqual([{ tier: 'best', installRoot: '/state/ricky/persona-repair-skills' }]);
   });
 });
 

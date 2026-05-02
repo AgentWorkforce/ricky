@@ -180,7 +180,7 @@ export interface LocalWorkflowFlowResult {
   capture: CapturedWorkflowSpec;
   generation?: LocalResponse;
   summary: WorkflowSummary;
-  confirmation: LocalRunConfirmation;
+  confirmation?: LocalRunConfirmation;
   run?: LocalResponse;
   monitoredRun?: LocalRunMonitorState;
   runSummary?: LocalWorkflowRunSummary;
@@ -258,8 +258,13 @@ export async function runLocalWorkflowFlow(deps: LocalWorkflowFlowDeps): Promise
   }
 
   const summary = buildWorkflowSummary({ capture, localResult: generation, preflight, artifactPath });
-  const confirmation = await deps.prompts.confirmRun({ summary });
   const command = summary.command;
+
+  if (generation && !generation.ok) {
+    return { preflight, capture, generation, summary, command };
+  }
+
+  const confirmation = await deps.prompts.confirmRun({ summary });
 
   if (confirmation === 'not-now' || confirmation === 'edit-first') {
     return { preflight, capture, generation, summary, confirmation, command };
