@@ -253,6 +253,10 @@ export interface LocalExecutorOptions {
     NonNullable<GenerationInput['workforcePersonaWriter']>,
     'repoRoot' | 'targetMode' | 'outputPath'
   >;
+  /** Concise phase updates for foreground CLI progress indicators. */
+  onProgress?: (message: string) => void;
+  /** Foreground workflow runtime output stream, separate from Ricky progress. */
+  onRuntimeOutput?: (stream: 'stdout' | 'stderr', line: string) => void;
 }
 
 export interface ScriptWorkflowRunnerOptions {
@@ -335,7 +339,10 @@ export function createProcessCommandRunner(): CommandRunner {
 }
 
 class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
-  constructor(private readonly runner: ScriptWorkflowRunner) {}
+  constructor(
+    private readonly runner: ScriptWorkflowRunner,
+    private readonly onRuntimeOutput?: (stream: 'stdout' | 'stderr', line: string) => void,
+  ) {}
 
   async launch(request: RunRequest): Promise<CoordinatorResult> {
     const runId = request.runId ?? cryptoRunId();
@@ -372,10 +379,12 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
           previousRunId: retry.previousRunId,
           onStdout: (line) => {
             stdout.push(line);
+            this.onRuntimeOutput?.('stdout', line);
             emit('stdout', line, { stream: 'stdout' });
           },
           onStderr: (line) => {
             stderr.push(line);
+            this.onRuntimeOutput?.('stderr', line);
             emit('stderr', line, { stream: 'stderr' });
           },
         }),
@@ -818,12 +827,13 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       const warnings: string[] = [];
       const nextActions: string[] = [];
       const cwd = request.invocationRoot ?? options.cwd ?? process.cwd();
+      const onProgress = options.onProgress;
       const artifactWriter = options.artifactWriter ?? defaultArtifactWriter;
       const coordinator =
         options.coordinator ??
         (options.commandRunner || options.route
           ? new LocalCoordinator(options.commandRunner ?? createProcessCommandRunner())
-          : new SdkScriptWorkflowCoordinator(options.scriptWorkflowRunner ?? createSdkScriptWorkflowRunner()));
+          : new SdkScriptWorkflowCoordinator(options.scriptWorkflowRunner ?? createSdkScriptWorkflowRunner(), options.onRuntimeOutput));
       const stageMode = resolveStageMode(request.stageMode, options.returnGeneratedArtifactOnly);
       const includeStageContract = true;
       const specDigest = digestSpec(request.spec);
@@ -888,6 +898,9 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           refine: request.refine,
           ...(workforcePersonaWriter ? { workforcePersonaWriter } : {}),
         };
+        onProgress?.(generationInput.workforcePersonaWriter
+          ? 'Writing workflow with Workforce persona...'
+          : 'Writing workflow...');
         generationResult = generationInput.workforcePersonaWriter
           ? await generateWithWorkforcePersona(generationInput)
           : generate(generationInput);
@@ -992,6 +1005,11 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
       const runtimeRunIdFile = runtimeRunIdFilePath(cwd, workflowId);
       await ensureParentDir(runtimeRunIdFile);
+      if (request.metadata.autoFixProgressOwner !== true) {
+        onProgress?.(request.retry?.startFromStep
+          ? `Running workflow from ${request.retry.startFromStep}...`
+          : 'Running workflow...');
+      }
       const runResult = await coordinator.launch({
         workflowFile: runTarget,
         cwd,
@@ -1099,6 +1117,7 @@ export interface LocalEntrypointOptions {
   artifactReader?: ArtifactReader;
   localExecutor?: LocalExecutorOptions;
   onProgress?: (message: string) => void;
+  onRuntimeOutput?: (stream: 'stdout' | 'stderr', line: string) => void;
 }
 
 export type LocalEntrypointInput = RawHandoff | LocalInvocationRequest;
@@ -1119,7 +1138,7 @@ export async function runLocal(
   handoff: LocalEntrypointInput,
   options: LocalEntrypointOptions = {},
 ): Promise<LocalResponse> {
-  const { executor, artifactReader, localExecutor, onProgress } = options;
+  const { executor, artifactReader, localExecutor, onProgress, onRuntimeOutput } = options;
 
   // Normalize
   let request: LocalInvocationRequest;
@@ -1147,10 +1166,12 @@ export async function runLocal(
 
   const resolvedExecutor =
     executor ??
-    (localExecutor
+    (localExecutor || onProgress || onRuntimeOutput
       ? createLocalExecutor({
-          ...localExecutor,
-          cwd: localExecutor.cwd ?? request.invocationRoot,
+          ...(localExecutor ?? {}),
+          cwd: localExecutor?.cwd ?? request.invocationRoot,
+          ...(onProgress ? { onProgress } : {}),
+          ...(onRuntimeOutput ? { onRuntimeOutput } : {}),
         })
       : getDefaultExecutor());
 
@@ -1175,6 +1196,10 @@ export async function runLocal(
         resolvedExecutor.execute({
           ...attemptRequest,
           autoFix: undefined,
+          metadata: {
+            ...attemptRequest.metadata,
+            autoFixProgressOwner: true,
+          },
         }),
     });
   }

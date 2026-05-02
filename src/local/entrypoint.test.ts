@@ -1163,6 +1163,25 @@ describe('runLocal', () => {
     expect(result.warnings.some((w) => w.includes('Cloud API surface'))).toBe(false);
   });
 
+  it('emits concise progress while generating and running locally', async () => {
+    const progress: string[] = [];
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['local run completed'] });
+
+    const result = await runLocal(
+      { source: 'cli', spec: 'generate a local workflow for packages/local/src/entrypoint.ts', stageMode: 'run' },
+      {
+        localExecutor,
+        onProgress: (message) => progress.push(message),
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(progress).toEqual([
+      'Writing workflow...',
+      'Running workflow...',
+    ]);
+  });
+
   it('can return a generated artifact without launching the local runtime', async () => {
     const localExecutor = memoryLocalExecutorOptions({ stdout: ['local run completed'] });
     const result = await runLocal(
@@ -2648,11 +2667,15 @@ describe('runLocal', () => {
         { source: 'workflow-artifact', artifactPath, stageMode: 'run' },
         {
           artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          onRuntimeOutput: (stream, line) => {
+            calls.push({ workflowFile: `${stream}:${line}`, cwd: 'streamed' });
+          },
           localExecutor: {
             cwd: repo,
             scriptWorkflowRunner: async (workflowFile, options) => {
               calls.push({ workflowFile, cwd: options.cwd, env: options.env });
               options.onStdout?.('sdk runner accepted workflow');
+              options.onStderr?.('sdk runner warning');
               if (options.env?.AGENT_RELAY_RUN_ID_FILE) {
                 await writeFile(options.env.AGENT_RELAY_RUN_ID_FILE, 'runtime-from-sdk\n', 'utf8');
               }
@@ -2662,7 +2685,11 @@ describe('runLocal', () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(calls).toEqual([expect.objectContaining({ workflowFile: artifactPath, cwd: repo })]);
+      expect(calls).toEqual([
+        expect.objectContaining({ workflowFile: artifactPath, cwd: repo }),
+        { workflowFile: 'stdout:sdk runner accepted workflow', cwd: 'streamed' },
+        { workflowFile: 'stderr:sdk runner warning', cwd: 'streamed' },
+      ]);
       expect(result.execution).toMatchObject({
         stage: 'execute',
         status: 'success',

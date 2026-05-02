@@ -37,6 +37,7 @@
     "@agentworkforce/harness-kit": "^0.5.5",
     "@agentworkforce/workload-router": "^0.5.4",
     "@inquirer/prompts": "^8.4.2",
+    "ora": "^8.2.0",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {

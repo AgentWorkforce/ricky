@@ -135,10 +135,10 @@ export async function runWithAutoFix(
     const classification = classifyFailure(evidence);
     const debuggerResult = debugWorkflowRun({ evidence, classification });
     const repairTarget = await resolveWorkflowRepairTarget(currentRequest, response);
-    onProgress?.(`Workflow failed${failedStep ? ` at ${failedStep}` : ''}; preparing repair...`);
 
     if (repairTarget) {
       try {
+        onProgress?.('Ricky is fixing the workflow...');
         const repair = await workflowRepairer({
           request: currentRequest,
           response,
@@ -307,13 +307,11 @@ function isV1DirectBlocker(code: string | undefined): boolean {
 async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<WorkflowRepairResult> {
   const deterministicRepair = repairWorkflowDeterministically(input);
   if (deterministicRepair) {
-    input.onProgress?.('Applying deterministic workflow repair...');
     return deterministicRepair;
   }
 
   let result: Awaited<ReturnType<typeof repairWorkflowWithWorkforcePersona>>;
   try {
-    input.onProgress?.('Asking Workforce persona to repair the workflow...');
     result = await repairWorkflowWithWorkforcePersona({
       repoRoot: input.cwd,
       artifactPath: input.artifactPath,

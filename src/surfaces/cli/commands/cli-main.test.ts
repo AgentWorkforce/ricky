@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import type { InteractiveCliResult } from '../entrypoint/interactive-cli.js';
 import type { OnboardingResult } from '../cli/onboarding.js';
 import type { LocalResponse } from '../../../local/entrypoint.js';
-import { cliMain, parseArgs, renderHelp } from './cli-main.js';
+import { cliMain, parseArgs, renderHelp, type CliProgressSpinner } from './cli-main.js';
 
 // ---------------------------------------------------------------------------
 // parseArgs
@@ -14,7 +15,7 @@ import { cliMain, parseArgs, renderHelp } from './cli-main.js';
 describe('parseArgs', () => {
   // Auto-fix is default-on for local run flows. Refinement stays opt-in so
   // omitted generation flags remain fast and deterministic.
-  const RUN_DEFAULTS = { autoFix: 3 };
+  const RUN_DEFAULTS = { autoFix: 7 };
 
   it('defaults to run command with auto-fix enabled and refinement omitted', () => {
     expect(parseArgs([])).toEqual({ command: 'run', ...RUN_DEFAULTS });
@@ -94,7 +95,7 @@ describe('parseArgs', () => {
       command: 'run',
       artifact: 'workflows/generated/example.ts',
       runRequested: true,
-      autoFix: 3,
+      autoFix: 7,
     });
     expect(parseArgs(['run', 'workflows/generated/example.ts', '--auto-fix=5'])).toMatchObject({
       autoFix: 5,
@@ -160,7 +161,7 @@ describe('parseArgs', () => {
     expect(parsed).toMatchObject({
       command: 'run',
       spec: 'build a workflow',
-      autoFix: 3,
+      autoFix: 7,
     });
     expect(parsed).not.toHaveProperty('refine');
   });
@@ -176,7 +177,7 @@ describe('parseArgs', () => {
   it('disables refine when --no-refine or --no-with-llm is passed', () => {
     const opted = parseArgs(['--spec', 'build a workflow', '--no-refine']);
     expect(opted).not.toHaveProperty('refine');
-    expect(opted).toMatchObject({ autoFix: 3 });
+    expect(opted).toMatchObject({ autoFix: 7 });
     const noLlm = parseArgs(['--spec', 'build a workflow', '--no-with-llm']);
     expect(noLlm).not.toHaveProperty('refine');
   });
@@ -196,7 +197,7 @@ describe('parseArgs', () => {
       spec: 'build a workflow',
       workflowName: 'release-health',
       noRun: true,
-      autoFix: 3,
+      autoFix: 7,
     });
 
     expect(parseArgs(['cloud', '--workflow', 'workflows/generated/release-health.ts', '--run', '--yes', '--json'])).toMatchObject({
@@ -464,6 +465,29 @@ function restoreEnv(name: string, value: string | undefined): void {
   process.env[name] = value;
 }
 
+function ttyOutputSink(): NodeJS.WritableStream & { isTTY: true } {
+  const output = new Writable({
+    write(_chunk, _encoding, callback): void {
+      callback();
+    },
+  }) as unknown as NodeJS.WritableStream & { isTTY: true };
+  output.isTTY = true;
+  return output;
+}
+
+function capturedTtyOutputSink(): (NodeJS.WritableStream & { isTTY: true; chunks: string[] }) {
+  const chunks: string[] = [];
+  const output = new Writable({
+    write(chunk, _encoding, callback): void {
+      chunks.push(String(chunk));
+      callback();
+    },
+  }) as unknown as NodeJS.WritableStream & { isTTY: true; chunks: string[] };
+  output.isTTY = true;
+  output.chunks = chunks;
+  return output;
+}
+
 describe('cliMain', () => {
   it('returns help output with exit code 0 for --help', async () => {
     const result = await cliMain({ argv: ['--help'] });
@@ -729,6 +753,7 @@ describe('cliMain', () => {
     const output = result.output.join('\n');
 
     expect(result.exitCode).toBe(1);
+    expect(output).toContain('Status: failed — generation did not complete');
     expect(output).toContain('Author: Workforce persona writer failed before authoring completed');
     expect(output).toContain('Generation: failed (status: error).');
     expect(output).toContain('Reason: WORKFORCE_PERSONA_WRITER_FAILED');
@@ -921,7 +946,7 @@ describe('cliMain', () => {
         handoff: expect.objectContaining({
           source: 'cli',
           stageMode: 'run',
-          autoFix: { maxAttempts: 3 },
+          autoFix: { maxAttempts: 7 },
         }),
       }),
     );
@@ -940,7 +965,7 @@ describe('cliMain', () => {
     expect(handoff).toMatchObject({
       source: 'cli',
       stageMode: 'run',
-      autoFix: { maxAttempts: 3 },
+      autoFix: { maxAttempts: 7 },
       cliMetadata: {
         handoff: 'inline-spec',
         workflowName: 'release-health',
@@ -961,7 +986,7 @@ describe('cliMain', () => {
     expect(runner.mock.calls[0][0].handoff).toMatchObject({
       source: 'cli',
       stageMode: 'run',
-      autoFix: { maxAttempts: 3 },
+      autoFix: { maxAttempts: 7 },
       refine: { model: 'sonnet' },
       cliMetadata: { handoff: 'inline-spec' },
     });
@@ -1272,7 +1297,7 @@ describe('cliMain', () => {
         },
       },
       auto_fix: {
-        max_attempts: 3,
+        max_attempts: 7,
         final_status: 'blocker',
         resumed: false,
         run_id: 'ricky-local-options',
@@ -1304,7 +1329,7 @@ describe('cliMain', () => {
 
     const output = result.output.join('\n');
     expect(output).toContain('Ricky reviewed the logs but could not safely finish the repair.');
-    expect(output).toContain('Auto-fix: stopped after 1/3 attempt(s) (MISSING_ENV_VAR)');
+    expect(output).toContain('Auto-fix: stopped after 1/7 attempt(s) (MISSING_ENV_VAR)');
     expect(output).toContain('Next:\n  export TEST_TOKEN=...');
     expect(output).toContain('  ricky status --run ricky-local-options');
     expect(output).not.toContain('Relevant logs:');
@@ -1314,7 +1339,7 @@ describe('cliMain', () => {
   it('renders auto-fix repair mode and summary for applied workflow repairs', async () => {
     const localResult = stagedLocalResult({
       auto_fix: {
-        max_attempts: 3,
+        max_attempts: 7,
         final_status: 'ok',
         resumed: true,
         run_id: 'ricky-local-repaired',
@@ -1340,7 +1365,7 @@ describe('cliMain', () => {
     });
 
     const output = result.output.join('\n');
-    expect(output).toContain('Auto-fix: repaired after 2/3 attempt(s)');
+    expect(output).toContain('Auto-fix: repaired after 2/7 attempt(s)');
     expect(output).toContain('Repair: deterministic — Aligned deterministic workflow checks.');
   });
 
@@ -1552,6 +1577,155 @@ describe('cliMain', () => {
     expect(runner.mock.calls[1][0].handoff.cliMetadata).toMatchObject({
       runMode: 'foreground',
     });
+  });
+
+  it('uses a TTY spinner for foreground local progress and stops before the final summary', async () => {
+    const events: string[] = [];
+    let spinnerText = '';
+    const spinner: CliProgressSpinner = {
+      get text(): string {
+        return spinnerText;
+      },
+      set text(value: string) {
+        spinnerText = value;
+        events.push(`text:${value}`);
+      },
+      start(): CliProgressSpinner {
+        events.push(`start:${spinnerText}`);
+        return spinner;
+      },
+      stop(): CliProgressSpinner {
+        events.push(`stop:${spinnerText}`);
+        return spinner;
+      },
+    };
+    const createProgressSpinner = vi.fn(({ text }: { text: string; stream: NodeJS.WritableStream }) => {
+      spinnerText = text;
+      events.push(`create:${text}`);
+      return spinner;
+    });
+    const runner = vi.fn(async (deps) => {
+      deps.localProgress?.('Writing workflow with Workforce persona...');
+      deps.localProgress?.('Ricky is fixing the workflow...');
+      deps.localProgress?.('Retrying workflow from install-deps...');
+      return fakeInteractiveResult({
+        ok: true,
+        localResult: stagedLocalResult({
+          auto_fix: {
+            max_attempts: 7,
+            final_status: 'ok',
+            resumed: true,
+            attempts: [
+              { attempt: 1, status: 'blocker', blocker_code: 'INVALID_ARTIFACT' },
+              { attempt: 2, status: 'ok' },
+            ],
+          },
+        }),
+      });
+    });
+
+    const result = await cliMain({
+      argv: ['run', 'workflows/generated/issue-3.ts', '--foreground'],
+      output: ttyOutputSink(),
+      isTTY: true,
+      createProgressSpinner,
+      runInteractive: runner,
+    });
+
+    expect(createProgressSpinner).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([
+      'create:Writing workflow with Workforce persona...',
+      'start:Writing workflow with Workforce persona...',
+      'text:Ricky is fixing the workflow...',
+      'text:Retrying workflow from install-deps...',
+      'stop:Retrying workflow from install-deps...',
+    ]);
+    const output = result.output.join('\n');
+    expect(output).toContain('Generation: ok — workflows/generated/issue-3.ts');
+    expect(output).toContain('Auto-fix: repaired after 2/7 attempt(s)');
+    expect(output).not.toContain('Ricky is fixing the workflow');
+    expect(output).not.toContain('Retrying workflow from install-deps');
+  });
+
+  it('streams foreground workflow output and clears the spinner first', async () => {
+    const events: string[] = [];
+    let spinnerText = '';
+    const spinner: CliProgressSpinner = {
+      get text(): string {
+        return spinnerText;
+      },
+      set text(value: string) {
+        spinnerText = value;
+        events.push(`text:${value}`);
+      },
+      start(): CliProgressSpinner {
+        events.push(`start:${spinnerText}`);
+        return spinner;
+      },
+      stop(): CliProgressSpinner {
+        events.push(`stop:${spinnerText}`);
+        return spinner;
+      },
+    };
+    const createProgressSpinner = vi.fn(({ text }: { text: string; stream: NodeJS.WritableStream }) => {
+      spinnerText = text;
+      events.push(`create:${text}`);
+      return spinner;
+    });
+    const output = capturedTtyOutputSink();
+    const runner = vi.fn(async (deps) => {
+      deps.localProgress?.('Running workflow (attempt 1/7)...');
+      deps.localRuntimeOutput?.('stdout', '[workflow] run relay-run-1');
+      deps.localRuntimeOutput?.('stdout', '  ✓ build — completed');
+      deps.localProgress?.('Ricky is fixing the workflow...');
+      deps.localRuntimeOutput?.('stderr', '[workflow] retrying failed step');
+      return fakeInteractiveResult({ ok: true, localResult: stagedLocalResult() });
+    });
+
+    await cliMain({
+      argv: ['run', 'workflows/generated/issue-3.ts', '--foreground'],
+      output,
+      isTTY: true,
+      createProgressSpinner,
+      runInteractive: runner,
+    });
+
+    expect(output.chunks.join('')).toContain('[workflow] run relay-run-1\n  ✓ build — completed\n[workflow] retrying failed step\n');
+    expect(events).toEqual([
+      'create:Running workflow (attempt 1/7)...',
+      'start:Running workflow (attempt 1/7)...',
+      'stop:Running workflow (attempt 1/7)...',
+      'create:Ricky is fixing the workflow...',
+      'start:Ricky is fixing the workflow...',
+      'stop:Ricky is fixing the workflow...',
+    ]);
+  });
+
+  it('does not attach spinner progress for JSON, quiet, non-TTY, background, or ordinary injected output streams', async () => {
+    const cases = [
+      { argv: ['run', 'workflows/generated/issue-3.ts', '--json'], isTTY: true, output: undefined, create: true },
+      { argv: ['run', 'workflows/generated/issue-3.ts', '--quiet'], isTTY: true, output: undefined, create: true },
+      { argv: ['run', 'workflows/generated/issue-3.ts', '--foreground'], isTTY: false, output: undefined, create: true },
+      { argv: ['run', 'workflows/generated/issue-3.ts', '--background'], isTTY: true, output: undefined, create: true },
+      { argv: ['run', 'workflows/generated/issue-3.ts', '--foreground'], isTTY: true, output: ttyOutputSink(), create: false },
+    ];
+
+    for (const testCase of cases) {
+      const createProgressSpinner = vi.fn();
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ localResult: stagedLocalResult() }));
+
+      await cliMain({
+        argv: testCase.argv,
+        isTTY: testCase.isTTY,
+        ...(testCase.output ? { output: testCase.output } : {}),
+        ...(testCase.create ? { createProgressSpinner } : {}),
+        runInteractive: runner,
+      });
+
+      expect(runner.mock.calls[0][0].localProgress).toBeUndefined();
+      expect(runner.mock.calls[0][0].localRuntimeOutput).toBeUndefined();
+      expect(createProgressSpinner).not.toHaveBeenCalled();
+    }
   });
 
   it('derives power-user cloud inline requests from stored auth and workspace without injected cloudRequest', async () => {

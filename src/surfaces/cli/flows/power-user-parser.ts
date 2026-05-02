@@ -1,5 +1,6 @@
 import type { RickyMode } from '../cli/mode-selector.js';
 import { isRickyMode } from '../cli/mode-selector.js';
+import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
 
 export type PowerUserCommand = 'run' | 'help' | 'version' | 'status' | 'connect';
 export type PowerUserSurface = 'legacy' | 'local' | 'cloud' | 'status' | 'connect';
@@ -240,12 +241,12 @@ function parseAutoFix(argv: string[]): number | undefined {
       rawValue = next && !next.startsWith('--') ? next : undefined;
     }
 
-    if (rawValue === undefined || rawValue === '') return 3;
+    if (rawValue === undefined || rawValue === '') return DEFAULT_AUTO_FIX_ATTEMPTS;
     const parsed = Number.parseInt(rawValue, 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
     return Math.min(10, Math.max(1, parsed));
   }
-  return 3;
+  return DEFAULT_AUTO_FIX_ATTEMPTS;
 }
 
 function readFlagValue(argv: string[], flag: string): string | undefined {

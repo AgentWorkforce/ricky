@@ -109,7 +109,7 @@ describe('runWithAutoFix', () => {
 
     expect(progress).toEqual([
       'Running workflow (attempt 1/3)...',
-      'Workflow failed at install-deps; preparing repair...',
+      'Ricky is fixing the workflow...',
       'Retrying workflow from install-deps...',
       'Running workflow (attempt 2/3)...',
     ]);
