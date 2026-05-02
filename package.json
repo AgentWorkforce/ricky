@@ -34,8 +34,8 @@
     "@agent-assistant/turn-context": "^0.3.11",
     "@agent-relay/cloud": "^6.0.6",
     "@agent-relay/sdk": "^6.0.6",
-    "@agentworkforce/harness-kit": "^0.3.1",
-    "@agentworkforce/workload-router": "^0.5.1",
+    "@agentworkforce/harness-kit": "^0.5.5",
+    "@agentworkforce/workload-router": "^0.5.4",
     "@inquirer/prompts": "^8.4.2",
     "ssh2": "^1.17.0"
   },

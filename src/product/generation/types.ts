@@ -200,7 +200,7 @@ export interface WorkforcePersonaGenerationMetadata {
   promptDigest: string;
   warnings: string[];
   runId: string | null;
-  source: 'package' | 'local-dev';
+  source: 'package';
   selectedIntent: string;
   responseFormat: 'structured-json' | 'fenced-artifact';
   outputPath: string;

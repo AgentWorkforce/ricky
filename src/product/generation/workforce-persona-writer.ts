@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
-import { access, readFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readFile } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { RenderedArtifact, WorkflowExecutionTarget } from './types.js';
@@ -120,7 +119,7 @@ export interface WorkforcePersonaWriterMetadata {
   promptDigest: string;
   warnings: string[];
   runId: string | null;
-  source: 'package' | 'local-dev';
+  source: 'package';
   selectedIntent: string;
   responseFormat: 'structured-json' | 'fenced-artifact';
   outputPath: string;
@@ -141,7 +140,7 @@ export interface WorkforcePersonaWriterResult {
 }
 
 export interface ResolvedWorkforcePersonaContext {
-  source: 'package' | 'local-dev';
+  source: 'package';
   intent: string;
   context: WorkforcePersonaContext;
   warnings: string[];
@@ -252,7 +251,7 @@ export async function defaultWorkforcePersonaResolver(
 ): Promise<ResolvedWorkforcePersonaContext> {
   let moduleResult: {
     module: WorkforcePersonaModule;
-    source: 'package' | 'local-dev';
+    source: 'package';
     warnings: string[];
   };
   try {
@@ -276,12 +275,12 @@ export async function resolveWorkforcePersonaContextWithModules(
   options: { tier?: string; installRoot?: string },
   moduleResult: {
     module: WorkforcePersonaModule;
-    source: 'package' | 'local-dev';
+    source: 'package';
     warnings: string[];
   },
   loadSelectionModule: () => Promise<{
     module: WorkforceSelectionModule;
-    source: 'package' | 'local-dev';
+    source: 'package';
     warnings: string[];
   }> = loadWorkforceSelectionModule,
 ): Promise<ResolvedWorkforcePersonaContext> {
@@ -295,9 +294,7 @@ export async function resolveWorkforcePersonaContextWithModules(
         const selected = selectionModule.module.usePersona(intent, selectionOptions(options));
         if (isUsablePersonaContext(selected)) {
           return {
-            source: moduleResult.source === 'local-dev' || selectionModule.source === 'local-dev'
-              ? 'local-dev'
-              : 'package',
+            source: 'package',
             intent,
             context: selected,
             warnings,
@@ -310,9 +307,7 @@ export async function resolveWorkforcePersonaContextWithModules(
         );
         if (isUsablePersonaContext(context)) {
           return {
-            source: moduleResult.source === 'local-dev' || selectionModule.source === 'local-dev'
-              ? 'local-dev'
-              : 'package',
+            source: 'package',
             intent,
             context,
             warnings,
@@ -386,37 +381,24 @@ export async function resolveWorkforcePersonaContextWithModules(
 
 export async function loadWorkforcePersonaModule(): Promise<{
   module: WorkforcePersonaModule;
-  source: 'package' | 'local-dev';
+  source: 'package';
   warnings: string[];
 }> {
   const warnings: string[] = [];
-  for (const candidate of await localWorkforceHarnessKitModuleCandidates()) {
-    const module = await importLocalWorkforceModule<WorkforcePersonaModule>(
-      candidate,
-      warnings,
-      'harness-kit',
-    );
-    if (!module) continue;
-    if (isRunnablePersonaModule(module)) {
-      return { module, source: 'local-dev', warnings };
-    }
-    warnings.push(`Local Workforce harness-kit at ${candidate} did not export runnable persona APIs.`);
-  }
-
   try {
     const packageName = '@agentworkforce/harness-kit';
     const module = await import(packageName) as WorkforcePersonaModule;
     if (isRunnablePersonaModule(module)) return { module, source: 'package', warnings };
-    warnings.push('@agentworkforce/harness-kit did not export useRunnablePersona() or useRunnableSelection().');
+    warnings.push(`@agentworkforce/harness-kit did not export useRunnablePersona() or useRunnableSelection(); exports: ${moduleExports(module)}.`);
   } catch (error) {
     warnings.push(`Package Workforce harness-kit unavailable: ${errorMessage(error)}`);
   }
 
   throw new WorkforcePersonaWriterError(
     [
-      '@agentworkforce/harness-kit is bundled as a Ricky dependency but could not be loaded.',
-      'Try reinstalling @agentworkforce/ricky (`npm install` in this project).',
-      'If you develop Ricky locally with a sibling ../workforce clone, publish or link that harness-kit.',
+      '@agentworkforce/harness-kit is installed but does not expose the runnable persona API Ricky needs.',
+      'Install a published npm version that exports useRunnablePersona() or useRunnableSelection().',
+      'Ricky only resolves npm packages for Workforce persona execution; local ../workforce checkouts are intentionally ignored.',
     ].join(' '),
     warnings,
   );
@@ -424,37 +406,24 @@ export async function loadWorkforcePersonaModule(): Promise<{
 
 export async function loadWorkforceSelectionModule(): Promise<{
   module: WorkforceSelectionModule;
-  source: 'package' | 'local-dev';
+  source: 'package';
   warnings: string[];
 }> {
   const warnings: string[] = [];
-  for (const candidate of await localWorkforceRouterModuleCandidates()) {
-    const module = await importLocalWorkforceModule<WorkforceSelectionModule>(
-      candidate,
-      warnings,
-      'workload-router',
-    );
-    if (!module) continue;
-    if (typeof module.usePersona === 'function') {
-      return { module, source: 'local-dev', warnings };
-    }
-    warnings.push(`Local Workforce router at ${candidate} did not export usePersona().`);
-  }
-
   try {
     const packageName = '@agentworkforce/workload-router';
     const module = await import(packageName) as WorkforceSelectionModule;
     if (typeof module.usePersona === 'function') return { module, source: 'package', warnings };
-    warnings.push('@agentworkforce/workload-router did not export usePersona().');
+    warnings.push(`@agentworkforce/workload-router did not export usePersona(); exports: ${moduleExports(module)}.`);
   } catch (error) {
     warnings.push(`Package Workforce router unavailable: ${errorMessage(error)}`);
   }
 
   throw new WorkforcePersonaWriterError(
     [
-      '@agentworkforce/workload-router is bundled as a Ricky dependency but could not be loaded.',
-      'Try reinstalling @agentworkforce/ricky (`npm install` in this project).',
-      'If you develop Ricky locally with a sibling ../workforce clone, publish or link that workload-router.',
+      '@agentworkforce/workload-router is installed but does not expose the persona selection API Ricky needs.',
+      'Install a published npm version that exports usePersona().',
+      'Ricky only resolves npm packages for Workforce persona selection; local ../workforce checkouts are intentionally ignored.',
     ].join(' '),
     warnings,
   );
@@ -670,50 +639,16 @@ async function resolveRelevantFiles(
   return contexts;
 }
 
-async function localWorkforceHarnessKitModuleCandidates(): Promise<string[]> {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, '../../..');
-  const siblingWorkforce = resolve(repoRoot, '../workforce/packages/harness-kit');
-  return [
-    join(siblingWorkforce, 'dist/index.js'),
-    join(siblingWorkforce, 'src/index.ts'),
-  ];
-}
-
-async function importLocalWorkforceModule<T>(
-  candidate: string,
-  warnings: string[],
-  label: string,
-): Promise<T | null> {
-  try {
-    await access(candidate);
-  } catch {
-    return null;
-  }
-
-  try {
-    return await import(pathToFileURL(candidate).href) as T;
-  } catch (error) {
-    warnings.push(`Local Workforce ${label} unavailable at ${candidate}: ${errorMessage(error)}`);
-    return null;
-  }
-}
-
-async function localWorkforceRouterModuleCandidates(): Promise<string[]> {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, '../../..');
-  const siblingWorkforce = resolve(repoRoot, '../workforce/packages/workload-router');
-  return [
-    join(siblingWorkforce, 'dist/index.js'),
-    join(siblingWorkforce, 'src/index.ts'),
-  ];
-}
-
 function isRunnablePersonaModule(value: WorkforcePersonaModule): boolean {
   return (
     typeof value.useRunnablePersona === 'function' ||
     typeof value.useRunnableSelection === 'function'
   );
+}
+
+function moduleExports(value: object): string {
+  const exports = Object.keys(value).sort();
+  return exports.length > 0 ? exports.join(', ') : 'none';
 }
 
 function runnablePersonaOptions(
