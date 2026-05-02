@@ -380,12 +380,16 @@ EOF
       cat > "$QUEUE_FILE" <<'EOF'
 workflows/wave10-agent-assistant-adoption/00-execute-agent-assistant-adoption-program.ts
 workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts
+workflows/wave12-simplified-workflow-cli/01-implement-and-prove-simplified-workflow-cli.ts
+workflows/wave12-simplified-workflow-cli/02-prove-no-dead-end-cli.ts
 EOF
       ;;
     expanded|*)
       cat > "$QUEUE_FILE" <<'EOF'
 workflows/wave10-agent-assistant-adoption/00-execute-agent-assistant-adoption-program.ts
 workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts
+workflows/wave12-simplified-workflow-cli/01-implement-and-prove-simplified-workflow-cli.ts
+workflows/wave12-simplified-workflow-cli/02-prove-no-dead-end-cli.ts
 workflows/wave7-analytics-proof/07-prove-proof-loop-analytics-feedback.ts
 workflows/wave0-foundation/04-initial-architecture-docs.ts
 workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
@@ -715,6 +719,16 @@ workflow_is_already_satisfied() {
         && ! git ls-tree -r --name-only HEAD packages | grep -q . \
         && ! grep -q '"workspaces"' package.json \
         && ! grep -q 'packages/' vitest.config.ts
+      ;;
+    workflows/wave12-simplified-workflow-cli/01-implement-and-prove-simplified-workflow-cli.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave12-simplified-workflow-cli/implement-and-prove/signoff.md \
+        'SIMPLIFIED_WORKFLOW_CLI_100_PERCENT_COMPLETE'
+      ;;
+    workflows/wave12-simplified-workflow-cli/02-prove-no-dead-end-cli.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave12-simplified-workflow-cli/no-dead-end-proof/signoff.md \
+        'NO_DEAD_END_SIGNOFF_COMPLETE'
       ;;
     *)
       return 1
