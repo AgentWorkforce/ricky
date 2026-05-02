@@ -3049,6 +3049,21 @@ describe('runLocal', () => {
 
         expect(result.ok).toBe(true);
         expectNoTurnContextFallback(result.logs);
+        expect(result.generation?.decisions?.assistant_turn_context).toMatchObject({
+          assistant_id: 'ricky',
+          turn_id: 'req-issue-11-live-adapter',
+          adapter: 'ricky-local-turn-context-adapter',
+          package: '@agent-assistant/turn-context',
+          context_blocks: expect.arrayContaining([
+            'enrichment-ricky-request-summary',
+            'enrichment-ricky-spec-text',
+          ]),
+          enrichment_ids: expect.arrayContaining([
+            'ricky-request-summary',
+            'ricky-spec-text',
+            'ricky-request-metadata',
+          ]),
+        });
         expect(localExecutor.runner.invocations).toHaveLength(0);
         expect(assembledInputs).toHaveLength(1);
 
@@ -3140,6 +3155,14 @@ describe('runLocal', () => {
         next: {
           run_command: `ricky run ${result.generation?.artifact?.path}`,
           run_mode_hint: `ricky run ${result.generation?.artifact?.path}`,
+        },
+        decisions: {
+          assistant_turn_context: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-generate',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          },
         },
       });
       expect(result.execution).toBeUndefined();
@@ -3246,6 +3269,12 @@ describe('runLocal', () => {
           requestId: 'req-issue-11-artifact',
           source: 'workflow-artifact',
           route: 'execute',
+          assistantTurnContext: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-artifact',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          },
         },
       });
       expect(result.logs).toEqual(

@@ -27,11 +27,13 @@ The shared turn context preserves the local request envelope data that issues #9
 - request metadata
 - spec text
 
-Those fields are carried in the shared turn context metadata and bounded enrichment blocks. They are not converted into Ricky's public response contract.
+Those fields are carried in the shared turn context metadata and bounded enrichment blocks. Ricky now also surfaces a compact `generation.decisions.assistant_turn_context` summary with the assistant id, turn id, adapter package, context block ids, and enrichment ids. The full turn context remains internal to the adapter boundary; Ricky's product response still owns the workflow-specific semantics.
 
 ## Still Ricky-owned
 
 Ricky still owns the public `LocalResponse` shape, including artifacts, logs, warnings, next actions, generation stage, execution stage, and exit code semantics.
+
+Ricky uses the shared turn context as provenance instead of as a product decision engine. The local executor records a compact summary in generation decisions and carries the same summary into local coordinator run metadata, so generated artifacts and local runs can be traced back to the Agent Assistant turn envelope without moving generation, execution, blockers, or evidence into `agent-assistant`.
 
 Ricky still owns local request normalization. Raw CLI, MCP, Claude, structured, free-form, and workflow-artifact handoffs continue through `normalizeRequest()` before the shared turn context adapter runs.
 
