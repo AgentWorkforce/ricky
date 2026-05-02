@@ -6,7 +6,6 @@ import type { RawHandoff } from '../../../local/request-normalizer.js';
 import type { LocalEntrypointOptions, LocalResponse } from '../../../local/entrypoint.js';
 import { runLocal } from '../../../local/entrypoint.js';
 export { legacyLocalRunStatePath, localRunStatePath, localRunStateRoot } from '../../../shared/state-paths.js';
-import { localRunArtifactDir, localRunStateRoot } from '../../../shared/state-paths.js';
 
 export type LocalRunMode = 'background' | 'foreground';
 
@@ -32,7 +31,7 @@ export interface LocalRunMonitorOptions {
   localOptions?: LocalEntrypointOptions;
   runLocalFn?: typeof runLocal;
   onMonitorStarted?: (state: LocalRunMonitorState) => void | Promise<void>;
-  /** Override where Ricky stores run reattachment state. Defaults outside the repo. */
+  /** Override where Ricky stores run reattachment state. Defaults under .workflow-artifacts/. */
   stateRoot?: string;
   /**
    * Inject a deterministic run-id factory for tests. The factory must return
@@ -46,7 +45,7 @@ export async function startLocalRunMonitor(options: LocalRunMonitorOptions): Pro
   const runId = options.runIdFactory
     ? options.runIdFactory({ artifactPath: options.artifactPath, mode: options.mode })
     : `ricky-local-${randomUUID()}`;
-  const artifactDir = options.stateRoot ? join(options.stateRoot, runId) : localRunArtifactDir(options.cwd, runId);
+  const artifactDir = options.stateRoot ? join(options.stateRoot, runId) : localWorkflowArtifactDir(options.cwd, runId);
   const statePath = join(artifactDir, 'state.json');
   const logPath = join(artifactDir, 'run.log');
   const evidencePath = join(artifactDir, 'evidence.json');
@@ -85,6 +84,10 @@ export async function startLocalRunMonitor(options: LocalRunMonitorOptions): Pro
   }
 
   return executeLocalRunMonitor(options, handoff, runningState);
+}
+
+export function localWorkflowArtifactDir(cwd: string, runId: string): string {
+  return resolve(cwd, '.workflow-artifacts', 'ricky-local-runs', runId);
 }
 
 async function executeLocalRunMonitor(

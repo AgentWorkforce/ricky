@@ -50,4 +50,26 @@ describe('power user parser defaults', () => {
       previousRunId: 'relay-run-123',
     });
   });
+
+  it('treats bare connect --cloud as the standard Cloud targets', () => {
+    expect(parsePowerUserArgs(['connect', 'agents', '--cloud'])).toMatchObject({
+      command: 'connect',
+      surface: 'connect',
+      connectTarget: 'agents',
+      cloudTargets: ['claude', 'codex', 'opencode', 'gemini'],
+    });
+
+    expect(parsePowerUserArgs(['connect', 'integrations', '--cloud'])).toMatchObject({
+      command: 'connect',
+      surface: 'connect',
+      connectTarget: 'integrations',
+      cloudTargets: ['slack', 'github', 'notion', 'linear'],
+    });
+  });
+
+  it('parses inline --cloud target lists for connect commands', () => {
+    expect(parsePowerUserArgs(['connect', 'agents', '--cloud=claude,codex'])).toMatchObject({
+      cloudTargets: ['claude', 'codex'],
+    });
+  });
 });

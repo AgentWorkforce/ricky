@@ -14,6 +14,7 @@ export interface WorkflowSummary {
   goal: string;
   agents: WorkflowSummaryAgent[];
   jobs: string[];
+  plan?: string[];
   desiredOutcome: string;
   sideEffects: string[];
   missingLocalBlockers: string[];
@@ -44,6 +45,7 @@ export function buildWorkflowSummary(input: {
     goal: summarizeGoal(input.capture.spec),
     agents,
     jobs: agents.map((agent) => `${agent.name}: ${agent.job}`),
+    plan: buildPlan(input.capture.source, artifactPath, agents),
     desiredOutcome: 'A completed local Agent Relay run with evidence, logs, artifacts, and a final outcome summary.',
     sideEffects,
     missingLocalBlockers: blockers,
@@ -60,6 +62,9 @@ export function renderWorkflowSummary(summary: WorkflowSummary, _options?: unkno
     '',
     'Agents',
     ...summary.agents.map((agent) => `  ${agent.name}: ${agent.job}`),
+    '',
+    'Plan',
+    ...(summary.plan ?? []).map((step, index) => `  ${index + 1}. ${step}`),
     '',
     'Desired outcome',
     `  ${summary.desiredOutcome}`,
@@ -91,6 +96,17 @@ export function localWorkflowSummary(
     goal: options.workflowName ?? localResult.generation?.artifact?.workflow_id ?? 'Run the generated local workflow.',
     agents,
     jobs: agents.map((agent) => `${agent.name}: ${agent.job}`),
+    plan: localResult.execution
+      ? [
+          `Use workflow artifact ${artifactPath}.`,
+          'Run it locally through @agent-relay/sdk/workflows.',
+          'Persist logs, evidence, fixes, generated artifacts, and final status.',
+        ]
+      : [
+          `Write workflow artifact ${artifactPath}.`,
+          'Review it before execution.',
+          `Run it explicitly with ${localResult.generation?.next?.run_command ?? `ricky run --artifact ${artifactPath}`}.`,
+        ],
     desiredOutcome: localResult.execution
       ? 'A completed local Agent Relay execution with logs and evidence.'
       : 'A generated local workflow artifact ready for explicit execution.',
@@ -130,6 +146,11 @@ export function cloudWorkflowSummary(
       },
     ],
     jobs: ['Cloud implementation agents: Run hosted workflow generation.'],
+    plan: [
+      'Validate Cloud account, workspace, and connected implementation agents.',
+      'Submit the explicit Cloud generate request.',
+      'Persist the Cloud run receipt and next recovery actions.',
+    ],
     desiredOutcome: 'A Cloud-generated workflow artifact with follow-up actions from AgentWorkforce Cloud.',
     sideEffects: ['Send the explicit Cloud generate request', 'Do not execute local workflows unless local mode is selected explicitly'],
     missingLocalBlockers: [...warnings, ...guidance],
@@ -216,6 +237,7 @@ export function cloudPowerUserWorkflowSummary(
     runId: runReceipt?.runId,
     status: runReceipt?.status ?? (cloudResult ? 'generated' : 'blocked'),
     cloudUrl: runReceipt?.receiptUrl,
+    runCommand: workflowPath ? `ricky cloud --workflow ${workflowPath} --run` : undefined,
     warnings: warningMessages,
     nextActions: followUpActions.length > 0 ? followUpActions : [
       'ricky connect cloud',
@@ -289,6 +311,22 @@ function summarizeGoal(spec: string): string {
     .map((line) => line.replace(/^[-#*\s]+/, '').trim())
     .find(Boolean);
   return firstLine ?? 'Run the requested local workflow to completion.';
+}
+
+function buildPlan(
+  source: CapturedWorkflowSpec['source'],
+  artifactPath: string,
+  agents: WorkflowSummaryAgent[],
+): string[] {
+  const firstStep = source === 'workflow-artifact'
+    ? `Use existing workflow artifact ${artifactPath}.`
+    : `Generate workflow artifact ${artifactPath} through the existing local generation pipeline.`;
+  const agentNames = agents.map((agent) => agent.name).join(', ') || 'the selected local agents';
+  return [
+    firstStep,
+    `Run assigned jobs with ${agentNames}.`,
+    'Monitor the run, preserve evidence, and stop before destructive actions or commits.',
+  ];
 }
 
 function resolveAgents(localResult: LocalResponse | undefined): WorkflowSummaryAgent[] {
@@ -371,6 +409,8 @@ export type CloudWorkflowSummaryIntegration = 'slack' | 'github' | 'notion' | 'l
 export interface CloudWorkflowSummary {
   availableAgents: CloudWorkflowSummaryAgent[];
   connectedIntegrations: CloudWorkflowSummaryIntegration[];
+  skippedIntegrations: CloudWorkflowSummaryIntegration[];
+  relevantSkippedIntegrations: CloudWorkflowSummaryIntegration[];
   caveats: string[];
   lines: string[];
 }
@@ -416,13 +456,18 @@ export function renderCloudWorkflowSummary(params: {
     }`,
   ];
 
-  for (const caveat of caveats) {
-    lines.push(`  Caveat: ${caveat}`);
+  if (caveats.length > 0) {
+    lines.push('  Integration caveats:');
+    for (const caveat of caveats) {
+      lines.push(`    ${caveat}`);
+    }
   }
 
   return {
     availableAgents: params.availableAgents,
     connectedIntegrations,
+    skippedIntegrations: params.skippedIntegrations,
+    relevantSkippedIntegrations: params.relevantSkippedIntegrations,
     caveats,
     lines,
   };

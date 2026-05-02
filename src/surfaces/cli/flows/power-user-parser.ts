@@ -5,6 +5,9 @@ export type PowerUserCommand = 'run' | 'help' | 'version' | 'status' | 'connect'
 export type PowerUserSurface = 'legacy' | 'local' | 'cloud' | 'status' | 'connect';
 export type ConnectTarget = 'cloud' | 'agents' | 'integrations';
 
+const DEFAULT_CLOUD_AGENT_TARGETS = ['claude', 'codex', 'opencode', 'gemini'];
+const DEFAULT_CLOUD_INTEGRATION_TARGETS = ['slack', 'github', 'notion', 'linear'];
+
 export interface PowerUserParsedArgs {
   command: PowerUserCommand;
   surface: PowerUserSurface;
@@ -144,10 +147,9 @@ function parseConnect(argv: string[]): PowerUserParsedArgs {
     return { ...base, ...(errors.length > 0 ? { errors } : {}) };
   }
 
+  const hasCloudFlag = hasFlag(argv, '--cloud');
   const cloudValue = readOptionalFlagValue(argv, '--cloud');
-  const cloudTargets = cloudValue
-    ? cloudValue.split(',').map((value) => value.trim()).filter(Boolean)
-    : undefined;
+  const cloudTargets = resolveCloudTargets(target, hasCloudFlag, cloudValue);
 
   return {
     ...base,
@@ -155,6 +157,18 @@ function parseConnect(argv: string[]): PowerUserParsedArgs {
     ...(cloudTargets && cloudTargets.length > 0 ? { cloudTargets } : {}),
     ...(errors.length > 0 ? { errors } : {}),
   };
+}
+
+function resolveCloudTargets(
+  target: ConnectTarget,
+  hasCloudFlag: boolean,
+  cloudValue: string | undefined,
+): string[] | undefined {
+  if (cloudValue) return cloudValue.split(',').map((value) => value.trim()).filter(Boolean);
+  if (!hasCloudFlag) return undefined;
+  if (target === 'agents') return DEFAULT_CLOUD_AGENT_TARGETS;
+  if (target === 'integrations') return DEFAULT_CLOUD_INTEGRATION_TARGETS;
+  return undefined;
 }
 
 function withCommonFlags<T extends Omit<PowerUserParsedArgs, 'json' | 'quiet' | 'verbose' | 'yes' | 'background' | 'foreground'>>(
@@ -240,10 +254,19 @@ function readFlagValue(argv: string[], flag: string): string | undefined {
 }
 
 function readOptionalFlagValue(argv: string[], flag: string): string | undefined {
+  const inline = argv.find((arg) => arg.startsWith(`${flag}=`));
+  if (inline) {
+    const value = inline.slice(flag.length + 1).trim();
+    return value || undefined;
+  }
   const index = argv.indexOf(flag);
   if (index === -1) return undefined;
   const value = argv[index + 1];
   return value && !value.startsWith('--') ? value : undefined;
+}
+
+function hasFlag(argv: string[], flag: string): boolean {
+  return argv.includes(flag) || argv.some((arg) => arg.startsWith(`${flag}=`));
 }
 
 function readRunArtifactPositional(argv: string[]): string | undefined {

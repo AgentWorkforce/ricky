@@ -183,7 +183,15 @@ export interface LocalWorkflowFlowResult {
   confirmation: LocalRunConfirmation;
   run?: LocalResponse;
   monitoredRun?: LocalRunMonitorState;
+  runSummary?: LocalWorkflowRunSummary;
   command: string;
+}
+
+export interface LocalWorkflowRunSummary {
+  outcome: string;
+  changedFiles: string[];
+  evidencePath?: string;
+  nextCommand: string;
 }
 
 export async function runLocalPreflight(cwd = process.cwd()): Promise<LocalPreflightResult> {
@@ -282,11 +290,51 @@ export async function runLocalWorkflowFlow(deps: LocalWorkflowFlowDeps): Promise
       runLocalFn,
       onMonitorStarted: deps.onMonitorStarted,
     });
-    return { preflight, capture, generation, summary, confirmation, monitoredRun, command };
+    return {
+      preflight,
+      capture,
+      generation,
+      summary,
+      confirmation,
+      monitoredRun,
+      runSummary: buildLocalWorkflowRunSummary(monitoredRun, undefined, command),
+      command,
+    };
   }
 
   const run = await runLocalFn(withSafeRunOptions(runHandoff, deps.autoFixAttempts), deps.localOptions);
-  return { preflight, capture, generation, summary, confirmation, run, command };
+  return {
+    preflight,
+    capture,
+    generation,
+    summary,
+    confirmation,
+    run,
+    runSummary: buildLocalWorkflowRunSummary(undefined, run, command),
+    command,
+  };
+}
+
+export function buildLocalWorkflowRunSummary(
+  monitoredRun: LocalRunMonitorState | undefined,
+  run: LocalResponse | undefined,
+  command: string,
+): LocalWorkflowRunSummary {
+  const response = monitoredRun?.response ?? run;
+  const evidence = response?.execution?.evidence;
+  const changedFiles = [
+    ...(evidence?.side_effects.files_written ?? []),
+    ...(response?.artifacts.map((artifact) => artifact.path) ?? []),
+  ];
+  return {
+    outcome: evidence?.outcome_summary
+      ?? (monitoredRun ? `Background run ${monitoredRun.status}.` : response?.ok ? 'Local run completed.' : 'Local run did not complete.'),
+    changedFiles: [...new Set(changedFiles)],
+    evidencePath: monitoredRun?.evidencePath
+      ?? evidence?.logs.stdout_path
+      ?? evidence?.logs.stderr_path,
+    nextCommand: monitoredRun?.reattachCommand ?? command,
+  };
 }
 
 async function detectRepoRoot(cwd: string): Promise<string> {
@@ -323,7 +371,7 @@ async function detectPackageManager(repoRoot: string): Promise<LocalPreflightRes
 
 async function detectSpecLocations(repoRoot: string): Promise<LocalSpecLocation[]> {
   const locations: LocalSpecLocation[] = [];
-  for (const candidate of ['SPEC.md', 'specs', 'docs/product', '.ricky/specs']) {
+  for (const candidate of ['SPEC.md', 'spec.md', 'specs', 'docs/specs', 'docs/product', 'product/specs', '.ricky/specs']) {
     const path = join(repoRoot, candidate);
     try {
       const entry = await stat(path);

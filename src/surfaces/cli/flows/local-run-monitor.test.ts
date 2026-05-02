@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { LocalResponse } from '../../../local/entrypoint.js';
-import { localRunStateRoot, startLocalRunMonitor, withSafeRunOptions } from './local-run-monitor.js';
+import { localRunStateRoot, localWorkflowArtifactDir, startLocalRunMonitor, withSafeRunOptions } from './local-run-monitor.js';
 
 describe('local run monitor', () => {
   it('persists state, logs, fixes, evidence, generated artifacts, and a reattach command for foreground runs', async () => {
@@ -356,12 +356,12 @@ describe('local run monitor', () => {
     }
   });
 
-  it('defaults run state outside the repo under a repo-keyed state directory', () => {
+  it('defaults run state under the repo .workflow-artifacts directory', () => {
     const cwd = '/workspace/customer-repo';
-    const stateRoot = localRunStateRoot(cwd, { RICKY_STATE_HOME: '/tmp/ricky-state' });
+    const artifactDir = localWorkflowArtifactDir(cwd, 'run-1');
 
-    expect(stateRoot).toMatch(/^\/tmp\/ricky-state\/ricky\/local-runs\/[a-f0-9]{12}$/);
-    expect(stateRoot).not.toContain('/workspace/customer-repo');
+    expect(artifactDir).toBe('/workspace/customer-repo/.workflow-artifacts/ricky-local-runs/run-1');
+    expect(localRunStateRoot(cwd, { RICKY_STATE_HOME: '/tmp/ricky-state' })).toMatch(/^\/tmp\/ricky-state\/ricky\/local-runs\/[a-f0-9]{12}$/);
   });
 
   it('clamps auto-fix attempts and never approves destructive actions or commits', () => {

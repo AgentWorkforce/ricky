@@ -76,6 +76,77 @@ describe('spec intake flow', () => {
     });
   });
 
+  it('asks two to three clarifying questions only when a goal is underspecified', async () => {
+    const questions: string[] = [];
+    const capture = await runSpecIntakeFlow({
+      cwd: '/repo',
+      prompts: {
+        selectSpecSource: async () => 'goal',
+        inputSpecFilePath: async () => 'SPEC.md',
+        editSpec: async ({ initialValue }) => initialValue ?? '',
+        inputWorkflowName: async () => 'Ambiguous Goal',
+        inputGoal: async () => 'clean up',
+        inputGoalClarification: async ({ question }) => {
+          questions.push(question);
+          return `Answer for ${question}`;
+        },
+        approveGeneratedSpec: async () => 'edit',
+        inputWorkflowArtifactPath: async () => 'unused',
+      },
+    });
+
+    expect(questions).toEqual([
+      'What should prove the workflow succeeded?',
+      'Which files, services, or commands should Ricky focus on?',
+      'What should Ricky avoid or pause before doing?',
+    ]);
+    expect(capture.generatedFromGoal).toMatchObject({
+      goal: 'clean up',
+      approved: false,
+    });
+    expect(capture.spec).toContain('Additional context:');
+  });
+
+  it('does not ask clarifying questions for a sufficiently actionable goal', async () => {
+    let clarificationCount = 0;
+    await runSpecIntakeFlow({
+      cwd: '/repo',
+      prompts: {
+        selectSpecSource: async () => 'goal',
+        inputSpecFilePath: async () => 'SPEC.md',
+        editSpec: async ({ initialValue }) => initialValue ?? '',
+        inputWorkflowName: async () => 'Release Health',
+        inputGoal: async () => 'verify release health before packaging',
+        inputGoalClarification: async () => {
+          clarificationCount += 1;
+          return 'unused';
+        },
+        approveGeneratedSpec: async () => 'approve',
+        inputWorkflowArtifactPath: async () => 'unused',
+      },
+    });
+
+    expect(clarificationCount).toBe(0);
+  });
+
+  it('surfaces a concise missing-spec error', async () => {
+    await expect(runSpecIntakeFlow({
+      cwd: '/repo',
+      readFileText: async () => {
+        throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      },
+      prompts: {
+        selectSpecSource: async () => 'spec-file',
+        inputSpecFilePath: async () => 'missing.md',
+        editSpec: async () => 'unused',
+        inputWorkflowName: async ({ defaultName }) => defaultName,
+        inputGoal: async () => 'unused',
+        approveGeneratedSpec: async () => 'approve',
+        inputWorkflowArtifactPath: async () => 'unused',
+      },
+    })).rejects.toThrow('Spec file not found: /repo/missing.md');
+  });
+
   it('uses the approved workflow name as the default generated artifact path', async () => {
     const capture = await runSpecIntakeFlow({
       cwd: '/repo',

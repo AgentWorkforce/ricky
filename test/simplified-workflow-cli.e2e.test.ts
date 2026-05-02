@@ -136,7 +136,7 @@ describe('simplified workflow CLI E2E paths', () => {
 
         if (confirmation === 'background') {
           expect(result.monitoredRun?.status).toBe('running');
-          expect(result.monitoredRun?.logPath).toContain(`${stateHome}/ricky/local-runs/`);
+          expect(result.monitoredRun?.logPath).toContain(`${repo}/.workflow-artifacts/ricky-local-runs/`);
           expect(result.monitoredRun?.evidencePath).toContain('evidence.json');
           expect(result.monitoredRun?.reattachCommand).toMatch(/^ricky status --run /);
           await vi.waitFor(async () => {
@@ -145,6 +145,9 @@ describe('simplified workflow CLI E2E paths', () => {
               'Workflow completed successfully with deterministic evidence.',
             );
             await expect(readFile(result.monitoredRun!.evidencePath, 'utf8')).resolves.toContain('final summary: passed');
+            expect(JSON.parse(await readFile(result.monitoredRun!.statePath, 'utf8'))).toMatchObject({
+              status: 'completed',
+            });
           });
           expect(runLocalFn.mock.calls[1][0].autoFix).toEqual({ maxAttempts: 7 });
         } else if (confirmation === 'foreground') {

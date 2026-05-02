@@ -20,6 +20,8 @@ import type {
   CloudImplementationAgent,
   CloudOptionalIntegration,
   CloudLoginRequirement,
+  CloudAgentReadiness,
+  CloudReadinessCheck,
   CloudReadinessSnapshot,
 } from '../flows/cloud-workflow-flow.js';
 import type { CloudWorkflowSummary } from '../flows/workflow-summary.js';
@@ -111,6 +113,8 @@ export interface InteractiveCliDeps extends CloudWorkflowFlowDeps {
     isTTY?: boolean;
     mode?: RickyMode;
     configStore?: RickyConfigStore;
+    verbose?: boolean;
+    signal?: AbortSignal;
   }) => Promise<OnboardingResult>;
 
   /** Caller workspace path for local artifact generation. Defaults to INIT_CWD or process.cwd(). */
@@ -180,6 +184,8 @@ export interface InteractiveCliDeps extends CloudWorkflowFlowDeps {
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   isTTY?: boolean;
+  verbose?: boolean;
+  signal?: AbortSignal;
 }
 
 function applyCliWorkforcePersonaPreferenceToLocalExecutor(
@@ -361,10 +367,11 @@ function defaultLocalWorkflowDeps(
     onMonitorStarted: (state) => {
       output.write([
         '',
-        'Background monitor started.',
+        'Ricky will run this in the background, monitor for issues, persist evidence, and keep auto-fixes bounded to non-destructive changes.',
         `  Workflow run id: ${state.runId}`,
         `  Status command: ${state.reattachCommand}`,
         `  Logs: ${state.logPath}`,
+        `  Evidence: ${state.evidencePath}`,
         '',
       ].join('\n'));
     },
@@ -862,7 +869,7 @@ async function confirmCloudAgentProviderAuth(
       default: 'skip',
       loop: false,
     },
-    { input: inputStream, output: outputStream },
+    { input: inputStream, output: outputStream, signal: deps.signal },
   );
   return answer === 'yes';
 }
@@ -910,6 +917,7 @@ async function selectConnectToolChoices(deps: InteractiveCliDeps): Promise<Conne
       {
         input,
         output,
+        signal: deps.signal,
       },
     );
     return selected === 'all' ? ['cloud', 'integrations', 'agents'] : [selected];
@@ -943,6 +951,7 @@ async function selectConnectIntegrationChoices(deps: InteractiveCliDeps): Promis
       {
         input,
         output,
+        signal: deps.signal,
       },
     );
   } catch (error) {
@@ -1207,27 +1216,216 @@ async function readGuidedCloudReadiness(
   deps: InteractiveCliDeps,
   auth: StoredAuth | null,
   workspaceId: string | undefined,
+  request?: CloudGenerateRequest,
 ): Promise<CloudReadinessSnapshot> {
   if (deps.checkCloudReadiness) return deps.checkCloudReadiness();
-  const hasToken = Boolean(auth?.accessToken || process.env.AGENTWORKFORCE_CLOUD_TOKEN || process.env.RICKY_CLOUD_TOKEN);
-  const hasWorkspace = Boolean(workspaceId);
+  const requestAuth = request ? cloudRequestAuthForReadiness(request, deps) : null;
+  const effectiveAuth = auth ?? requestAuth;
+  const effectiveWorkspaceId = workspaceId ?? request?.workspace?.workspaceId;
+  const hasToken = Boolean(
+    auth?.accessToken ||
+    request?.auth?.token ||
+    process.env.AGENTWORKFORCE_CLOUD_TOKEN ||
+    process.env.RICKY_CLOUD_TOKEN,
+  );
+  const hasWorkspace = Boolean(effectiveWorkspaceId);
+  if (effectiveAuth && effectiveWorkspaceId) {
+    return fetchGuidedCloudReadiness(effectiveAuth, effectiveWorkspaceId, {
+      fallbackToRequestReadiness: request !== undefined,
+    });
+  }
+
   return {
     account: { connected: hasToken },
     credentials: { connected: hasToken },
     workspace: { connected: hasWorkspace },
-    agents: {
-      claude: { connected: hasToken, capable: hasToken },
-      codex: { connected: hasToken, capable: hasToken },
-      opencode: { connected: hasToken, capable: hasToken },
-      gemini: { connected: hasToken, capable: hasToken },
-    },
-    integrations: {
-      slack: { connected: false },
-      github: { connected: false },
-      notion: { connected: false },
-      linear: { connected: false },
-    },
+    agents: request ? optimisticRequestAgentReadiness() : defaultGuidedCloudAgentReadiness(),
+    integrations: defaultGuidedCloudIntegrationReadiness(),
   };
+}
+
+function cloudRequestAuthForReadiness(
+  request: CloudGenerateRequest,
+  deps: Pick<InteractiveCliDeps, 'connectApiUrl'>,
+): StoredAuth | null {
+  const token = request.auth?.token?.trim();
+  if (!token) return null;
+  return {
+    accessToken: token,
+    refreshToken: '',
+    accessTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    apiUrl: deps.connectApiUrl ?? defaultCloudApiUrl(),
+  };
+}
+
+function defaultCloudApiUrl(): string {
+  try {
+    const configured = process.env.CLOUD_API_URL?.trim();
+    if (configured) return configured;
+    return 'https://api.agentrelay.cloud';
+  } catch {
+    return 'https://api.agentrelay.cloud';
+  }
+}
+
+async function fetchGuidedCloudReadiness(
+  auth: StoredAuth,
+  workspaceId: string,
+  options: { fallbackToRequestReadiness?: boolean } = {},
+): Promise<CloudReadinessSnapshot> {
+  try {
+    const [agents, integrations] = await Promise.all([
+      fetchGuidedCloudAgents(auth),
+      fetchGuidedCloudIntegrations(auth, workspaceId),
+    ]);
+    return {
+      account: { connected: true },
+      credentials: { connected: true },
+      workspace: { connected: true, label: workspaceId },
+      agents,
+      integrations,
+    };
+  } catch (error) {
+    if (options.fallbackToRequestReadiness) {
+      return {
+        account: { connected: true },
+        credentials: { connected: true },
+        workspace: { connected: true, label: workspaceId },
+        agents: optimisticRequestAgentReadiness(),
+        integrations: defaultGuidedCloudIntegrationReadiness(
+          error instanceof Error ? error.message : String(error),
+        ),
+      };
+    }
+    return {
+      account: { connected: Boolean(auth.accessToken) },
+      credentials: { connected: Boolean(auth.accessToken) },
+      workspace: { connected: Boolean(workspaceId), label: workspaceId },
+      agents: defaultGuidedCloudAgentReadiness(
+        error instanceof Error ? error.message : String(error),
+      ),
+      integrations: defaultGuidedCloudIntegrationReadiness(
+        error instanceof Error ? error.message : String(error),
+      ),
+    };
+  }
+}
+
+type GuidedCloudAgentApiRecord = {
+  displayName?: unknown;
+  harness?: unknown;
+  provider?: unknown;
+  status?: unknown;
+  credentialStoredAt?: unknown;
+  lastAuthenticatedAt?: unknown;
+  lastError?: unknown;
+};
+
+async function fetchGuidedCloudAgents(auth: StoredAuth): Promise<Record<CloudImplementationAgent, CloudAgentReadiness>> {
+  const body = await fetchGuidedCloudJson(auth, '/api/v1/cloud-agents');
+  const records = Array.isArray((body as { agents?: unknown }).agents)
+    ? (body as { agents: GuidedCloudAgentApiRecord[] }).agents
+    : [];
+  const result = defaultGuidedCloudAgentReadiness();
+  for (const record of records) {
+    const agent = cloudAgentFromProvider(
+      typeof record.harness === 'string'
+        ? record.harness
+        : typeof record.provider === 'string'
+          ? record.provider
+          : undefined,
+    );
+    if (!agent) continue;
+    const connected = record.status === 'connected' || Boolean(record.credentialStoredAt || record.lastAuthenticatedAt);
+    result[agent] = {
+      connected,
+      capable: connected,
+      ...(typeof record.displayName === 'string' && record.displayName.trim() ? { label: record.displayName.trim() } : {}),
+      ...(typeof record.lastError === 'string' && record.lastError.trim() ? { recovery: record.lastError.trim() } : {}),
+    };
+  }
+  return result;
+}
+
+async function fetchGuidedCloudIntegrations(
+  auth: StoredAuth,
+  workspaceId: string,
+): Promise<Record<CloudOptionalIntegration, CloudReadinessCheck>> {
+  const entries = await Promise.all(CONNECT_OPTIONAL_INTEGRATIONS.map(async (integration) => {
+    try {
+      const body = await fetchGuidedCloudJson(
+        auth,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/integrations/${integration}`,
+      );
+      const connectionId = typeof (body as { connectionId?: unknown }).connectionId === 'string'
+        ? (body as { connectionId: string }).connectionId
+        : '';
+      const providerConfigKey = typeof (body as { providerConfigKey?: unknown }).providerConfigKey === 'string'
+        ? (body as { providerConfigKey: string }).providerConfigKey
+        : '';
+      const connected = Boolean(connectionId.trim());
+      const label = providerConfigKey.trim() || connectionId.trim();
+      return [integration, {
+        connected,
+        ...(connected && label ? { label } : {}),
+      }] as const;
+    } catch (error) {
+      return [integration, {
+        connected: false,
+        label: 'unknown',
+        recovery: error instanceof Error ? error.message : String(error),
+      }] as const;
+    }
+  }));
+  return Object.fromEntries(entries) as Record<CloudOptionalIntegration, CloudReadinessCheck>;
+}
+
+async function fetchGuidedCloudJson(auth: StoredAuth, path: string): Promise<unknown> {
+  const relayCloud = await import('@agent-relay/cloud');
+  const { response } = await relayCloud.authorizedApiFetch(auth, path, { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(`${path} returned HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+function optimisticRequestAgentReadiness(): Record<CloudImplementationAgent, CloudAgentReadiness> {
+  return {
+    claude: { connected: true, capable: true, label: 'provided request context' },
+    codex: { connected: true, capable: true, label: 'provided request context' },
+    opencode: { connected: true, capable: true, label: 'provided request context' },
+    gemini: { connected: true, capable: true, label: 'provided request context' },
+  };
+}
+
+function defaultGuidedCloudAgentReadiness(recovery?: string): Record<CloudImplementationAgent, CloudAgentReadiness> {
+  return {
+    claude: { connected: false, capable: false, ...(recovery ? { recovery } : {}) },
+    codex: { connected: false, capable: false, ...(recovery ? { recovery } : {}) },
+    opencode: { connected: false, capable: false, ...(recovery ? { recovery } : {}) },
+    gemini: { connected: false, capable: false, ...(recovery ? { recovery } : {}) },
+  };
+}
+
+function defaultGuidedCloudIntegrationReadiness(
+  recovery?: string,
+): Record<CloudOptionalIntegration, CloudReadinessCheck> {
+  return {
+    slack: { connected: false, ...(recovery ? { label: 'unknown', recovery } : {}) },
+    github: { connected: false, ...(recovery ? { label: 'unknown', recovery } : {}) },
+    notion: { connected: false, ...(recovery ? { label: 'unknown', recovery } : {}) },
+    linear: { connected: false, ...(recovery ? { label: 'unknown', recovery } : {}) },
+  };
+}
+
+function cloudAgentFromProvider(provider: string | undefined): CloudImplementationAgent | undefined {
+  const normalized = provider?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.includes('claude') || normalized.includes('anthropic')) return 'claude';
+  if (normalized.includes('codex') || normalized.includes('openai')) return 'codex';
+  if (normalized.includes('opencode')) return 'opencode';
+  if (normalized.includes('gemini') || normalized.includes('google')) return 'gemini';
+  return undefined;
 }
 
 const CLOUD_LOGIN_LABELS: Record<CloudLoginRequirement, string> = {
@@ -1261,7 +1459,7 @@ async function promptCloudLogin(deps: InteractiveCliDeps, missing: string[]): Pr
       default: 'yes',
       loop: false,
     },
-    { input: inputStream, output: outputStream },
+    { input: inputStream, output: outputStream, signal: deps.signal },
   );
   return answer === 'yes';
 }
@@ -1345,44 +1543,26 @@ function cloudRequestFromCapture(
   };
 }
 
-function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDeps {
+function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps, request?: CloudGenerateRequest): InteractiveCliDeps {
   const next: InteractiveCliDeps = { ...deps };
   const inputStream = deps.input ?? process.stdin;
   const outputStream = deps.output ?? process.stdout;
   const interactive = ownsInteractiveTerminal(deps, inputStream, outputStream);
   const connectedAgents = new Set<string>();
-  const connectedIntegrations = new Set<CloudOptionalIntegration>();
 
   if (!next.checkCloudReadiness) {
     next.checkCloudReadiness = async () => {
       const auth = await readCloudAuth(deps);
-      const token = process.env.AGENTWORKFORCE_CLOUD_TOKEN ?? process.env.RICKY_CLOUD_TOKEN ?? auth?.accessToken;
-      const workspaceId = await resolveCloudWorkspaceId(deps, auth);
-      const hasToken = Boolean(token);
-      return {
-        account: { connected: hasToken },
-        credentials: { connected: hasToken },
-        workspace: { connected: Boolean(workspaceId) },
-        agents: {
-          claude: { connected: connectedAgents.has('claude'), capable: connectedAgents.has('claude') },
-          codex: { connected: connectedAgents.has('codex'), capable: connectedAgents.has('codex') },
-          opencode: { connected: connectedAgents.has('opencode'), capable: connectedAgents.has('opencode') },
-          gemini: { connected: connectedAgents.has('gemini'), capable: connectedAgents.has('gemini') },
-        },
-        integrations: {
-          slack: { connected: connectedIntegrations.has('slack') },
-          github: { connected: connectedIntegrations.has('github') },
-          notion: { connected: connectedIntegrations.has('notion') },
-          linear: { connected: connectedIntegrations.has('linear') },
-        },
-      };
+      const workspaceId = await resolveCloudWorkspaceId(deps, auth) ?? request?.workspace?.workspaceId;
+      const readiness = await readGuidedCloudReadiness(deps, auth, workspaceId, request);
+      return mergeSessionConnectedAgents(readiness, connectedAgents);
     };
   }
 
   if (!next.promptMissingCloudAgents && interactive) {
     next.promptMissingCloudAgents = async ({ availableAgents, missingAgents }) => {
       const choices = [
-        { value: 'connect-all' as const, name: 'Yes, connect missing agents' },
+        { value: 'connect-all' as const, name: 'Connect all missing agents' },
         { value: 'choose' as const, name: 'Choose which agents to connect' },
         ...(availableAgents.length > 0
           ? [{ value: 'continue-connected' as const, name: 'Continue with connected agents' }]
@@ -1394,13 +1574,13 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDep
         choices,
         default: availableAgents.length > 0 ? 'continue-connected' : 'connect-all',
         loop: false,
-      }, { input: inputStream, output: outputStream });
+      }, { input: inputStream, output: outputStream, signal: deps.signal });
       if (action === 'choose') {
         const agents = await checkbox({
           message: 'Which Cloud agents should Ricky connect?',
           required: true,
           choices: missingAgents.map((agent) => ({ value: agent, name: agent })),
-        }, { input: inputStream, output: outputStream });
+        }, { input: inputStream, output: outputStream, signal: deps.signal });
         return { action, agents };
       }
       return { action };
@@ -1425,11 +1605,17 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDep
   }
 
   if (!next.selectOptionalCloudIntegrations && interactive) {
-    next.selectOptionalCloudIntegrations = async ({ missingIntegrations }) => {
+    next.selectOptionalCloudIntegrations = async ({ missingIntegrations, relevantIntegrations }) => {
       const integrations = await checkbox({
-        message: 'Connect integrations to make workflow runs better?',
-        choices: missingIntegrations.map((integration) => ({ value: integration, name: integration })),
-      }, { input: inputStream, output: outputStream });
+        message: 'Select optional integrations to connect. Leave all unchecked to skip.',
+        choices: missingIntegrations.map((integration) => ({
+          value: integration,
+          name: CONNECT_INTEGRATION_LABELS[integration],
+          description: relevantIntegrations.includes(integration)
+            ? 'Mentioned in this spec; skipping will be shown as a caveat.'
+            : 'Optional for this run.',
+        })),
+      }, { input: inputStream, output: outputStream, signal: deps.signal });
       return integrations.length > 0 ? { action: 'connect', integrations } : { action: 'skip-all' };
     };
   }
@@ -1437,12 +1623,7 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDep
   if (!next.connectOptionalCloudIntegrations) {
     next.connectOptionalCloudIntegrations = async (integrations) => {
       if (integrations.length > 0) {
-        const results = await connectCloudIntegrationsViaNango(integrations, deps);
-        for (const result of results) {
-          if (result.status === 'link-opened' || result.status === 'link-created') {
-            connectedIntegrations.add(result.integration);
-          }
-        }
+        await connectCloudIntegrationsViaNango(integrations, deps);
       }
     };
   }
@@ -1458,12 +1639,30 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps): InteractiveCliDep
         ],
         default: 'run-and-monitor',
         loop: false,
-      }, { input: inputStream, output: outputStream });
+      }, { input: inputStream, output: outputStream, signal: deps.signal });
       return { action };
     };
   }
 
   return next;
+}
+
+function mergeSessionConnectedAgents(
+  readiness: CloudReadinessSnapshot,
+  connectedAgents: Set<string>,
+): CloudReadinessSnapshot {
+  if (connectedAgents.size === 0) return readiness;
+  const agents = { ...readiness.agents };
+  for (const provider of connectedAgents) {
+    const agent = cloudAgentFromProvider(provider);
+    if (!agent) continue;
+    agents[agent] = {
+      connected: true,
+      capable: true,
+      label: agents[agent]?.label ?? 'connected during this CLI session',
+    };
+  }
+  return { ...readiness, agents };
 }
 
 function withoutGuidedReadinessRecoveryPrompts(deps: InteractiveCliDeps): InteractiveCliDeps {
@@ -1515,13 +1714,19 @@ export async function runInteractiveCli(
     providerStatus: deps.providerStatus,
     compactForExecution: deps.handoff !== undefined,
     skipFirstRunPersistence: deps.handoff !== undefined,
+    verbose: deps.verbose,
+    signal: deps.signal,
   });
+  const fallbackMode = onboarding.mode === 'status' || onboarding.mode === 'connect' || onboarding.mode === 'exit'
+    ? 'local'
+    : toRickyMode(onboarding.mode);
 
+  try {
   if (onboarding.mode === 'status' || onboarding.mode === 'connect' || onboarding.mode === 'exit') {
     const guidance = await compactShellChoiceGuidance(onboarding.mode, deps);
     return {
       ok: true,
-      mode: 'local',
+      mode: fallbackMode,
       onboarding,
       diagnoses: [],
       guidance,
@@ -1583,12 +1788,33 @@ export async function runInteractiveCli(
     };
   }
 
+  } catch (error) {
+    if (!isPromptCancellation(error) || deps.verbose === true) {
+      throw error;
+    }
+
+    writeCancellationLine(deps);
+    return {
+      ok: true,
+      mode: fallbackMode,
+      onboarding,
+      diagnoses: [],
+      guidance: ['Cancelled. Nothing was generated or executed.'],
+      awaitingInput: true,
+    };
+  }
+
   // Unreachable for valid RickyMode, but TypeScript exhaustiveness
   return {
     ok: true,
-    mode,
+    mode: fallbackMode,
     onboarding,
     diagnoses: [],
     guidance: [],
   };
+}
+
+function writeCancellationLine(deps: Pick<InteractiveCliDeps, 'output'>): void {
+  const output = deps.output ?? process.stdout;
+  output.write('\nCancelled.\n');
 }

@@ -5,6 +5,7 @@ import { generate, generateWithWorkforcePersona } from './pipeline.js';
 import type { WorkforcePersonaExecution, WorkforcePersonaResolver } from './workforce-persona-writer.js';
 import {
   buildWorkflowPersonaTask,
+  defaultWorkforcePersonaResolver,
   parsePersonaWorkflowResponse,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
 } from './workforce-persona-writer.js';
@@ -29,8 +30,19 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('80-to-100 fix loop');
     expect(task).toContain('Structured response contract');
     expect(task).toContain('fenced ```ts artifact block plus a fenced ```json metadata block');
+    expect(task).toContain('Relevant file context');
+    expect(task).toContain('Auto-fix and repair expectations');
     expect(task).toContain('Evidence rules');
     expect(task).toContain('Do not open an interactive Claude, Codex, or OpenCode terminal UI');
+  });
+
+  it('defaults to the Agent Relay workflow-writing persona when the packaged router exposes it', async () => {
+    const resolved = await defaultWorkforcePersonaResolver(WORKFORCE_PERSONA_INTENT_CANDIDATES);
+
+    expect(resolved.intent).toBe('agent-relay-workflow');
+    expect(resolved.context.selection.personaId).toBeTruthy();
+    expect(resolved.context.selection.runtime.harness).toMatch(/^(claude|codex|opencode)$/);
+    expect(typeof resolved.context.sendMessage).toBe('function');
   });
 
   it('parses structured JSON persona output and validates metadata', () => {

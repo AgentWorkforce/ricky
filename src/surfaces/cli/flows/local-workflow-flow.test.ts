@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
@@ -199,7 +199,80 @@ describe('local workflow flow', () => {
       expect(result.generation).toBeUndefined();
       expect(result.confirmation).toBe('foreground');
       expect(result.run?.execution?.evidence?.outcome_summary).toContain('final summary');
+      expect(result.runSummary).toMatchObject({
+        outcome: 'final summary: existing workflow passed',
+        changedFiles: [
+          '.workflow-artifacts/ricky-local-runs/foreground-existing/stdout.log',
+          'workflows/generated/existing.ts',
+        ],
+        evidencePath: `${repo}/.workflow-artifacts/ricky-local-runs/foreground-existing/stdout.log`,
+        nextCommand: 'ricky run --artifact workflows/generated/existing.ts',
+      });
       expect(result.command).toBe('ricky run --artifact workflows/generated/existing.ts');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('starts a background monitored run with persisted state paths and a reattach command', async () => {
+    const repo = await makeRepo();
+    const localResponse: LocalResponse = {
+      ok: true,
+      artifacts: [{
+        path: 'workflows/generated/background.ts',
+        type: 'text/typescript',
+        content: "workflow('background').agent('codex', { role: 'Run background checks' })",
+      }],
+      logs: ['generated'],
+      warnings: [],
+      nextActions: [],
+      generation: {
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: 'workflows/generated/background.ts',
+          workflow_id: 'wf-background',
+          spec_digest: 'digest',
+        },
+      },
+      exitCode: 0,
+    };
+    const runLocalFn = vi.fn().mockResolvedValue(localResponse);
+
+    try {
+      const result = await runLocalWorkflowFlow({
+        cwd: repo,
+        runLocalFn,
+        prompts: {
+          selectSpecSource: async () => 'editor',
+          inputSpecFilePath: async () => 'SPEC.md',
+          editSpec: async () => 'Verify background monitoring.',
+          inputWorkflowName: async () => 'Background',
+          inputGoal: async () => 'verify background monitoring',
+          approveGeneratedSpec: async () => 'approve',
+          inputWorkflowArtifactPath: async () => 'unused',
+          confirmRun: async () => 'background',
+        },
+      });
+
+      expect(result.confirmation).toBe('background');
+      expect(result.monitoredRun).toMatchObject({
+        status: 'running',
+        artifactPath: 'workflows/generated/background.ts',
+        reattachCommand: `ricky status --run ${result.monitoredRun?.runId}`,
+      });
+      expect(result.monitoredRun?.artifactDir).toContain(`${repo}/.workflow-artifacts/ricky-local-runs/`);
+      expect(result.monitoredRun?.evidencePath).toContain('/evidence.json');
+      expect(result.runSummary).toMatchObject({
+        outcome: 'Background run running.',
+        evidencePath: result.monitoredRun?.evidencePath,
+        nextCommand: result.monitoredRun?.reattachCommand,
+      });
+      await vi.waitFor(async () => {
+        expect(JSON.parse(await readFile(result.monitoredRun!.statePath, 'utf8'))).toMatchObject({
+          status: 'completed',
+        });
+      });
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

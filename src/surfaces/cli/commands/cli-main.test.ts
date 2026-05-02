@@ -1522,6 +1522,35 @@ describe('cliMain', () => {
     });
   });
 
+  it('renders a Cloud run command when power-user Cloud generation does not run immediately', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({
+      mode: 'cloud',
+      cloudResult: {
+        artifacts: [{ path: 'workflows/generated/cloud-release.ts', type: 'text/typescript' }],
+        warnings: [],
+        assumptions: [],
+        validation: { ok: true, status: 'passed', issues: [] },
+        followUpActions: [],
+      },
+    }));
+
+    const result = await cliMain({
+      argv: ['cloud', '--spec', 'build a cloud workflow', '--name', 'cloud-release'],
+      runInteractive: runner,
+      cloudRequest: {
+        auth: { token: 'stored-token' },
+        workspace: { workspaceId: 'workspace-from-test' },
+        body: { spec: 'placeholder', mode: 'cloud' },
+      },
+    });
+
+    const output = result.output.join('\n');
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain('Ricky cloud: cloud-release generated; run when ready.');
+    expect(output).toContain('Workflow: workflows/generated/cloud-release.ts');
+    expect(output).toContain('Run: ricky cloud --workflow workflows/generated/cloud-release.ts --run');
+  });
+
   it('fails power-user cloud non-interactively with recovery commands when Cloud context is missing', async () => {
     await withCloudEnvCleared(async () => {
       const runner = vi.fn();
@@ -1851,6 +1880,53 @@ describe('cliMain', () => {
       target: 'agents',
       status: 'connected',
       connectedProviders: ['claude', 'codex'],
+    });
+  });
+
+  it('ricky connect agents --cloud connects the standard Cloud agent set', async () => {
+    const connectProvider = vi.fn(async (options: { provider: string }) => ({
+      provider: options.provider,
+      success: true,
+    }));
+
+    const result = await cliMain({
+      argv: ['connect', 'agents', '--cloud', '--json'],
+      connectProvider,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(connectProvider.mock.calls.map(([options]) => options.provider)).toEqual([
+      'claude',
+      'codex',
+      'opencode',
+      'gemini',
+    ]);
+    expect(JSON.parse(result.output.join('\n'))).toMatchObject({
+      target: 'agents',
+      status: 'connected',
+      connectedProviders: ['claude', 'codex', 'opencode', 'gemini'],
+    });
+  });
+
+  it('ricky connect integrations --cloud connects the standard optional integration set', async () => {
+    const connectCloudIntegrations = vi.fn().mockResolvedValue([
+      { integration: 'slack', status: 'link-opened', url: 'https://nango.example/slack' },
+      { integration: 'github', status: 'link-opened', url: 'https://nango.example/github' },
+      { integration: 'notion', status: 'link-opened', url: 'https://nango.example/notion' },
+      { integration: 'linear', status: 'link-opened', url: 'https://nango.example/linear' },
+    ]);
+
+    const result = await cliMain({
+      argv: ['connect', 'integrations', '--cloud', '--json'],
+      connectCloudIntegrations,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(connectCloudIntegrations).toHaveBeenCalledWith(['slack', 'github', 'notion', 'linear']);
+    expect(JSON.parse(result.output.join('\n'))).toMatchObject({
+      target: 'integrations',
+      status: 'connected',
+      connectedProviders: ['slack', 'github', 'notion', 'linear'],
     });
   });
 

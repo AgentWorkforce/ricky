@@ -145,12 +145,21 @@ function needsClarification(goal: string): boolean {
   return !/\b(verify|test|build|generate|fix|implement|release|deploy|audit|check|prove)\b/i.test(goal);
 }
 
+function clarificationQuestionsForGoal(goal: string): string[] {
+  if (!needsClarification(goal)) return [];
+  return [
+    'What should prove the workflow succeeded?',
+    'Which files, services, or commands should Ricky focus on?',
+    'What should Ricky avoid or pause before doing?',
+  ];
+}
+
 async function captureSpecFile(deps: SpecIntakeFlowDeps, suggestions: string[]): Promise<CapturedWorkflowSpec> {
   const defaultPath = suggestions[0];
   const specPath = await deps.prompts.inputSpecFilePath({ suggestions, defaultPath });
   const resolvedPath = resolve(deps.cwd, specPath);
   const readText = deps.readFileText ?? ((path: string) => readFile(path, 'utf8'));
-  const spec = await readText(resolvedPath);
+  const spec = await readSpecFile(readText, resolvedPath);
   const workflowName = await deps.prompts.inputWorkflowName({
     defaultName: defaultWorkflowNameFromPath(specPath),
   });
@@ -178,11 +187,13 @@ async function captureEditorSpec(deps: SpecIntakeFlowDeps): Promise<CapturedWork
 async function captureGoalSpec(deps: SpecIntakeFlowDeps): Promise<CapturedWorkflowSpec> {
   const goal = await deps.prompts.inputGoal();
   const clarifications: string[] = [];
-  if (needsClarification(goal) && deps.prompts.inputGoalClarification) {
-    clarifications.push(await deps.prompts.inputGoalClarification({
+  for (const question of clarificationQuestionsForGoal(goal)) {
+    if (!deps.prompts.inputGoalClarification) break;
+    const answer = await deps.prompts.inputGoalClarification({
       goal,
-      question: 'What should prove the workflow succeeded?',
-    }));
+      question,
+    });
+    if (answer.trim()) clarifications.push(answer);
   }
 
   const draftSpec = buildSpecFromGoal(goal, clarifications);
@@ -204,6 +215,21 @@ async function captureGoalSpec(deps: SpecIntakeFlowDeps): Promise<CapturedWorkfl
       approved: approval === 'approve',
     },
   };
+}
+
+async function readSpecFile(
+  readText: (path: string) => Promise<string>,
+  resolvedPath: string,
+): Promise<string> {
+  try {
+    return await readText(resolvedPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const missing = /\bENOENT\b|no such file/i.test(message);
+    throw new Error(missing
+      ? `Spec file not found: ${resolvedPath}`
+      : `Could not read spec file ${resolvedPath}: ${message}`);
+  }
 }
 
 async function captureWorkflowArtifact(deps: SpecIntakeFlowDeps): Promise<CapturedWorkflowSpec> {

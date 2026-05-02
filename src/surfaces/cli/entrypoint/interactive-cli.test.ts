@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { OnboardingResult } from '../cli/onboarding.js';
@@ -1020,11 +1021,11 @@ describe('runInteractiveCli', () => {
       expect.objectContaining({
         body: expect.objectContaining({
           metadata: expect.objectContaining({
-            cloudReadiness: {
+            cloudReadiness: expect.objectContaining({
               availableAgents: ['codex'],
               connectedIntegrations: [],
               caveats: ['GitHub was skipped, so Cloud will not use GitHub-backed context for this run.'],
-            },
+            }),
           }),
         }),
       }),
@@ -1122,6 +1123,50 @@ describe('runInteractiveCli', () => {
     expect(result.localResult).toBeUndefined();
     expect(result.guidance.join('\n')).toContain('ricky status --json');
     expect(localExecutor.execute).not.toHaveBeenCalled();
+  });
+
+  it('passes cancellation controls through to onboarding', async () => {
+    const signal = new AbortController().signal;
+    const onboard = vi.fn().mockResolvedValue(onboarding('local'));
+
+    await runInteractiveCli({
+      onboard,
+      signal,
+      verbose: true,
+    });
+
+    expect(onboard).toHaveBeenCalledWith(expect.objectContaining({
+      signal,
+      verbose: true,
+    }));
+  });
+
+  it('prints concise cancellation when a compact follow-up prompt is cancelled', async () => {
+    const output = new PassThrough();
+    const selectConnectTools = vi.fn().mockRejectedValue(
+      Object.assign(new Error('User force closed the prompt'), { name: 'ExitPromptError' }),
+    );
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('connect')),
+      output,
+      selectConnectTools,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.awaitingInput).toBe(true);
+    expect(result.guidance).toEqual(['Cancelled. Nothing was generated or executed.']);
+    expect(output.read()?.toString()).toBe('\nCancelled.\n');
+  });
+
+  it('rethrows compact follow-up prompt cancellation when verbose is set', async () => {
+    await expect(runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('connect')),
+      verbose: true,
+      selectConnectTools: vi.fn().mockRejectedValue(
+        Object.assign(new Error('User force closed the prompt'), { name: 'ExitPromptError' }),
+      ),
+    })).rejects.toThrow('User force closed the prompt');
   });
 
   it('prints actionable guidance for the Connect tools first-screen choice when no terminal is owned', async () => {

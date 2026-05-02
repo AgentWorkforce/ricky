@@ -142,7 +142,7 @@ export async function runCloudWorkflowFlow(
       guidance: [
         ...summary.lines,
         'Cloud run command:',
-        `  ricky cloud --spec-file ./spec.md --no-run`,
+        `  ricky cloud --spec-file ${request.body.specPath ?? './spec.md'} --no-run`,
         'Run that command when ready. No local fallback was attempted.',
       ],
     };
@@ -452,6 +452,8 @@ function withCloudMetadata(
         cloudReadiness: {
           availableAgents: summary.availableAgents,
           connectedIntegrations: summary.connectedIntegrations,
+          skippedIntegrations: summary.skippedIntegrations,
+          relevantSkippedIntegrations: summary.relevantSkippedIntegrations,
           caveats: summary.caveats,
         },
       },
