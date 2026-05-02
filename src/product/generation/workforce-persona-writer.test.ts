@@ -35,6 +35,9 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('Relevant file context');
     expect(task).toContain('Auto-fix and repair expectations');
     expect(task).toContain('Evidence rules');
+    expect(task).toContain('IMPLEMENTATION_WORKFLOW_CONTRACT');
+    expect(task).toContain('must edit source files');
+    expect(task).toContain('Do not satisfy implementation specs by only writing plan.md');
     expect(task).toContain('Do not open an interactive Claude, Codex, or OpenCode terminal UI');
   });
 
