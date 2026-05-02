@@ -210,6 +210,26 @@ describe('parseArgs', () => {
     });
   });
 
+  it('does not run local or Cloud --workflow artifacts unless --run is present', () => {
+    const localPreview = parseArgs(['local', '--workflow', 'workflows/generated/release-health.ts']);
+    expect(localPreview).toMatchObject({
+      command: 'run',
+      surface: 'local',
+      mode: 'local',
+      artifact: 'workflows/generated/release-health.ts',
+    });
+    expect(localPreview).not.toHaveProperty('runRequested');
+
+    const cloudPreview = parseArgs(['cloud', '--workflow', 'workflows/generated/release-health.ts']);
+    expect(cloudPreview).toMatchObject({
+      command: 'run',
+      surface: 'cloud',
+      mode: 'cloud',
+      artifact: 'workflows/generated/release-health.ts',
+    });
+    expect(cloudPreview).not.toHaveProperty('runRequested');
+  });
+
   it('parses power-user run modes, verbose output, and conflicting run-mode recovery', () => {
     expect(parseArgs(['local', '--spec', 'build a workflow', '--run', '--background', '--verbose'])).toMatchObject({
       command: 'run',
@@ -828,6 +848,28 @@ describe('cliMain', () => {
         }),
       }),
     );
+  });
+
+  it('uses preview stage for power-user local --workflow until --run is explicit', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['local', '--workflow', 'workflows/generated/example.ts'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'local',
+        handoff: expect.objectContaining({
+          source: 'workflow-artifact',
+          artifactPath: 'workflows/generated/example.ts',
+          stageMode: 'generate',
+        }),
+      }),
+    );
+    expect(runner.mock.calls[0][0].handoff).not.toHaveProperty('autoFix');
   });
 
   it('threads manual resume flags through artifact execution handoff retry metadata', async () => {

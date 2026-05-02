@@ -145,6 +145,8 @@ describe('workforce persona workflow writer', () => {
     const passed = sendMessageOptions[0];
     expect(passed.workingDirectory).toBe('/repo');
     expect(passed.installSkills).toBe(false);
+    expect(passed.mode).toBe('one-shot');
+    expect(passed.responseFormat).toBe('structured-json-or-fenced-artifact');
     // Non-interactive contract: no TUI / interactive flag set on sendMessage.
     expect(passed).not.toHaveProperty('tty');
     expect(passed).not.toHaveProperty('interactive');
@@ -332,6 +334,40 @@ describe('workforce persona workflow writer', () => {
     expect(result.workforcePersona?.promptDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(result.workforcePersona?.warnings).toEqual(['using local ../workforce workload-router']);
     expect(result.artifact?.content).toBe(base.artifact!.content);
+  });
+
+  it('uses a runnable usePersona(...).sendMessage seam when harness-kit is unavailable', async () => {
+    const resolved = await resolveWorkforcePersonaContextWithModules(
+      ['agent-relay-workflow'],
+      { tier: 'best' },
+      {
+        source: 'package',
+        warnings: ['harness-kit unavailable'],
+        module: {},
+      },
+      async () => ({
+        source: 'local-dev',
+        warnings: ['using local ../workforce workload-router'],
+        module: {
+          usePersona(intent, options) {
+            return runnableContext({ personaId: intent, tier: options?.tier ?? 'minimum' });
+          },
+        },
+      }),
+    );
+
+    expect(resolved.source).toBe('local-dev');
+    expect(resolved.intent).toBe('agent-relay-workflow');
+    expect(resolved.context.selection).toMatchObject({
+      personaId: 'agent-relay-workflow',
+      tier: 'best',
+    });
+    expect(resolved.warnings).toEqual([
+      'harness-kit unavailable',
+      'using local ../workforce workload-router',
+    ]);
+    const result = await resolved.context.sendMessage('task');
+    expect(result.status).toBe('completed');
   });
 });
 

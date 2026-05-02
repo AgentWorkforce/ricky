@@ -72,4 +72,24 @@ describe('power user parser defaults', () => {
       cloudTargets: ['claude', 'codex'],
     });
   });
+
+  it('requires --run for power-user workflow artifact execution', () => {
+    const preview = parsePowerUserArgs(['local', '--workflow', 'workflows/generated/review.ts']);
+    expect(preview).toMatchObject({
+      command: 'run',
+      surface: 'local',
+      mode: 'local',
+      artifact: 'workflows/generated/review.ts',
+    });
+    expect(preview).not.toHaveProperty('runRequested');
+
+    expect(parsePowerUserArgs(['local', '--workflow', 'workflows/generated/review.ts', '--run'])).toMatchObject({
+      artifact: 'workflows/generated/review.ts',
+      runRequested: true,
+    });
+    expect(parsePowerUserArgs(['run', 'workflows/generated/review.ts'])).toMatchObject({
+      artifact: 'workflows/generated/review.ts',
+      runRequested: true,
+    });
+  });
 });

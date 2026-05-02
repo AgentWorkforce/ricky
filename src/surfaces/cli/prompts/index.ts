@@ -1,4 +1,4 @@
-import { select } from '@inquirer/prompts';
+import { checkbox, select } from '@inquirer/prompts';
 
 export type PromptShellChoice = 'local' | 'cloud' | 'status' | 'connect' | 'exit';
 
@@ -13,6 +13,7 @@ export interface PromptShell {
 }
 
 export interface InquirerPromptShellDeps {
+  promptKit?: PromptKit;
   selectPrompt?: SelectPrompt;
 }
 
@@ -26,15 +27,40 @@ export class PromptCancelledError extends Error {
   }
 }
 
+export interface PromptChoice<Value> {
+  value: Value;
+  name?: string;
+  description?: string;
+  short?: string;
+  checked?: boolean;
+  disabled?: boolean | string;
+}
+
+export interface SelectPromptConfig<Value> {
+  message: string;
+  choices: readonly PromptChoice<Value>[];
+  default?: Value;
+  pageSize?: number;
+  loop?: boolean;
+}
+
+export interface CheckboxPromptConfig<Value> {
+  message: string;
+  choices: readonly PromptChoice<Value>[];
+  pageSize?: number;
+  loop?: boolean;
+  required?: boolean;
+}
+
+export interface PromptKit {
+  select<Value>(config: SelectPromptConfig<Value>, runtime?: PromptShellRuntime): Promise<Value>;
+  checkbox<Value>(config: CheckboxPromptConfig<Value>, runtime?: PromptShellRuntime): Promise<Value[]>;
+}
+
 type SelectPrompt = <Value>(
   config: {
     message: string;
-    choices: readonly {
-      value: Value;
-      name?: string;
-      description?: string;
-      short?: string;
-    }[];
+    choices: readonly PromptChoice<Value>[];
     default?: Value;
     pageSize?: number;
     loop?: boolean;
@@ -46,6 +72,22 @@ type SelectPrompt = <Value>(
     signal?: AbortSignal;
   },
 ) => Promise<Value>;
+
+type CheckboxPrompt = <Value>(
+  config: {
+    message: string;
+    choices: readonly PromptChoice<Value>[];
+    pageSize?: number;
+    loop?: boolean;
+    required?: boolean;
+  },
+  context?: {
+    input?: NodeJS.ReadableStream;
+    output?: NodeJS.WritableStream;
+    clearPromptOnDone?: boolean;
+    signal?: AbortSignal;
+  },
+) => Promise<Value[]>;
 
 export const FIRST_SCREEN_PROMPT_CHOICES: readonly {
   value: PromptShellChoice;
@@ -79,29 +121,55 @@ export const FIRST_SCREEN_PROMPT_CHOICES: readonly {
   },
 ];
 
-export function createInquirerPromptShell(deps: InquirerPromptShellDeps = {}): PromptShell {
+export function createInquirerPromptKit(deps: {
+  selectPrompt?: SelectPrompt;
+  checkboxPrompt?: CheckboxPrompt;
+} = {}): PromptKit {
   const selectPrompt = deps.selectPrompt ?? select;
+  const checkboxPrompt = deps.checkboxPrompt ?? checkbox;
 
   return {
-    async selectFirstScreen(runtime = {}) {
+    async select<Value>(config: SelectPromptConfig<Value>, runtime: PromptShellRuntime = {}) {
       try {
-        return await selectPrompt<PromptShellChoice>(
-          {
-            message: 'Ricky',
-            choices: FIRST_SCREEN_PROMPT_CHOICES,
-            default: 'local',
-            pageSize: FIRST_SCREEN_PROMPT_CHOICES.length,
-            loop: false,
-          },
-          {
-            input: runtime.input,
-            output: runtime.output,
-            signal: runtime.signal,
-          },
-        );
+        return await selectPrompt<Value>(config, {
+          input: runtime.input,
+          output: runtime.output,
+          signal: runtime.signal,
+        });
       } catch (error) {
         throw normalizePromptError(error, runtime.signal);
       }
+    },
+
+    async checkbox<Value>(config: CheckboxPromptConfig<Value>, runtime: PromptShellRuntime = {}) {
+      try {
+        return await checkboxPrompt<Value>(config, {
+          input: runtime.input,
+          output: runtime.output,
+          signal: runtime.signal,
+        });
+      } catch (error) {
+        throw normalizePromptError(error, runtime.signal);
+      }
+    },
+  };
+}
+
+export function createInquirerPromptShell(deps: InquirerPromptShellDeps = {}): PromptShell {
+  const promptKit = deps.promptKit ?? createInquirerPromptKit({ selectPrompt: deps.selectPrompt });
+
+  return {
+    async selectFirstScreen(runtime = {}) {
+      return promptKit.select<PromptShellChoice>(
+        {
+          message: 'Ricky',
+          choices: FIRST_SCREEN_PROMPT_CHOICES,
+          default: 'local',
+          pageSize: FIRST_SCREEN_PROMPT_CHOICES.length,
+          loop: false,
+        },
+        runtime,
+      );
     },
   };
 }

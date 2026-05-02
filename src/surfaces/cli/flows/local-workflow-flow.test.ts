@@ -1,5 +1,6 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -44,6 +45,47 @@ describe('guided local prompt cancellation normalization', () => {
     await expect(prompts.selectSpecSource({ suggestions: [] })).rejects.toBeInstanceOf(PromptCancelledError);
     await expect(prompts.inputSpecFilePath({ suggestions: [] })).rejects.toBeInstanceOf(PromptCancelledError);
     await expect(prompts.editSpec({ initialValue: '', message: 'spec' })).rejects.toBeInstanceOf(PromptCancelledError);
+  });
+
+  it('prints the generated spec and workflow summary before approval prompts', async () => {
+    const { select } = await import('@inquirer/prompts');
+    const mockedSelect = select as unknown as {
+      mockResolvedValueOnce: (value: unknown) => unknown;
+    };
+    mockedSelect.mockResolvedValueOnce('approve');
+    mockedSelect.mockResolvedValueOnce('not-now');
+
+    const output = new PassThrough();
+    let rendered = '';
+    output.on('data', (chunk) => {
+      rendered += chunk.toString('utf8');
+    });
+
+    const prompts = createInquirerLocalWorkflowPrompts({ output });
+    await prompts.approveGeneratedSpec({
+      goal: 'verify release health',
+      spec: 'Goal: verify release health\n\nSafety:\n- Pause before commits.',
+    });
+    await prompts.confirmRun({
+      summary: {
+        artifactPath: 'workflows/generated/release-health.ts',
+        goal: 'verify release health',
+        agents: [{ name: 'codex', job: 'Run checks' }],
+        jobs: ['codex: Run checks'],
+        plan: ['Generate workflow artifact workflows/generated/release-health.ts.'],
+        desiredOutcome: 'Local run with evidence.',
+        sideEffects: ['Write workflow artifact workflows/generated/release-health.ts'],
+        missingLocalBlockers: ['agent-relay: install dependencies'],
+        command: 'ricky run workflows/generated/release-health.ts',
+      },
+    });
+
+    expect(rendered).toContain('Generated spec');
+    expect(rendered).toContain('Goal: verify release health');
+    expect(rendered).toContain('Ricky wrote: workflows/generated/release-health.ts');
+    expect(rendered).toContain('Agents');
+    expect(rendered).toContain('Missing local blockers');
+    expect(rendered).toContain('Run command: ricky run workflows/generated/release-health.ts');
   });
 });
 

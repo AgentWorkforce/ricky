@@ -23,6 +23,8 @@ import type {
   CloudAgentReadiness,
   CloudReadinessCheck,
   CloudReadinessSnapshot,
+  CloudRunConfirmation,
+  MissingCloudAgentAction,
 } from '../flows/cloud-workflow-flow.js';
 import type { CloudWorkflowSummary } from '../flows/workflow-summary.js';
 import type { LocalWorkflowFlowDeps, LocalWorkflowFlowResult } from '../flows/local-workflow-flow.js';
@@ -48,8 +50,11 @@ import {
   runLocalWorkflowFlow,
 } from '../flows/local-workflow-flow.js';
 import { runSpecIntakeFlow, type CapturedWorkflowSpec, type SpecIntakePrompts } from '../flows/spec-intake-flow.js';
-import { checkbox, select } from '@inquirer/prompts';
-import { isPromptCancellation } from '../prompts/index.js';
+import {
+  createInquirerPromptKit,
+  isPromptCancellation,
+  type PromptKit,
+} from '../prompts/index.js';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
@@ -152,6 +157,9 @@ export interface InteractiveCliDeps extends CloudWorkflowFlowDeps {
 
   /** Optional injected prompt for Connect tools second-step selection. */
   selectConnectTools?: () => Promise<ConnectToolChoice[]>;
+
+  /** Optional injected Inquirer prompt wrapper for deterministic prompt tests. */
+  promptKit?: PromptKit;
 
   /** Optional injected prompt for selecting concrete optional integrations. */
   selectConnectIntegrations?: () => Promise<CloudOptionalIntegration[]>;
@@ -863,7 +871,7 @@ async function confirmCloudAgentProviderAuth(
   const outputStream = deps.output ?? process.stdout;
   if (!ownsInteractiveTerminal(deps, inputStream, outputStream)) return true;
 
-  const answer = await select<'yes' | 'skip'>(
+  const answer = await promptKitFor(deps).select<'yes' | 'skip'>(
     {
       message: 'Cloud agent connections open Daytona provider auth sandboxes. Continue?',
       choices: [
@@ -889,46 +897,41 @@ async function selectConnectToolChoices(deps: InteractiveCliDeps): Promise<Conne
   const ownsTerminal = deps.input === undefined && deps.output === undefined && input === process.stdin && output === process.stdout;
   if (!isTTY || !ownsTerminal) return undefined;
 
-  try {
-    const selected = await select<ConnectToolChoice | 'all'>(
-      {
-        message: 'What do you want to connect?',
-        choices: [
-          {
-            value: 'cloud',
-            name: 'Cloud account',
-            description: 'Run AgentWorkforce Cloud login.',
-          },
-          {
-            value: 'integrations',
-            name: 'Optional integrations',
-            description: 'Choose Slack, GitHub, Notion, and Linear Nango authorizations.',
-          },
-          {
-            value: 'agents',
-            name: 'Cloud agents',
-            description: 'Open Daytona-backed Claude, Codex, OpenCode, and Gemini auth flows.',
-          },
-          {
-            value: 'all',
-            name: 'All setup steps',
-            description: 'Cloud account, optional integrations, then Cloud agents.',
-          },
-        ],
-        default: 'integrations',
-        loop: false,
-      },
-      {
-        input,
-        output,
-        signal: deps.signal,
-      },
-    );
-    return selected === 'all' ? ['cloud', 'integrations', 'agents'] : [selected];
-  } catch (error) {
-    if (isPromptCancellation(error)) return [];
-    throw error;
-  }
+  const selected = await promptKitFor(deps).select<ConnectToolChoice | 'all'>(
+    {
+      message: 'What do you want to connect?',
+      choices: [
+        {
+          value: 'cloud',
+          name: 'Cloud account',
+          description: 'Run AgentWorkforce Cloud login.',
+        },
+        {
+          value: 'integrations',
+          name: 'Optional integrations',
+          description: 'Choose Slack, GitHub, Notion, and Linear Nango authorizations.',
+        },
+        {
+          value: 'agents',
+          name: 'Cloud agents',
+          description: 'Open Daytona-backed Claude, Codex, OpenCode, and Gemini auth flows.',
+        },
+        {
+          value: 'all',
+          name: 'All setup steps',
+          description: 'Cloud account, optional integrations, then Cloud agents.',
+        },
+      ],
+      default: 'integrations',
+      loop: false,
+    },
+    {
+      input,
+      output,
+      signal: deps.signal,
+    },
+  );
+  return selected === 'all' ? ['cloud', 'integrations', 'agents'] : [selected];
 }
 
 async function selectConnectIntegrationChoices(deps: InteractiveCliDeps): Promise<CloudOptionalIntegration[]> {
@@ -942,26 +945,21 @@ async function selectConnectIntegrationChoices(deps: InteractiveCliDeps): Promis
   const ownsTerminal = deps.input === undefined && deps.output === undefined && input === process.stdin && output === process.stdout;
   if (!isTTY || !ownsTerminal) return [...CONNECT_OPTIONAL_INTEGRATIONS];
 
-  try {
-    return await checkbox<CloudOptionalIntegration>(
-      {
-        message: 'Which optional integrations do you want to authorize?',
-        choices: CONNECT_OPTIONAL_INTEGRATIONS.map((integration) => ({
-          value: integration,
-          name: CONNECT_INTEGRATION_LABELS[integration],
-          checked: true,
-        })),
-      },
-      {
-        input,
-        output,
-        signal: deps.signal,
-      },
-    );
-  } catch (error) {
-    if (isPromptCancellation(error)) return [];
-    throw error;
-  }
+  return promptKitFor(deps).checkbox<CloudOptionalIntegration>(
+    {
+      message: 'Which optional integrations do you want to authorize?',
+      choices: CONNECT_OPTIONAL_INTEGRATIONS.map((integration) => ({
+        value: integration,
+        name: CONNECT_INTEGRATION_LABELS[integration],
+        checked: true,
+      })),
+    },
+    {
+      input,
+      output,
+      signal: deps.signal,
+    },
+  );
 }
 
 async function executeCloudPath(
@@ -1453,7 +1451,7 @@ async function promptCloudLogin(deps: InteractiveCliDeps, missing: string[]): Pr
   const inputStream = deps.input ?? process.stdin;
   const outputStream = deps.output ?? process.stdout;
   if (!ownsInteractiveTerminal(deps, inputStream, outputStream)) return false;
-  const answer = await select<'yes' | 'back'>(
+  const answer = await promptKitFor(deps).select<'yes' | 'back'>(
     {
       message: `${missing.join(' and ')} missing. Log in now?`,
       choices: [
@@ -1466,6 +1464,10 @@ async function promptCloudLogin(deps: InteractiveCliDeps, missing: string[]): Pr
     { input: inputStream, output: outputStream, signal: deps.signal },
   );
   return answer === 'yes';
+}
+
+function promptKitFor(deps: Pick<InteractiveCliDeps, 'promptKit'>): PromptKit {
+  return deps.promptKit ?? createInquirerPromptKit();
 }
 
 async function readCloudAuth(deps: Pick<InteractiveCliDeps, 'readCloudAuth'> = {}): Promise<StoredAuth | null> {
@@ -1573,21 +1575,21 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps, request?: CloudGen
           : []),
         { value: 'go-back' as const, name: 'Go back' },
       ];
-      const action = await select({
+      const action = await promptKitFor(deps).select<'connect-all' | 'choose' | 'continue-connected' | 'go-back'>({
         message: 'Connect missing Cloud agents now?',
         choices,
         default: availableAgents.length > 0 ? 'continue-connected' : 'connect-all',
         loop: false,
       }, { input: inputStream, output: outputStream, signal: deps.signal });
       if (action === 'choose') {
-        const agents = await checkbox({
+        const agents = await promptKitFor(deps).checkbox<CloudImplementationAgent>({
           message: 'Which Cloud agents should Ricky connect?',
           required: true,
           choices: missingAgents.map((agent) => ({ value: agent, name: agent })),
         }, { input: inputStream, output: outputStream, signal: deps.signal });
-        return { action, agents };
+        return { action, agents } satisfies MissingCloudAgentAction;
       }
-      return { action };
+      return { action } satisfies MissingCloudAgentAction;
     };
   }
 
@@ -1610,7 +1612,7 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps, request?: CloudGen
 
   if (!next.selectOptionalCloudIntegrations && interactive) {
     next.selectOptionalCloudIntegrations = async ({ missingIntegrations, relevantIntegrations }) => {
-      const integrations = await checkbox({
+      const integrations = await promptKitFor(deps).checkbox<CloudOptionalIntegration>({
         message: 'Select optional integrations to connect. Leave all unchecked to skip.',
         choices: missingIntegrations.map((integration) => ({
           value: integration,
@@ -1633,9 +1635,9 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps, request?: CloudGen
   }
 
   if (!next.confirmCloudRun && interactive) {
-    next.confirmCloudRun = async () => {
-      const action = await select({
-        message: 'Run this workflow in AgentWorkforce Cloud?',
+    next.confirmCloudRun = async (summary) => {
+      const action = await promptKitFor(deps).select<'run-and-monitor' | 'show-command' | 'edit-first'>({
+        message: `${summary.lines.join('\n')}\nRun this workflow in AgentWorkforce Cloud?`,
         choices: [
           { value: 'run-and-monitor' as const, name: 'Yes, run in Cloud and monitor it' },
           { value: 'show-command' as const, name: 'Not now, show me the Cloud run command' },
@@ -1644,7 +1646,7 @@ function withDefaultGuidedCloudDeps(deps: InteractiveCliDeps, request?: CloudGen
         default: 'run-and-monitor',
         loop: false,
       }, { input: inputStream, output: outputStream, signal: deps.signal });
-      return { action };
+      return { action } satisfies CloudRunConfirmation;
     };
   }
 

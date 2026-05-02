@@ -7,7 +7,7 @@ import { PromptCancelledError } from '../prompts/index.js';
 import type { RawHandoff } from '../../../local/request-normalizer.js';
 import type { LocalEntrypointOptions, LocalResponse } from '../../../local/entrypoint.js';
 import { runLocal } from '../../../local/entrypoint.js';
-import { buildWorkflowSummary, type WorkflowSummary } from './workflow-summary.js';
+import { buildWorkflowSummary, renderWorkflowSummary, type WorkflowSummary } from './workflow-summary.js';
 import {
   runSpecIntakeFlow,
   specCaptureToHandoff,
@@ -137,18 +137,26 @@ export function createInquirerLocalWorkflowPrompts(runtime: LocalWorkflowPromptR
       }, context));
     },
     async approveGeneratedSpec({ spec }) {
-      return withCancellationNormalization(() => select({
-        message: 'Use this generated spec?',
-        choices: [
-          { value: 'approve' as const, name: 'Approve and generate workflow' },
-          { value: 'edit' as const, name: 'Edit first' },
-        ],
-        default: 'approve',
-        loop: false,
-      }, {
-        ...context,
-        output: runtime.output,
-      }));
+      return withCancellationNormalization(async () => {
+        runtime.output?.write([
+          '',
+          'Generated spec',
+          spec,
+          '',
+        ].join('\n'));
+        return select({
+          message: 'Use this generated spec?',
+          choices: [
+            { value: 'approve' as const, name: 'Approve and generate workflow' },
+            { value: 'edit' as const, name: 'Edit first' },
+          ],
+          default: 'approve',
+          loop: false,
+        }, {
+          ...context,
+          output: runtime.output,
+        });
+      });
     },
     async inputWorkflowArtifactPath({ suggestions }) {
       return withCancellationNormalization(() => input({
@@ -158,19 +166,26 @@ export function createInquirerLocalWorkflowPrompts(runtime: LocalWorkflowPromptR
       }, context));
     },
     async confirmRun({ summary }) {
-      return withCancellationNormalization(() => select({
-        message: summary.missingLocalBlockers.length > 0
-          ? 'Local blockers were found. What should Ricky do?'
-          : 'Run this workflow now?',
-        choices: [
-          { value: 'background' as const, name: 'Yes, run in the background and monitor it' },
-          { value: 'foreground' as const, name: 'Yes, run in the foreground' },
-          { value: 'not-now' as const, name: 'Not now, just show the command' },
-          { value: 'edit-first' as const, name: 'Edit the workflow first' },
-        ],
-        default: summary.missingLocalBlockers.length > 0 ? 'not-now' : 'background',
-        loop: false,
-      }, context));
+      return withCancellationNormalization(async () => {
+        runtime.output?.write([
+          '',
+          ...renderWorkflowSummary(summary),
+          '',
+        ].join('\n'));
+        return select({
+          message: summary.missingLocalBlockers.length > 0
+            ? 'Local blockers were found. What should Ricky do?'
+            : 'Run this workflow now?',
+          choices: [
+            { value: 'background' as const, name: 'Yes, run in the background and monitor it' },
+            { value: 'foreground' as const, name: 'Yes, run in the foreground' },
+            { value: 'not-now' as const, name: 'Not now, just show the command' },
+            { value: 'edit-first' as const, name: 'Edit the workflow first' },
+          ],
+          default: summary.missingLocalBlockers.length > 0 ? 'not-now' : 'background',
+          loop: false,
+        }, context);
+      });
     },
   };
 }

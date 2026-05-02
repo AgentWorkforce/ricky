@@ -89,7 +89,11 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const workflowName = readFlagValue(effectiveArgv, '--name');
   const stdin = effectiveArgv.includes('--stdin');
   const noRun = effectiveArgv.includes('--no-run');
-  const runRequested = (effectiveArgv.includes('--run') || effectiveArgv.includes('--generate-and-run') || artifact !== undefined) && !noRun;
+  const runRequested = (
+    effectiveArgv.includes('--run') ||
+    effectiveArgv.includes('--generate-and-run') ||
+    (surface === 'legacy' && artifact !== undefined)
+  ) && !noRun;
   const startFromStep = readFlagValue(effectiveArgv, '--start-from');
   const previousRunId = readFlagValue(effectiveArgv, '--previous-run-id') ?? readFlagValue(effectiveArgv, '--resume-from-run');
   const autoFix = parseAutoFix(effectiveArgv);
