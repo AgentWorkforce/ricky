@@ -6,7 +6,7 @@ GitHub issue #13 verdict: the agent-assistant adoption is real in Ricky's local 
 
 Ricky adopted `@agent-assistant/turn-context` as a bounded request/turn envelope primitive in the local runtime path. The adapter maps Ricky's normalized `LocalInvocationRequest` into a shared turn context and preserves request id, source metadata, structured spec data, invocation root, execution mode, stage mode, spec path, request metadata, and spec text as metadata/enrichment context.
 
-The adoption does not move Ricky's public response contract, local request normalization, workflow artifact contract, runtime precheck behavior, blocker taxonomy, recovery wording, or coordinator execution semantics into `agent-assistant`.
+The local executor now records the assembled context as compact provenance through `generation.decisions.assistant_turn_context` and local coordinator run metadata. The adoption still does not move Ricky's local request normalization, workflow artifact contract, runtime precheck behavior, blocker taxonomy, recovery wording, or coordinator execution semantics into `agent-assistant`.
 
 ## Product path exercised
 

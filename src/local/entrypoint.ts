@@ -9,6 +9,7 @@
 import type { ArtifactReader, LocalInvocationRequest, LocalStageMode, RawHandoff } from './request-normalizer.js';
 import { assembleRickyTurnContext } from './assistant-turn-context-adapter.js';
 import { normalizeRequest } from './request-normalizer.js';
+import type { TurnContextAssembly } from '@agent-assistant/turn-context';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -57,6 +58,15 @@ export interface LocalResponseArtifact {
 export type LocalGenerationStatus = 'ok' | 'error';
 export type LocalExecutionStatus = 'success' | 'blocker' | 'error';
 
+export interface LocalAssistantTurnContextDecision {
+  assistant_id: string;
+  turn_id: string;
+  adapter: string;
+  package: string;
+  context_blocks: string[];
+  enrichment_ids: string[];
+}
+
 export interface LocalGenerationStageResult {
   stage: 'generate';
   status: LocalGenerationStatus;
@@ -75,6 +85,7 @@ export interface LocalGenerationStageResult {
     tool_selection?: unknown;
     refinement?: unknown;
     workforce_persona?: unknown;
+    assistant_turn_context?: LocalAssistantTurnContextDecision;
   };
 }
 
@@ -818,7 +829,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       const specDigest = digestSpec(request.spec);
       let generationStage: LocalGenerationStageResult | undefined;
 
-      await observeRickyTurnContext(request, logs);
+      const assistantTurnContext = await observeRickyTurnContext(request, logs);
 
       logs.push(`[local] received spec from ${request.source}`);
       logs.push(`[local] mode: ${request.mode}`);
@@ -850,6 +861,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           stage: 'generate',
           status: 'error',
           error: warnings[0] ?? 'Spec intake could not produce an executable workflow artifact.',
+          ...decisionsForAssistantTurnContext(assistantTurnContext),
         };
         return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
       }
@@ -899,7 +911,14 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         if (!generationResult.success || !artifact) {
           warnings.push(...generationResult.validation.errors);
           nextActions.push('Fix the generated workflow validation errors before local execution.');
-          generationStage = createGenerationStage('error', artifact, specDigest, generationResult.validation.errors[0], generationResult);
+          generationStage = createGenerationStage(
+            'error',
+            artifact,
+            specDigest,
+            generationResult.validation.errors[0],
+            generationResult,
+            assistantTurnContext,
+          );
           return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
         }
 
@@ -908,7 +927,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
         }
         logs.push(`[local] wrote workflow artifact: ${artifact.artifactPath}`);
-        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult);
+        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult, assistantTurnContext);
       }
 
       const runTarget = artifact?.artifactPath ?? workflowFile;
@@ -919,12 +938,13 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           stage: 'generate',
           status: 'error',
           error: 'No executable local workflow artifact was available.',
+          ...decisionsForAssistantTurnContext(assistantTurnContext),
         };
         return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
       }
 
       if (!generationStage) {
-        generationStage = createArtifactReferenceGenerationStage(runTarget, request.requestId, specDigest);
+        generationStage = createArtifactReferenceGenerationStage(runTarget, request.requestId, specDigest, assistantTurnContext);
       }
 
       if (stageMode === 'generate') {
@@ -985,6 +1005,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           source: request.source,
           route: intakeResult.routing.target,
           generatedWorkflowId: artifact?.workflowId,
+          ...(assistantTurnContext ? { assistantTurnContext } : {}),
         },
       });
 
@@ -1033,12 +1054,16 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
   };
 }
 
-async function observeRickyTurnContext(request: LocalInvocationRequest, logs: string[]): Promise<void> {
+async function observeRickyTurnContext(
+  request: LocalInvocationRequest,
+  logs: string[],
+): Promise<LocalAssistantTurnContextDecision | undefined> {
   try {
-    await assembleRickyTurnContext(request);
+    return summarizeRickyTurnContext(await assembleRickyTurnContext(request));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logs.push(`[local] turn context adapter skipped: ${message}`);
+    return undefined;
   }
 }
 
@@ -1362,6 +1387,7 @@ function createGenerationStage(
   specDigest: string,
   error?: string,
   generationResult?: GenerationResult,
+  assistantTurnContext?: LocalAssistantTurnContextDecision,
 ): LocalGenerationStageResult {
   return {
     stage: 'generate',
@@ -1391,9 +1417,10 @@ function createGenerationStage(
             tool_selection: generationResult.toolSelection.selections,
             ...(generationResult.refinement ? { refinement: generationResult.refinement } : {}),
             ...(generationResult.workforcePersona ? { workforce_persona: generationResult.workforcePersona } : {}),
+            ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
           },
         }
-      : {}),
+      : decisionsForAssistantTurnContext(assistantTurnContext)),
   };
 }
 
@@ -1418,6 +1445,7 @@ function createArtifactReferenceGenerationStage(
   artifactPath: string,
   requestId: string | undefined,
   specDigest: string,
+  assistantTurnContext?: LocalAssistantTurnContextDecision,
 ): LocalGenerationStageResult {
   return {
     stage: 'generate',
@@ -1431,6 +1459,30 @@ function createArtifactReferenceGenerationStage(
       run_command: localRunCommand(artifactPath),
       run_mode_hint: `ricky run ${artifactPath}`,
     },
+    ...decisionsForAssistantTurnContext(assistantTurnContext),
+  };
+}
+
+function decisionsForAssistantTurnContext(
+  assistantTurnContext: LocalAssistantTurnContextDecision | undefined,
+): Pick<LocalGenerationStageResult, 'decisions'> {
+  if (!assistantTurnContext) return {};
+  return {
+    decisions: {
+      assistant_turn_context: assistantTurnContext,
+    },
+  };
+}
+
+function summarizeRickyTurnContext(assembly: TurnContextAssembly): LocalAssistantTurnContextDecision {
+  const metadata = assembly.metadata as { adapter?: { name?: unknown; package?: unknown } } | undefined;
+  return {
+    assistant_id: assembly.assistantId,
+    turn_id: assembly.turnId,
+    adapter: typeof metadata?.adapter?.name === 'string' ? metadata.adapter.name : 'unknown',
+    package: typeof metadata?.adapter?.package === 'string' ? metadata.adapter.package : '@agent-assistant/turn-context',
+    context_blocks: assembly.context.blocks.map((block) => block.id),
+    enrichment_ids: [...assembly.provenance.usedEnrichmentIds],
   };
 }
 
