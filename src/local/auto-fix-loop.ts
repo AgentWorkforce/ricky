@@ -375,6 +375,12 @@ export function repairWorkflowDeterministically(
     changes.push(...templateRepair.changes);
   }
 
+  const gitDiffRepair = repairBareGitDiffManifestGates(content);
+  if (gitDiffRepair.content !== content) {
+    content = gitDiffRepair.content;
+    changes.push(...gitDiffRepair.changes);
+  }
+
   if (content === input.artifactContent || changes.length === 0) return null;
 
   return {
@@ -488,6 +494,28 @@ function repairUnknownStepTemplateRefs(content: string): { content: string; chan
   });
 
   return { content: next, changes };
+}
+
+function repairBareGitDiffManifestGates(content: string): { content: string; changes: string[] } {
+  if (!content.includes('git diff --name-only')) return { content, changes: [] };
+
+  const changes: string[] = [];
+  let next = content.replace(
+    /git diff --name-only\s*\|\s*/g,
+    () => {
+      changes.push('expanded git diff pipe gates to include untracked files');
+      return '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | ';
+    },
+  );
+  next = next.replace(
+    /git diff --name-only\s*>\s*/g,
+    () => {
+      changes.push('expanded git diff redirect gates to include untracked files');
+      return '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > ';
+    },
+  );
+
+  return { content: next, changes: [...new Set(changes)] };
 }
 
 function repairAgentStepTimeouts(content: string, evidence: WorkflowRunEvidence): { content: string; changes: string[] } {
