@@ -450,7 +450,7 @@ Non-goals:
 ${formatList(spec.constraints.filter((constraint) => constraint.category === 'scope').map((constraint) => constraint.constraint))}
 
 Verification commands:
-${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using grep, rg, or an equivalent assertion', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff --name-only gate requiring a non-empty diff', 'PR URL or explicit result summary'])}
+${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using grep, rg, or an equivalent assertion', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff gate combining git diff --name-only with git ls-files --others --exclude-standard and requiring a non-empty diff', 'PR URL or explicit result summary'])}
 
 Write ${artifactsDir}/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`)},
       verification: { type: 'file_exists', value: ${literal(`${artifactsDir}/lead-plan.md`)} },
