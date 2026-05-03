@@ -1362,13 +1362,16 @@ echo "running" > "$STATUS_FILE"
 git rev-parse HEAD > "$LAST_COMMIT_FILE"
 INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 restore_checkpoint
+# A resumed invocation may restore an older checkpoint baseline after we've
+# already synced local main to origin/main for this fresh run. Reset the
+# invocation baseline to the current repo head so queue-exhausted summaries and
+# any no-op runs report truthful commit state for this invocation.
+git rev-parse HEAD > "$LAST_COMMIT_FILE"
+INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
 write_queue
 filter_queue_for_repo_state
 fallback_to_expanded_queue_when_flight_safe_exhausted
 resume_remaining_queue_from_checkpoint
-if [[ -z "$INITIAL_GIT_HEAD" ]]; then
-  INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
-fi
 persist_checkpoint
 
 QUEUE_ITEMS=()
