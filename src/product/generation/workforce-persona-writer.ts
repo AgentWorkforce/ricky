@@ -498,6 +498,7 @@ export function buildWorkflowPersonaTask(
     '- Use a dedicated workflow channel, not general.',
     '- Include explicit agents, step dependencies, deterministic gates, review stages, and final signoff.',
     '- Include an 80-to-100 fix loop: implement, validate, review, fix, final review, hard validation.',
+    '- Include a real deterministic sanity gate over produced files using grep, rg, git grep, or an equivalent inline assertion that exits non-zero when expected content/state is missing.',
     '- Verification must include typecheck/test commands when relevant plus git-diff evidence.',
     '- Run with an explicit cwd: .run({ cwd: process.cwd() }).',
     '- Preserve Agent Relay workflow authoring rules: deterministic gates are evidence, agents do production work, and every generated workflow must be locally dry-runnable.',

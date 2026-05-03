@@ -68,6 +68,8 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
     expect(artifact.content).toContain('.agent("validator-claude"');
     expect(artifact.content).toContain('80-to-100 fix loop');
+    expect(artifact.content).toContain('deterministic sanity gate using grep, rg, or an equivalent assertion');
+    expect(artifact.content).toContain('Generated workflow quality');
     expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -576,6 +578,171 @@ describe('workflow generation pipeline', () => {
     expect(validation.issues).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: 'RESULT_PR_REPORTING_MISSING' }),
+      ]),
+    );
+  });
+
+  it('accepts ripgrep as an equivalent deterministic sanity gate', () => {
+    const implementationSpec = spec({
+      description: 'Implement local workflow generation checks with resilient sanity validation.',
+      targetFiles: ['src/product/generation/pipeline.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/resilient-sanity.ts',
+    });
+    const base = artifact(result);
+    const gatesWithoutGrep = base.gates.map((gate) => ({
+      ...gate,
+      command: gate.command
+        .replace(/\bgit\s+grep\b/g, 'printf')
+        .replace(/\bgrep\b/g, 'printf'),
+    }));
+    const rgArtifact = {
+      ...base,
+      gates: gatesWithoutGrep.map((gate) => gate.name === 'post-implementation-file-gate'
+        ? {
+            ...gate,
+            command: "test -f src/product/generation/pipeline.ts && rg -e 'export|function|class' src/product/generation/pipeline.ts",
+          }
+        : gate),
+    };
+
+    const validation = validateGeneratedArtifact(
+      rgArtifact,
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    );
+
+    expect(validation.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
+      ]),
+    );
+  });
+
+  it('requires inline runtime sanity gates to read evidence and fail on mismatch', () => {
+    const implementationSpec = spec({
+      description: 'Implement local workflow generation checks with inline sanity validation.',
+      targetFiles: ['src/product/generation/pipeline.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/inline-sanity.ts',
+    });
+    const base = artifact(result);
+    const gatesWithoutGrep = base.gates.map((gate) => ({
+      ...gate,
+      command: gate.command
+        .replace(/\bgit\s+grep\b/g, 'printf')
+        .replace(/\bgrep\b/g, 'printf'),
+    }));
+    const withPostImplementationCommand = (command: string) => ({
+      ...base,
+      gates: gatesWithoutGrep.map((gate) => gate.name === 'post-implementation-file-gate'
+        ? { ...gate, command }
+        : gate),
+    });
+
+    const noOpNodeValidation = validateGeneratedArtifact(
+      withPostImplementationCommand('node -e "console.log(\'ok\')"'),
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    );
+    expect(noOpNodeValidation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
+      ]),
+    );
+
+    const assertingNodeValidation = validateGeneratedArtifact(
+      withPostImplementationCommand(
+        'node -e "const { readFileSync } = require(\'fs\'); if (!readFileSync(\'src/product/generation/pipeline.ts\', \'utf8\').includes(\'validateGeneratedArtifact\')) process.exit(1)"',
+      ),
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    );
+    expect(assertingNodeValidation.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
+      ]),
+    );
+  });
+
+  it('accepts ruby and perl inline assertions invoked with -e', () => {
+    const implementationSpec = spec({
+      description: 'Implement local workflow generation checks with ruby and perl sanity validation.',
+      targetFiles: ['src/product/generation/pipeline.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/ruby-perl-sanity.ts',
+    });
+    const base = artifact(result);
+    const gatesWithoutGrep = base.gates.map((gate) => ({
+      ...gate,
+      command: gate.command
+        .replace(/\bgit\s+grep\b/g, 'printf')
+        .replace(/\bgrep\b/g, 'printf'),
+    }));
+    const validations = [
+      'ruby -e "raise unless File.read(\'src/product/generation/pipeline.ts\').include?(\'validateGeneratedArtifact\')"',
+      'perl -e "open my $fh, \'<\', \'src/product/generation/pipeline.ts\' or die $!; local $/; my $s = <$fh>; die unless $s =~ /validateGeneratedArtifact/"',
+    ].map((command) => validateGeneratedArtifact(
+      {
+        ...base,
+        gates: gatesWithoutGrep.map((gate) => gate.name === 'post-implementation-file-gate'
+          ? { ...gate, command }
+          : gate),
+      },
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    ));
+
+    for (const validation of validations) {
+      expect(validation.issues).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
+        ]),
+      );
+    }
+  });
+
+  it('does not count prose mentioning grep as a rendered sanity gate', () => {
+    const implementationSpec = spec({
+      description: 'Implement local workflow generation checks with strict gate validation.',
+      targetFiles: ['src/product/generation/pipeline.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/missing-sanity.ts',
+    });
+    const base = artifact(result);
+    const noSanityArtifact = {
+      ...base,
+      gates: base.gates.map((gate) => ({
+        ...gate,
+        command: gate.command
+          .replace(/\bgit\s+grep\b/g, 'printf')
+          .replace(/\bgrep\b/g, 'printf'),
+      })),
+    };
+
+    expect(noSanityArtifact.content).toContain('deterministic sanity gate');
+    const validation = validateGeneratedArtifact(
+      noSanityArtifact,
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    );
+
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
       ]),
     );
   });
