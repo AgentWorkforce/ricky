@@ -329,6 +329,7 @@ describe('renderHelp', () => {
     expect(helpText).toContain('Happy path:');
     expect(helpText).toContain('ricky local --spec <text>');
     expect(helpText).toContain('ricky run <path> --background');
+    expect(helpText).toContain('ricky run <artifact> --start-from <step>');
     expect(helpText).toContain('ricky status --run <run-id>');
     expect(helpText).toContain('Without --run:  artifact path on disk');
     expect(helpText).not.toMatch(/automatic execution/i);
@@ -1334,6 +1335,59 @@ describe('cliMain', () => {
     expect(output).toContain('  ricky status --run ricky-local-options');
     expect(output).not.toContain('Relevant logs:');
     expect(output).not.toContain('Options:');
+  });
+
+  it('renders a concrete --start-from resume command for failed workflow runs', async () => {
+    const localResult = stagedLocalResult({
+      ok: false,
+      warnings: ['workflow failed'],
+      exitCode: 2,
+      execution: {
+        ...stagedLocalResult().execution!,
+        status: 'blocker',
+        execution: {
+          ...stagedLocalResult().execution!.execution,
+          run_id: 'relay-run-123',
+        },
+        blocker: {
+          code: 'INVALID_ARTIFACT',
+          category: 'workflow_invalid',
+          message: 'Workflow reported a failed run.',
+          detected_at: '2026-01-01T00:00:00.000Z',
+          detected_during: 'launch',
+          recovery: {
+            actionable: true,
+            steps: ['Inspect the captured workflow logs.'],
+          },
+          context: {
+            missing: ['passing workflow run'],
+            found: [],
+          },
+        },
+        evidence: {
+          ...stagedLocalResult().execution!.evidence!,
+          failed_step: { id: 'implement-tests', name: 'implement-tests' },
+          logs: {
+            ...stagedLocalResult().execution!.evidence!.logs,
+            tail: [
+              '  ✗ implement-tests — FAILED: The operation was aborted due to timeout',
+              '[workflow] FAILED: Step "implement-tests" failed after 2 retries',
+            ],
+            truncated: false,
+          },
+        },
+      },
+    });
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ ok: false, localResult }));
+
+    const result = await cliMain({
+      argv: ['run', 'workflows/generated/issue-3.ts'],
+      runInteractive: runner,
+    });
+
+    const output = result.output.join('\n');
+    expect(output).toContain('Execution: blocked — INVALID_ARTIFACT at implement-tests');
+    expect(output).toContain('Resume: ricky run workflows/generated/issue-3.ts --start-from implement-tests --previous-run-id relay-run-123');
   });
 
   it('renders auto-fix repair mode and summary for applied workflow repairs', async () => {

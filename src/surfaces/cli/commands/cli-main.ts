@@ -310,6 +310,7 @@ export function renderHelp(): string[] {
     '  ricky --mode local --spec-file <path>               Generate from file',
     '  ricky --mode local --stdin                          Generate from stdin',
     '  ricky run <artifact>                                Execute existing artifact',
+    '  ricky run <artifact> --start-from <step>             Resume an existing workflow from a failed step',
     '  ricky help                                          This help text',
     '  ricky version                                       Version',
     '',
@@ -1796,6 +1797,8 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     if (localResult.execution) {
       lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
       lines.push(executionFailureSummary(localResult));
+      const resume = resumeCommandFor(localResult);
+      if (resume) lines.push(`Resume: ${resume}`);
     } else if (localResult.generation) {
       lines.push(`Generation: failed (status: ${localResult.generation.status}).`);
       if (localResult.generation.error) lines.push(`Reason: ${localResult.generation.error}`);
@@ -1936,6 +1939,25 @@ function executionFailureSummary(localResult: NonNullable<InteractiveCliResult['
     ?? execution.evidence?.failed_step?.id;
   const status = execution.status === 'blocker' ? 'blocked' : execution.status;
   return `Execution: ${status}${blocker}${failedStep ? ` at ${failedStep}` : ''}`;
+}
+
+function resumeCommandFor(localResult: NonNullable<InteractiveCliResult['localResult']>): string | undefined {
+  const execution = localResult.execution;
+  if (!execution || execution.status !== 'blocker') return undefined;
+  const artifactPath = execution.execution.workflow_file
+    ?? execution.execution.artifact_path
+    ?? localResult.generation?.artifact?.path
+    ?? localResult.artifacts[0]?.path;
+  const failedStep = failedStepFromTail(execution.evidence?.logs.tail ?? [])
+    ?? execution.evidence?.failed_step?.id;
+  if (!artifactPath || !failedStep) return undefined;
+  return [
+    'ricky run',
+    artifactPath,
+    '--start-from',
+    failedStep,
+    ...(execution.execution.run_id ? ['--previous-run-id', execution.execution.run_id] : []),
+  ].join(' ');
 }
 
 function failedStepFromTail(tail: string[]): string | undefined {

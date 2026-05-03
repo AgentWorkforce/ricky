@@ -70,6 +70,7 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('80-to-100 fix loop');
     expect(artifact.content).toContain('deterministic sanity gate using grep, rg, or an equivalent assertion');
     expect(artifact.content).toContain('Generated workflow quality');
+    expect(artifact.content).toContain('Keep each agent step bounded to one coherent slice');
     expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
