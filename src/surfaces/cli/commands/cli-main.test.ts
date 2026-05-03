@@ -88,6 +88,13 @@ describe('parseArgs', () => {
       json: true,
       ...RUN_DEFAULTS,
     });
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--mode', 'cloud'])).toEqual({
+      command: 'run',
+      mode: 'cloud',
+      artifact: 'workflows/generated/example.ts',
+      runRequested: true,
+      ...RUN_DEFAULTS,
+    });
   });
 
   it('parses --auto-fix attempts and treats zero as disabled', () => {
@@ -1870,6 +1877,92 @@ describe('cliMain', () => {
     });
   });
 
+  it('routes ricky run artifacts in cloud mode through Ricky-supervised Cloud execution', async () => {
+    await withCloudEnvCleared(async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ mode: 'cloud' }));
+
+      const result = await cliMain({
+        argv: ['run', 'workflows/generated/cloud-release.ts', '--mode', 'cloud', '--json'],
+        runInteractive: runner,
+        readCloudAuth: vi.fn().mockResolvedValue({
+          accessToken: 'stored-token',
+          refreshToken: 'stored-refresh',
+          accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          apiUrl: 'https://cloud.example.test',
+        }),
+        resolveCloudWorkspace: vi.fn().mockResolvedValue('workspace-from-cloud-profile'),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(runner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'cloud',
+          cloudRequest: {
+            auth: { token: 'stored-token' },
+            workspace: { workspaceId: 'workspace-from-cloud-profile' },
+            body: {
+              spec: {
+                kind: 'structured',
+                document: {
+                  intent: 'execute',
+                  workflowPath: 'workflows/generated/cloud-release.ts',
+                },
+                format: 'ricky-workflow',
+              },
+              specPath: 'workflows/generated/cloud-release.ts',
+              mode: 'cloud',
+              autoFix: {
+                enabled: true,
+                maxAttempts: 7,
+                preferWorkforcePersona: true,
+                allowOpenRouterFallback: true,
+                requireHumanApprovalFor: ['code_push', 'pr_create', 'secrets', 'billing', 'external_write'],
+              },
+              metadata: {
+                ricky: {
+                  optIn: true,
+                  runEndpoint: '/api/v1/ricky/runs',
+                },
+                cli: {
+                  handoff: 'artifact',
+                },
+              },
+            },
+          },
+        }),
+      );
+      expect(runner.mock.calls[0][0]).not.toHaveProperty('handoff');
+    });
+  });
+
+  it('keeps Ricky cloud execution opt-in while disabling repairs when requested', async () => {
+    await withCloudEnvCleared(async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ mode: 'cloud' }));
+
+      const result = await cliMain({
+        argv: ['run', 'workflows/generated/cloud-release.ts', '--mode', 'cloud', '--no-auto-fix', '--json'],
+        runInteractive: runner,
+        readCloudAuth: vi.fn().mockResolvedValue({
+          accessToken: 'stored-token',
+          refreshToken: 'stored-refresh',
+          accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          apiUrl: 'https://cloud.example.test',
+        }),
+        resolveCloudWorkspace: vi.fn().mockResolvedValue('workspace-from-cloud-profile'),
+      });
+
+      expect(result.exitCode).toBe(0);
+      const request = runner.mock.calls[0][0].cloudRequest;
+      expect(request.body.metadata.ricky).toMatchObject({ optIn: true });
+      expect(request.body.autoFix).toMatchObject({
+        enabled: false,
+        preferWorkforcePersona: true,
+        allowOpenRouterFallback: true,
+      });
+      expect(request.body.autoFix).not.toHaveProperty('maxAttempts');
+    });
+  });
+
   it('renders a Cloud run command when power-user Cloud generation does not run immediately', async () => {
     const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({
       mode: 'cloud',
@@ -2533,13 +2626,14 @@ describe('cliMain', () => {
       );
     });
 
-    it('rejects cloud mode with spec handoff', async () => {
+    it('routes cloud mode spec handoff to Cloud setup instead of local handoff', async () => {
       const result = await cliMain({
         argv: ['--mode', 'cloud', '--spec', 'a workflow'],
+        readCloudAuth: async () => null,
       });
 
       expect(result.exitCode).toBe(1);
-      expect(result.output.join('\n')).toContain('Cloud mode does not accept CLI spec handoff');
+      expect(result.output.join('\n')).toContain('Cloud mode requires a connected AgentWorkforce Cloud account.');
     });
 
     it('handles --file alias for --spec-file', async () => {
