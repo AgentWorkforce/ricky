@@ -33,6 +33,13 @@ export interface CloudWorkspaceContext {
 
 export type CloudGenerateMode = 'cloud' | 'both';
 
+export type CloudAutoFixApprovalBoundary =
+  | 'code_push'
+  | 'pr_create'
+  | 'secrets'
+  | 'billing'
+  | 'external_write';
+
 export interface CloudNaturalLanguageSpecPayload {
   kind: 'natural-language';
   text: string;
@@ -49,6 +56,19 @@ export type CloudWorkflowSpecPayload =
   | CloudNaturalLanguageSpecPayload
   | CloudStructuredSpecPayload;
 
+export interface CloudRickyAutoFixPolicy {
+  /** Whether Ricky should diagnose and repair failed Cloud workflow runs. */
+  enabled: boolean;
+  /** Maximum bounded repair attempts when auto-fix is enabled. */
+  maxAttempts?: number;
+  /** Prefer AgentWorkforce's workflow-writer persona during repair. */
+  preferWorkforcePersona?: boolean;
+  /** Allow Cloud to fall back to OpenRouter when configured primary agents fail. */
+  allowOpenRouterFallback?: boolean;
+  /** Destructive or externally-visible actions that still require a human. */
+  requireHumanApprovalFor?: CloudAutoFixApprovalBoundary[];
+}
+
 export interface CloudGenerateRequestBody {
   /** The natural-language prompt or structured workflow spec to generate from. */
   spec: CloudWorkflowSpecPayload;
@@ -56,6 +76,8 @@ export interface CloudGenerateRequestBody {
   specPath?: string;
   /** Execution mode — Cloud-only or both (local + Cloud). */
   mode?: CloudGenerateMode;
+  /** Ricky supervision policy for executing existing workflow artifacts in Cloud. */
+  autoFix?: CloudRickyAutoFixPolicy;
   /** Opaque metadata from the originating surface. */
   metadata?: Record<string, unknown>;
 }

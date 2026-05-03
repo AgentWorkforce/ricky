@@ -14,7 +14,7 @@
 import type { OnboardingResult, RickyConfigStore } from '../cli/onboarding.js';
 import type { RickyMode } from '../cli/mode-selector.js';
 import type { CloudExecutor, CloudGenerateResult } from '../../../cloud/api/generate-endpoint.js';
-import type { CloudGenerateRequest } from '../../../cloud/api/request-types.js';
+import type { CloudGenerateRequest, CloudGenerateRequestBody } from '../../../cloud/api/request-types.js';
 import type {
   CloudWorkflowFlowDeps,
   CloudImplementationAgent,
@@ -57,6 +57,7 @@ import {
 } from '../prompts/index.js';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
 
 // ---------------------------------------------------------------------------
 // Interactive CLI result contract
@@ -1541,14 +1542,39 @@ function cloudRequestFromCapture(
       spec,
       ...(capture.specPath ? { specPath: capture.specPath } : {}),
       mode: 'cloud',
+      ...cloudRickyCaptureExecutionBodyFor(capture),
       metadata: {
         workflowName: capture.workflowName,
+        ...cloudRickyCaptureExecutionMetadataFor(capture),
         cli: {
           handoff: capture.source,
           workflowName: capture.workflowName,
           ...(capture.generatedFromGoal ? { generatedFromGoal: capture.generatedFromGoal } : {}),
         },
       },
+    },
+  };
+}
+
+function cloudRickyCaptureExecutionBodyFor(capture: CapturedWorkflowSpec): Partial<CloudGenerateRequestBody> {
+  if (capture.source !== 'workflow-artifact') return {};
+  return {
+    autoFix: {
+      enabled: true,
+      maxAttempts: DEFAULT_AUTO_FIX_ATTEMPTS,
+      preferWorkforcePersona: true,
+      allowOpenRouterFallback: true,
+      requireHumanApprovalFor: ['code_push', 'pr_create', 'secrets', 'billing', 'external_write'],
+    },
+  };
+}
+
+function cloudRickyCaptureExecutionMetadataFor(capture: CapturedWorkflowSpec): Record<string, unknown> {
+  if (capture.source !== 'workflow-artifact') return {};
+  return {
+    ricky: {
+      optIn: true,
+      runEndpoint: '/api/v1/ricky/runs',
     },
   };
 }

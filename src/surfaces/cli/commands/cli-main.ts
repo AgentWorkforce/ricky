@@ -15,7 +15,7 @@ import type { InteractiveCliDeps, InteractiveCliResult } from '../entrypoint/int
 import type { CloudIntegrationConnector } from '../entrypoint/interactive-cli.js';
 import type { ProviderStatus, RickyMode } from '../cli/mode-selector.js';
 import type { RawHandoff, SpecInput } from '../../../local/request-normalizer.js';
-import type { CloudGenerateRequest, CloudWorkflowSpecPayload } from '../../../cloud/api/request-types.js';
+import type { CloudGenerateRequest, CloudGenerateRequestBody, CloudWorkflowSpecPayload } from '../../../cloud/api/request-types.js';
 import type { ConnectProviderOptions, ConnectProviderResult, StoredAuth, WhoAmIResponse } from '@agent-relay/cloud';
 import type { LocalRunMonitorState } from '../flows/local-run-monitor.js';
 import { legacyLocalRunStatePath, localRunStatePath } from '../flows/local-run-monitor.js';
@@ -394,12 +394,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
     return undefined;
   }
 
-  if (parsed.mode === 'cloud') {
-    if (parsed.surface === 'cloud') {
-      return undefined;
-    }
-    throw new Error('Cloud mode does not accept CLI spec handoff in this local slice. Use `ricky cloud --spec ...` for Cloud generation or --mode local for local generation.');
-  }
+  if (parsed.mode === 'cloud') return undefined;
 
   const handoffMode = parsed.mode ?? 'local';
   const invocationRoot = resolveInvocationRoot(deps.cwd);
@@ -551,6 +546,7 @@ async function buildCloudRequest(parsed: ParsedArgs, deps: CliMainDeps): Promise
   const cloudSpec = await readCloudSpec(parsed, deps);
 
   if (deps.cloudRequest) {
+    const rickyExecution = cloudRickyExecutionBodyFor(parsed, cloudSpec.handoff, deps.cloudRequest.body);
     return {
       ...deps.cloudRequest,
       body: {
@@ -558,9 +554,11 @@ async function buildCloudRequest(parsed: ParsedArgs, deps: CliMainDeps): Promise
         spec: cloudSpec.spec,
         ...(cloudSpec.specPath ? { specPath: cloudSpec.specPath } : {}),
         mode: 'cloud',
+        ...rickyExecution,
         metadata: {
           ...deps.cloudRequest.body.metadata,
           ...(parsed.workflowName ? { workflowName: parsed.workflowName } : {}),
+          ...cloudRickyExecutionMetadataFor(cloudSpec.handoff),
           cli: cliMetadataFor(parsed, cloudSpec.handoff),
         },
       },
@@ -601,10 +599,44 @@ async function buildStoredCredentialCloudRequest(
       spec: cloudSpec.spec,
       ...(cloudSpec.specPath ? { specPath: cloudSpec.specPath } : {}),
       mode: 'cloud',
+      ...cloudRickyExecutionBodyFor(parsed, cloudSpec.handoff),
       metadata: {
         ...(parsed.workflowName ? { workflowName: parsed.workflowName } : {}),
+        ...cloudRickyExecutionMetadataFor(cloudSpec.handoff),
         cli: cliMetadataFor(parsed, cloudSpec.handoff),
       },
+    },
+  };
+}
+
+function cloudRickyExecutionBodyFor(
+  parsed: ParsedArgs,
+  handoff: string,
+  existingBody?: CloudGenerateRequestBody,
+): Partial<CloudGenerateRequestBody> {
+  if (handoff !== 'artifact') return {};
+  return {
+    autoFix: existingBody?.autoFix ?? cloudRickyAutoFixPolicyFor(parsed),
+  };
+}
+
+function cloudRickyAutoFixPolicyFor(parsed: ParsedArgs): NonNullable<CloudGenerateRequestBody['autoFix']> {
+  const enabled = parsed.autoFix !== undefined;
+  return {
+    enabled,
+    ...(enabled ? { maxAttempts: parsed.autoFix } : {}),
+    preferWorkforcePersona: parsed.workforcePersonaWriterCli !== false,
+    allowOpenRouterFallback: true,
+    requireHumanApprovalFor: ['code_push', 'pr_create', 'secrets', 'billing', 'external_write'],
+  };
+}
+
+function cloudRickyExecutionMetadataFor(handoff: string): Record<string, unknown> {
+  if (handoff !== 'artifact') return {};
+  return {
+    ricky: {
+      optIn: true,
+      runEndpoint: '/api/v1/ricky/runs',
     },
   };
 }
