@@ -510,7 +510,7 @@ sync_repo_with_origin_main_if_safe() {
     return 0
   fi
 
-  read -r behind ahead < <(git rev-list --left-right --count HEAD...origin/main)
+  read -r ahead behind < <(git rev-list --left-right --count HEAD...origin/main)
 
   if (( ahead > 0 )); then
     log "skipping origin/main fast-forward because local main has ${ahead} unpushed commit(s)"
