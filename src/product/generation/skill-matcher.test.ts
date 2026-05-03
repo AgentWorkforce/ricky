@@ -1,4 +1,6 @@
-import { resolve } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -26,23 +28,51 @@ describe('skill matcher', () => {
     expect(matches[0].confidence).toBeGreaterThanOrEqual(0.4);
   });
 
-  it('falls back to the project default when no skill-relevant content matches', () => {
+  it('falls back to the project workflow-generation defaults when no skill-relevant content matches', () => {
     const matches = matchSkills(spec('Update a small README sentence.'), {
       registry: registry([
+        { id: 'choosing-swarm-patterns', description: 'Use for Agent Relay workflow pattern selection.' },
         { id: 'writing-agent-relay-workflows', description: 'Use for agent relay workflow authoring.' },
+        { id: 'relay-80-100-workflow', description: 'Use for end-to-end workflow validation.' },
       ]),
     });
 
-    expect(matches).toEqual([
-      expect.objectContaining({
-        id: 'writing-agent-relay-workflows',
-        reason: expect.stringContaining('Project default'),
-      }),
-    ]);
+    expect(matches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'choosing-swarm-patterns',
+          reason: expect.stringContaining('Project default'),
+        }),
+        expect.objectContaining({
+          id: 'writing-agent-relay-workflows',
+          reason: expect.stringContaining('Project default'),
+        }),
+        expect.objectContaining({
+          id: 'relay-80-100-workflow',
+          reason: expect.stringContaining('Project default'),
+        }),
+      ]),
+    );
   });
 
   it('returns no skills for an empty registry', () => {
     expect(matchSkills(spec('Generate a workflow.'), { registry: [] })).toEqual([]);
+  });
+
+  it('preserves top-ranked matches when the caller explicitly caps maxMatches', () => {
+    const matches = matchSkills(spec('Generate a github primitive webhook handler.'), {
+      registry: registry([
+        { id: 'github-primitive', description: 'Use for github primitive webhook handlers and GitHub APIs.' },
+        { id: 'choosing-swarm-patterns', description: 'Use for Agent Relay workflow pattern selection.' },
+        { id: 'writing-agent-relay-workflows', description: 'Use for agent relay workflow authoring.' },
+        { id: 'relay-80-100-workflow', description: 'Use for end-to-end workflow validation.' },
+      ]),
+      maxMatches: 1,
+    });
+
+    expect(matches).toEqual([
+      expect.objectContaining({ id: 'github-primitive' }),
+    ]);
   });
 
   it('does not select below-threshold matches when fallback is disabled', () => {
@@ -89,11 +119,37 @@ describe('skill matcher', () => {
     expect(skills).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          id: 'choosing-swarm-patterns',
+          path: expect.stringMatching(new RegExp(`^${escapeRegExp(repoRoot)}/.*skills/choosing-swarm-patterns/SKILL\\.md$`)),
+        }),
+        expect.objectContaining({
           id: 'writing-agent-relay-workflows',
           path: expect.stringMatching(new RegExp(`^${escapeRegExp(repoRoot)}/.*skills/writing-agent-relay-workflows/SKILL\\.md$`)),
         }),
       ]),
     );
+  });
+
+  it('discovers bundled package skills when invoked outside a project tree', () => {
+    const emptyProject = mkdtempSync(join(tmpdir(), 'ricky-empty-project-'));
+    try {
+      process.chdir(emptyProject);
+      resetSkillRegistryCache();
+
+      const skills = loadSkillRegistry();
+
+      expect(skills).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'choosing-swarm-patterns' }),
+          expect.objectContaining({ id: 'writing-agent-relay-workflows' }),
+          expect.objectContaining({ id: 'relay-80-100-workflow' }),
+        ]),
+      );
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(emptyProject, { recursive: true, force: true });
+      resetSkillRegistryCache();
+    }
   });
 });
 

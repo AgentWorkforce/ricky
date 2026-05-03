@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { SkillMatch, SkillMatchEvidence, ToolRunner } from './types.js';
@@ -24,11 +25,16 @@ export interface SkillMatcherOptions {
   defaultSkillId?: string | null;
 }
 
-const DEFAULT_MAX_MATCHES = 3;
+const DEFAULT_MAX_MATCHES = 5;
 const DEFAULT_THRESHOLD = 0.4;
-const DEFAULT_SKILL_ID = 'writing-agent-relay-workflows';
+const DEFAULT_WORKFLOW_SKILL_IDS = [
+  'choosing-swarm-patterns',
+  'writing-agent-relay-workflows',
+  'relay-80-100-workflow',
+];
 const PROJECT_SKILL_DIRS = ['.agents/skills', 'skills', '.claude/skills'];
 const USER_SKILL_DIRS = ['.claude/skills'];
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
 let cachedRegistry: SkillRegistryDescriptor[] | null = null;
 
@@ -44,23 +50,17 @@ export function matchSkills(spec: NormalizedWorkflowSpec, options: SkillMatcherO
     .filter((match) => match.confidence >= threshold)
     .sort(compareMatches);
 
-  if (
-    scored.length > 0 &&
-    options.defaultSkillId === undefined &&
-    scored.length < maxMatches &&
-    !scored.some((match) => match.id === DEFAULT_SKILL_ID)
-  ) {
-    const defaultDescriptor = registry.find((descriptor) => descriptor.id === DEFAULT_SKILL_ID);
-    if (defaultDescriptor) scored.push(fallbackMatch(defaultDescriptor));
+  if (options.defaultSkillId === undefined) {
+    const withWorkflowDefaults = appendWorkflowDefaultMatches(scored, registry);
+    const deduped = dedupeMatches(withWorkflowDefaults);
+    return options.maxMatches === undefined
+      ? trimMatchesPreservingWorkflowDefaults(deduped, maxMatches)
+      : deduped.slice(0, maxMatches);
   }
 
   if (scored.length === 0 && typeof options.defaultSkillId === 'string') {
     const fallback = registry.find((descriptor) => descriptor.id === options.defaultSkillId);
     return fallback ? [fallbackMatch(fallback)] : [];
-  }
-
-  if (scored.length === 0 && options.defaultSkillId === undefined && registry.some((descriptor) => descriptor.id === DEFAULT_SKILL_ID)) {
-    return [fallbackMatch(registry.find((descriptor) => descriptor.id === DEFAULT_SKILL_ID)!)];
   }
 
   return dedupeMatches(scored).slice(0, maxMatches);
@@ -79,6 +79,7 @@ export function resetSkillRegistryCache(): void {
 function discoverSkillRegistry(): SkillRegistryDescriptor[] {
   const roots = [
     ...projectSkillRoots(process.cwd()),
+    ...packageSkillRoots(),
     ...USER_SKILL_DIRS.map((dir) => join(homedir(), dir)),
   ];
   const seen = new Set<string>();
@@ -95,6 +96,17 @@ function discoverSkillRegistry(): SkillRegistryDescriptor[] {
   }
 
   return dedupeDescriptors(descriptors);
+}
+
+function packageSkillRoots(): string[] {
+  return [
+    // Source execution: src/product/generation/skill-matcher.ts -> repo root.
+    resolve(MODULE_DIR, '../../../.agents/skills'),
+    // Bundled npm execution: dist/ricky.js -> package root.
+    resolve(MODULE_DIR, '../.agents/skills'),
+    // Future direct package layout: module file colocated with bundled skills.
+    resolve(MODULE_DIR, '.agents/skills'),
+  ];
 }
 
 function projectSkillRoots(startDir: string): string[] {
@@ -224,6 +236,28 @@ function fallbackMatch(descriptor: SkillRegistryDescriptor): SkillMatch {
     preferredRunner: descriptor.preferredRunner,
     preferredModel: descriptor.preferredModel,
   };
+}
+
+function appendWorkflowDefaultMatches(
+  matches: SkillMatch[],
+  registry: SkillRegistryDescriptor[],
+): SkillMatch[] {
+  const present = new Set(matches.map((match) => match.id));
+  const defaults = DEFAULT_WORKFLOW_SKILL_IDS
+    .filter((id) => !present.has(id))
+    .map((id) => registry.find((descriptor) => descriptor.id === id))
+    .filter((descriptor): descriptor is SkillRegistryDescriptor => Boolean(descriptor))
+    .map(fallbackMatch);
+
+  return [...matches, ...defaults];
+}
+
+function trimMatchesPreservingWorkflowDefaults(matches: SkillMatch[], maxMatches: number): SkillMatch[] {
+  if (matches.length <= maxMatches) return matches;
+
+  const defaultMatches = matches.filter((match) => DEFAULT_WORKFLOW_SKILL_IDS.includes(match.id));
+  const nonDefaultMatches = matches.filter((match) => !DEFAULT_WORKFLOW_SKILL_IDS.includes(match.id));
+  return [...defaultMatches, ...nonDefaultMatches].slice(0, maxMatches).sort(compareMatches);
 }
 
 function compareMatches(a: SkillMatch, b: SkillMatch): number {

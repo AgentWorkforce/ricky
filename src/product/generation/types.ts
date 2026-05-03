@@ -22,7 +22,7 @@ export type WorkflowExecutionTarget = 'local' | 'cloud';
 
 export type SkillApplicationStage = 'generation_selection' | 'generation_loading' | 'generation_rendering';
 
-export type SkillApplicationEffect = 'workflow_contract' | 'validation_gates' | 'metadata';
+export type SkillApplicationEffect = 'workflow_contract' | 'validation_gates' | 'metadata' | 'pattern_selection';
 
 export interface GenerationIssue {
   severity: GenerationIssueSeverity;

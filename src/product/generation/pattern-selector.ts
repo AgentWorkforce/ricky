@@ -1,9 +1,14 @@
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { SwarmPattern } from '../../shared/models/workflow-config.js';
-import type { GenerationRiskLevel, PatternDecision } from './types.js';
+import type { GenerationRiskLevel, PatternDecision, SkillContext } from './types.js';
 
-export function selectPattern(spec: NormalizedWorkflowSpec, patternOverride?: SwarmPattern): PatternDecision {
-  const signals = collectSignals(spec);
+export function selectPattern(
+  spec: NormalizedWorkflowSpec,
+  patternOverride?: SwarmPattern,
+  skillContext?: SkillContext,
+): PatternDecision {
+  const usesSwarmPatternSkill = skillContext?.applicableSkillNames.includes('choosing-swarm-patterns') ?? false;
+  const signals = collectSignals(spec, usesSwarmPatternSkill);
   const riskLevel = assessRisk(spec, signals);
 
   if (patternOverride) {
@@ -16,17 +21,19 @@ export function selectPattern(spec: NormalizedWorkflowSpec, patternOverride?: Sw
     };
   }
 
-  const pattern = choosePattern(spec, riskLevel, signals);
+  const pattern = usesSwarmPatternSkill
+    ? choosePatternWithSwarmSkill(spec, riskLevel, signals)
+    : choosePattern(spec, riskLevel, signals);
   return {
     pattern,
-    reason: explainPattern(pattern, riskLevel, signals),
+    reason: explainPattern(pattern, riskLevel, signals, usesSwarmPatternSkill),
     specSignals: signals,
     riskLevel,
     overrideUsed: false,
   };
 }
 
-function collectSignals(spec: NormalizedWorkflowSpec): string[] {
+function collectSignals(spec: NormalizedWorkflowSpec, usesSwarmPatternSkill = false): string[] {
   const signals: string[] = [];
   const targetCount = spec.targetFiles.length;
   const combinedText = normalizeText([
@@ -51,6 +58,7 @@ function collectSignals(spec: NormalizedWorkflowSpec): string[] {
   if (isDocOnly(spec)) signals.push('doc or spec oriented');
   if (spec.executionPreference === 'cloud') signals.push('cloud execution requested');
   if (spec.providerContext.surface === 'mcp') signals.push('mcp handoff surface');
+  if (usesSwarmPatternSkill) signals.push('choosing-swarm-patterns skill loaded');
 
   return signals.length > 0 ? signals : ['simple generation request'];
 }
@@ -80,14 +88,42 @@ function choosePattern(spec: NormalizedWorkflowSpec, riskLevel: GenerationRiskLe
   return 'pipeline';
 }
 
-function explainPattern(pattern: SwarmPattern, riskLevel: GenerationRiskLevel, signals: string[]): string {
+function choosePatternWithSwarmSkill(
+  spec: NormalizedWorkflowSpec,
+  riskLevel: GenerationRiskLevel,
+  signals: string[],
+): SwarmPattern {
+  const text = normalizeText([
+    spec.description,
+    spec.targetContext,
+    ...spec.constraints.map((constraint) => constraint.constraint),
+    ...spec.evidenceRequirements.map((requirement) => requirement.requirement),
+    ...spec.acceptanceGates.map((gate) => gate.gate),
+  ]);
+
+  if (/\b(strictly linear|linear|sequential|pipeline|one step after another)\b/.test(text)) return 'pipeline';
+  if (signals.some((signal) => signal === 'parallel work suggested' || signal === 'many target files')) return 'dag';
+  if (/\b(coordinator|supervisor|lead|review|approval|approve|signoff|gate|handoff|triage|specialist)\b/.test(text)) return 'supervisor';
+  if (riskLevel === 'high') return 'dag';
+  if (riskLevel === 'medium') return 'supervisor';
+  if (isDocOnly(spec) && spec.acceptanceGates.length > 0) return 'supervisor';
+  return 'pipeline';
+}
+
+function explainPattern(
+  pattern: SwarmPattern,
+  riskLevel: GenerationRiskLevel,
+  signals: string[],
+  usesSwarmPatternSkill = false,
+): string {
+  const skillPrefix = usesSwarmPatternSkill ? ' using choosing-swarm-patterns' : '';
   if (pattern === 'dag') {
-    return `Selected dag because the request is ${riskLevel} risk and benefits from parallel implementation, review, and validation gates.`;
+    return `Selected dag${skillPrefix} because the request is ${riskLevel} risk and benefits from parallel implementation, review, and validation gates.`;
   }
   if (pattern === 'supervisor') {
-    return `Selected supervisor because the request is ${riskLevel} risk and needs coordinated planning, implementation, and review.`;
+    return `Selected supervisor${skillPrefix} because the request is ${riskLevel} risk and needs coordinated planning, implementation, and review.`;
   }
-  return `Selected pipeline because the request is ${riskLevel} risk and can proceed through a linear reliability ladder.`;
+  return `Selected pipeline${skillPrefix} because the request is ${riskLevel} risk and can proceed through a linear reliability ladder.`;
 }
 
 function isDocOnly(spec: NormalizedWorkflowSpec): boolean {

@@ -29,6 +29,7 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('"targetMode": "local"');
     expect(task).toContain('"repoRoot": "/repo"');
     expect(task).toContain('Agent Relay workflow standards');
+    expect(task).toContain('Matched Ricky generation skills');
     expect(task).toContain('80-to-100 fix loop');
     expect(task).toContain('Structured response contract');
     expect(task).toContain('fenced ```ts artifact block plus a fenced ```json metadata block');
@@ -325,6 +326,9 @@ describe('workforce persona workflow writer', () => {
     expect(calls[0].intents).toEqual(WORKFORCE_PERSONA_INTENT_CANDIDATES);
     expect(calls[0].task).toContain('"repoRoot": "/repo"');
     expect(calls[0].task).toContain('"outputPath": "workflows/generated/workforce-writer.ts"');
+    expect(calls[0].task).toContain('"loadedSkills"');
+    expect(calls[0].task).toContain('choosing-swarm-patterns');
+    expect(calls[0].task).toContain('Quick Decision Framework');
     expect(result.workforcePersona).toMatchObject({
       personaId: 'agent-relay-workflow',
       tier: 'best',
