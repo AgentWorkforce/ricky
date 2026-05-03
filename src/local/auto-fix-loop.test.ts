@@ -264,6 +264,27 @@ describe('runWithAutoFix', () => {
     expect(repair?.content).toContain("dependsOn: ['implement-tests-timeout-continuation']");
   });
 
+  it('deterministically repairs bare git diff manifest gates to include untracked files', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/cloud-autofix.ts',
+      artifactContent: bareGitDiffManifestWorkflowContent(),
+      evidence: gitDiffManifestFailureEvidence(),
+    });
+
+    expect(repair).toMatchObject({
+      applied: true,
+      mode: 'deterministic',
+      summary: expect.stringContaining('expanded git diff pipe gates to include untracked files'),
+    });
+    expect(repair?.content).toContain(
+      'NON_TRANSIENT=$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | rg -v',
+    );
+    expect(repair?.content).toContain(
+      '`GIT_DIFF_TMP=$(mktemp) && { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > "$GIT_DIFF_TMP" && mv "$GIT_DIFF_TMP" ${FINAL_DIFF_FILES}`',
+    );
+    expect(repair?.content).not.toContain('NON_TRANSIENT=$(git diff --name-only | rg -v');
+  });
+
   it('persona repair failure escalates without retrying', async () => {
     const runSingleAttempt = vi.fn().mockResolvedValue(blockerResponse('MISSING_BINARY', 'run-1', 'install-deps'));
 
@@ -893,6 +914,90 @@ Run focused tests while editing. Write \${ARTIFACT_DIR}/tests-summary.md ending 
   })
   .run({ cwd: process.cwd() });
 `;
+}
+
+function bareGitDiffManifestWorkflowContent(): string {
+  return `
+import { workflow } from '@agent-relay/sdk/workflows';
+
+const OUTPUT_MANIFEST = 'artifacts/ricky/output-manifest.txt';
+const FINAL_DIFF_FILES = 'artifacts/ricky/final-diff-files.txt';
+
+workflow('cloud-autofix')
+  .step('verify-non-empty-implementation-diff', {
+    type: 'deterministic',
+    command: [
+      'set -e',
+      'NON_TRANSIENT=$(git diff --name-only | rg -v "^(patches/|artifacts/|docs/.*plan\\\\.md$|.*output-manifest\\\\.txt$)" || true)',
+      'if [ -z "$NON_TRANSIENT" ]; then echo "EMPTY_IMPLEMENTATION_DIFF"; exit 1; fi',
+      \`printf "%s\\\\n" "$NON_TRANSIENT" > \${OUTPUT_MANIFEST}\`,
+      \`cat \${OUTPUT_MANIFEST}\`,
+      \`rg -n "^(packages/web/app/api/v1/ricky/runs/|packages/web/lib/ricky/)" \${OUTPUT_MANIFEST} >/dev/null\`,
+    ].join(' && '),
+    captureOutput: true,
+    failOnError: true,
+  })
+  .step('final-signoff', {
+    type: 'deterministic',
+    dependsOn: ['verify-non-empty-implementation-diff'],
+    command: [
+      'set -e',
+      \`git diff --name-only > \${FINAL_DIFF_FILES}\`,
+      \`test -s \${FINAL_DIFF_FILES}\`,
+    ].join(' && '),
+    failOnError: true,
+  })
+  .run({ cwd: process.cwd() });
+`;
+}
+
+function gitDiffManifestFailureEvidence(): WorkflowRunEvidence {
+  return {
+    runId: 'diff-run-1',
+    workflowId: 'wf-cloud-autofix',
+    workflowName: 'cloud-autofix',
+    status: 'failed',
+    startedAt: '2026-05-03T00:00:00.000Z',
+    completedAt: '2026-05-03T00:03:23.000Z',
+    steps: [{
+      stepId: 'verify-non-empty-implementation-diff',
+      stepName: 'verify-non-empty-implementation-diff',
+      status: 'failed',
+      startedAt: '2026-05-03T00:03:23.000Z',
+      completedAt: '2026-05-03T00:03:24.000Z',
+      error: 'Command failed with exit code 1',
+      verifications: [{
+        type: 'exit_code',
+        passed: false,
+        expected: '0',
+        actual: '1',
+        message: 'Command failed with exit code 1',
+        command: 'NON_TRANSIENT=$(git diff --name-only | rg -v "^(patches/|artifacts/|docs/.*plan\\.md$|.*output-manifest\\.txt$)" || true)',
+        exitCode: 1,
+      }],
+      deterministicGates: [],
+      logs: [{
+        stream: 'stdout',
+        excerpt: [
+          'packages/core/src/bootstrap/launcher.ts',
+          'packages/web/app/api/v1/workflows/run/route.ts',
+          'tests/workflow-run-route.test.ts',
+        ].join('\n'),
+      }],
+      artifacts: [],
+      history: [],
+      retries: [],
+      narrative: [],
+    }],
+    deterministicGates: [],
+    artifacts: [{ path: 'workflows/generated/cloud-autofix.ts', kind: 'file' }],
+    logs: [{
+      stream: 'stderr',
+      excerpt: '[workflow] FAILED: Step "verify-non-empty-implementation-diff" failed: Command failed with exit code 1',
+    }],
+    narrative: [],
+    routing: [],
+  };
 }
 
 function execution(runId: string | undefined): NonNullable<LocalResponse['execution']>['execution'] {

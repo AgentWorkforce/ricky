@@ -500,7 +500,7 @@ export function buildWorkflowPersonaTask(
     '- Include an 80-to-100 fix loop: implement, validate, review, fix, final review, hard validation.',
     '- Include a real deterministic sanity gate over produced files using grep, rg, git grep, or an equivalent inline assertion that exits non-zero when expected content/state is missing.',
     '- Keep agent steps bounded: split broad implementation or test-writing work into multiple sequential/fan-out steps with deterministic gates between them instead of one large step that can exhaust retries by timeout.',
-    '- Verification must include typecheck/test commands when relevant plus git-diff evidence.',
+    '- Verification must include typecheck/test commands when relevant plus git-diff evidence; diff/manifest gates must combine git diff --name-only with git ls-files --others --exclude-standard so newly-created files are visible.',
     '- Run with an explicit cwd: .run({ cwd: process.cwd() }).',
     '- Preserve Agent Relay workflow authoring rules: deterministic gates are evidence, agents do production work, and every generated workflow must be locally dry-runnable.',
     '- Include the literal marker IMPLEMENTATION_WORKFLOW_CONTRACT in implementation workflows.',
