@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { intake } from '../spec-intake/index.js';
 import type { NormalizedWorkflowSpec, RawSpecPayload } from '../spec-intake/types.js';
-import { generate } from './pipeline.js';
+import { generate, validateGeneratedArtifact } from './pipeline.js';
 
 const RECEIVED_AT = '2026-04-26T00:00:00.000Z';
 
@@ -406,6 +406,150 @@ describe('workflow generation pipeline', () => {
     });
     expect(gate(artifact, 'git-diff-gate').command).toContain('git ls-files --others --exclude-standard');
     expect(result.validation.issues).toEqual([]);
+  });
+
+  it('marks implementation workflows with source-change and result evidence contracts', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement durable backend review orchestration with tests and a pull request.',
+        targetFiles: ['packages/backend/src/services/deep-review-orchestrator.ts'],
+        acceptanceGates: ['npx vitest run packages/backend/src/services/deep-review-orchestrator.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/deep-review-orchestration.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const content = artifact(result).content;
+    expect(content).toContain('IMPLEMENTATION_WORKFLOW_CONTRACT');
+    expect(content).toMatch(/source changes|code changes/i);
+    expect(content).toMatch(/non-empty diff/i);
+    expect(content).toMatch(/PR URL|pull request/i);
+  });
+
+  it('rejects planning-only artifacts for implementation specs', () => {
+    const implementationSpec = spec({
+      description: [
+        'Implement webapp-triggered deep reviews with backend services, runtime election, Slack and Telegram retriggers, GitHub writeback, tests, and a pull request.',
+        'The workflow must update backend and webapp source files.',
+      ].join(' '),
+      targetFiles: ['packages/backend/src/routes/review-workspace.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/webapp-review.ts',
+    });
+
+    const weakArtifact = {
+      ...artifact(result),
+      content: [
+        "import { workflow } from '@agent-relay/sdk/workflows';",
+        'async function main() {',
+        '  const result = await workflow("ricky-webapp-review")',
+        '    .description("Scaffold a model-agnostic deep-review relay workflow plan.")',
+        '    .pattern("dag")',
+        '    .channel("wf-ricky-webapp-review")',
+        '    .agent("reviewer", { cli: "claude", role: "review stage" })',
+        '    .step("prepare-context", { type: "deterministic", command: "echo skill-application-boundary.json generation_time_only runtimeEmbodiment", captureOutput: true, failOnError: true })',
+        '    .step("plan-minimal", { agent: "reviewer", task: "Write the plan to plan.md and create mapping.json for the orchestration plan." })',
+        '    .step("post-implementation-file-gate", { type: "deterministic", command: "test -f plan.md && grep -Eq \'ReviewReadinessResult\' plan.md", captureOutput: true, failOnError: true })',
+        '    .step("fix-loop", { agent: "reviewer", task: "fix-loop" })',
+        '    .step("final-review", { agent: "reviewer", task: "final-review" })',
+        '    .step("final-hard-validation", { type: "deterministic", command: "npx tsc --noEmit && npm test", captureOutput: true, failOnError: true })',
+        '    .step("git-diff-gate", { type: "deterministic", command: "git diff --name-only > git-diff.txt", captureOutput: true, failOnError: true })',
+        '    .run({ cwd: process.cwd() });',
+        '  console.log(result.status);',
+        '}',
+        'main().catch((error) => { console.error(error); process.exit(1); });',
+      ].join('\n'),
+    };
+
+    const validation = validateGeneratedArtifact(weakArtifact, result.patternDecision, result.skillContext, implementationSpec);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'IMPLEMENTATION_CONTRACT_MISSING' }),
+        expect.objectContaining({ code: 'SOURCE_CHANGE_CONTRACT_MISSING' }),
+        expect.objectContaining({ code: 'RESULT_PR_REPORTING_MISSING' }),
+        expect.objectContaining({ code: 'PLANNING_ONLY_WORKFLOW_FOR_IMPLEMENTATION' }),
+      ]),
+    );
+  });
+
+  it('treats write-a-plan-then-implement requests as implementation workflows', () => {
+    const implementationSpec = spec({
+      description: [
+        'Write a plan, then implement webapp-triggered deep reviews with backend services, runtime election, tests, and result evidence.',
+        'The workflow must update backend source files.',
+      ].join(' '),
+      targetFiles: ['packages/backend/src/services/deep-review-orchestrator.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/mixed-plan-implement.ts',
+    });
+
+    const weakArtifact = {
+      ...artifact(result),
+      content: [
+        "import { workflow } from '@agent-relay/sdk/workflows';",
+        'async function main() {',
+        '  const result = await workflow("ricky-mixed")',
+        '    .description("Write a plan for the implementation.")',
+        '    .pattern("dag")',
+        '    .channel("wf-ricky-mixed")',
+        '    .agent("reviewer", { cli: "claude", role: "review stage" })',
+        '    .step("prepare-context", { type: "deterministic", command: "echo skill-application-boundary.json generation_time_only runtimeEmbodiment", captureOutput: true, failOnError: true })',
+        '    .step("plan-minimal", { agent: "reviewer", task: "Write the plan to plan.md and create mapping.json." })',
+        '    .step("post-implementation-file-gate", { type: "deterministic", command: "test -f plan.md && grep -Eq \'ReviewReadinessResult\' plan.md", captureOutput: true, failOnError: true })',
+        '    .step("fix-loop", { agent: "reviewer", task: "fix-loop" })',
+        '    .step("final-review", { agent: "reviewer", task: "final-review" })',
+        '    .step("final-hard-validation", { type: "deterministic", command: "npx tsc --noEmit && npm test", captureOutput: true, failOnError: true })',
+        '    .step("git-diff-gate", { type: "deterministic", command: "git diff --name-only > git-diff.txt", captureOutput: true, failOnError: true })',
+        '    .run({ cwd: process.cwd() });',
+        '  console.log(result.status);',
+        '}',
+        'main().catch((error) => { console.error(error); process.exit(1); });',
+      ].join('\n'),
+    };
+
+    const validation = validateGeneratedArtifact(weakArtifact, result.patternDecision, result.skillContext, implementationSpec);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'IMPLEMENTATION_CONTRACT_MISSING' }),
+        expect.objectContaining({ code: 'PLANNING_ONLY_WORKFLOW_FOR_IMPLEMENTATION' }),
+      ]),
+    );
+  });
+
+  it('accepts explicit non-PR result status evidence for implementation workflows', () => {
+    const implementationSpec = spec({
+      description: 'Implement local-only workflow generation checks with tests and a result summary.',
+      targetFiles: ['src/product/generation/pipeline.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/local-result-evidence.ts',
+    });
+    const content = artifact(result).content
+      .replace(/PR\/result reporting/g, 'result reporting')
+      .replace(/PR URL or /g, '')
+      .replace(/pull request/g, 'result status')
+      .replace(/Pull request/g, 'Result status');
+    const validation = validateGeneratedArtifact(
+      { ...artifact(result), content },
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    );
+
+    expect(validation.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'RESULT_PR_REPORTING_MISSING' }),
+      ]),
+    );
   });
 
   it('returns dry-run and deterministic validation commands without executing agent-relay', () => {

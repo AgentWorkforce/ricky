@@ -35,12 +35,12 @@ export function generate(input: GenerationInput): GenerationResult {
   if (input.refine) {
     const refined = refineWithLlm(input.spec, artifact, {
       model: input.refine.model,
-      validate: (candidate) => validateGeneratedArtifact(candidate, patternDecision, skillContext),
+      validate: (candidate) => validateGeneratedArtifact(candidate, patternDecision, skillContext, input.spec),
     });
     finalArtifact = refined.artifact;
     refinement = refined.metadata;
   }
-  const validation = validateGeneratedArtifact(finalArtifact, patternDecision, skillContext);
+  const validation = validateGeneratedArtifact(finalArtifact, patternDecision, skillContext, input.spec);
   const plannedChecks = buildPlannedChecks(finalArtifact, input.dryRunEnabled !== false);
 
   return {
@@ -91,7 +91,7 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       resolver: input.workforcePersonaWriter?.resolver,
     });
     const finalArtifact = applyPersonaArtifactToRenderedArtifact(artifact, personaResult);
-    const validation = validateGeneratedArtifact(finalArtifact, baseResult.patternDecision, baseResult.skillContext);
+    const validation = validateGeneratedArtifact(finalArtifact, baseResult.patternDecision, baseResult.skillContext, input.spec);
     const plannedChecks = buildPlannedChecks(finalArtifact, input.dryRunEnabled !== false);
 
     return {
@@ -150,6 +150,7 @@ export function validateGeneratedArtifact(
   artifact: RenderedArtifact,
   patternDecision: PatternDecision,
   skillContext: SkillContext,
+  spec?: NormalizedWorkflowSpec,
 ): GenerationValidationResult {
   const issues: GenerationIssue[] = [...skillContext.issues];
   const content = artifact.content;
@@ -200,6 +201,37 @@ export function validateGeneratedArtifact(
   }
   if (!/\.run\(\{ cwd: process\.cwd\(\) \}\)/.test(content)) {
     issues.push(blockingIssue('validation', 'RUN_CWD_MISSING', 'Rendered workflow does not run with explicit cwd.'));
+  }
+
+  if (spec && requiresImplementationWorkflow(spec)) {
+    if (!/IMPLEMENTATION_WORKFLOW_CONTRACT/.test(content)) {
+      issues.push(blockingIssue(
+        'validation',
+        'IMPLEMENTATION_CONTRACT_MISSING',
+        'Implementation specs must render workflows with an explicit implementation contract, not planning-only artifacts.',
+      ));
+    }
+    if (!/source changes|code changes|edit source|implementation diff|non-empty diff/i.test(content)) {
+      issues.push(blockingIssue(
+        'validation',
+        'SOURCE_CHANGE_CONTRACT_MISSING',
+        'Implementation workflow must explicitly require source/code changes and non-empty diff evidence.',
+      ));
+    }
+    if (!/pull request|PR URL|gh pr create|gh pr view|result status|result location|explicit result|results?:/i.test(content)) {
+      issues.push(blockingIssue(
+        'validation',
+        'RESULT_PR_REPORTING_MISSING',
+        'Implementation workflow must report PR/result evidence or an explicit result status/location instead of only artifact paths.',
+      ));
+    }
+    if (looksPlanningOnly(content)) {
+      issues.push(blockingIssue(
+        'validation',
+        'PLANNING_ONLY_WORKFLOW_FOR_IMPLEMENTATION',
+        'Rendered workflow looks planning-only for an implementation spec.',
+      ));
+    }
   }
 
   for (const skillName of skillContext.applicableSkillNames) {
@@ -274,6 +306,53 @@ export function validateGeneratedArtifact(
     hasDeterministicGates,
     hasReviewStage,
   };
+}
+
+function requiresImplementationWorkflow(spec: NormalizedWorkflowSpec): boolean {
+  const text = [
+    spec.description,
+    spec.targetContext,
+    spec.desiredAction.summary,
+    ...spec.constraints.map((constraint) => constraint.constraint),
+    ...spec.acceptanceGates.map((gate) => gate.gate),
+    ...spec.evidenceRequirements.map((requirement) => requirement.requirement),
+  ].filter(Boolean).join('\n');
+
+  const lower = text.toLowerCase();
+  const explicitPlanningOnly =
+    /\b(plan only|planning only|documentation only|docs only|mapping only)\b/.test(lower);
+  const implementationTarget = spec.targetFiles.some((file) => !/\.(md|mdx|txt|adoc)$/i.test(file));
+  const implementationSignal =
+    /\b(implement|implementation|add|update|replace|migrate|wire|persist|dispatch|route|endpoint|schema|migration|service|webhook|writeback|runtime election|github writeback|webapp|backend|telegram|slack)\b/.test(lower);
+  const verificationSignal =
+    /\b(test|typecheck|build|acceptance|e2e|end-to-end|pr|pull request|github|diff|files? changed)\b/.test(lower);
+
+  if (explicitPlanningOnly && !implementationTarget && !implementationSignal) return false;
+
+  if (implementationTarget) return true;
+  return implementationSignal && verificationSignal;
+}
+
+function looksPlanningOnly(content: string): boolean {
+  const lower = content.toLowerCase();
+  const planSignals = [
+    /scaffold[^.\n]+plan/,
+    /write the plan to/,
+    /minimal[^.\n]+orchestration plan/,
+    /create[^.\n]+mapping\.json/,
+    /plan\.md/,
+    /mapping\.json/,
+  ].filter((pattern) => pattern.test(lower)).length;
+  const implementationSignals = [
+    /implementation_workflow_contract/,
+    /source changes/,
+    /code changes/,
+    /gh pr create/,
+    /pull request/,
+    /non-empty diff/,
+  ].filter((pattern) => pattern.test(lower)).length;
+
+  return planSignals >= 3 && implementationSignals < 2;
 }
 
 export function buildPlannedChecks(artifact: RenderedArtifact, includeDryRun = true): PlannedCheck[] {

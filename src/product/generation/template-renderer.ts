@@ -117,6 +117,8 @@ function renderSource(input: {
   const lines: string[] = [
     "import { workflow } from '@agent-relay/sdk/workflows';",
     '',
+    '// IMPLEMENTATION_WORKFLOW_CONTRACT: implementation specs must produce source changes, tests, non-empty diff evidence, and PR/result reporting.',
+    '',
     'async function main() {',
     `  const result = await workflow(${literal(input.workflowId)})`,
     `    .description(${literal(input.spec.description)})`,
@@ -430,6 +432,10 @@ Generation-time skill boundary:
 Description:
 ${spec.description}
 
+Implementation contract:
+- If this is an implementation spec, agents must make source changes in the target repository rather than stopping at planning artifacts.
+- Final success requires code/source changes, tests, non-empty diff evidence, and PR/result reporting unless the spec explicitly says planning-only.
+
 Deliverables:
 ${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : ['A generated workflow artifact and any requested output files'])}
 
@@ -437,7 +443,7 @@ Non-goals:
 ${formatList(spec.constraints.filter((constraint) => constraint.category === 'scope').map((constraint) => constraint.constraint))}
 
 Verification commands:
-${formatList(['file_exists gate for declared targets', 'grep sanity gate', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff --name-only gate'])}
+${formatList(['file_exists gate for declared targets', 'grep sanity gate', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff --name-only gate requiring a non-empty diff', 'PR URL or explicit result summary'])}
 
 Write ${artifactsDir}/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`)},
       verification: { type: 'file_exists', value: ${literal(`${artifactsDir}/lead-plan.md`)} },
@@ -458,6 +464,11 @@ function renderImplementationStep(
       dependsOn: ['lead-plan'],
 ${selectionLines}
       task: ${templateLiteral(`${isCodeWorkflow ? 'Implement the requested code-writing workflow slice.' : 'Author the requested workflow artifact.'}
+
+IMPLEMENTATION_WORKFLOW_CONTRACT:
+- For implementation specs, edit source files and produce code changes, not just plan.md, mapping.json, or analysis artifacts.
+- Keep a non-empty implementation diff outside transient artifact directories.
+- Add or update tests that prove the changed behavior.
 
 Scope:
 ${spec.description}
@@ -556,9 +567,11 @@ ${selectionLines}
 
 Include:
 - files changed
+- source changes and implementation diff evidence
 - dry-run command to execute before runtime launch
 - deterministic validation commands
 - review verdicts
+- PR URL or a clear result location/status when PR creation is intentionally out of scope
 - skill application boundary from ${artifactsDir}/skill-application-boundary.json
 - remaining risks or environmental blockers
 ${renderToolSelectionSummary(selection)}
