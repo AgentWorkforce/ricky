@@ -111,6 +111,10 @@ export interface WorkforcePersonaWriterOptions {
   personaIntentCandidates?: readonly string[];
   resolver?: WorkforcePersonaResolver;
   skillContext?: SkillContext;
+  validationFeedback?: {
+    errors: string[];
+    previousContent: string;
+  };
 }
 
 export interface WorkforcePersonaWriterMetadata {
@@ -189,6 +193,7 @@ export async function writeWorkflowWithWorkforcePersona(
     outputPath: options.outputPath,
     relevantFiles,
     skillContext: options.skillContext,
+    validationFeedback: options.validationFeedback,
   });
   const promptDigest = digest(task);
   const selection = resolved.context.selection;
@@ -439,6 +444,10 @@ export function buildWorkflowPersonaTask(
     outputPath: string;
     relevantFiles: Array<{ path: string; content?: string }>;
     skillContext?: SkillContext;
+    validationFeedback?: {
+      errors: string[];
+      previousContent: string;
+    };
   },
 ): string {
   const contract = {
@@ -492,6 +501,7 @@ export function buildWorkflowPersonaTask(
     'Matched Ricky generation skills:',
     renderSkillContextForPersona(input.skillContext),
     '',
+    ...renderValidationFeedbackForPersona(input.validationFeedback),
     'Agent Relay workflow standards:',
     '- Prefer TypeScript workflows using @agent-relay/sdk/workflows.',
     '- Choose `.pattern(...)` from the normalized spec and matched skill context: pipeline for linear stages, supervisor for coordinated review/hand-off, or dag for parallel branches and gated fan-out. When `choosing-swarm-patterns` is matched, use its decision framework before authoring tasks.',
@@ -528,6 +538,25 @@ export function buildWorkflowPersonaTask(
     'Structured response contract:',
     JSON.stringify(contract, null, 2),
   ].join('\n');
+}
+
+function renderValidationFeedbackForPersona(
+  feedback: { errors: string[]; previousContent: string } | undefined,
+): string[] {
+  if (!feedback) return [];
+  return [
+    'Ricky pre-write validation failed on your previous artifact.',
+    'Fix every validation issue before returning the complete replacement artifact.',
+    '',
+    'Validation errors:',
+    safeJson(feedback.errors),
+    '',
+    'Previous rejected artifact:',
+    '```ts',
+    feedback.previousContent.trimEnd(),
+    '```',
+    '',
+  ];
 }
 
 function renderSkillContextForPersona(skillContext: SkillContext | undefined): string {

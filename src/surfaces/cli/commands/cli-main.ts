@@ -1809,12 +1809,15 @@ function renderLocalJson(localResult: NonNullable<InteractiveCliResult['localRes
 function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localResult']>): string[] {
   const lines: string[] = [];
   const artifactPath = localResult.generation?.artifact?.path ?? localResult.artifacts[0]?.path;
+  const workflowName = localResult.generation?.artifact?.workflow_id;
   if (localResult.ok) {
     if (localResult.execution?.status === 'success') {
       lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
+      if (workflowName) lines.push(`Workflow name: ${workflowName}`);
       lines.push(`Execution: success${localResult.execution.execution.run_id ? ` — run ${localResult.execution.execution.run_id}` : ''}`);
     } else if (localResult.generation) {
       lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
+      if (workflowName) lines.push(`Workflow name: ${workflowName}`);
       if (localResult.generation.next) {
         lines.push(`Run: ${localResult.generation.next.run_command}`);
         lines.push(`Background: ${localResult.generation.next.run_command} --background`);
@@ -1828,6 +1831,7 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
   } else {
     if (localResult.execution) {
       lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
+      if (workflowName) lines.push(`Workflow name: ${workflowName}`);
       lines.push(executionFailureSummary(localResult));
       const resume = resumeCommandFor(localResult);
       if (resume) lines.push(`Resume: ${resume}`);

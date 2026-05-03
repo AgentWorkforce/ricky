@@ -1177,7 +1177,7 @@ describe('runLocal', () => {
 
     expect(result.ok).toBe(true);
     expect(progress).toEqual([
-      'Writing workflow...',
+      'ricky is writing the workflow...',
       'Running workflow...',
     ]);
   });
