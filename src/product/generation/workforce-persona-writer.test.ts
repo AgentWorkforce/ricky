@@ -198,6 +198,109 @@ describe('workforce persona workflow writer', () => {
     expect(errorText).toMatch(/workflow|persona|fenced|structured/i);
   });
 
+  it('runs pre-write validation and asks the persona to repair invalid workflow syntax before succeeding', async () => {
+    const base = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/prewrite-repair.ts',
+    });
+    expect(base.success).toBe(true);
+    const tasks: string[] = [];
+    const resolver: WorkforcePersonaResolver = async () => ({
+      source: 'package',
+      intent: 'agent-relay-workflow',
+      warnings: [],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          runtime: { harness: 'codex', model: 'codex/test' },
+        },
+        sendMessage(task) {
+          tasks.push(task);
+          const content = tasks.length === 1
+            ? `${base.artifact!.content}\n}`
+            : base.artifact!.content;
+          return execution(personaResponse('workflows/generated/prewrite-repair.ts', content));
+        },
+      },
+    });
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/prewrite-repair.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'prewrite-repair',
+        targetMode: 'local',
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact?.content).toBe(base.artifact!.content);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1]).toContain('Ricky pre-write validation failed');
+    expect(tasks[1]).toContain('Rendered artifact has unbalanced braces');
+    expect(tasks[1]).toContain('Previous rejected artifact');
+    expect(result.workforcePersona?.warnings).toContain(
+      'Ricky pre-write validation repaired the Workforce persona artifact before writing.',
+    );
+  });
+
+  it('falls back to Ricky deterministic rendering when persona pre-write repair is still invalid', async () => {
+    const base = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/prewrite-fallback.ts',
+    });
+    expect(base.success).toBe(true);
+    const resolver: WorkforcePersonaResolver = async () => ({
+      source: 'package',
+      intent: 'agent-relay-workflow',
+      warnings: [],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          runtime: { harness: 'codex', model: 'codex/test' },
+        },
+        sendMessage() {
+          return execution(personaResponse(
+            'workflows/generated/prewrite-fallback.ts',
+            `${base.artifact!.content}\n}`,
+          ));
+        },
+      },
+    });
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/prewrite-fallback.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'prewrite-fallback',
+        targetMode: 'local',
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact?.content).toBe(base.artifact!.content);
+    expect(result.validation.warnings.join('\n')).toContain('used Ricky deterministic renderer instead');
+    expect(result.workforcePersona?.warnings.join('\n')).toContain('used Ricky deterministic renderer instead');
+  });
+
   it('adapts harness-kit useRunnablePersona into the sendMessage context Ricky expects', async () => {
     const calls: Array<{ intent: string; options: Record<string, unknown> | undefined }> = [];
     const resolved = await resolveWorkforcePersonaContextWithModules(
@@ -475,6 +578,16 @@ function execution(output: string): WorkforcePersonaExecution {
   Object.defineProperty(promise, 'runId', { value: Promise.resolve('persona-run-001') });
   promise.cancel = () => {};
   return promise;
+}
+
+function personaResponse(path: string, content: string): string {
+  return JSON.stringify({
+    artifact: {
+      path,
+      content,
+    },
+    metadata: { workflowName: path.split('/').pop()?.replace(/\.ts$/, '') },
+  });
 }
 
 function workflowSource(): string {

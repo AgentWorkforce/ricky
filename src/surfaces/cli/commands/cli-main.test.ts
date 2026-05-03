@@ -1202,6 +1202,7 @@ describe('cliMain', () => {
 
       expect(result.exitCode).toBe(0);
       expect(output).toContain('Generation: ok — workflows/generated/issue-3.ts');
+      expect(output).toContain('Workflow name: wf-issue-3');
       expect(output).toContain('Execution: success');
       expect(output).toContain('Stdout: /repo/.workflow-artifacts/ricky-local-runs/run-1/stdout.log');
       expect(output).toContain('Stderr: /repo/.workflow-artifacts/ricky-local-runs/run-1/stderr.log');
@@ -1236,6 +1237,7 @@ describe('cliMain', () => {
 
       const output = result.output.join('\n');
       expect(output).toContain('Generation: ok — workflows/generated/issue-3.ts');
+      expect(output).toContain('Workflow name: wf-issue-3');
       expect(output).toContain('Run: ricky run workflows/generated/issue-3.ts');
       expect(output).not.toContain('Author:');
     });
@@ -1263,6 +1265,7 @@ describe('cliMain', () => {
       const output = result.output.join('\n');
       expect(result.exitCode).toBe(0);
       expect(output).toContain('Generation: ok — workflows/generated/issue-3.ts');
+      expect(output).toContain('Workflow name: wf-issue-3');
       expect(output).toContain('Run: ricky run workflows/generated/issue-3.ts');
       expect(output).toContain('Background: ricky run workflows/generated/issue-3.ts --background');
       expect(output).not.toContain('--- execution ---');
@@ -1666,7 +1669,7 @@ describe('cliMain', () => {
       return spinner;
     });
     const runner = vi.fn(async (deps) => {
-      deps.localProgress?.('Writing workflow with Workforce persona...');
+      deps.localProgress?.('ricky is writing the workflow...');
       deps.localProgress?.('Ricky is fixing the workflow...');
       deps.localProgress?.('Retrying workflow from install-deps...');
       return fakeInteractiveResult({
@@ -1695,8 +1698,8 @@ describe('cliMain', () => {
 
     expect(createProgressSpinner).toHaveBeenCalledTimes(1);
     expect(events).toEqual([
-      'create:Writing workflow with Workforce persona...',
-      'start:Writing workflow with Workforce persona...',
+      'create:ricky is writing the workflow...',
+      'start:ricky is writing the workflow...',
       'text:Ricky is fixing the workflow...',
       'text:Retrying workflow from install-deps...',
       'stop:Retrying workflow from install-deps...',

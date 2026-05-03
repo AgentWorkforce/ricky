@@ -77,7 +77,7 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
     (input.spec.executionPreference === 'cloud' ? 'cloud' : 'local');
 
   try {
-    const personaResult = await writeWorkflowWithWorkforcePersona(input.spec, {
+    const writerOptions = {
       repoRoot: input.workforcePersonaWriter?.repoRoot ?? process.cwd(),
       workflowName: input.workforcePersonaWriter?.workflowName ?? artifact.workflowId,
       targetMode,
@@ -90,9 +90,48 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       personaIntentCandidates: input.workforcePersonaWriter?.personaIntentCandidates,
       resolver: input.workforcePersonaWriter?.resolver,
       skillContext: baseResult.skillContext,
-    });
-    const finalArtifact = applyPersonaArtifactToRenderedArtifact(artifact, personaResult);
-    const validation = validateGeneratedArtifact(finalArtifact, baseResult.patternDecision, baseResult.skillContext, input.spec);
+    };
+    const personaResult = await writeWorkflowWithWorkforcePersona(input.spec, writerOptions);
+    let finalArtifact = applyPersonaArtifactToRenderedArtifact(artifact, personaResult);
+    let validation = validateGeneratedArtifact(finalArtifact, baseResult.patternDecision, baseResult.skillContext, input.spec);
+    let finalPersonaMetadata = personaResult.metadata;
+
+    if (!validation.valid) {
+      const repairResult = await writeWorkflowWithWorkforcePersona(input.spec, {
+        ...writerOptions,
+        validationFeedback: {
+          errors: validation.errors,
+          previousContent: finalArtifact.content,
+        },
+      });
+      const repairedArtifact = applyPersonaArtifactToRenderedArtifact(artifact, repairResult);
+      const repairValidation = validateGeneratedArtifact(repairedArtifact, baseResult.patternDecision, baseResult.skillContext, input.spec);
+
+      if (repairValidation.valid) {
+        finalArtifact = repairedArtifact;
+        validation = repairValidation;
+        finalPersonaMetadata = {
+          ...repairResult.metadata,
+          warnings: [
+            ...repairResult.metadata.warnings,
+            'Ricky pre-write validation repaired the Workforce persona artifact before writing.',
+          ],
+        };
+      } else {
+        const fallbackMessage = `Ricky pre-write validation rejected the Workforce persona artifact after repair (${repairValidation.errors[0] ?? 'unknown validation error'}); used Ricky deterministic renderer instead.`;
+        const fallbackIssue = warningIssue('validation', 'WORKFORCE_PERSONA_PREWRITE_REPAIR_FALLBACK', fallbackMessage);
+        return {
+          ...baseResult,
+          success: true,
+          validation: addValidationWarning(baseResult.validation, fallbackIssue),
+          workforcePersona: {
+            ...repairResult.metadata,
+            warnings: [...repairResult.metadata.warnings, fallbackMessage],
+          },
+        };
+      }
+    }
+
     const plannedChecks = buildPlannedChecks(finalArtifact, input.dryRunEnabled !== false);
 
     return {
@@ -105,7 +144,7 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
         .filter((check) => check.stage !== 'dry_run')
         .map((check) => check.command),
       executionRoute: resolveExecutionRoute(input.spec, finalArtifact),
-      workforcePersona: personaResult.metadata,
+      workforcePersona: finalPersonaMetadata,
     };
   } catch (error) {
     const writerError = error instanceof WorkforcePersonaWriterError ? error : null;
@@ -503,5 +542,26 @@ function blockingIssue(stage: GenerationIssue['stage'], code: string, message: s
     code,
     message,
     blocking: true,
+  };
+}
+
+function warningIssue(stage: GenerationIssue['stage'], code: string, message: string): GenerationIssue {
+  return {
+    severity: 'warning',
+    stage,
+    code,
+    message,
+    blocking: false,
+  };
+}
+
+function addValidationWarning(
+  validation: GenerationValidationResult,
+  issue: GenerationIssue,
+): GenerationValidationResult {
+  return {
+    ...validation,
+    warnings: [...validation.warnings, issue.message],
+    issues: [...validation.issues, issue],
   };
 }

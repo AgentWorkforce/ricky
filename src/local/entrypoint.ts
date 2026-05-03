@@ -898,9 +898,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           refine: request.refine,
           ...(workforcePersonaWriter ? { workforcePersonaWriter } : {}),
         };
-        onProgress?.(generationInput.workforcePersonaWriter
-          ? 'Writing workflow with Workforce persona...'
-          : 'Writing workflow...');
+        onProgress?.('ricky is writing the workflow...');
         generationResult = generationInput.workforcePersonaWriter
           ? await generateWithWorkforcePersona(generationInput)
           : generate(generationInput);
