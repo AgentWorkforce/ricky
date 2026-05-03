@@ -311,6 +311,13 @@ function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillC
     );
   }
 
+  if (skills.applicableSkillNames.includes('choosing-swarm-patterns')) {
+    commands.push(
+      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
+      `grep -F ${shellQuote('"effect":"pattern_selection"')} ${quotedPath}`,
+    );
+  }
+
   if (skills.applicableSkillNames.includes('writing-agent-relay-workflows')) {
     commands.push(
       `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
@@ -617,6 +624,17 @@ function buildRenderingSkillEvidence(
 ): SkillApplicationEvidence[] {
   const loaded = new Set(skills.applicableSkillNames);
   const evidence: SkillApplicationEvidence[] = [...skills.applicationEvidence];
+
+  if (loaded.has('choosing-swarm-patterns')) {
+    evidence.push({
+      skillName: 'choosing-swarm-patterns',
+      stage: 'generation_rendering',
+      effect: 'pattern_selection',
+      behavior: 'generation_time_only',
+      runtimeEmbodiment: false,
+      evidence: 'Rendered the selected swarm pattern into the workflow builder so Ricky chooses the coordination shape before authoring tasks.',
+    });
+  }
 
   if (loaded.has('writing-agent-relay-workflows')) {
     evidence.push({

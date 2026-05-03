@@ -26,19 +26,31 @@ describe('skill matcher', () => {
     expect(matches[0].confidence).toBeGreaterThanOrEqual(0.4);
   });
 
-  it('falls back to the project default when no skill-relevant content matches', () => {
+  it('falls back to the project workflow-generation defaults when no skill-relevant content matches', () => {
     const matches = matchSkills(spec('Update a small README sentence.'), {
       registry: registry([
+        { id: 'choosing-swarm-patterns', description: 'Use for Agent Relay workflow pattern selection.' },
         { id: 'writing-agent-relay-workflows', description: 'Use for agent relay workflow authoring.' },
+        { id: 'relay-80-100-workflow', description: 'Use for end-to-end workflow validation.' },
       ]),
     });
 
-    expect(matches).toEqual([
-      expect.objectContaining({
-        id: 'writing-agent-relay-workflows',
-        reason: expect.stringContaining('Project default'),
-      }),
-    ]);
+    expect(matches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'choosing-swarm-patterns',
+          reason: expect.stringContaining('Project default'),
+        }),
+        expect.objectContaining({
+          id: 'writing-agent-relay-workflows',
+          reason: expect.stringContaining('Project default'),
+        }),
+        expect.objectContaining({
+          id: 'relay-80-100-workflow',
+          reason: expect.stringContaining('Project default'),
+        }),
+      ]),
+    );
   });
 
   it('returns no skills for an empty registry', () => {
@@ -88,6 +100,10 @@ describe('skill matcher', () => {
 
     expect(skills).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          id: 'choosing-swarm-patterns',
+          path: expect.stringMatching(new RegExp(`^${escapeRegExp(repoRoot)}/.*skills/choosing-swarm-patterns/SKILL\\.md$`)),
+        }),
         expect.objectContaining({
           id: 'writing-agent-relay-workflows',
           path: expect.stringMatching(new RegExp(`^${escapeRegExp(repoRoot)}/.*skills/writing-agent-relay-workflows/SKILL\\.md$`)),

@@ -1,6 +1,12 @@
 ---
 name: choosing-swarm-patterns
-description: Use when coordinating multiple AI agents with Agent Relay's workflow engine and need to pick the right orchestration pattern - covers the 10 core patterns (fan-out, pipeline, hub-spoke, consensus, mesh, handoff, cascade, dag, debate, hierarchical) plus 14 specialized ones, with decision framework and accurate SDK/YAML examples.
+description: Use when Ricky writes or generates Agent Relay workflows and needs to pick the right orchestration shape for coordinating multiple AI agents - covers the 10 core patterns (fan-out, pipeline, hub-spoke, consensus, mesh, handoff, cascade, dag, debate, hierarchical) plus 14 specialized ones, with decision framework and accurate SDK/YAML examples.
+keywords:
+  - workflow generation
+  - workflow shape
+  - pattern selection
+  - swarm pattern
+  - Agent Relay
 ---
 
 ### Overview

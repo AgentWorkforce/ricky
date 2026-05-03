@@ -126,10 +126,23 @@ describe('workflow generation pipeline', () => {
     const artifact = result.artifact!;
 
     expect(result.skillContext.applicableSkillNames).toEqual(
-      expect.arrayContaining(['writing-agent-relay-workflows', 'relay-80-100-workflow']),
+      expect.arrayContaining(['choosing-swarm-patterns', 'writing-agent-relay-workflows', 'relay-80-100-workflow']),
     );
     expect(result.skillContext.applicationEvidence).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          skillName: 'choosing-swarm-patterns',
+          stage: 'generation_selection',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+        }),
+        expect.objectContaining({
+          skillName: 'choosing-swarm-patterns',
+          stage: 'generation_loading',
+          effect: 'metadata',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+        }),
         expect.objectContaining({
           skillName: 'writing-agent-relay-workflows',
           stage: 'generation_selection',
@@ -161,6 +174,14 @@ describe('workflow generation pipeline', () => {
     expect(artifact.skillApplicationEvidence).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          skillName: 'choosing-swarm-patterns',
+          stage: 'generation_rendering',
+          effect: 'pattern_selection',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+          evidence: expect.stringContaining('coordination shape'),
+        }),
+        expect.objectContaining({
           skillName: 'writing-agent-relay-workflows',
           stage: 'generation_rendering',
           effect: 'workflow_contract',
@@ -180,6 +201,7 @@ describe('workflow generation pipeline', () => {
     );
     expect(artifact.content).toContain('loaded-skills.txt');
     expect(artifact.content).toContain('skill-application-boundary.json');
+    expect(artifact.content).toContain('choosing-swarm-patterns');
     expect(artifact.content).toContain('writing-agent-relay-workflows');
     expect(artifact.content).toContain('relay-80-100-workflow');
     expect(artifact.content).toContain('generation_time_only');
@@ -187,11 +209,13 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('Skills are applied by Ricky during selection, loading, and template rendering.');
     expect(artifact.content).toContain('Do not claim generated agents load, retain, or embody skill files at runtime');
     const skillBoundaryGate = artifact.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!;
+    expect(skillBoundaryGate.command).toContain('choosing-swarm-patterns');
     expect(skillBoundaryGate.command).toContain('writing-agent-relay-workflows');
     expect(skillBoundaryGate.command).toContain('relay-80-100-workflow');
     expect(skillBoundaryGate.command).toContain('"stage":"generation_selection"');
     expect(skillBoundaryGate.command).toContain('"stage":"generation_loading"');
     expect(skillBoundaryGate.command).toContain('"stage":"generation_rendering"');
+    expect(skillBoundaryGate.command).toContain('"effect":"pattern_selection"');
     expect(skillBoundaryGate.command).toContain('"effect":"workflow_contract"');
     expect(skillBoundaryGate.command).toContain('"effect":"validation_gates"');
     expect(artifact.gates).toEqual(
