@@ -41,7 +41,9 @@ describe('workflow generation pipeline', () => {
       riskLevel: 'high',
       overrideUsed: false,
     });
+    expect(result.patternDecision.specSignals).toContain('choosing-swarm-patterns skill loaded');
     expect(result.patternDecision.reason).toMatch(/parallel implementation, review, and validation gates/i);
+    expect(result.patternDecision.reason).toMatch(/choosing-swarm-patterns/i);
     expect(result.executionRoute).toMatchObject({
       artifactDelivery: 'write_local_file',
       resolvedTarget: 'local',
@@ -278,6 +280,8 @@ describe('workflow generation pipeline', () => {
       pattern: 'supervisor',
       riskLevel: 'medium',
     });
+    expect(result.patternDecision.specSignals).toContain('choosing-swarm-patterns skill loaded');
+    expect(result.patternDecision.reason).toMatch(/choosing-swarm-patterns/i);
     expect(artifact.tasks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-claude' }),
@@ -877,6 +881,8 @@ describe('workflow generation pipeline', () => {
       riskLevel: 'low',
       overrideUsed: false,
     });
+    expect(result.patternDecision.specSignals).toContain('choosing-swarm-patterns skill loaded');
+    expect(result.patternDecision.reason).toMatch(/choosing-swarm-patterns/i);
   });
 
   it('respects pattern override', () => {

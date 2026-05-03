@@ -384,10 +384,11 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
         const prepackBuildsBundle = typeof rootPkg.scripts?.prepack === 'string'
           && (rootPkg.scripts.prepack.includes('bundle') || rootPkg.scripts.prepack.includes('build'));
         const filesIncludesDist = Array.isArray(rootPkg.files) && rootPkg.files.includes('dist');
+        const filesIncludesSkills = Array.isArray(rootPkg.files) && rootPkg.files.includes('.agents/skills');
 
         return result(
           'cli-bin-still-wired',
-          [targetIsBundle, bundlerScriptExists, cliBinSourceExists, cliMainExists, prepackBuildsBundle, filesIncludesDist],
+          [targetIsBundle, bundlerScriptExists, cliBinSourceExists, cliMainExists, prepackBuildsBundle, filesIncludesDist, filesIncludesSkills],
           [
             `package.json bin.ricky: ${binTarget || '(missing)'}`,
             `bundler script exists: ${bundlerScriptExists}`,
@@ -395,6 +396,7 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
             `src/surfaces/cli/commands/cli-main.ts exists: ${cliMainExists}`,
             `prepack builds the bundle: ${prepackBuildsBundle}`,
             `published files include dist: ${filesIncludesDist}`,
+            `published files include .agents/skills: ${filesIncludesSkills}`,
           ],
           [],
           [
@@ -404,6 +406,7 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
             ...(cliMainExists ? [] : ['Missing src/surfaces/cli/commands/cli-main.ts']),
             ...(prepackBuildsBundle ? [] : ['prepack script does not run the bundle/build']),
             ...(filesIncludesDist ? [] : ['Root package.json files does not include dist']),
+            ...(filesIncludesSkills ? [] : ['Root package.json files does not include .agents/skills']),
           ],
         );
       },

@@ -1,4 +1,6 @@
-import { resolve } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -110,6 +112,28 @@ describe('skill matcher', () => {
         }),
       ]),
     );
+  });
+
+  it('discovers bundled package skills when invoked outside a project tree', () => {
+    const emptyProject = mkdtempSync(join(tmpdir(), 'ricky-empty-project-'));
+    try {
+      process.chdir(emptyProject);
+      resetSkillRegistryCache();
+
+      const skills = loadSkillRegistry();
+
+      expect(skills).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'choosing-swarm-patterns' }),
+          expect.objectContaining({ id: 'writing-agent-relay-workflows' }),
+          expect.objectContaining({ id: 'relay-80-100-workflow' }),
+        ]),
+      );
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(emptyProject, { recursive: true, force: true });
+      resetSkillRegistryCache();
+    }
   });
 });
 

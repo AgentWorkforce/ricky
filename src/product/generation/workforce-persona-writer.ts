@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
-import type { RenderedArtifact, WorkflowExecutionTarget } from './types.js';
+import type { RenderedArtifact, SkillContext, WorkflowExecutionTarget } from './types.js';
 
 export const WORKFORCE_PERSONA_INTENT_CANDIDATES = [
   'agent-relay-workflow',
@@ -109,6 +110,7 @@ export interface WorkforcePersonaWriterOptions {
   onProgress?: (chunk: { stream: 'stdout' | 'stderr'; text: string }) => void;
   personaIntentCandidates?: readonly string[];
   resolver?: WorkforcePersonaResolver;
+  skillContext?: SkillContext;
 }
 
 export interface WorkforcePersonaWriterMetadata {
@@ -186,6 +188,7 @@ export async function writeWorkflowWithWorkforcePersona(
     repoRoot: options.repoRoot,
     outputPath: options.outputPath,
     relevantFiles,
+    skillContext: options.skillContext,
   });
   const promptDigest = digest(task);
   const selection = resolved.context.selection;
@@ -435,6 +438,7 @@ export function buildWorkflowPersonaTask(
     repoRoot: string;
     outputPath: string;
     relevantFiles: Array<{ path: string; content?: string }>;
+    skillContext?: SkillContext;
   },
 ): string {
   const contract = {
@@ -485,9 +489,12 @@ export function buildWorkflowPersonaTask(
       content: file.content ?? null,
     }))),
     '',
+    'Matched Ricky generation skills:',
+    renderSkillContextForPersona(input.skillContext),
+    '',
     'Agent Relay workflow standards:',
     '- Prefer TypeScript workflows using @agent-relay/sdk/workflows.',
-    '- Choose `.pattern(...)` from the normalized spec: pipeline (linear stages), supervisor (coordinated review/hand-off), or dag (parallel branches, gated fan-out). Prefer dag when multiple independent workstreams, critical evidence, or high risk; pipeline for simple linear work; supervisor when a lead must gate subordinate steps.',
+    '- Choose `.pattern(...)` from the normalized spec and matched skill context: pipeline for linear stages, supervisor for coordinated review/hand-off, or dag for parallel branches and gated fan-out. When `choosing-swarm-patterns` is matched, use its decision framework before authoring tasks.',
     '- Use a dedicated workflow channel, not general.',
     '- Include explicit agents, step dependencies, deterministic gates, review stages, and final signoff.',
     '- Include an 80-to-100 fix loop: implement, validate, review, fix, final review, hard validation.',
@@ -519,6 +526,34 @@ export function buildWorkflowPersonaTask(
     'Structured response contract:',
     JSON.stringify(contract, null, 2),
   ].join('\n');
+}
+
+function renderSkillContextForPersona(skillContext: SkillContext | undefined): string {
+  if (!skillContext || skillContext.matches.length === 0) return 'No Ricky generation skills were matched.';
+
+  const summaries = skillContext.matches.map((match) => ({
+    id: match.id,
+    confidence: match.confidence,
+    reason: match.reason,
+    evidence: match.evidence.map((item) => `${item.source}:${item.trigger}`),
+  }));
+  const choosingSwarm = skillContext.matches.find((match) => match.id === 'choosing-swarm-patterns');
+  const choosingSwarmContent = choosingSwarm?.path ? safeReadSkillText(choosingSwarm.path) : null;
+
+  return [
+    safeJson({
+      loadedSkills: skillContext.applicableSkillNames,
+      matches: summaries,
+    }),
+    choosingSwarmContent
+      ? [
+          '',
+          '# choosing-swarm-patterns',
+          'Use this generation-time skill context to choose the workflow shape before writing steps:',
+          choosingSwarmContent,
+        ].join('\n')
+      : '',
+  ].filter(Boolean).join('\n');
 }
 
 export function parsePersonaWorkflowResponse(output: string, expectedPath: string): ParsedPersonaResponse {
@@ -798,6 +833,14 @@ function safeJson(value: unknown): string {
     return JSON.stringify(value, null, 2);
   } catch (error) {
     return JSON.stringify({ error: errorMessage(error) }, null, 2);
+  }
+}
+
+function safeReadSkillText(path: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return 'UNAVAILABLE_SKILL_CONTENT';
   }
 }
 

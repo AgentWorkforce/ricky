@@ -51,7 +51,7 @@ describe('Ricky flat src layout proof', () => {
     ],
     [
       'cli-bin-still-wired',
-      ['package.json bin.ricky: ./dist/ricky.js', 'src/surfaces/cli/bin/ricky.ts exists: true', 'prepack builds the bundle: true'],
+      ['package.json bin.ricky: ./dist/ricky.js', 'src/surfaces/cli/bin/ricky.ts exists: true', 'prepack builds the bundle: true', 'published files include .agents/skills: true'],
     ],
     ['legacy-packages-removed', ['packages/ exists: false', 'packages/ file count: 0']],
     ['surface-folder-shape', ['src/surfaces exists: true', 'src/surfaces/cli exists: true', 'future surfaces documented: slack/, web/, mac/']],

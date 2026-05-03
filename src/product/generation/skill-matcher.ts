@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { SkillMatch, SkillMatchEvidence, ToolRunner } from './types.js';
@@ -33,6 +34,7 @@ const DEFAULT_WORKFLOW_SKILL_IDS = [
 ];
 const PROJECT_SKILL_DIRS = ['.agents/skills', 'skills', '.claude/skills'];
 const USER_SKILL_DIRS = ['.claude/skills'];
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
 let cachedRegistry: SkillRegistryDescriptor[] | null = null;
 
@@ -74,6 +76,7 @@ export function resetSkillRegistryCache(): void {
 function discoverSkillRegistry(): SkillRegistryDescriptor[] {
   const roots = [
     ...projectSkillRoots(process.cwd()),
+    ...packageSkillRoots(),
     ...USER_SKILL_DIRS.map((dir) => join(homedir(), dir)),
   ];
   const seen = new Set<string>();
@@ -90,6 +93,17 @@ function discoverSkillRegistry(): SkillRegistryDescriptor[] {
   }
 
   return dedupeDescriptors(descriptors);
+}
+
+function packageSkillRoots(): string[] {
+  return [
+    // Source execution: src/product/generation/skill-matcher.ts -> repo root.
+    resolve(MODULE_DIR, '../../../.agents/skills'),
+    // Bundled npm execution: dist/ricky.js -> package root.
+    resolve(MODULE_DIR, '../.agents/skills'),
+    // Future direct package layout: module file colocated with bundled skills.
+    resolve(MODULE_DIR, '.agents/skills'),
+  ];
 }
 
 function projectSkillRoots(startDir: string): string[] {

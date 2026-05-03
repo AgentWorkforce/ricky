@@ -22,8 +22,8 @@ import {
 } from './workforce-persona-writer.js';
 
 export function generate(input: GenerationInput): GenerationResult {
-  const patternDecision = selectPattern(input.spec, input.patternOverride);
   const skillContext = loadSkills(input.spec, input.skillOverrides, input.templateOverride);
+  const patternDecision = selectPattern(input.spec, input.patternOverride, skillContext);
   const artifact = renderWorkflow({
     spec: input.spec,
     pattern: patternDecision,
@@ -89,6 +89,7 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       tier: input.workforcePersonaWriter?.tier,
       personaIntentCandidates: input.workforcePersonaWriter?.personaIntentCandidates,
       resolver: input.workforcePersonaWriter?.resolver,
+      skillContext: baseResult.skillContext,
     });
     const finalArtifact = applyPersonaArtifactToRenderedArtifact(artifact, personaResult);
     const validation = validateGeneratedArtifact(finalArtifact, baseResult.patternDecision, baseResult.skillContext, input.spec);
