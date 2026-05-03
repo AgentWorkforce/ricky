@@ -450,7 +450,7 @@ Non-goals:
 ${formatList(spec.constraints.filter((constraint) => constraint.category === 'scope').map((constraint) => constraint.constraint))}
 
 Verification commands:
-${formatList(['file_exists gate for declared targets', 'grep sanity gate', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff --name-only gate requiring a non-empty diff', 'PR URL or explicit result summary'])}
+${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using grep, rg, or an equivalent assertion', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff --name-only gate requiring a non-empty diff', 'PR URL or explicit result summary'])}
 
 Write ${artifactsDir}/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`)},
       verification: { type: 'file_exists', value: ${literal(`${artifactsDir}/lead-plan.md`)} },
@@ -489,7 +489,11 @@ ${renderToolSelectionSummary(selection)}
 
 Before editing, read ${artifactsDir}/matched-skills.md when it exists and use it only as generation-time context for this task.
 
-Keep execution routing explicit for local, cloud, and MCP callers. Materialize outputs to disk, then stop for deterministic gates.`)},
+Keep execution routing explicit for local, cloud, and MCP callers. Materialize outputs to disk, then stop for deterministic gates.
+
+Generated workflow quality:
+- Include a real deterministic sanity gate over produced files, not just prose saying one exists.
+- Prefer grep, rg, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.`)},
     })`;
 }
 

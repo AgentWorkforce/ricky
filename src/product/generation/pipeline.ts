@@ -179,8 +179,12 @@ export function validateGeneratedArtifact(
   if (!artifact.gates.some((gate) => gate.verificationType === 'file_exists')) {
     issues.push(blockingIssue('validation', 'FILE_EXISTS_GATE_MISSING', 'Rendered workflow has no file_exists gate.'));
   }
-  if (!/\bgrep\b/.test(content)) {
-    issues.push(blockingIssue('validation', 'GREP_GATE_MISSING', 'Rendered workflow has no grep sanity gate.'));
+  if (!hasDeterministicSanityGate(artifact)) {
+    issues.push(blockingIssue(
+      'validation',
+      'GREP_GATE_MISSING',
+      'Rendered workflow has no deterministic sanity gate such as grep, rg, or an equivalent assertion.',
+    ));
   }
   if (!/npx tsc --noEmit/.test(content)) {
     issues.push(blockingIssue('validation', 'TYPECHECK_GATE_MISSING', 'Rendered workflow has no typecheck gate.'));
@@ -307,6 +311,57 @@ export function validateGeneratedArtifact(
     hasDeterministicGates,
     hasReviewStage,
   };
+}
+
+function hasDeterministicSanityGate(artifact: RenderedArtifact): boolean {
+  return artifact.gates.some((gate) => gate.failOnError && isSanityGateCommand(gate.command));
+}
+
+function isSanityGateCommand(command: string): boolean {
+  const normalized = command.replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+
+  return [
+    /\b(?:git\s+grep|grep|rg)\b/,
+    isInlineAssertionCommand(normalized),
+    /\bawk\b.*\bexit\b/,
+    /\btest\s+-s\s+['"]?[^'"\s]*output-manifest\.txt\b/,
+    /\[\[\s+.+(?:==|=~)\s+.+\]\]/,
+    /\bcase\b.+\bin\b.+\besac\b/,
+  ].some((pattern) => typeof pattern === 'boolean' ? pattern : pattern.test(normalized));
+}
+
+function isInlineAssertionCommand(command: string): boolean {
+  const invokesInlineRuntime =
+    /\b(?:node|bun)\s+(?:--input-type=module\s+)?(?:-e|--eval)\b/.test(command) ||
+    /\bpython3?\s+-c\b/.test(command) ||
+    /\b(?:ruby|perl)\s+-e\b/.test(command);
+  if (!invokesInlineRuntime) return false;
+
+  const readsEvidence = [
+    /\breadFileSync\b/,
+    /\b(?:existsSync|statSync|accessSync)\b/,
+    /\b(?:require|import)\s*\(\s*['"](?:node:)?fs/,
+    /\bfrom\s+['"](?:node:)?fs\b/,
+    /\bopen\b/,
+    /\bPath\s*\(/,
+    /\bFile\./,
+    /\bARGV\b|\$ARGV\b|@ARGV\b/,
+  ].some((pattern) => pattern.test(command));
+
+  const canFailOnMismatch = [
+    /\bassert\b/,
+    /\bprocess\.exit\s*\(\s*1\s*\)/,
+    /\bthrow\s+new\s+Error\b/,
+    /\braise\b/,
+    /\bdie\b/,
+    /\bexit\s+1\b/,
+    /\bexit\s*\(\s*1\s*\)/,
+    /\bunless\b/,
+    /\bif\b/,
+  ].some((pattern) => pattern.test(command));
+
+  return readsEvidence && canFailOnMismatch;
 }
 
 function requiresImplementationWorkflow(spec: NormalizedWorkflowSpec): boolean {
