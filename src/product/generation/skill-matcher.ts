@@ -52,7 +52,10 @@ export function matchSkills(spec: NormalizedWorkflowSpec, options: SkillMatcherO
 
   if (options.defaultSkillId === undefined) {
     const withWorkflowDefaults = appendWorkflowDefaultMatches(scored, registry);
-    return trimMatchesPreservingWorkflowDefaults(dedupeMatches(withWorkflowDefaults), maxMatches);
+    const deduped = dedupeMatches(withWorkflowDefaults);
+    return options.maxMatches === undefined
+      ? trimMatchesPreservingWorkflowDefaults(deduped, maxMatches)
+      : deduped.slice(0, maxMatches);
   }
 
   if (scored.length === 0 && typeof options.defaultSkillId === 'string') {

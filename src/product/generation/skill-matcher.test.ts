@@ -59,6 +59,22 @@ describe('skill matcher', () => {
     expect(matchSkills(spec('Generate a workflow.'), { registry: [] })).toEqual([]);
   });
 
+  it('preserves top-ranked matches when the caller explicitly caps maxMatches', () => {
+    const matches = matchSkills(spec('Generate a github primitive webhook handler.'), {
+      registry: registry([
+        { id: 'github-primitive', description: 'Use for github primitive webhook handlers and GitHub APIs.' },
+        { id: 'choosing-swarm-patterns', description: 'Use for Agent Relay workflow pattern selection.' },
+        { id: 'writing-agent-relay-workflows', description: 'Use for agent relay workflow authoring.' },
+        { id: 'relay-80-100-workflow', description: 'Use for end-to-end workflow validation.' },
+      ]),
+      maxMatches: 1,
+    });
+
+    expect(matches).toEqual([
+      expect.objectContaining({ id: 'github-primitive' }),
+    ]);
+  });
+
   it('does not select below-threshold matches when fallback is disabled', () => {
     const matches = matchSkills(spec('Tiny unrelated request.'), {
       registry: registry([{ id: 'github-primitive', description: 'GitHub webhook APIs.' }]),
