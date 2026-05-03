@@ -493,7 +493,8 @@ Keep execution routing explicit for local, cloud, and MCP callers. Materialize o
 
 Generated workflow quality:
 - Include a real deterministic sanity gate over produced files, not just prose saying one exists.
-- Prefer grep, rg, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.`)},
+- Prefer grep, rg, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.
+- Keep each agent step bounded to one coherent slice. Split broad implementation or test-writing work into sequential/fan-out steps with deterministic gates between them instead of relying on a single long agent timeout.`)},
     })`;
 }
 

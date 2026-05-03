@@ -203,6 +203,67 @@ describe('runWithAutoFix', () => {
     expect(repair?.content).not.toContain('{{steps.write-message.output}}');
   });
 
+  it('deterministically splits timed-out agent steps and resumes from the failed step', async () => {
+    const firstFailure = agentTimeoutBlockerResponse();
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(firstFailure)
+      .mockResolvedValueOnce(successResponse('timeout-run-2'));
+    const artifactWriter = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runWithAutoFix({
+      ...baseRequest,
+      source: 'workflow-artifact',
+      spec: agentTimeoutWorkflowContent(),
+      specPath: 'workflows/generated/webapp-review.ts',
+    }, {
+      maxAttempts: 2,
+      runSingleAttempt,
+      artifactWriter,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(artifactWriter).toHaveBeenCalledTimes(1);
+    const repaired = String(artifactWriter.mock.calls[0][1]);
+    expect(repaired).toContain("RICKY_TIMEOUT_REPAIR");
+    expect(repaired).toContain(".step('implement-tests-timeout-continuation'");
+    expect(repaired).toContain("dependsOn: ['implement-tests']");
+    expect(repaired).toContain("dependsOn: ['implement-tests-timeout-continuation']");
+    expect(repaired).toContain('IMPLEMENT_TESTS_TIMEOUT_CONTINUATION_DONE');
+    expect(result.auto_fix?.attempts[0]).toMatchObject({
+      blocker_code: 'INVALID_ARTIFACT',
+      failed_step: 'implement-tests',
+      applied_fix: {
+        mode: 'deterministic',
+        artifact_path: 'workflows/generated/webapp-review.ts',
+        summary: expect.stringContaining('split timed-out agent step implement-tests'),
+      },
+    });
+    expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
+      attempt: 2,
+      previousRunId: 'timeout-run-1',
+      retryOfRunId: 'timeout-run-1',
+      startFromStep: 'implement-tests',
+    });
+  });
+
+  it('uses step-specific timeout evidence and preserves comma-containing timeout expressions', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/webapp-review.ts',
+      artifactContent: agentTimeoutWorkflowContent('Math.min(MAX_TIMEOUT, 900_000)'),
+      evidence: timeoutRepairEvidenceWithEarlierNonTimeoutFailure(),
+    });
+
+    expect(repair).toMatchObject({
+      applied: true,
+      summary: expect.stringContaining('split timed-out agent step implement-tests'),
+    });
+    expect(repair?.content).toContain(".step('implement-tests-timeout-continuation'");
+    expect(repair?.content).not.toContain(".step('run-focused-validation-timeout-continuation'");
+    expect(repair?.content).toContain('timeoutMs: Math.min(MAX_TIMEOUT, 900_000)');
+    expect(repair?.content).toContain("dependsOn: ['implement-tests-timeout-continuation']");
+  });
+
   it('persona repair failure escalates without retrying', async () => {
     const runSingleAttempt = vi.fn().mockResolvedValue(blockerResponse('MISSING_BINARY', 'run-1', 'install-deps'));
 
@@ -568,6 +629,121 @@ function semanticContractBlockerResponse(artifactPath: string, artifactContent: 
   };
 }
 
+function agentTimeoutBlockerResponse(): LocalResponse {
+  const blocker: LocalClassifiedBlocker = {
+    code: 'INVALID_ARTIFACT',
+    category: 'workflow_invalid',
+    message: 'Workflow reported a failed run: Step "implement-tests" failed after 2 retries: The operation was aborted due to timeout.',
+    detected_at: '2026-04-28T00:00:00.000Z',
+    detected_during: 'launch',
+    recovery: {
+      actionable: true,
+      steps: ['Inspect the timed-out agent step and split the work.'],
+    },
+    context: {
+      missing: ['completed agent step'],
+      found: ['step=implement-tests', 'reason=timeout'],
+    },
+  };
+  return {
+    ok: false,
+    artifacts: [{ path: 'workflows/generated/webapp-review.ts', content: agentTimeoutWorkflowContent() }],
+    logs: [],
+    warnings: [blocker.message],
+    nextActions: [...blocker.recovery.steps],
+    generation: {
+      stage: 'generate',
+      status: 'ok',
+      artifact: { path: 'workflows/generated/webapp-review.ts', workflow_id: 'wf-timeout', spec_digest: 'timeout' },
+    },
+    execution: {
+      stage: 'execute',
+      status: 'blocker',
+      execution: {
+        ...execution('timeout-run-1'),
+        artifact_path: 'workflows/generated/webapp-review.ts',
+        workflow_file: 'workflows/generated/webapp-review.ts',
+      },
+      blocker,
+      evidence: {
+        outcome_summary: blocker.message,
+        logs: {
+          tail: [
+            '[workflow 161:26] [implement-tests] Started (owner: test-impl, specialist: test-impl)',
+            '  ↻ implement-tests — retrying (attempt 1)',
+            '[workflow 163:36] [implement-tests] Started (owner: test-impl, specialist: test-impl)',
+            '  ↻ implement-tests — retrying (attempt 2)',
+            '[workflow 165:46] [implement-tests] Started (owner: test-impl, specialist: test-impl)',
+            '  ✗ implement-tests — FAILED: The operation was aborted due to timeout',
+            '[workflow] FAILED: Step "implement-tests" failed: Step "implement-tests" failed after 2 retries: The operation was aborted due to timeout',
+          ],
+          truncated: false,
+        },
+        side_effects: { files_written: [], commands_invoked: [] },
+        assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
+      },
+    },
+    exitCode: 2,
+  };
+}
+
+function timeoutRepairEvidenceWithEarlierNonTimeoutFailure(): WorkflowRunEvidence {
+  return {
+    runId: 'timeout-run-1',
+    workflowId: 'wf-timeout',
+    workflowName: 'ricky-webapp-review',
+    status: 'failed',
+    startedAt: '2026-04-28T00:00:00.000Z',
+    completedAt: '2026-04-28T00:10:00.000Z',
+    steps: [
+      {
+        stepId: 'run-focused-validation',
+        stepName: 'run-focused-validation',
+        status: 'failed',
+        startedAt: '2026-04-28T00:00:00.000Z',
+        completedAt: '2026-04-28T00:00:10.000Z',
+        error: 'Command failed with exit code 1',
+        verifications: [{
+          type: 'exit_code',
+          passed: false,
+          expected: '0',
+          actual: '1',
+          message: 'Command failed with exit code 1',
+        }],
+        deterministicGates: [],
+        logs: [{ stream: 'stdout', excerpt: '[workflow] [run-focused-validation] Command failed (exit code 1)' }],
+        artifacts: [],
+        history: [],
+        retries: [],
+        narrative: [],
+      },
+      {
+        stepId: 'implement-tests',
+        stepName: 'implement-tests',
+        status: 'failed',
+        startedAt: '2026-04-28T00:00:00.000Z',
+        completedAt: '2026-04-28T00:10:00.000Z',
+        error: 'The operation was aborted due to timeout',
+        verifications: [],
+        deterministicGates: [],
+        logs: [{ stream: 'stdout', excerpt: '  ✗ implement-tests — FAILED: The operation was aborted due to timeout' }],
+        artifacts: [],
+        history: [],
+        retries: [],
+        narrative: [],
+      },
+    ],
+    deterministicGates: [],
+    artifacts: [{ path: 'workflows/generated/webapp-review.ts', kind: 'file' }],
+    logs: [
+      { stream: 'stderr', excerpt: '  ✗ implement-tests — FAILED: The operation was aborted due to timeout' },
+      { stream: 'stderr', excerpt: '[workflow] FAILED: Step "implement-tests" failed after 2 retries: The operation was aborted due to timeout' },
+    ],
+    narrative: [],
+    routing: [],
+  };
+}
+
 function semanticContractEvidence(response: LocalResponse): WorkflowRunEvidence {
   return {
     runId: response.execution?.execution.run_id ?? 'semantic-run-1',
@@ -663,6 +839,56 @@ workflow('ricky-demo-broken-greeting')
     type: 'deterministic',
     dependsOn: ['emit-done'],
     command: \`printf 'pipeline complete: %s\\n' '{{steps.write-message.output}}' > \${artifactDir}/summary.txt\`,
+    failOnError: true,
+  })
+  .run({ cwd: process.cwd() });
+`;
+}
+
+function agentTimeoutWorkflowContent(timeoutExpression = 'AGENT_STEP_TIMEOUT_MS'): string {
+  return `
+import { workflow } from '@agent-relay/sdk/workflows';
+
+const ARTIFACT_DIR = 'workflows/generated/.ricky-webapp-review';
+const MAX_TIMEOUT = 1_800_000;
+const AGENT_STEP_TIMEOUT_MS = Number.parseInt(process.env.RICKY_AGENT_STEP_TIMEOUT_MS ?? '300000', 10);
+
+workflow('ricky-webapp-review')
+  .agent('test-impl', {
+    cli: 'codex',
+    preset: 'worker',
+    role: 'Test implementer and fixer.',
+    retries: 2,
+    timeoutMs: AGENT_STEP_TIMEOUT_MS,
+  })
+  .step('verify-surfaces-and-webapp', {
+    type: 'deterministic',
+    command: 'echo SURFACES_VERIFIED',
+    failOnError: true,
+  })
+  .step('implement-tests', {
+    agent: 'test-impl',
+    dependsOn: ['verify-surfaces-and-webapp'],
+    timeoutMs: ${timeoutExpression},
+    task: \`Add and update tests for the implemented deep review flow.
+
+Required coverage:
+- readiness gate states,
+- intent idempotency,
+- runtime election,
+- review-workspace routes,
+- Slack and Telegram retrigger handoff,
+- webapp queued/blocked/running/completed states,
+- workflow dispatch/writeback contract.
+
+Run focused tests while editing. Write \${ARTIFACT_DIR}/tests-summary.md ending with TESTS_IMPLEMENTED.\`,
+    verification: { type: 'file_exists', value: \`\${ARTIFACT_DIR}/tests-summary.md\` },
+  })
+  .step('run-focused-validation', {
+    type: 'deterministic',
+    dependsOn: ['implement-tests'],
+    command: 'npm test',
+    captureOutput: true,
     failOnError: true,
   })
   .run({ cwd: process.cwd() });

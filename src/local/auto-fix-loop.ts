@@ -347,6 +347,12 @@ export function repairWorkflowDeterministically(
   let content = input.artifactContent;
   const changes: string[] = [];
 
+  const timeoutRepair = repairAgentStepTimeouts(content, input.evidence);
+  if (timeoutRepair.content !== content) {
+    content = timeoutRepair.content;
+    changes.push(...timeoutRepair.changes);
+  }
+
   const missingFileRepair = missingFileRepairFromEvidence(input.evidence)
     ?? missingFileRepairFromArtifactContent(content, input.evidence);
   if (missingFileRepair) {
@@ -484,6 +490,237 @@ function repairUnknownStepTemplateRefs(content: string): { content: string; chan
   return { content: next, changes };
 }
 
+function repairAgentStepTimeouts(content: string, evidence: WorkflowRunEvidence): { content: string; changes: string[] } {
+  const timedOutStep = timedOutAgentStepFromEvidence(evidence);
+  if (!timedOutStep) return { content, changes: [] };
+  if (content.includes(`${timedOutStep}-timeout-continuation`)) return { content, changes: [] };
+
+  const range = findStepObjectRange(content, timedOutStep);
+  if (!range) return { content, changes: [] };
+
+  const block = content.slice(range.start, range.end);
+  const agent = block.match(/\bagent:\s*['"`]([^'"`]+)['"`]/)?.[1];
+  if (!agent) return { content, changes: [] };
+  const taskRange = findTemplatePropertyRange(block, 'task');
+  if (!taskRange) return { content, changes: [] };
+
+  const continuationStep = `${timedOutStep}-timeout-continuation`;
+  const handoffPath = timeoutContinuationPath(content, timedOutStep);
+  const marker = markerForStep(continuationStep);
+  const timeoutValue = timeoutValueForContinuation(block);
+  const originalTask = block.slice(taskRange.contentStart, taskRange.contentEnd);
+  const repairedTask = `${originalTask.trimEnd()}
+
+RICKY_TIMEOUT_REPAIR:
+- This step previously exhausted its agent timeout/retries.
+- Complete a bounded first slice only, then write a concise handoff for the continuation step to ${handoffPath}.
+- Preserve any work already completed in the repository.
+- If the original task has multiple coverage areas, do not try to finish all of them in this one agent turn.`;
+  const repairedBlock = `${block.slice(0, taskRange.contentStart)}${repairedTask}${block.slice(taskRange.contentEnd)}`;
+  const before = content.slice(0, range.start);
+  const after = rewriteDependsOnStep(content.slice(range.end), timedOutStep, continuationStep);
+  const continuation = renderTimeoutContinuationStep({
+    stepId: continuationStep,
+    dependsOn: timedOutStep,
+    agent,
+    timeoutValue,
+    handoffPath,
+    marker,
+  });
+  const next = `${before}${repairedBlock}\n\n${continuation}${after}`;
+
+  return {
+    content: next,
+    changes: [`split timed-out agent step ${timedOutStep} with continuation ${continuationStep}`],
+  };
+}
+
+function timedOutAgentStepFromEvidence(evidence: WorkflowRunEvidence): string | null {
+  for (const step of evidence.steps) {
+    if (step.status !== 'failed') continue;
+    const stepText = [
+      step.error,
+      ...step.verifications.map((verification) => verification.message ?? verification.actual ?? ''),
+      ...step.deterministicGates.flatMap((gate) => gate.verifications.map((verification) => verification.message ?? verification.actual ?? '')),
+      ...step.logs.map((entry) => entry.excerpt),
+    ].filter(Boolean).join('\n');
+    if (hasTimeoutSignal(stepText)) {
+      return step.stepId;
+    }
+  }
+
+  const allLogs = evidence.logs.map((entry) => entry.excerpt).join('\n');
+  const failed = allLogs.match(/Step "([^"]+)" failed after \d+ retries: .*?(?:timed?\s*out|timeout|aborted)/i)
+    ?? allLogs.match(/✗\s+(.+?)\s+—\s+FAILED: .*?(?:timed?\s*out|timeout|aborted)/i);
+  return failed?.[1]?.trim() ?? null;
+}
+
+function hasTimeoutSignal(text: string): boolean {
+  return /\b(?:timed?\s*out|timeout|aborted due to timeout)\b/i.test(text);
+}
+
+function findStepObjectRange(content: string, stepId: string): { start: number; end: number } | null {
+  const escaped = escapeRegExp(stepId);
+  const stepMatch = new RegExp(`\\.step\\(\\s*['"\`]${escaped}['"\`]\\s*,\\s*\\{`).exec(content);
+  if (!stepMatch) return null;
+  const start = stepMatch.index;
+  const objectStart = content.indexOf('{', start);
+  if (objectStart === -1) return null;
+  const objectEnd = findMatchingBrace(content, objectStart);
+  if (objectEnd === -1) return null;
+  let end = objectEnd + 1;
+  while (/\s/.test(content[end] ?? '')) end += 1;
+  if (content[end] === ')') end += 1;
+  return { start, end };
+}
+
+function findMatchingBrace(content: string, start: number): number {
+  let depth = 0;
+  let quote: '"' | "'" | '`' | null = null;
+  let escaped = false;
+
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function findTemplatePropertyRange(block: string, property: string): {
+  contentStart: number;
+  contentEnd: number;
+} | null {
+  const match = new RegExp(`\\b${escapeRegExp(property)}\\s*:`).exec(block);
+  if (!match) return null;
+  const tick = block.indexOf('`', match.index + match[0].length);
+  if (tick === -1) return null;
+  const contentStart = tick + 1;
+  let escaped = false;
+  for (let index = contentStart; index < block.length; index += 1) {
+    const char = block[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char === '`') return { contentStart, contentEnd: index };
+  }
+  return null;
+}
+
+function rewriteDependsOnStep(content: string, oldStep: string, newStep: string): string {
+  return content.replace(/dependsOn:\s*\[([^\]]*)\]/g, (match, values: string) => {
+    if (!new RegExp(`['"\`]${escapeRegExp(oldStep)}['"\`]`).test(values)) return match;
+    return match.replace(new RegExp(`(['"\`])${escapeRegExp(oldStep)}\\1`, 'g'), `$1${newStep}$1`);
+  });
+}
+
+function timeoutContinuationPath(content: string, stepId: string): string {
+  if (/\bARTIFACT_DIR\b/.test(content)) return `\${ARTIFACT_DIR}/${stepId}-timeout-continuation.md`;
+  return `.workflow-artifacts/ricky-auto-fix/${stepId}-timeout-continuation.md`;
+}
+
+function timeoutValueForContinuation(block: string): string {
+  const timeout = propertyExpression(block, 'timeoutMs');
+  return timeout || '900_000';
+}
+
+function propertyExpression(block: string, property: string): string | null {
+  const match = new RegExp(`\\b${escapeRegExp(property)}\\s*:`).exec(block);
+  if (!match) return null;
+
+  let index = match.index + match[0].length;
+  while (/\s/.test(block[index] ?? '')) index += 1;
+  const start = index;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let quote: '"' | "'" | '`' | null = null;
+  let escaped = false;
+
+  for (; index < block.length; index += 1) {
+    const char = block[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '(') parenDepth += 1;
+    if (char === ')') parenDepth = Math.max(0, parenDepth - 1);
+    if (char === '[') bracketDepth += 1;
+    if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+    if (char === '{') braceDepth += 1;
+    if (char === '}') {
+      if (braceDepth === 0) break;
+      braceDepth -= 1;
+      continue;
+    }
+    if (char === ',' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) break;
+  }
+
+  const value = block.slice(start, index).trim();
+  return value || null;
+}
+
+function markerForStep(stepId: string): string {
+  return `${stepId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_DONE`;
+}
+
+function renderTimeoutContinuationStep(input: {
+  stepId: string;
+  dependsOn: string;
+  agent: string;
+  timeoutValue: string;
+  handoffPath: string;
+  marker: string;
+}): string {
+  return `    .step('${input.stepId}', {
+      agent: '${input.agent}',
+      dependsOn: ['${input.dependsOn}'],
+      timeoutMs: ${input.timeoutValue},
+      task: \`Continue the previously timed-out workflow step "${input.dependsOn}".
+
+Read any handoff or summary produced by ${input.dependsOn}, inspect the current git diff, and finish only the remaining work from that original step. Keep the scope bounded and preserve existing edits.
+
+Write ${input.handoffPath} ending with ${input.marker}.\`,
+      verification: { type: 'file_exists', value: \`${input.handoffPath}\` },
+    })`;
+}
+
 function nearestStepId(value: string, candidates: string[]): string | null {
   const prefix = value.split('-')[0];
   const ranked = candidates
@@ -542,6 +779,10 @@ function replacePathReference(content: string, expectedPath: string, materialize
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function resolveWorkflowRepairTarget(
