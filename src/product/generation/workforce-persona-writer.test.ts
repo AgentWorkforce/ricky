@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { NormalizedWorkflowSpec, RawSpecPayload } from '../spec-intake/types.js';
 import { generate, generateWithWorkforcePersona } from './pipeline.js';
@@ -41,6 +44,7 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('Evidence rules');
     expect(task).toContain('IMPLEMENTATION_WORKFLOW_CONTRACT');
     expect(task).toContain('must edit source files');
+    expect(task).toContain('Do not create, edit, or write outputPath directly');
     expect(task).toContain('Do not satisfy implementation specs by only writing plan.md');
     expect(task).toContain('Do not open an interactive Claude, Codex, or OpenCode terminal UI');
   });
@@ -99,6 +103,35 @@ describe('workforce persona workflow writer', () => {
     expect(parsed.responseFormat).toBe('fenced-artifact');
     expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
     expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
+  });
+
+  it('recovers expected artifact content from disk when structured output omits inline content', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-response-'));
+    const artifactPath = 'workflows/generated/persona.ts';
+    const absoluteArtifactPath = join(repoRoot, artifactPath);
+    mkdirSync(join(repoRoot, 'workflows/generated'), { recursive: true });
+    writeFileSync(absoluteArtifactPath, workflowSource(), 'utf8');
+
+    try {
+      const parsed = parsePersonaWorkflowResponse(JSON.stringify({
+        artifact: {
+          path: artifactPath,
+          language: 'typescript',
+          content: 'See artifact block above.',
+        },
+        metadata: {
+          workflowName: 'persona',
+          agents: ['lead'],
+        },
+      }), artifactPath, { repoRoot });
+
+      expect(parsed.responseFormat).toBe('structured-json');
+      expect(parsed.content).toContain('workflow("persona")');
+      expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
+      expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 
   it('invokes the spawned harness non-interactively (no TUI flag, structured-response contract)', async () => {

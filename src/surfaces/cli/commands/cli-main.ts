@@ -1837,6 +1837,11 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
       if (resume) lines.push(`Resume: ${resume}`);
     } else if (localResult.generation) {
       lines.push(`Generation: failed (status: ${localResult.generation.status}).`);
+      if (artifactPath) {
+        lines.push(`Workflow target: ${artifactPath}`);
+        lines.push('Artifact written: no');
+      }
+      if (workflowName) lines.push(`Workflow name: ${workflowName}`);
       if (localResult.generation.error) lines.push(`Reason: ${localResult.generation.error}`);
     } else {
       lines.push('Local handoff failed.');

@@ -145,6 +145,11 @@ export interface WorkforcePersonaWriterResult {
   metadata: WorkforcePersonaWriterMetadata;
 }
 
+export interface PersonaResponseParseOptions {
+  repoRoot?: string;
+  readFileText?: (path: string) => string;
+}
+
 export interface ResolvedWorkforcePersonaContext {
   source: 'package';
   intent: string;
@@ -227,7 +232,9 @@ export async function writeWorkflowWithWorkforcePersona(
     );
   }
 
-  const parsed = parsePersonaWorkflowResponse(result.output, options.outputPath);
+  const parsed = parsePersonaWorkflowResponse(result.output, options.outputPath, {
+    repoRoot: options.repoRoot,
+  });
   return {
     artifact: {
       content: parsed.content,
@@ -519,6 +526,7 @@ export function buildWorkflowPersonaTask(
     '',
     'Constraints:',
     '- Produce only the workflow artifact and metadata contract.',
+    '- Do not create, edit, or write outputPath directly; Ricky writes the returned artifact after parsing artifact.content.',
     '- Do not commit, push, open PRs, or perform destructive file operations.',
     '- Do not open an interactive Claude, Codex, or OpenCode terminal UI.',
     '- Keep generated runtime-agent prompts model-agnostic.',
@@ -587,10 +595,14 @@ function renderSkillContextForPersona(skillContext: SkillContext | undefined): s
   ].filter(Boolean).join('\n');
 }
 
-export function parsePersonaWorkflowResponse(output: string, expectedPath: string): ParsedPersonaResponse {
+export function parsePersonaWorkflowResponse(
+  output: string,
+  expectedPath: string,
+  options: PersonaResponseParseOptions = {},
+): ParsedPersonaResponse {
   const directJson = parseJsonObject(output);
   if (directJson) {
-    return validateStructuredResponse(directJson, expectedPath, 'structured-json');
+    return validateStructuredResponse(directJson, expectedPath, 'structured-json', options);
   }
 
   const jsonFence = fencedBlock(output, 'json');
@@ -601,7 +613,7 @@ export function parsePersonaWorkflowResponse(output: string, expectedPath: strin
       return validateFencedResponse(tsFence, metadataJson, expectedPath);
     }
     if (metadataJson) {
-      return validateStructuredResponse(metadataJson, expectedPath, 'structured-json');
+      return validateStructuredResponse(metadataJson, expectedPath, 'structured-json', options);
     }
   }
 
@@ -631,24 +643,60 @@ function validateStructuredResponse(
   value: Record<string, unknown>,
   expectedPath: string,
   responseFormat: WorkforcePersonaWriterMetadata['responseFormat'],
+  options: PersonaResponseParseOptions,
 ): ParsedPersonaResponse {
   const artifact = isRecord(value.artifact) ? value.artifact : value;
-  const content = artifact.content;
+  const artifactPath = artifact.path;
+  const inlineContent = artifact.content;
+  const recoveredContent = recoverExpectedArtifactContent(artifactPath, expectedPath, options);
+  const content = typeof inlineContent === 'string' && inlineContent.trim().length > 0
+    ? inlineContent
+    : recoveredContent;
   if (typeof content !== 'string' || content.trim().length === 0) {
     throw new WorkforcePersonaWriterError('Workforce persona structured response is missing artifact.content.');
   }
-  validateArtifactContent(content);
 
-  const artifactPath = artifact.path;
   if (typeof artifactPath === 'string' && artifactPath !== expectedPath) {
     throw new WorkforcePersonaWriterError(
       `Workforce persona artifact path ${artifactPath} did not match expected output path ${expectedPath}.`,
     );
   }
+  try {
+    validateArtifactContent(content);
+  } catch (error) {
+    if (!recoveredContent || content === recoveredContent) throw error;
+    validateArtifactContent(recoveredContent);
+    const metadata = isRecord(value.metadata) ? value.metadata : {};
+    validateMetadata(metadata);
+    return { content: recoveredContent, metadata, responseFormat };
+  }
 
   const metadata = isRecord(value.metadata) ? value.metadata : {};
   validateMetadata(metadata);
   return { content, metadata, responseFormat };
+}
+
+function recoverExpectedArtifactContent(
+  artifactPath: unknown,
+  expectedPath: string,
+  options: PersonaResponseParseOptions,
+): string | undefined {
+  if (!options.repoRoot || typeof artifactPath !== 'string' || artifactPath !== expectedPath) {
+    return undefined;
+  }
+  const expectedResolved = isAbsolute(expectedPath)
+    ? expectedPath
+    : resolve(options.repoRoot, expectedPath);
+  const artifactResolved = isAbsolute(artifactPath)
+    ? artifactPath
+    : resolve(options.repoRoot, artifactPath);
+  if (artifactResolved !== expectedResolved) return undefined;
+
+  try {
+    return options.readFileText?.(artifactResolved) ?? readFileSync(artifactResolved, 'utf8');
+  } catch {
+    return undefined;
+  }
 }
 
 function validateFencedResponse(
