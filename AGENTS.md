@@ -1,6 +1,8 @@
 <!-- prpm:snippet:start @agent-workforce/trail-snippet@1.1.2 -->
 # Trail
 
+`CLAUDE.md` is a symlink to this `AGENTS.md`; keep shared agent instructions here.
+
 Record your work as a trajectory for future agents and humans to follow.
 
 ## Usage

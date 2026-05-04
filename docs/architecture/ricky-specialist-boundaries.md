@@ -1,5 +1,7 @@
 # Ricky Specialist Boundaries
 
+Status: mixed current and planned specialist architecture. The diagnostic engine is implemented; manifest-backed specialist orchestration and Agent Assistant specialist routing are planned unless explicitly identified as current.
+
 ## Purpose
 
 This document defines the specialist domains in Ricky, their ownership boundaries, and how they communicate. Wave 2 implementers should read this before writing specialist code to avoid overlapping responsibilities or unintended coupling.
@@ -8,7 +10,7 @@ This document defines the specialist domains in Ricky, their ownership boundarie
 
 ## 1. Composition via Agent Assistant
 
-Ricky specialists are orchestrated through `@agent-assistant/specialists`, not through ad-hoc routing or direct inter-specialist calls.
+Target architecture: Ricky specialists are orchestrated through `@agent-assistant/specialists`, not through ad-hoc routing or direct inter-specialist calls. Current code has product-local specialist-like modules and the implemented diagnostic engine, but no direct `@agent-assistant/specialists` dependency.
 
 ### How it works
 
@@ -25,7 +27,7 @@ Without clear specialist boundaries, Ricky drifts into a monolithic agent where 
 
 Specialists are stateless, per-request handlers. There is no singleton state, no warm cache between requests, and no persistent specialist instances.
 
-**Discovery:** The orchestration layer discovers available specialists through a registration manifest at `src/product/specialists/manifest.ts`. This manifest exports a list of specialist descriptors — each declaring its name, domain, and factory function.
+**Discovery:** Planned manifest-backed discovery would use `src/product/specialists/manifest.ts`. That manifest is not currently implemented, so this section describes the target registration model.
 
 **Instantiation:** Each specialist exports a factory function that accepts injectable dependencies and returns the specialist interface. The orchestration layer creates a fresh specialist instance per request.
 
@@ -115,7 +117,7 @@ The diagnostic engine in `src/runtime/diagnostics/` is the first specialist-like
 
 - Failure classification: mapping raw evidence to typed blocker classes
 - Unblocker guidance: producing actionable remediation strategies
-- Five blocker classes: `agent_runtime.handoff_stalled`, `agent_runtime.progress_opaque`, `environment.relay_state_contaminated`, `workflow_structure.control_flow_invalid`, `validation_strategy.repo_mismatch`
+- Eight blocker classes: `agent_runtime.handoff_stalled`, `agent_runtime.progress_opaque`, `environment.relay_state_contaminated`, `environment.missing_config`, `environment.already_running`, `workflow_structure.control_flow_invalid`, `validation_strategy.unsupported_command`, `validation_strategy.repo_mismatch`
 
 ### How it works
 
@@ -297,7 +299,7 @@ Mines workflow run histories to identify failure patterns, bad design choices, a
 
 ### Expected file locations
 
-- `src/analytics/` - health-analyzer, digest-generator, types
+- `src/product/analytics/` - health-analyzer, digest-generator, types
 
 ### Key constraints
 

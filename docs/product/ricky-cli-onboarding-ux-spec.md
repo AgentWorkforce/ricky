@@ -23,24 +23,30 @@ It is intentionally narrower than the full Ricky product spec. It should give a 
 
 ## Current vs Target CLI Surface
 
-The Ricky package is private and has no published `bin` entry. The current runnable CLI surface and the target surface this spec requires are different. Implementations must not present target commands as already available.
+The Ricky package now has a `bin` entry (`ricky` -> `dist/ricky.js`) and can also be run in development with `npm start -- ...`. This spec still contains target UX requirements, but implementation copy must distinguish current commands from planned additions.
 
-### Current CLI surface (as of this writing)
+### Current CLI surface
 
-The current CLI is invoked via `npm start` (which runs `tsx src/commands/cli-main.ts`). The parser in `packages/cli/src/commands/cli-main.ts` supports:
+The current development CLI is invoked via `npm start -- ...` (which runs `tsx src/surfaces/cli/commands/cli-main.ts`). The bundled package CLI is invoked through `ricky` after `npm run build`. The parser supports:
 
 | Command / Flag | Behavior |
 |---|---|
-| `npm start` | Start interactive session (dispatches to `run`) |
-| `npm start -- --mode <mode>` | Start with mode preset: `local`, `cloud`, `both` |
+| `ricky` or `npm start` | Start guided mode |
+| `ricky local --spec <text>` | Write a local workflow artifact |
+| `ricky cloud --spec <text>` | Generate with Cloud |
+| `ricky run <path>` | Run an existing artifact |
+| `ricky status` | Show local and Cloud readiness |
+| `ricky status --run <run-id>` | Check background run progress |
+| `ricky connect cloud` | Connect AgentWorkforce Cloud |
+| `ricky --mode <mode>` | Start with mode preset: `local`, `cloud`, or `both` |
 | `npm start -- help` or `--help` / `-h` | Show help text |
 | `npm start -- version` or `--version` / `-v` | Show version |
 
-No other commands or flags are parsed. The `ParsedArgs` type exposes `command: 'run' | 'help' | 'version'` and an optional `mode`.
+The current parser also supports workflow inputs (`--spec`, `--spec-file`, `--stdin`), run controls (`--run`, `--no-run`, `--background`, `--foreground`, `--start-from`, `--previous-run-id`), output controls (`--json`, `--quiet`, `--verbose`), refinement (`--refine`, `--with-llm`), and auto-fix controls (`--auto-fix`, `--no-auto-fix`, `--repair`).
 
 ### Target CLI surface (required by this spec)
 
-This spec requires the following additions to `packages/cli/src/commands/cli-main.ts` before the onboarding UX is complete. Each entry includes the expected parser contract.
+This spec previously required the following additions. Rows already present in the current CLI should be treated as implemented; remaining rows are target UX.
 
 | Command / Flag | Parser contract | Dispatch target | Expected output |
 |---|---|---|---|
@@ -49,20 +55,20 @@ This spec requires the following additions to `packages/cli/src/commands/cli-mai
 | `ricky generate --spec "..."` | `{ command: 'generate', specSource: 'inline', spec: string }` | Build `CliHandoff`, pass to `normalizeRequest`, then execute | Spec intake confirmation, then workflow generation |
 | `ricky generate --spec-file <path>` | `{ command: 'generate', specSource: 'file', specFile: string }` | Build `CliHandoff` with `specFile`, pass to `normalizeRequest`, then execute | Spec intake confirmation, then workflow generation |
 | `ricky generate --spec-stdin` | `{ command: 'generate', specSource: 'stdin' }` | Read stdin, build `CliHandoff`, pass to `normalizeRequest`, then execute | Spec intake confirmation, then workflow generation |
-| `ricky status` | `{ command: 'status' }` | Read config and provider state, render summary | Mode, provider connection status, config path |
+| `ricky status` | `{ command: 'status' }` | Read config and provider state, render summary | Implemented |
 | `--quiet` / `-q` | Sets `parsed.quiet = true` on any command | Suppress banner and non-essential output | Reduced output |
 | `--no-banner` | Sets `parsed.noBanner = true` on any command | Suppress banner only | Output without banner |
 | `--verbose` | Sets `parsed.verbose = true` on any command | Include diagnostic detail in recovery messages and provider errors | Extended output on failure paths |
 
-The `generate` command must build a `CliHandoff` (as defined in `packages/local/src/request-normalizer.ts`) and pass it through `normalizeRequest()` before execution. The `--mode` flag applies to `generate` as well.
+The current command spelling for generation is `ricky local --spec...` or `ricky cloud --spec...`; a literal `ricky generate` command remains target UX unless the parser adds it. Generation must build a `CliHandoff` (as defined in `src/local/request-normalizer.ts`) and pass it through `normalizeRequest()` before execution. The `--mode` flag applies to generation as well.
 
-Until these are implemented, development-mode invocations use `npm start -- ...` with the current parser. User-facing copy in this spec uses `npx ricky` to represent the target surface. When the package gains a `bin` entry or is published, the `npx ricky` invocations become live.
+Development-mode invocations use `npm start -- ...`; package invocations use `ricky` or `npx @agentworkforce/ricky` after build/publish.
 
-**Copy honesty rule**: Implementation copy (e.g., in `mode-selector.ts` and `onboarding.ts`) is intentionally more conservative than spec copy — it references `npm start -- --help` instead of `npx ricky help`, and says "user-facing generate/debug command layer is not exposed yet" where the spec documents the target generate command. This is correct behavior. When target commands land in `parseArgs()`, implementation copy should be updated in the same PR to match the spec's target surface wording.
+**Copy honesty rule**: Implementation copy must only advertise commands that are implemented. Where this spec documents target spellings such as `ricky generate`, current copy should prefer the implemented `ricky local --spec...`, `ricky cloud --spec...`, and `ricky run <artifact>` forms.
 
 ### Parser Delta Punch List
 
-`packages/cli/src/commands/cli-main.ts` must extend `ParsedArgs` from the current `run | help | version` shape to a discriminated union that can represent onboarding, status, and all three spec input modes:
+`src/surfaces/cli/commands/cli-main.ts` must extend `ParsedArgs` from the current `run | help | version` shape to a discriminated union that can represent onboarding, status, and all three spec input modes:
 
 ```ts
 type ParsedArgs =
@@ -646,11 +652,11 @@ Expected normalized behavior:
 
 ## Interactive CLI Composition Contract
 
-`packages/cli/src/entrypoint/interactive-cli.ts` is the composition boundary between terminal UX and execution. It wires onboarding to the normalized request path but does not own banner artwork, copy strings, provider OAuth, or workflow generation internals.
+`src/surfaces/cli/entrypoint/interactive-cli.ts` is the composition boundary between terminal UX and execution. It wires onboarding to the normalized request path but does not own banner artwork, copy strings, provider OAuth, or workflow generation internals.
 
 Required flow:
 
-1. Parse `ParsedArgs` in `packages/cli/src/commands/cli-main.ts`.
+1. Parse `ParsedArgs` in `src/surfaces/cli/commands/cli-main.ts`.
 2. Load config and provider status through injected dependencies.
 3. Resolve mode using `--mode`, `RICKY_MODE`, project config, global config, then interactive prompt.
 4. Render first-run onboarding only when there is no completed config and the current command is interactive.
@@ -704,7 +710,7 @@ agent-relay was not found.
 
 Ricky needs agent-relay for local workflow execution.
 Install or expose it, then retry:
-  npm install -g @agent-relay/cli
+  npm install -g @agent-relaysrc/surfaces/cli
 
 You can also continue with Cloud:
   npx ricky --mode cloud
@@ -896,22 +902,22 @@ The future implementation workflow should build within these boundaries.
 
 | Module | Responsibility |
 |---|---|
-| `packages/cli/src/cli/ascii-art.ts` | Banner constants, color handling, compact/full rendering, display predicates |
-| `packages/cli/src/cli/welcome.ts` | First-run and returning-user welcome copy |
-| `packages/cli/src/cli/mode-selector.ts` | Mode options, aliases, prompt rendering, selected-mode result copy |
-| `packages/cli/src/cli/onboarding.ts` | First-run orchestration, config read/write, provider guidance, recovery guidance |
-| `packages/cli/src/commands/cli-main.ts` | CLI argument parsing and command dispatch |
-| `packages/cli/src/entrypoint/interactive-cli.ts` | Composition of onboarding, normalized handoff, local executor, Cloud executor, and diagnostics |
+| `src/surfaces/cli/cli/ascii-art.ts` | Banner constants, color handling, compact/full rendering, display predicates |
+| `src/surfaces/cli/cli/welcome.ts` | First-run and returning-user welcome copy |
+| `src/surfaces/cli/cli/mode-selector.ts` | Mode options, aliases, prompt rendering, selected-mode result copy |
+| `src/surfaces/cli/cli/onboarding.ts` | First-run orchestration, config read/write, provider guidance, recovery guidance |
+| `src/surfaces/cli/commands/cli-main.ts` | CLI argument parsing and command dispatch |
+| `src/surfaces/cli/entrypoint/interactive-cli.ts` | Composition of onboarding, normalized handoff, local executor, Cloud executor, and diagnostics |
 
 ### Non-CLI Boundaries
 
 | Module area | Boundary |
 |---|---|
-| `packages/local/src/request-normalizer.ts` | Normalizes CLI, MCP, Claude, and artifact handoffs into local request contracts |
-| `packages/local/src/entrypoint.ts` | Executes local/BYOH requests; does not own onboarding copy |
-| `packages/cloud/src/auth/*` | Owns provider auth status and workspace scoping; does not own terminal UX |
-| `packages/cloud/src/api/*` | Owns Cloud generate request/response handling; does not render onboarding |
-| `packages/runtime/src/diagnostics/*` | Classifies blockers and returns structured unblocker guidance |
+| `src/local/request-normalizer.ts` | Normalizes CLI, MCP, Claude, and artifact handoffs into local request contracts |
+| `src/local/entrypoint.ts` | Executes local/BYOH requests; does not own onboarding copy |
+| `src/cloud/auth/*` | Owns provider auth status and workspace scoping; does not own terminal UX |
+| `src/cloud/api/*` | Owns Cloud generate request/response handling; does not render onboarding |
+| `src/runtime/diagnostics/*` | Classifies blockers and returns structured unblocker guidance |
 
 Implementation must not:
 
@@ -925,19 +931,19 @@ Implementation must not:
 
 | Test file | Required coverage | Depends on new parser work? |
 |---|---|---|
-| `packages/cli/src/cli/onboarding.test.ts` | First-run banner, welcome, mode copy, recovery copy, non-TTY behavior, corrupted config recovery | No — tests onboarding module directly |
-| `packages/cli/src/cli/ascii-art.test.ts` | Full banner, compact banner, terminal width fallback, color suppression, environment suppression | No — tests banner module directly |
-| `packages/cli/src/cli/mode-selector.test.ts` | Mode aliases, default local choice, explore non-persistence, copy snapshots | No — tests mode-selector module directly |
-| `packages/cli/src/commands/cli-main.test.ts` | Existing: `--mode`, `help`, `version`. **New (requires parser additions per "Target CLI surface" above):** `--quiet`, `--no-banner`, `--verbose`, `setup`, `welcome`, `generate`, `status` dispatch | **Yes** — new commands require extending `ParsedArgs` and `parseArgs()` |
-| `packages/cli/src/entrypoint/interactive-cli.test.ts` | Returning-user routing, handoff skips full onboarding, local/cloud/both composition | Partially — handoff routing depends on `generate` dispatch existing |
-| `packages/local/src/request-normalizer.test.ts` | CLI and MCP handoffs normalize to the same domain shape | No — normalizer already supports `CliHandoff` and `McpHandoff` |
-| `packages/runtime/src/diagnostics/*.test.ts` | Missing toolchain, missing auth, local environment blocker, and corrupted config classification | No — tests diagnostic classifiers directly |
+| `src/surfaces/cli/cli/onboarding.test.ts` | First-run banner, welcome, mode copy, recovery copy, non-TTY behavior, corrupted config recovery | No — tests onboarding module directly |
+| `src/surfaces/cli/cli/ascii-art.test.ts` | Full banner, compact banner, terminal width fallback, color suppression, environment suppression | No — tests banner module directly |
+| `src/surfaces/cli/cli/mode-selector.test.ts` | Mode aliases, default local choice, explore non-persistence, copy snapshots | No — tests mode-selector module directly |
+| `src/surfaces/cli/commands/cli-main.test.ts` | Existing: `--mode`, `help`, `version`. **New (requires parser additions per "Target CLI surface" above):** `--quiet`, `--no-banner`, `--verbose`, `setup`, `welcome`, `generate`, `status` dispatch | **Yes** — new commands require extending `ParsedArgs` and `parseArgs()` |
+| `src/surfaces/cli/entrypoint/interactive-cli.test.ts` | Returning-user routing, handoff skips full onboarding, local/cloud/both composition | Partially — handoff routing depends on `generate` dispatch existing |
+| `src/local/request-normalizer.test.ts` | CLI and MCP handoffs normalize to the same domain shape | No — normalizer already supports `CliHandoff` and `McpHandoff` |
+| `src/runtime/diagnostics/*.test.ts` | Missing toolchain, missing auth, local environment blocker, and corrupted config classification | No — tests diagnostic classifiers directly |
 
 Tests must use injected input, output, config stores, provider status, and executors. They must not depend on the developer machine's actual Cloud auth, global config, or terminal width.
 
 The table describes the preferred test organization, but the implementation may consolidate files if the same behavioral coverage remains explicit and easy to locate. A consolidated test file is acceptable only when test names preserve the module or flow being covered.
 
-**Current state note**: As of this writing, all CLI onboarding tests live in `packages/cli/src/cli/onboarding.test.ts` (consolidated). The `ascii-art.test.ts` and `mode-selector.test.ts` rows above describe the coverage expected, not a required file split. Additionally, `packages/cli/src/cli/proof/onboarding-proof.ts` contains 11 named proof cases that exercise the real implementation end-to-end and serve as supplementary verification beyond the unit test suite.
+**Current state note**: As of this writing, all CLI onboarding tests live in `src/surfaces/cli/cli/onboarding.test.ts` (consolidated). The `ascii-art.test.ts` and `mode-selector.test.ts` rows above describe the coverage expected, not a required file split. Additionally, `src/surfaces/cli/cli/proof/onboarding-proof.ts` contains 11 named proof cases that exercise the real implementation end-to-end and serve as supplementary verification beyond the unit test suite.
 
 ## Acceptance Criteria
 
@@ -952,7 +958,7 @@ The implementation is complete when:
 - Cloud copy shows `npx agent-relay cloud connect google` exactly.
 - GitHub setup references the AgentWorkforce Cloud dashboard and Nango-backed integration guidance without invented URLs.
 - CLI handoff examples cover inline spec, spec file, stdin, and Claude-to-CLI handoff.
-- The `generate` command builds a `CliHandoff` and passes it through `normalizeRequest()` from `packages/local/src/request-normalizer.ts`.
+- The `generate` command builds a `CliHandoff` and passes it through `normalizeRequest()` from `src/local/request-normalizer.ts`.
 - MCP handoff uses `ricky.generate` and normalizes through the same request path as CLI.
 - At least one recovery path exists for missing toolchain, missing Cloud auth, local environment blockers, and corrupted config.
 - Non-interactive first run returns setup guidance without rendering the banner.

@@ -2,11 +2,11 @@
 
 ## Problem
 
-Running `ricky --version` (or `-v`, or `version`) prints `ricky 0.0.0` regardless of which version of `@agentworkforce/ricky` is installed. The string is hardcoded.
+`ricky --version` (or `-v`, or `version`) should print the version of the installed `@agentworkforce/ricky` package. This spec records the desired behavior and the acceptance contract for keeping the package version path truthful.
 
 ```
 $ ricky --version
-ricky 0.0.0          # always — even when package.json says 0.1.0
+ricky 0.1.13
 ```
 
 The default lives in `src/surfaces/cli/commands/cli-main.ts`:
@@ -18,7 +18,7 @@ if (parsed.command === 'version') {
 }
 ```
 
-`CliMainDeps.version` exists for test injection, but the bin entry (`src/bin/ricky.ts`) calls `cliMain()` with no deps, so the fallback always wins. Nothing reads `package.json`.
+`CliMainDeps.version` exists for test injection, but the bin entry (`src/surfaces/cli/bin/ricky.ts`) calls `cliMain()` with no deps. In production, the CLI must resolve `package.json` instead of relying on the fallback.
 
 ## Why it matters
 
@@ -37,7 +37,7 @@ ricky 0.1.0
 
 It must work in three contexts:
 
-1. **Installed from npm** — bin runs from `<prefix>/lib/node_modules/@agentworkforce/ricky/dist/bin/ricky.js`; `package.json` sits at `<that pkg root>/package.json`.
+1. **Installed from npm** — bin runs from `<prefix>/lib/node_modules/@agentworkforce/ricky/dist/ricky.js`; `package.json` sits at `<that pkg root>/package.json`.
 2. **Local dev via `npm start`** — runs from source via tsx; `package.json` is at the repo root.
 3. **Tests** — `cliMain({ version: '9.9.9' })` still wins (the injectable `deps.version` override stays the highest-priority source).
 
@@ -53,7 +53,7 @@ It must work in three contexts:
 - Read synchronously is fine here — version lookup happens once per invocation and only on the version path.
 - Cache the result at module scope so repeated calls don't hit the filesystem.
 - Do not require a build step (e.g. don't bake the version in via codegen) — keeping the lookup runtime keeps `npm version` bumps + `prepack` flow simple.
-- `tsconfig.build.json` already excludes tests; no config change needed.
+- The bundled CLI is produced by `scripts/bundle-cli.mjs`; no separate `tsconfig.build.json` is required for this path.
 
 ## Test cases
 
@@ -71,6 +71,6 @@ Add to `src/surfaces/cli/commands/cli-main.test.ts`:
 
 ## Acceptance
 
-- `node dist/bin/ricky.js --version` prints the version from `package.json`.
+- `node dist/ricky.js --version` prints the version from `package.json`.
 - All existing cli-main tests pass; the three new tests above pass.
 - `package.json` version bumps automatically flow through to the CLI without any code edit.

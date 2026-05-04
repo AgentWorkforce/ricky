@@ -1,5 +1,7 @@
 # Ricky Surfaces and Ingress
 
+Status: CLI and Local/BYOH are current; Cloud generation contract is partial; Slack, Web, and MCP/Claude handoff sections describe planned surfaces unless marked current.
+
 ## Purpose
 
 This document describes every surface through which users and systems interact with Ricky, how requests enter the system, and how they converge into a unified domain model. Wave 1 through Wave 4 implementers should read this before adding or modifying any ingress path.
@@ -34,7 +36,7 @@ Request normalization      ← src/local/request-normalizer.ts
   │                          Produces LocalInvocationRequest or CloudGenerateRequest
   ▼
 Ingress routing            ← src/surfaces/cli/entrypoint/interactive-cli.ts
-  │                          Mode-based: local / cloud / both / explore
+  │                          Mode-based: local / cloud / status / connect / exit
   ▼
 Executor                   ← LocalExecutor or CloudExecutor
   │
@@ -91,7 +93,7 @@ Returns a structured `CliMainResult` with exit code, output lines, and optional 
 
 1. **Banner** - ASCII art from `src/surfaces/cli/cli/ascii-art.ts`
 2. **Welcome** - first-run vs returning user messaging from `src/surfaces/cli/cli/welcome.ts`
-3. **Mode selection** - local, cloud, both, or explore via `src/surfaces/cli/cli/mode-selector.ts`
+3. **Mode selection** - local, cloud, status, connect, or exit via `src/surfaces/cli/cli/mode-selector.ts`
 4. **Provider guidance** - next-step instructions per selected mode
 
 ### Configuration
@@ -104,16 +106,17 @@ Project-level config overrides global config. Both are plain JSON.
 
 ### Mode selection
 
-`src/surfaces/cli/cli/mode-selector.ts` accepts four modes:
+`src/surfaces/cli/cli/mode-selector.ts` currently presents these choices:
 
 | Mode | Behavior |
 |---|---|
 | `local` | Route to LocalExecutor for BYOH execution |
 | `cloud` | Route to CloudExecutor for hosted execution |
-| `both` | Route to LocalExecutor with cloud fallback |
-| `explore` | Informational mode, no execution |
+| `status` | Show local and Cloud readiness |
+| `connect` | Connect AgentWorkforce Cloud |
+| `exit` | Leave guided mode |
 
-Accepts numeric input (1-4) or text aliases. Defaults to `local` if no input.
+Accepts numeric input or text aliases. Defaults to `local` if no input.
 
 ---
 
@@ -121,9 +124,9 @@ Accepts numeric input (1-4) or text aliases. Defaults to `local` if no input.
 
 ### The normalizer
 
-`src/local/request-normalizer.ts` accepts requests from five ingress types and normalizes them into a single contract.
+`src/local/request-normalizer.ts` currently accepts CLI, MCP-style, Claude-style, and workflow-artifact handoffs. Web handoff is planned.
 
-### Five handoff types
+### Handoff types
 
 **CliHandoff** - direct CLI submission
 - Source: `--spec "string"` argument or stdin
@@ -141,14 +144,14 @@ Accepts numeric input (1-4) or text aliases. Defaults to `local` if no input.
 - Source: path to a workflow file on disk
 - Contains: file path, optional metadata
 
-**WebHandoff** - browser-initiated submission
+**WebHandoff** - planned browser-initiated submission
 - Source: `POST /api/v1/ricky/web/submit` (see §7)
 - Contains: session/OAuth auth context, spec, mode, and metadata
 - Normalizes to `CloudGenerateRequest` when mode is `cloud` or `both`, or `LocalInvocationRequest` when mode is `local`
 
 ### Normalized output
 
-All five handoff variants normalize through the same boundary. Four of the five (CliHandoff, McpHandoff, ClaudeHandoff, WorkflowArtifactHandoff) always normalize to `LocalInvocationRequest`. WebHandoff normalizes to either `CloudGenerateRequest` (when mode is `cloud` or `both`) or `LocalInvocationRequest` (when mode is `local`), with the mode field in the handoff determining the downstream domain contract:
+Current implemented handoff variants normalize through the same boundary. WebHandoff is a planned extension that should normalize to either `CloudGenerateRequest` (when mode is `cloud` or `both`) or `LocalInvocationRequest` (when mode is `local`), with the mode field in the handoff determining the downstream domain contract:
 
 - `spec` - the workflow spec string
 - `source` - label identifying the handoff origin
@@ -186,6 +189,13 @@ Adding a new ingress type means adding a new handoff variant to the normalizer. 
     spec: string;
     specPath?: string;
     mode?: 'cloud' | 'both';
+    autoFix?: {
+      enabled: boolean;
+      maxAttempts?: number;
+      preferWorkforcePersona?: boolean;
+      allowOpenRouterFallback?: boolean;
+      requireHumanApprovalFor?: Array<'code_push' | 'pr_create' | 'secrets' | 'billing' | 'external_write'>;
+    };
     metadata?: Record<string, unknown>;
   };
 }
@@ -199,6 +209,9 @@ Adding a new ingress type means adding a new handoff variant to the normalizer. 
   status: number;
   artifacts: CloudArtifact[];
   warnings: CloudWarning[];
+  assumptions: CloudAssumption[];
+  validation: CloudValidationStatus;
+  runReceipt: CloudRunReceipt;
   followUpActions: CloudFollowUpAction[];
   requestId: string;
 }
@@ -267,6 +280,8 @@ All Cloud API changes must be evaluated against these compatibility rules before
 ---
 
 ## 5. Slack surface
+
+Status: planned. No Slack source handler is currently implemented in this repo.
 
 ### Manifest
 
@@ -433,6 +448,8 @@ On failure, the MCP tool returns the standard MCP error shape:
 ---
 
 ## 7. Web surface
+
+Status: planned.
 
 Per SPEC.md, Ricky will have a browser-based onboarding and interaction surface. This surface is not yet implemented, but the ingress contract is defined here so implementers build to the same normalization path as every other surface.
 
@@ -610,8 +627,9 @@ After normalization, the mode field in the request determines the execution path
 ```
 mode = "local"  -> LocalExecutor.execute()
 mode = "cloud"  -> CloudExecutor.generate()
-mode = "both"   -> LocalExecutor.execute() with cloud fallback
-mode = "explore" -> informational response, no execution
+mode = "status" -> readiness summary, no execution
+mode = "connect" -> Cloud connection flow, no workflow execution
+mode = "exit"   -> leave guided mode
 ```
 
 The orchestrator (`src/surfaces/cli/entrypoint/interactive-cli.ts`) makes this routing decision. No surface should pre-decide the execution path; that is the orchestrator's responsibility.

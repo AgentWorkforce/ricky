@@ -18,11 +18,11 @@ Ricky's core job is not generic assistant chat. Ricky is specifically responsibl
 - returning resulting workflow artifacts when Ricky writes or coordinates runs
 
 Ricky should work through co-equal interfaces and onboarding surfaces:
-- **Slack**: an interactive surface for workflow debugging, generation, coordination, proactive notifications, and onboarding
-- **Web**: a browser-based onboarding and interaction surface for connecting accounts, starting from a spec, and launching Cloud-backed flows
-- **CLI**: a local-first onboarding and command surface for direct invocation, spec handoff, and local/Cloud routing
-- **Local / BYOH mode**: runs against local repos, local tools, local agent-relay, and local skill loading
-- **Cloud API**: hosted through `AgentWorkforce/cloud`, with an API surface that can generate workflows from a spec, return downloadable artifacts, and optionally kick off execution and return resulting code artifacts
+- **CLI**: implemented local-first onboarding and command surface for direct invocation, spec handoff, and local/Cloud routing
+- **Local / BYOH mode**: implemented local repo/spec handling, workflow artifact generation, local execution, and background monitoring
+- **Cloud API**: partially implemented through `AgentWorkforce/cloud` contracts for authenticated workflow generation and artifact return
+- **Slack**: planned interactive surface for workflow debugging, generation, coordination, proactive notifications, and onboarding
+- **Web**: planned browser-based onboarding and interaction surface for connecting accounts, starting from a spec, and launching Cloud-backed flows
 
 Slack is a product surface, not Ricky's core identity.
 
@@ -351,8 +351,6 @@ Ricky should:
 7. keep the experience friendly and concise rather than documentation-heavy
 
 ### 7.6 Proactive workflow failure notification
-
-### 7.3 Proactive workflow failure notification
 Input:
 - failure or degraded health signal from Cloud/workflow analytics
 
@@ -362,7 +360,7 @@ Ricky should:
 3. suggest next actions
 4. optionally trigger safe remediation or ask for approval
 
-### 7.4 Workflow improvement analytics
+### 7.7 Workflow improvement analytics
 Input:
 - many workflow runs over time
 
@@ -556,8 +554,11 @@ A future RelayFile-backed model may be useful here, but Ricky should not require
 
 ## 11. Cloud Product/API Shape
 
-### 11.1 Initial endpoint concept
-A Cloud-hosted Ricky endpoint should eventually accept requests like:
+### 11.1 Cloud endpoint status
+The current implemented Cloud API contract is:
+- `POST /api/v1/ricky/workflows/generate`
+
+Future Cloud-hosted Ricky endpoints are proposals and should not be treated as implemented routes until source handlers exist:
 - `POST /api/v1/ricky/workflows/generate`
 - `POST /api/v1/ricky/workflows/generate-and-run`
 - `POST /api/v1/ricky/workflows/debug`
@@ -695,7 +696,9 @@ The implementation spec after this product spec should cover:
 
 ---
 
-## 18. Initial Repo Structure Recommendation
+## 18. Historical Initial Repo Structure Recommendation
+
+This structure is retained as the original starting recommendation. Ricky now uses a flat single-package layout with source under the root `src/` tree, product surfaces under `src/surfaces/`, and no legacy `packages/*` workspace sources.
 
 ```text
 ricky/

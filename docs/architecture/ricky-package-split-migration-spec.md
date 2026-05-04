@@ -1,5 +1,9 @@
 # Ricky Package Split Migration Spec
 
+Status: historical. Ricky now uses a flat single-package `src/` layout after the Wave 11 flat-layout collapse; this document is retained as pre-collapse migration context, not current implementation guidance.
+
+Historical package paths and pre-collapse `src/cli` / `src/analytics` references are intentionally retained below as evidence of the migration proposal that was later superseded.
+
 ## 1. Purpose
 
 Define the bounded migration from Ricky's current single-package `src/*` layout to a real workspace-based `packages/*` product repo.

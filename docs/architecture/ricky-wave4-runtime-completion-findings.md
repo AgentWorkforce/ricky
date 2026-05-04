@@ -1,5 +1,7 @@
 # Ricky Wave 4 Runtime Completion Findings
 
+Status: historical runtime investigation. Paths have been updated to the current flat `src/surfaces/cli/` layout where applicable.
+
 ## Summary
 
 The repeated Wave 4 live-run failures were narrowed with three runtime experiments:
@@ -77,7 +79,7 @@ Observed behavior:
 - the first tiny worker step, `write-ascii-art`, started normally
 - the runtime reported it still running at 30s, 60s, and 90s
 - the run terminated before that worker step cleanly completed
-- inspection after termination showed `src/cli/ascii-art.ts` had in fact been edited during the step
+- inspection after termination showed `src/surfaces/cli/cli/ascii-art.ts` had in fact been edited during the step
 
 ## Prompt-countermeasure rerun result
 
@@ -91,7 +93,7 @@ Observed behavior:
 - deterministic prep and read steps again completed successfully
 - the first tiny worker step, `write-ascii-art`, again started normally
 - the worker log still showed broader repo exploration, including reads from other onboarding implementation files and tests
-- `src/cli/ascii-art.ts` mtime did not change during this rerun
+- `src/surfaces/cli/cli/ascii-art.ts` mtime did not change during this rerun
 - the worker still did not reach a timely clean completion, and the run was manually terminated
 
 ## Key log evidence
@@ -134,7 +136,7 @@ This is meaningfully narrower than the earlier theory that live Codex worker exe
 The real Ricky step differs from the successful reproducers in ways that likely matter:
 - much larger deterministic context is provided before the worker starts
 - richer product/spec/workflow text is injected into the worker task path
-- the target file lives inside the active real product surface (`src/cli/`) alongside closely related neighboring files and tests
+- the target file lives inside the active real product surface (`src/surfaces/cli/`) alongside closely related neighboring files and tests
 
 That combination appears to trigger broader exploratory behavior that does not happen in the minimal reproducers.
 
@@ -155,7 +157,7 @@ If worker scoping remains unreliable in real product paths, Ricky should reserve
 ## Recommended next move
 
 Instead of only further prompt tuning, Ricky should now:
-1. build a third reproducer that targets a real `src/cli/` file but minimizes surrounding context
+1. build a third reproducer that targets a real `src/surfaces/cli/` file but minimizes surrounding context
 2. inspect step outputs under `.agent-relay/step-outputs/<run-id>` for additional completion metadata
 3. decide whether bounded Ricky source-file edits inside real product directories should stay on Codex worker steps at all
 4. consider switching the smallest file-writing steps to a deterministic execution path

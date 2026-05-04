@@ -1,12 +1,16 @@
 # Spec: Drop the `npx --no-install agent-relay run` subprocess for local execution
 
+## Current-state note
+
+Ricky's user-facing command for executing an artifact is `ricky run <artifact>`. This spec is retained as a historical design note for the local execution route: the implementation should avoid requiring the `agent-relay` binary on `PATH` for the primary local-run path and should prefer the SDK/programmatic or Node strip-types route where available.
+
 ## Problem
 
 Today's `LocalCoordinator` spawns the workflow via `npx --no-install agent-relay run <file>`. Three real costs:
 
 1. **PATH/binary resolution failures.** Users who installed `@agentworkforce/ricky` globally but don't have `agent-relay` resolvable from the run cwd hit `MISSING_BINARY` blockers. The `--no-install` flag intentionally blocks npx's auto-install fallback, so any case where `agent-relay` isn't in `node_modules/.bin/` of the cwd fails.
 2. **Cold-start cost.** `npx` adds ~1–2s of bin-resolution overhead per invocation. The workflow runner inside agent-relay (`runScriptWorkflow`) ultimately spawns `node --experimental-strip-types <file>` (or `tsx` fallback) anyway. We're just paying for the wrapper.
-3. **Two sources of truth.** `agent-relay run` is the canonical script runner; `@agent-relay/sdk@6.0.4` exposes the same logic as `runScriptWorkflow` for direct import. Ricky calling the binary instead of the function is incidental, not architectural.
+3. **Two sources of truth.** `agent-relay run` is the canonical script runner; `@agent-relay/sdk@6.0.6` exposes the same logic as `runScriptWorkflow` for direct import. Ricky calling the binary instead of the function is incidental, not architectural.
 
 The end-state we want: ricky executes generated workflow files in-process via `node --experimental-strip-types <file>` (or `tsx` fallback), with `@agent-relay/sdk` resolved from the user's repo. No `agent-relay` binary required for the local-run path.
 
@@ -48,7 +52,7 @@ For pre-22.6 Node, the route falls back to `tsx`. Detection is best-effort: try 
 
 ### Dep + lockfile
 
-- `package.json`: bump `@agent-relay/sdk` from `^5.0.0` to `^6.0.4` (the latest registry version that ships `runScriptWorkflow`-compatible workflow runtime). The bump is *minor for our purposes* because we're keeping the existing import shape (`@agent-relay/sdk/workflows`) — the change is the runtime behavior the SDK provides.
+- `package.json`: use `@agent-relay/sdk` `^6.0.6` or newer compatible 6.x runtime. The repo currently depends on `^6.0.6`.
 
 ### Documentation
 
@@ -67,7 +71,7 @@ For pre-22.6 Node, the route falls back to `tsx`. Detection is best-effort: try 
 2. `node --experimental-strip-types -e "1"` — sanity-check the local Node version.
 3. End-to-end on a real generated workflow:
    ```
-   node dist/ricky.js --mode local --spec-file specs/cli-version-from-package-json.md --run
+   ricky run <artifact>
    ```
    The artifact should generate AND execute without `agent-relay` on PATH; the spawn line in the runtime evidence should read `node --experimental-strip-types --no-warnings=ExperimentalWarning workflows/generated/<file>.ts`.
 
@@ -76,4 +80,4 @@ For pre-22.6 Node, the route falls back to `tsx`. Detection is best-effort: try 
 - A user with `@agentworkforce/ricky` (and `@agent-relay/sdk` as a transitive dep) installed can run `ricky --mode local --spec-file <spec> --run` end-to-end without ever invoking `npx --no-install agent-relay`. Trace: precheck verifies `node_modules/@agent-relay/sdk/package.json` exists → `LocalCoordinator` spawns `node --experimental-strip-types <file>` → workflow executes → evidence records the actual spawn line.
 - `MISSING_BINARY` blockers still fire for the right reasons (Node not on PATH, SDK not installed) but no longer for "agent-relay not on PATH".
 - The user-facing `run_command` field in the response still says `npx --no-install agent-relay run <file>` as a valid alternative reproduction command.
-- All 645 existing tests pass; the 14 updated tests cover the new route shape end-to-end.
+- `npm test` passes; the updated tests cover the new route shape end-to-end without relying on a hard-coded suite count.

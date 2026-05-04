@@ -20,8 +20,11 @@ This means Ricky is in a good position to adopt more `agent-assistant` infrastru
 Ricky has one strong shared dependency at the repo level:
 
 - `@agent-relay/sdk`
+- `@agent-assistant/turn-context`
 
-That dependency is real and central. Ricky uses `workflow()` from `@agent-relay/sdk/workflows` throughout authored workflows and generated workflow artifacts. Its product output, validation expectations, and execution contract are built around Relay-native TypeScript workflows rather than a Ricky-only workflow DSL.
+The Relay dependency is real and central. Ricky uses `workflow()` from `@agent-relay/sdk/workflows` throughout authored workflows and generated workflow artifacts. Its product output, validation expectations, and execution contract are built around Relay-native TypeScript workflows rather than a Ricky-only workflow DSL.
+
+`@agent-assistant/turn-context` is also a landed direct adoption slice. Ricky maps normalized local requests into the shared turn context envelope and records compact provenance in generation decisions and local coordinator metadata. This is intentionally narrow and does not move Ricky's workflow artifact contract, blocker taxonomy, runtime prechecks, or execution semantics into Agent Assistant.
 
 This matters because Ricky is not inventing a separate workflow runtime. It is building a product on top of the Relay workflow substrate.
 
@@ -271,13 +274,14 @@ These are strong candidates for shared runtime influence, but they are still clo
 
 ## Verdict on current integration depth
 
-Ricky is **not yet deeply built on agent-assistant** in an implementation sense.
+Ricky is **not yet broadly built on agent-assistant** in an implementation sense, but it does have a narrow direct adoption of `@agent-assistant/turn-context`.
 
 A more accurate description is:
 
 - Ricky is built on the Relay workflow substrate
 - Ricky uses real generation-time shared skills and Relay-native workflow conventions
 - Ricky has architecture and product intent aligned with agent-assistant
+- Ricky directly uses `@agent-assistant/turn-context` for local request/turn envelope provenance
 - Ricky still implements many assistant-like runtime seams locally
 - Ricky should treat agent-assistant adoption as a deliberate next wave, not a claim about the current state
 

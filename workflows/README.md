@@ -23,7 +23,19 @@ workflows/
   wave3-cloud-api/
   wave4-local-byoh/
   wave5-scale-and-ops/
+  wave6-proof/
+  wave7-analytics-proof/
+  wave7-cli-proof/
+  wave7-local-proof/
+  wave7-recovery/
+  wave7-runtime-proof/
   wave8-github-issues/
+  wave9-agent-assistant/
+  wave10-agent-assistant-adoption/
+  wave11-flat-layout-collapse/
+  wave12-simplified-workflow-cli/
+  demo-persona-repair/
+  generated/
 ```
 
 ## Principles

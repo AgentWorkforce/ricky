@@ -12,9 +12,9 @@
 
 Ricky is a workflow reliability, workflow coordination, and workflow authoring product for AgentWorkforce.
 
-Ricky is built to:
 Ricky is the product answer to the workflow monitor problem described in `AgentWorkforce/cloud#161`: a cheap, workflow-native monitor/recovery agent that can watch long-running workflow programs, diagnose failures, fix common issues, resume from the right point, and keep a truthful evidence trail instead of requiring expensive manual babysitting.
 
+Ricky is built to:
 - debug failed workflows
 - fix broken workflows
 - restart or rerun them safely when appropriate
@@ -26,16 +26,79 @@ Ricky is the product answer to the workflow monitor problem described in `AgentW
 
 ## Interfaces
 
-Ricky is designed to work through these co-equal interfaces and onboarding surfaces:
-- **Slack**
-- **Web**
-- **CLI**
-- **Local / BYOH**
-- **Cloud API**
+Ricky is designed around co-equal interfaces and onboarding surfaces. Current implementation status:
+- **CLI** — implemented as the primary local command surface.
+- **Local / BYOH** — implemented for local workflow generation, artifact execution, background monitoring, and status checks.
+- **Cloud API** — partially implemented for Cloud generation request/response contracts and CLI connection/status flows.
+- **Slack** — planned; no source handler is currently implemented in this repo.
+- **Web** — planned; no browser surface is currently implemented in this repo.
 
 Slack is a surface, not the product identity.
 
-## CLI onboarding
+## Install and Run
+
+Ricky publishes the `ricky` bin from `dist/ricky.js`.
+
+```sh
+npm install
+npm run build
+node dist/ricky.js --help
+npm start -- --help
+```
+
+For package consumers, the intended command form is:
+
+```sh
+npx @agentworkforce/ricky --help
+ricky --help
+```
+
+## CLI Reference
+
+Common commands:
+- `ricky` — start guided mode.
+- `ricky status` — show local and Cloud readiness.
+- `ricky connect cloud` — connect an AgentWorkforce Cloud account.
+- `ricky cloud --spec <text>` — generate with Cloud.
+- `ricky local --spec <text>` — write a local workflow artifact.
+- `ricky local --spec-file <path> --run` — generate from a file, then run locally.
+- `ricky run <artifact>` — execute an existing workflow artifact.
+- `ricky run <artifact> --background` — execute in the background and print a Ricky run id.
+- `ricky status --run <run-id>` — check background run progress.
+- `ricky version` — print the package version.
+
+Common options:
+- `--mode <local|cloud|both>` — set the routing mode.
+- `--spec <text>`, `--spec-file <path>`, `--stdin` — provide a workflow spec.
+- `--artifact <path>` or `--workflow <path>` — alias for `ricky run <path>`.
+- `--run` / `--no-run` — execute after generation or generate only.
+- `--background` / `--foreground` — choose monitoring mode for local execution.
+- `--start-from <step>` and `--previous-run-id <id>` — resume a prior run.
+- `--auto-fix[=N]` / `--no-auto-fix` — enable or disable the local diagnose/repair/resume loop.
+- `--refine[=model]` / `--with-llm[=model]` — opt into the LLM refinement pass.
+- `--json` — print machine-readable results.
+- `--quiet` — print only essential output.
+- `--verbose` — include diagnostic detail for unexpected failures.
+
+## Workflow Execution
+
+Ricky can generate a workflow artifact and run it immediately:
+
+```sh
+ricky --mode local --spec-file ./spec.md --run
+```
+
+It can also run an existing artifact attached to the terminal or in the background:
+
+```sh
+ricky run workflows/generated/package-checks.ts
+ricky run workflows/generated/package-checks.ts --background
+ricky status --run <run-id>
+```
+
+When generation does not run the artifact, the CLI prints the artifact path plus foreground and background run commands.
+
+## CLI Onboarding
 
 Ricky's CLI should be intentionally welcoming and user-friendly.
 
@@ -52,7 +115,12 @@ At minimum, Ricky's onboarding surfaces should be able to guide users through:
 - connecting the GitHub app through the Cloud/Nango dashboard flow
 - starting from Slack, web, or CLI without needing a special privileged setup path
 
-Known Cloud connect command pattern from the Cloud repo:
+Current Ricky Cloud connection commands:
+- `ricky connect cloud`
+- `ricky status`
+- `ricky --mode cloud --spec-file ./spec.md --no-run`
+
+Provider-specific Cloud connection can still point users at existing AgentWorkforce Cloud flows, including:
 - `npx agent-relay cloud connect google`
 
 For GitHub-app connection flow, Ricky should direct users into the Cloud dashboard integration flow rather than inventing an ad hoc local-only path.
@@ -88,6 +156,9 @@ npm start            # launch the CLI from src/surfaces/cli/commands/cli-main.ts
 
 npm scripts:
 - `npm start` — launch the interactive CLI from `src/surfaces/cli/commands/cli-main.ts`
+- `npm run build` — bundle the CLI to `dist/ricky.js`
+- `npm run bundle` — run the esbuild bundler directly
+- `npm run clean` — remove `dist/`
 - `npm test` — bundle the CLI, then run the full test suite and proof tests
 - `npm run typecheck` — typecheck the flat `src/` tree plus workflows/proofs/scripts
 - `npm run batch` — run workflow batches via `scripts/run-ricky-batch.sh`
@@ -95,6 +166,7 @@ npm scripts:
   - default queue mode is now `flight-safe`, which only runs the workflows currently classified as unattended-safe
   - default behavior checkpoints after a small bounded chunk (`RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION`, default `4`) and can resume with `bash scripts/run-ricky-overnight.sh --resume`
   - checkpoint state lives under `.workflow-artifacts/overnight-state/<queue-mode>/checkpoint.env`
+- `npm run prepack` — build before package packing
 
 ## Package shape
 

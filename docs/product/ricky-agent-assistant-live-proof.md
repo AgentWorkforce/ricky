@@ -25,8 +25,6 @@ The issue #11 implementation signoff records the deterministic validation suite:
 ```text
 npm run typecheck
 npx tsc --noEmit
-npm test --workspace @ricky/local
-npm test --workspace @ricky/cli
 npm test
 ```
 

@@ -1,5 +1,7 @@
 # Ricky Next-Wave Backlog and Proof Plan
 
+Status: historical dated artifact. This plan describes the pre-Wave-11 six-package workspace era; Ricky now uses a flat single-package `src/` layout.
+
 ## Purpose
 
 This backlog should stay explicitly aligned with the original workflow monitor-agent problem captured in `AgentWorkforce/cloud#161`. Ricky is not just a general workflow product idea; it is the productization of the need for a cheap, observant, restart-aware workflow monitor that can diagnose failures, apply bounded fixes, and resume from the right point with evidence.
@@ -8,7 +10,7 @@ This document defines the bounded next Ricky backlog after the first-wave buildo
 
 The goal is to make the next implementation and proof workflows specific enough to author without rediscovering priorities, evidence bars, or sequencing.
 
-## Current First-Wave Status
+## Historical First-Wave Status
 
 As of 2026-04-28, Ricky has a real npm workspace split across six private packages:
 

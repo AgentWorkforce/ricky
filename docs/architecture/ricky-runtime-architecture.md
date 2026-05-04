@@ -1,5 +1,7 @@
 # Ricky Runtime Architecture
 
+Status: mixed current and target architecture. Current direct Agent Assistant reuse is `@agent-assistant/turn-context`; broader surfaces/specialists/proactive/VFS/harness entries are target architecture unless explicitly noted as implemented.
+
 ## Purpose
 
 This document describes how Ricky is composed at runtime, what execution model it uses, and how its internal layers relate to the Agent Assistant substrate. Wave 1 and Wave 2 implementers should read this before writing runtime, evidence, or product-layer code.
@@ -10,18 +12,18 @@ This document describes how Ricky is composed at runtime, what execution model i
 
 Ricky is a product composed on top of Agent Assistant. It is not a standalone runtime stack.
 
-### Agent Assistant packages Ricky depends on
+### Agent Assistant package status
 
 | Package | Role in Ricky |
 |---|---|
-| `@agent-assistant/surfaces` | Slack ingress, webhook handling |
-| `@agent-assistant/webhook-runtime` | Slack signature verification, dedup, thread handling |
-| `@agent-assistant/turn-context` | Turn shaping and conversation context |
-| `@agent-assistant/specialists` | Specialist orchestration and routing |
-| `@agent-assistant/proactive` | Proactive failure notifications and follow-up |
-| `@agent-assistant/vfs` | Artifact persistence and evidence storage |
-| `@agent-assistant/harness` | BYOH execution coordination |
-| `@agent-assistant/sdk` | Shared assistant SDK primitives |
+| `@agent-assistant/turn-context` | Current direct dependency; Ricky uses it as a bounded request/turn envelope primitive in the local path |
+| `@agent-assistant/surfaces` | Planned for Slack ingress and webhook handling |
+| `@agent-assistant/webhook-runtime` | Planned for Slack signature verification, dedup, and thread handling |
+| `@agent-assistant/specialists` | Planned specialist orchestration and routing substrate |
+| `@agent-assistant/proactive` | Planned proactive failure notifications and follow-up |
+| `@agent-assistant/vfs` | Planned artifact persistence and evidence storage seam |
+| `@agent-assistant/harness` | Planned BYOH execution coordination seam |
+| `@agent-assistant/sdk` | Planned shared assistant SDK primitives |
 
 ### What Ricky owns
 
@@ -39,7 +41,7 @@ Ricky should never duplicate what Agent Assistant already provides. If a capabil
 
 ### Agent Assistant version tracking
 
-Ricky tracks upstream Agent Assistant changes via workspace protocol. Pin the major version of each `@agent-assistant/*` dependency; float minor and patch versions. When Agent Assistant ships a breaking major change, Ricky updates in a dedicated branch with its own validation pass — never auto-float majors.
+Ricky tracks upstream Agent Assistant changes through npm package versions. Pin the major version of each adopted `@agent-assistant/*` dependency; float minor and patch versions. When Agent Assistant ships a breaking major change, Ricky updates in a dedicated branch with its own validation pass — never auto-float majors.
 
 ---
 
@@ -76,7 +78,7 @@ Ricky is workflow-native at the builder/runner/evidence level, not a prompt wrap
 
 ### Integration rule for implementers
 
-Ricky code must import Relay SDK types and invoke Relay SDK APIs through a thin adapter layer (`src/runtime/relay-adapter/` when implemented). This adapter is the single module that knows the Relay SDK import paths and version-specific API shape. All other Ricky code imports the adapter, not the SDK directly. This ensures that Relay SDK version upgrades are contained to the adapter layer.
+Target rule: Ricky code should import Relay SDK types and invoke Relay SDK APIs through a thin adapter layer once that layer exists. There is no current `src/runtime/relay-adapter/` directory, so direct SDK usage remains part of the current implementation until an adapter migration lands.
 
 ---
 
@@ -153,11 +155,11 @@ CLI argv
 **Phase 1 - Onboarding:**
 - Display ASCII banner and welcome message
 - Detect first-run vs returning user
-- Mode selection: local, cloud, both, or explore
+- Mode selection: local, cloud, status, connect, or exit
 
 **Phase 2 - Mode-routed execution:**
 - `cloud` mode -> `executeCloudPath()` via CloudExecutor
-- `local` or `both` mode -> `executeLocalPath()` via LocalExecutor
+- `local` mode -> `executeLocalPath()` via LocalExecutor
 
 **Phase 3 - Diagnosis and recovery:**
 - On local failure, the diagnostic engine classifies the blocker
@@ -257,14 +259,17 @@ New types that are used across more than one layer (runtime, product, cloud, CLI
 
 `src/runtime/diagnostics/` implements Ricky's failure classification and unblocker system.
 
-### Five blocker classes
+### Eight blocker classes
 
 | Class | Code | Meaning |
 |---|---|---|
 | Runtime handoff stall | `agent_runtime.handoff_stalled` | Agent assigned but not producing output |
 | Opaque progress | `agent_runtime.progress_opaque` | Worker alive but no artifact-visible progress |
 | Stale relay state | `environment.relay_state_contaminated` | Local relay state contaminates reruns |
+| Missing config | `environment.missing_config` | Required setup/config is absent |
+| Already running | `environment.already_running` | Existing run state makes another launch unsafe |
 | Control flow breakage | `workflow_structure.control_flow_invalid` | Dependency graph is wrong |
+| Unsupported validation command | `validation_strategy.unsupported_command` | Requested validation command is unavailable or unsupported |
 | Repo validation mismatch | `validation_strategy.repo_mismatch` | Validation command is not meaningful |
 
 ### Classification flow
@@ -337,7 +342,7 @@ The Cloud runtime (Cloudflare worker, Cloud specialist-worker, or future Cloud e
 
 ### Translation surface
 
-The `CloudEvidenceNormalizer` is a function owned by the Cloud executor adapter (`src/cloud/api/` when implemented). It accepts raw Cloud evidence and returns `WorkflowRunEvidence`.
+Planned target: `CloudEvidenceNormalizer` is a function owned by the Cloud executor adapter. The current Cloud generate endpoint returns artifact-bundle response fields and does not yet expose a separate implemented `CloudEvidenceNormalizer`.
 
 ```typescript
 interface CloudEvidenceNormalizer {
@@ -465,7 +470,9 @@ The overnight wrapper is intentionally restart-safe rather than monolithic. It c
 
 Ricky distinguishes three error categories. Every error in the system is one of these.
 
-### Error hierarchy
+### Planned error hierarchy
+
+The named classes below are target architecture. The current implementation primarily returns structured blocker/error response objects rather than these concrete error classes.
 
 | Error type | Class | Carries | When |
 |---|---|---|---|

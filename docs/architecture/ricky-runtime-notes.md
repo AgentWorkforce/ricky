@@ -1,5 +1,7 @@
 # Ricky Runtime Notes
 
+Status: historical runtime notes with current path names preserved where relevant.
+
 ## Core findings
 
 ### 1. Codex is not generically broken in Ricky

@@ -2,7 +2,7 @@
 
 ## Problem
 
-Today `ricky run --artifact <path>` coordinates the workflow through the Agent Relay SDK runtime and reports back. On failure, the user gets a classified blocker (MISSING_BINARY, INVALID_ARTIFACT, etc.) and a list of recovery steps — but they should not have to diagnose the workflow artifact, patch it, then re-invoke the run with `--start-from <step> --previous-run-id <runId>` themselves.
+Currently `ricky run --artifact <path>` coordinates the workflow through the Agent Relay SDK runtime and reports back. On failure, the user gets a classified blocker (MISSING_BINARY, INVALID_ARTIFACT, etc.) and a list of recovery steps — but they should not have to diagnose the workflow artifact, patch it, then re-invoke the run with `--start-from <step> --previous-run-id <runId>` themselves.
 
 That's the part Ricky should automate. The pieces already exist, but nothing wires them into a closed loop:
 
@@ -25,7 +25,7 @@ ricky run --artifact workflows/generated/foo.ts --auto-fix=5     # max 5 attempt
 ricky --mode local --spec-file my.md --run --auto-fix             # composes with --run
 ```
 
-Default attempts: **3**. `--auto-fix` with no value → 3. `--auto-fix=N` → N attempts (1–10 clamped). Generation-only flows do not enter auto-fix because no workflow has run yet.
+Default attempts: **7**. `--auto-fix` with no value → 7. `--auto-fix=N` → N attempts (1–10 clamped). Generation-only flows do not enter auto-fix because no workflow has run yet.
 
 Loop semantics on each iteration:
 
@@ -81,22 +81,22 @@ The existing single-attempt path stays available when `autoFix` is unset, primar
 For each attempt, the loop emits a labeled section:
 
 ```
-attempt 1/3:
+attempt 1/7:
   status: blocker (MISSING_BINARY)
   applied fix: npm install
   fix outcome: ok
-attempt 2/3:
+attempt 2/7:
   status: ok
   duration: 14.2s
 ```
 
-The final exit message summarizes: `Auto-fix loop succeeded on attempt 2/3.` or `Auto-fix loop exhausted 3 attempts. Final blocker: ...`.
+The final exit message summarizes: `Auto-fix: ok after 2/7 attempt(s).` or `Auto-fix: blocker after 7/7 attempt(s). Final blocker: ...`.
 
 When `--json` is set, the response includes:
 ```json
 {
   "auto_fix": {
-    "max_attempts": 3,
+    "max_attempts": 7,
     "attempts": [
       { "attempt": 1, "status": "blocker", "blocker_code": "MISSING_BINARY", "applied_fix": { "mode": "workforce-persona", "artifact_path": "workflows/generated/foo.ts" } },
       { "attempt": 2, "status": "ok", "run_id": "..." }
@@ -116,7 +116,7 @@ Unit tests in `src/local/auto-fix-loop.test.ts`:
 2. **Persona repair retries with start-from + previous-run-id** — first attempt blocks, the Workforce workflow persona returns a repaired artifact, Ricky writes it, and the second attempt is invoked with `retry.previousRunId` and the failed step.
 3. **Repair failure escalates** — persona repair cannot produce a safe artifact. Loop stops, exit non-zero, user gets the diagnosis and recovery steps.
 4. **Guided repairMode still repairs** — debugger says guided, but a workflow artifact exists, so Ricky asks the persona to patch and retries.
-5. **Max attempts exhaustion** — three blockers in a row, all with directly-repairable fixes that don't actually help. Loop stops at attempt 3 with all attempt summaries.
+5. **Max attempts exhaustion** — seven blockers in a row, all with directly-repairable fixes that don't actually help. Loop stops at attempt 7 with all attempt summaries.
 6. **Run id missing from prior attempt** — second attempt invoked without `--previous-run-id` and a warning logged.
 7. **`--auto-fix=0` is treated as `--no-auto-fix`** (or rejected with a parse error — pick one and document).
 8. **`--auto-fix` composes with `--run` after `--spec-file`** — generate, then enter the loop on the first run.
@@ -134,6 +134,6 @@ End-to-end (manual, not automated): generate a workflow that fails on first run,
 
 - `ricky run --artifact <path> --auto-fix` succeeds on a workflow that fails the first attempt with a `MISSING_BINARY` blocker and is fixable by `npm install`.
 - Same command with `--auto-fix=1` runs once, blocker reported, no retry.
-- Same command without `--auto-fix` behaves identically to today (single attempt, no debugger call).
+- Same command with `--no-auto-fix` preserves the single-attempt behavior for users who want failures surfaced immediately.
 - All existing `runLocal` tests still pass — the loop is a wrapper, not a replacement.
 - `ricky --help` documents the flag.

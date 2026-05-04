@@ -1,5 +1,7 @@
 # Ricky Failure Taxonomy and Autonomous Unblockers
 
+Status: current diagnostic taxonomy with planned autonomous unblocker behavior called out where not yet implemented.
+
 This document captures the concrete failure patterns observed while bootstrapping Ricky's meta-workflow and generated workflow batch. The goal is to turn real operator pain into product knowledge so Ricky can eventually classify, explain, and unblock these cases autonomously.
 
 ## Why this exists
@@ -88,7 +90,41 @@ Ricky should treat relay state contamination as an environment issue, not as evi
 ### Product rule
 Ricky must lint for orchestration correctness, not only file presence and syntax.
 
-## Category 4: Weak deterministic scope or change-detection gates
+## Category 4: Missing configuration
+
+### Symptom
+- A run cannot start because required local or project configuration is absent or unreadable.
+- The user needs setup guidance rather than a workflow rewrite.
+
+### Ricky classification
+`environment.missing_config`
+
+### Ricky unblocker strategy
+1. Surface the missing config path and the command or setup step that creates it.
+2. Avoid rerunning until the required configuration exists.
+3. Keep recovery guidance local and specific to the selected mode.
+
+### Product rule
+Ricky should classify missing setup as an environment blocker, not as a generation failure.
+
+## Category 5: Already-running environment conflict
+
+### Symptom
+- A local runtime state file or process marker indicates another Ricky/Relay run is active.
+- Starting another run could corrupt or confuse evidence.
+
+### Ricky classification
+`environment.already_running`
+
+### Ricky unblocker strategy
+1. Report the active run marker and status path.
+2. Ask the user to inspect, wait for, or explicitly clear the active run.
+3. Do not silently launch a competing run.
+
+### Product rule
+Ricky should prefer explicit operator intent over speculative concurrent reruns.
+
+## Planned related signal: Weak deterministic scope or change-detection gates
 
 ### Symptom
 - Workflows claim to verify changes, but the gates only observe tracked diffs.
@@ -103,7 +139,7 @@ Ricky must lint for orchestration correctness, not only file presence and syntax
 - "Some expected file changed" is weaker than "the changed set is confined to allowed paths and includes the intended target paths".
 
 ### Ricky classification
-`workflow_structure.scope_gate_weak`
+Planned related signal. The current emitted taxonomy does not include `workflow_structure.scope_gate_weak`; weak scope gates should be folded into `workflow_structure.control_flow_invalid` or a future explicit class after a source-level taxonomy change.
 
 ### Ricky unblocker strategy
 1. Build change-detection gates from the full changed set:
@@ -116,7 +152,23 @@ Ricky must lint for orchestration correctness, not only file presence and syntax
 ### Product rule
 Ricky should treat weak scope gates as a reliability bug, not a cosmetic issue.
 
-## Category 5: Validation-strategy mismatch
+## Category 6: Unsupported validation command
+
+### Symptom
+- A workflow asks Ricky to run a validation command that is unavailable, unsupported, or not meaningful for the current repo.
+
+### Ricky classification
+`validation_strategy.unsupported_command`
+
+### Ricky unblocker strategy
+1. Explain which command is unsupported.
+2. Suggest a supported targeted command or setup step.
+3. Avoid treating the unsupported command as proof of product failure.
+
+### Product rule
+Ricky should classify unsupported validation separately from a validation that ran and failed.
+
+## Category 7: Validation-strategy mismatch
 
 ### Symptom
 - A theoretically strong validation command is not actually meaningful in the repo.
@@ -142,7 +194,7 @@ Ricky should treat weak scope gates as a reliability bug, not a cosmetic issue.
 ### Product rule
 Ricky should never pretend a validation command is authoritative when the repo does not support it.
 
-## Category 6: Opaque long-running review or fix loops
+## Category 8: Opaque long-running review or fix loops
 
 ### Symptom
 - A review or fix step remains alive for many minutes with repeated `still running` notices.
@@ -206,8 +258,10 @@ Every Ricky failure summary should clearly distinguish:
 | Agent handoff stalled | `agent_runtime.handoff_stalled` | Spawned worker assigned but not producing useful output | downgrade deterministic step or restart narrowly |
 | Progress opaque | `agent_runtime.progress_opaque` | Worker alive but no artifact-visible progress | inspect artifact freshness, then restart or downgrade |
 | Relay state contaminated | `environment.relay_state_contaminated` | Local relay state likely contaminates reruns | quarantine state and rerun clean |
+| Missing config | `environment.missing_config` | Required local or project config is absent | guide setup before rerun |
+| Already running | `environment.already_running` | Active run state makes a new run unsafe | inspect/wait/clear before rerun |
 | Control flow invalid | `workflow_structure.control_flow_invalid` | Review/fix/signoff dependency graph is wrong | patch template and regenerate |
-| Scope gate weak | `workflow_structure.scope_gate_weak` | Changed-set validation is incomplete | tighten regression/change gates |
+| Unsupported validation command | `validation_strategy.unsupported_command` | Validation command is unavailable or unsupported | switch to supported targeted validation |
 | Repo validation mismatch | `validation_strategy.repo_mismatch` | Nominal validation command is not meaningful in this repo | switch to truthful targeted validation |
 
 ## Decision
