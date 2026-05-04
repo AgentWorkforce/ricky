@@ -15,5 +15,8 @@ describe('generated workflow hygiene', () => {
     const workflowBody = readFileSync(join(generatedDir, cleanupWorkflows[0]), 'utf8');
     expect(workflowBody).toContain('IMPLEMENTATION_WORKFLOW_CONTRACT');
     expect(workflowBody).toContain('git diff gate comparing git diff --name-status');
+    expect(workflowBody).toContain('Codex structural marker gate');
+    expect(workflowBody).toContain('must not be presented as independent review evidence');
+    expect(workflowBody).not.toContain('.agent("reviewer-codex"');
   });
 });

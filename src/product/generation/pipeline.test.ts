@@ -296,14 +296,23 @@ describe('workflow generation pipeline', () => {
         expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-claude' }),
         expect.objectContaining({ id: 'implement-artifact', agentRole: 'author-codex' }),
         expect.objectContaining({ id: 'review-claude', dependsOn: ['initial-soft-validation'] }),
-        expect.objectContaining({ id: 'review-codex', dependsOn: ['initial-soft-validation'] }),
+        expect.objectContaining({
+          id: 'review-codex',
+          agentRole: 'deterministic',
+          name: 'Codex structural marker gate',
+          dependsOn: ['initial-soft-validation'],
+        }),
       ]),
     );
     expect(artifact.content).toContain('.agent("lead-claude", { cli: "codex", interactive: false');
     expect(artifact.content).toContain('.agent("reviewer-claude", { cli: "codex", preset: "reviewer"');
+    expect(artifact.content).not.toContain('.agent("reviewer-codex"');
     expect(artifact.content).toContain('.agent("validator-claude", { cli: "codex", preset: "worker"');
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
+    expect(artifact.content).toContain('Codex structural marker gate');
+    expect(artifact.content).toContain('must not be presented as independent review evidence');
+    expect(artifact.content).toContain('Substantive review evidence comes from the Claude review steps plus deterministic validation gates');
     expect(artifact.content).toContain('docs/release-readiness.md');
     expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
@@ -317,10 +326,12 @@ describe('workflow generation pipeline', () => {
           agent: 'reviewer-claude',
           concurrency: 1,
         }),
+      ]),
+    );
+    expect(result.toolSelection.selections).not.toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           stepId: 'review-codex',
-          agent: 'reviewer-codex',
-          concurrency: 1,
         }),
       ]),
     );

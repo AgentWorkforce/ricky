@@ -190,7 +190,6 @@ function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSp
       { name: 'lead-claude', cli: 'codex', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
       { name: 'author-codex', cli: 'codex', role: 'Writes the requested bounded artifact and keeps scope to declared files.', retries: 2 },
       { name: 'reviewer-claude', cli: 'codex', preset: 'reviewer', role: 'Reviews artifact quality, scope, and evidence.', retries: 1 },
-      { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews implementation practicality and deterministic checks.', retries: 1 },
       { name: 'validator-claude', cli: 'codex', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
     ];
   }
@@ -212,16 +211,25 @@ function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSp
 
 function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean): WorkflowTask[] {
   const implementer = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
+  const codexReviewRole = isCodeWorkflow ? 'reviewer-codex' : 'deterministic';
+  const codexReviewName = isCodeWorkflow ? 'Review with Codex' : 'Codex structural marker gate';
+  const codexReviewDescription = isCodeWorkflow
+    ? 'Review generated work for code quality and deterministic checks.'
+    : 'Write deterministic structural review-marker evidence without presenting it as an independent agent review.';
+  const finalCodexReviewName = isCodeWorkflow ? 'Final review with Codex' : 'Final Codex structural marker gate';
+  const finalCodexReviewDescription = isCodeWorkflow
+    ? 'Re-review implementation and validation after fixes.'
+    : 'Write deterministic final structural review-marker evidence without presenting it as an independent agent review.';
   return [
     task('prepare-context', 'Prepare context', 'deterministic', 'Read or materialize the normalized spec and target context.', []),
     task('lead-plan', 'Lead plan', 'lead-claude', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
     task('implement-artifact', 'Implement artifact', implementer, describeImplementation(spec), ['lead-plan']),
     task('review-claude', 'Review with Claude', 'reviewer-claude', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
-    task('review-codex', 'Review with Codex', 'reviewer-codex', 'Review generated work for code quality and deterministic checks.', ['initial-soft-validation']),
+    task('review-codex', codexReviewName, codexReviewRole, codexReviewDescription, ['initial-soft-validation']),
     task('read-review-feedback', 'Read review feedback', 'deterministic', 'Collect review verdicts before fixing.', ['review-claude', 'review-codex']),
     task('fix-loop', '80-to-100 fix loop', 'validator-claude', 'Apply bounded fixes from review and validation feedback.', ['read-review-feedback']),
     task('final-review-claude', 'Final review with Claude', 'reviewer-claude', 'Re-review the fixed state only.', ['post-fix-validation']),
-    task('final-review-codex', 'Final review with Codex', 'reviewer-codex', 'Re-review implementation and validation after fixes.', ['post-fix-validation']),
+    task('final-review-codex', finalCodexReviewName, codexReviewRole, finalCodexReviewDescription, ['post-fix-validation']),
     task('final-signoff', 'Final signoff', 'validator-claude', 'Write final evidence summary after hard deterministic gates.', ['regression-gate']),
   ];
 }
@@ -644,8 +652,7 @@ function renderSecondaryReviewStep(
 
   const marker = final ? 'FINAL_REVIEW_CODEX_PASS' : 'REVIEW_COMPLETE';
   const reviewPath = `${artifactsDir}/${stepName}.md`;
-  const label = final ? 'Final Codex structural review' : 'Codex structural review';
-  const stage = final ? 'post-fix-validation' : 'initial-soft-validation';
+  const label = final ? 'Final Codex structural marker gate' : 'Codex structural marker gate';
   const lines = [
     "node - <<'NODE'",
     "const fs = require('node:fs');",
@@ -654,9 +661,10 @@ function renderSecondaryReviewStep(
     `  ${literal(`# ${label}`)},`,
     "  '',",
     `  ${literal(`- Spec: ${spec.description}`)},`,
-    "  '- This deterministic review gate replaces the hanging non-interactive Codex reviewer path for non-code workflow slices.',",
-    "  '- It verifies the workflow left review evidence on disk without spawning another reviewer subprocess.',",
-    `  ${literal(`- Review artifact: ${reviewPath}`)},`,
+    "  '- This deterministic structural marker replaces the hanging non-interactive Codex reviewer path for non-code workflow slices.',",
+    "  '- It is not an independent reviewer subprocess and must not be presented as independent review evidence.',",
+    "  '- Substantive review evidence comes from the Claude review steps plus deterministic validation gates.',",
+    `  ${literal(`- Marker artifact: ${reviewPath}`)},`,
     "  '- Deterministic validation gates completed before this review step.',",
     "  '',",
     `  ${literal(marker)},`,
