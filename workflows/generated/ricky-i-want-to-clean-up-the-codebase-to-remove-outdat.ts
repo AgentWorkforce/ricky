@@ -134,9 +134,17 @@ Generated workflow quality:
       failOnError: true,
     })
 
-    .step("initial-soft-validation", {
+    .step("cleanup-evidence-sanity-gate", {
       type: 'deterministic',
       dependsOn: ["post-implementation-file-gate"],
+      command: "node <<'NODE'\nconst fs = require('node:fs');\nconst base = '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat';\nconst read = (name) => fs.readFileSync(`${base}/${name}`, 'utf8');\nconst manifest = read('output-manifest.txt');\nconst report = read('cleanup-report.md');\nconst inventory = read('cleanup-diff-inventory.txt');\nconst validation = read('validation-evidence.md');\nconst prescan = read('cleanup-candidate-prescan.txt');\nif (!prescan.includes('CLEANUP_CANDIDATE_PRESCAN_OK')) throw new Error('prescan marker missing');\nif (!/^(A|M|D)\\s+\\S+/m.test(manifest)) throw new Error('manifest lacks status-prefixed changed paths');\nif (!/cleanup-candidate-prescan\\.txt/i.test(report)) throw new Error('cleanup report does not cite prescan input');\nif (!/(active-reference|reference evidence|No deleted paths declared)/i.test(report)) throw new Error('cleanup report missing active-reference evidence summary');\nif (!/^(A|M|D)\\s+\\S+/m.test(inventory)) throw new Error('cleanup diff inventory lacks status-prefixed entries');\nif (!/(command summaries|Commands run|Validation commands)/i.test(validation)) throw new Error('validation evidence missing command summaries');\nif (!/(npx tsc --noEmit|npx vitest run|git diff --name-status)/.test(validation)) throw new Error('validation evidence missing deterministic command names');\nconsole.log('CLEANUP_EVIDENCE_SANITY_GATE_OK');\nNODE",
+      captureOutput: true,
+      failOnError: true,
+    })
+
+    .step("initial-soft-validation", {
+      type: 'deterministic',
+      dependsOn: ["cleanup-evidence-sanity-gate"],
       command: "npx tsc --noEmit && npx vitest run",
       captureOutput: true,
       failOnError: false,
@@ -145,6 +153,7 @@ Generated workflow quality:
     .step("review-claude", {
       agent: "reviewer-claude",
       dependsOn: ["initial-soft-validation"],
+      timeoutMs: 300_000,
 
       task: `Review the generated work.
 
@@ -239,6 +248,7 @@ Re-run document sanity checks before handing off to post-fix validation.`,
     .step("final-review-claude", {
       agent: "reviewer-claude",
       dependsOn: ["post-fix-validation"],
+      timeoutMs: 300_000,
 
       task: `Re-review the fixed state only.
 

@@ -22,6 +22,9 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('must not be presented as independent review evidence');
     expect(workflowBody).toContain('cleanup-candidate-prescan.txt');
     expect(workflowBody).toContain('CLEANUP_CANDIDATE_PRESCAN_OK');
+    expect(workflowBody).toContain('cleanup-evidence-sanity-gate');
+    expect(workflowBody).toContain('CLEANUP_EVIDENCE_SANITY_GATE_OK');
+    expect(workflowBody).toContain('timeoutMs: 300_000');
     expect(workflowBody).toContain('Tracked agent config files');
     expect(workflowBody).toContain('Relaycast permission references');
     expect(workflowBody).not.toContain('.agent("reviewer-codex"');
@@ -40,6 +43,8 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('cleanup-report.md');
     expect(workflowBody).toContain('cleanup-diff-inventory.txt');
     expect(workflowBody).toContain('validation-evidence.md');
+    expect(workflowBody).toContain('manifest lacks status-prefixed changed paths');
+    expect(workflowBody).toContain('validation evidence missing deterministic command names');
     expect(workflowBody).toContain('basename referenced by');
     expect(workflowBody).toContain('status-prefixed changed-file inventory and command summaries');
   });
