@@ -297,6 +297,7 @@ Write .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-ou
 Include:
 - files changed
 - source changes and implementation diff evidence
+- status-prefixed changed-file inventory and command summaries
 - dry-run command to execute before runtime launch
 - deterministic validation commands
 - review verdicts

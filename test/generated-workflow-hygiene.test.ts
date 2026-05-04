@@ -22,4 +22,18 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('must not be presented as independent review evidence');
     expect(workflowBody).not.toContain('.agent("reviewer-codex"');
   });
+
+  it('hard-gates cleanup evidence before signoff', () => {
+    const workflowBody = readFileSync(
+      join(process.cwd(), 'workflows', 'generated', 'ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts'),
+      'utf8',
+    );
+
+    expect(workflowBody).toContain('lead plan missing required marker');
+    expect(workflowBody).toContain('cleanup-report.md');
+    expect(workflowBody).toContain('cleanup-diff-inventory.txt');
+    expect(workflowBody).toContain('validation-evidence.md');
+    expect(workflowBody).toContain('basename referenced by');
+    expect(workflowBody).toContain('status-prefixed changed-file inventory and command summaries');
+  });
 });
