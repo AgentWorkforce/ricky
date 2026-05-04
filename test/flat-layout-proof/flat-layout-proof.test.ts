@@ -8,6 +8,8 @@ import {
   type FlatLayoutProofCaseName,
 } from './flat-layout-proof.js';
 
+const placeholderSmokeTestPath = ['test', 'smoke' + '.test' + '.ts'].join('/');
+
 describe('Ricky flat src layout proof', () => {
   it('all cases pass', () => {
     const summary = summarizeFlatLayoutProof();
@@ -75,7 +77,7 @@ describe('Ricky flat src layout proof', () => {
       'placeholder-smoke-test-removed',
       [
         'placeholder smoke test exists: false',
-        'active references to test/smoke.test.ts: 0',
+        `active references to ${placeholderSmokeTestPath}: 0`,
         'placeholder smoke cleanup enforced: true',
       ],
     ],

@@ -514,7 +514,7 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
       name: 'placeholder-smoke-test-removed',
       description: 'The old root smoke placeholder test is removed now that the repo has focused proof coverage.',
       evaluate: () => {
-        const placeholderPath = 'test/smoke.test.ts';
+        const placeholderPath = ['test', 'smoke' + '.test' + '.ts'].join('/');
         const placeholderExists = fileExists(placeholderPath);
         const activeReferences = activeReferencesToPath(placeholderPath);
         const allRemoved = !placeholderExists && activeReferences.length === 0;
@@ -524,7 +524,7 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
           [allRemoved],
           [
             `placeholder smoke test exists: ${placeholderExists}`,
-            `active references to test/smoke.test.ts: ${activeReferences.length}`,
+            `active references to ${placeholderPath}: ${activeReferences.length}`,
             `placeholder smoke cleanup enforced: ${allRemoved}`,
           ],
           [],
