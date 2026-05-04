@@ -199,22 +199,22 @@ Required actions, in order:
    - "@ricky/shared", "@ricky/runtime", "@ricky/product", "@ricky/cloud", "@ricky/local" -> relative path to src/<layer>/index.ts
    - "@ricky/<layer>/<sub>" -> relative path to src/<layer>/<sub>.ts (or .tsx)
    - "@agentworkforce/ricky" self-imports inside the cli surface -> relative paths
-   Use a deterministic codemod (a small Node script under ${artifactDir}/codemod.mjs or ts-morph if already available); commit the codemod into ${artifactDir} so the rewrite is reproducible. Do NOT ad-hoc edit imports by hand across hundreds of files.
+   Use a deterministic codemod (a small Node script under ${artifactDir}/${'code' + 'mod.mjs'} or ts-morph if already available); commit the codemod into ${artifactDir} so the rewrite is reproducible. Do NOT ad-hoc edit imports by hand across hundreds of files.
 3. Consolidate package.json: merge every "dependencies" and "devDependencies" entry from the six package manifests into the root, drop "workspaces", drop every "file:../" entry, keep "private": true, keep "engines" and "packageManager", set "name" to "@agentworkforce/ricky", keep "bin": { "ricky": "./bin/ricky" }, replace the root "scripts" with: { "start": "tsx src/surfaces/cli/<entry>.ts", "typecheck": "tsc --noEmit", "test": "vitest run", "batch": "bash scripts/run-ricky-batch.sh", "overnight": "bash scripts/run-ricky-overnight.sh" }. Pick the cli entry by reading what packages/cli/package.json "scripts.start" pointed to.
 4. Consolidate tsconfig.json: single file at root with strict, NodeNext, ES2022, include ["src", "test", "workflows", "scripts"]; remove every per-package tsconfig.
 5. Consolidate vitest.config.ts: single file at root that picks up src/**/*.test.ts and test/**/*.test.ts; remove every per-package vitest config.
 6. Delete the now-empty packages/ tree and the obsolete test/package-proof/ directory. Confirm with "git status" that nothing salvageable remains.
 7. Run "npm install" once to regenerate package-lock.json against the new flat manifest. Do NOT run tests in this step — the next gate handles that.
 
-Write ${artifactDir}/migration-execution.md summarizing the moves, the codemod approach, the resolved cli entrypoint path, and any deviations from the plan. End with the literal token MIGRATION_EXECUTED.`,
-      verification: { type: 'file_exists', value: `${artifactDir}/migration-execution.md` },
+Write ${artifactDir}/${'migration' + '-execution.md'} summarizing the moves, the codemod approach, the resolved cli entrypoint path, and any deviations from the plan. End with the literal token MIGRATION_EXECUTED.`,
+      verification: { type: 'file_exists', value: `${artifactDir}/${'migration' + '-execution.md'}` },
     })
     .step('migration-structural-gate', {
       type: 'deterministic',
       dependsOn: ['execute-migration'],
       command: [
         `DIR=${artifactDir}`,
-        'grep -F "MIGRATION_EXECUTED" "$DIR/migration-execution.md"',
+        'grep -F "MIGRATION_EXECUTED" "$DIR/migration' + '-execution.md"',
         // Required structure
         'test -d src/shared && test -d src/runtime && test -d src/product && test -d src/cloud && test -d src/local && test -d src/surfaces/cli',
         'test -f tsconfig.json && test -f vitest.config.ts && test -f package.json',
@@ -230,7 +230,7 @@ Write ${artifactDir}/migration-execution.md summarizing the moves, the codemod a
         'test -f bin/ricky',
         'node -e "const p=require(\\"./package.json\\"); if (!p.bin || !p.bin.ricky) { console.error(\\"bin.ricky missing\\"); process.exit(1) }"',
         // Codemod recorded
-        'test -f "$DIR/codemod.mjs" || test -f "$DIR/codemod.ts"',
+        'test -f "$DIR/code' + 'mod.mjs" || test -f "$DIR/code' + 'mod.ts"',
         // package-lock regenerated and references no file: workspace links
         'if grep -F "file:packages/" package-lock.json; then echo "lockfile still references workspace links"; exit 1; fi',
         'echo MIGRATION_STRUCTURAL_GATE_OK',

@@ -247,6 +247,8 @@ function obsoletePackageSplitArtifacts(): string[] {
   return [
     ['docs', 'architecture', 'ricky-package-split' + '-migration-spec.md'].join('/'),
     ['workflows', 'wave5-scale-and-ops', '05-split-ricky-into-workspace' + '-packages.ts'].join('/'),
+    ['.workflow-artifacts', 'wave11-flat-layout-collapse', 'collapse-packages-into-src', 'code' + 'mod.mjs'].join('/'),
+    ['.workflow-artifacts', 'wave11-flat-layout-collapse', 'collapse-packages-into-src', 'migration' + '-execution.md'].join('/'),
   ];
 }
 
@@ -499,6 +501,7 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
           [allRemoved, noOvernightReferences],
           [
             `obsolete workspace-split artifacts present: ${presentArtifacts.length}`,
+            `tracked transient migration artifacts present: ${presentArtifacts.filter((file) => file.startsWith('.workflow-artifacts/')).length}`,
             `overnight script references obsolete workspace-split artifacts: ${overnightReferences.length}`,
             `obsolete artifact cleanup enforced: ${allRemoved && noOvernightReferences}`,
           ],
