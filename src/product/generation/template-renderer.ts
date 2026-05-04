@@ -174,6 +174,7 @@ function renderSource(input: {
     '',
     renderFinalSignoffStep(input.artifactsDir, selectionFor(input.toolSelection, 'final-signoff')),
     '',
+    ...renderOptionalGateStep(input.gates.find((gate) => gate.name === 'final-artifact-consistency-gate')),
     '    .run({ cwd: process.cwd() });',
     '',
     '  console.log(result.status);',
@@ -306,6 +307,18 @@ function buildGates(
     gate('final-hard-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', gitDiffCommand, 'artifact_exists', true, ['final-hard-validation'], 'final'),
     gate('regression-gate', isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
+    ...(usingManifest
+      ? [
+          gate(
+            'final-artifact-consistency-gate',
+            buildFinalArtifactConsistencyGateCommand(artifactsDir),
+            'deterministic_gate',
+            true,
+            ['final-signoff'],
+            'final',
+          ),
+        ]
+      : []),
   ];
 }
 
@@ -640,6 +653,7 @@ Generated workflow quality:
 - Include a real deterministic sanity gate over produced files, not just prose saying one exists.
 - Prefer grep, rg, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.
 - For cleanup or deletion work, persist a changed-files inventory with statuses, active-reference evidence for deleted paths, and command summaries for final signoff.
+- For cleanup or deletion work, start from ${artifactsDir}/cleanup-candidate-prescan.txt and cite that exact path in ${artifactsDir}/cleanup-report.md so the evidence trail names its prescan input.
 - Keep each agent step bounded to one coherent slice. Split broad implementation or test-writing work into sequential/fan-out steps with deterministic gates between them instead of relying on a single long agent timeout.`)},
     })`;
 }
@@ -782,6 +796,7 @@ Include:
 - PR URL or a clear result location/status when PR creation is intentionally out of scope
 - skill application boundary from ${artifactsDir}/skill-application-boundary.json
 - remaining risks or environmental blockers
+- every current output-manifest path, and no stale cleanup targets unless those targets are in the current manifest
 ${renderToolSelectionSummary(selection)}
 
 End with GENERATED_WORKFLOW_READY.`)},
@@ -793,6 +808,10 @@ function renderGateStep(gateToRender: DeterministicGate): string {
   return renderDeterministicStep(gateToRender.name, gateToRender.dependsOn, gateToRender.command, gateToRender.failOnError);
 }
 
+function renderOptionalGateStep(gateToRender: DeterministicGate | undefined): string[] {
+  return gateToRender ? [renderGateStep(gateToRender), ''] : [];
+}
+
 function renderDeterministicStep(name: string, dependsOn: string[], command: string, failOnError: boolean): string {
   const depends = dependsOn.length > 0 ? `\n      dependsOn: ${arrayLiteral(dependsOn)},` : '';
   return `    .step(${literal(name)}, {
@@ -801,6 +820,54 @@ function renderDeterministicStep(name: string, dependsOn: string[], command: str
       captureOutput: true,
       failOnError: ${failOnError},
     })`;
+}
+
+function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    `const base = ${literal(artifactsDir)};`,
+    "const read = (name) => fs.readFileSync(base + '/' + name, 'utf8');",
+    "const manifestLines = read('output-manifest.txt')",
+    '  .split(/\\r?\\n/)',
+    '  .map((line) => line.trim())',
+    "  .filter((line) => line && !line.startsWith('#'));",
+    "if (manifestLines.length === 0) throw new Error('output manifest is empty');",
+    'const manifestPaths = manifestLines.map((line) => {',
+    '  const match = /^(A|M|D)\\s+(.+)$/.exec(line);',
+    "  if (!match) throw new Error('manifest entry lacks status prefix: ' + line);",
+    '  return match[2];',
+    '});',
+    'const docs = [',
+    "  ['review-feedback.md', read('review-feedback.md')],",
+    "  ['fix-loop-report.md', read('fix-loop-report.md')],",
+    "  ['final-review-claude.md', read('final-review-claude.md')],",
+    "  ['signoff.md', read('signoff.md')],",
+    '];',
+    'for (const [name, body] of docs) {',
+    '  for (const path of manifestPaths) {',
+    "    if (!body.includes(path)) throw new Error(name + ' missing manifest path: ' + path);",
+    '  }',
+    '}',
+    'const codexMarker = read(\'final-review-codex.md\');',
+    "if (!codexMarker.includes('FINAL_REVIEW_CODEX_PASS')) throw new Error('final-review-codex marker missing pass sentinel');",
+    'const staleTargets = [',
+    "  ['test', 'smoke' + '.test' + '.ts'].join('/'),",
+    "  'smoke' + '.test' + '.ts',",
+    "  ['workflows', 'wave6-proof', '01-close-first-wave-signoff-and-blockers.ts'].join('/'),",
+    "  ['workflows', 'wave11-flat-layout-collapse', '01-collapse-packages-into-src.ts'].join('/'),",
+    '];',
+    'const manifestSet = new Set(manifestPaths);',
+    'for (const [name, body] of docs) {',
+    '  for (const stale of staleTargets) {',
+    '    if (!manifestSet.has(stale) && body.includes(stale)) {',
+    "      throw new Error(name + ' mentions stale non-manifest target: ' + stale);",
+    '    }',
+    '  }',
+    '}',
+    "console.log('FINAL_ARTIFACT_CONSISTENCY_GATE_OK');",
+    'NODE',
+  ].join('\n');
 }
 
 function task(id: string, name: string, agentRole: string, description: string, dependsOn: string[]): WorkflowTask {

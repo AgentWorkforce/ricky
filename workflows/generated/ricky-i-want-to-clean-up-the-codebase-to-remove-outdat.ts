@@ -123,6 +123,7 @@ Generated workflow quality:
 - Prefer grep, rg, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.
 - For cleanup or deletion work, persist a changed-files inventory with statuses, active-reference evidence for deleted paths, and command summaries for final signoff.
 - Start from .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/cleanup-candidate-prescan.txt so cleanup candidates are based on tracked files and active request references.
+- For cleanup or deletion work, cite that exact path in .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/cleanup-report.md so the evidence trail names its prescan input.
 - Keep each agent step bounded to one coherent slice. Split broad implementation or test-writing work into sequential/fan-out steps with deterministic gates between them instead of relying on a single long agent timeout.`,
     })
 
@@ -347,8 +348,9 @@ const manifestPaths = manifestLines.map((line) => {
   return match[2];
 });
 const docs = [
+  ['review-feedback.md', read('review-feedback.md')],
+  ['fix-loop-report.md', read('fix-loop-report.md')],
   ['final-review-claude.md', read('final-review-claude.md')],
-  ['final-review-codex.md', read('final-review-codex.md')],
   ['signoff.md', read('signoff.md')],
 ];
 for (const [name, body] of docs) {
@@ -356,11 +358,13 @@ for (const [name, body] of docs) {
     if (!body.includes(path)) throw new Error(name + ' missing manifest path: ' + path);
   }
 }
+const codexMarker = read('final-review-codex.md');
+if (!codexMarker.includes('FINAL_REVIEW_CODEX_PASS')) throw new Error('final-review-codex marker missing pass sentinel');
 const staleTargets = [
   ['test', 'smoke' + '.test' + '.ts'].join('/'),
   'smoke' + '.test' + '.ts',
   ['workflows', 'wave6-proof', '01-close-first-wave-signoff-and-blockers.ts'].join('/'),
-  ['test', 'generated-workflow-hygiene.test.ts'].join('/'),
+  ['workflows', 'wave11-flat-layout-collapse', '01-collapse-packages-into-src.ts'].join('/'),
 ];
 const manifestSet = new Set(manifestPaths);
 for (const [name, body] of docs) {

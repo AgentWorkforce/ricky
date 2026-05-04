@@ -892,6 +892,20 @@ describe('workflow generation pipeline', () => {
     expect(fileGate.command).toContain('output-manifest.txt');
     expect(fileGate.command).not.toContain('workflows/generated/no-target.ts');
     expect(artifact.content).toContain('output-manifest.txt');
+    expect(artifact.content).toContain('cleanup-candidate-prescan.txt');
+    expect(artifact.content).toContain('cite that exact path in');
+    expect(gate(artifact, 'final-artifact-consistency-gate')).toMatchObject({
+      stage: 'final',
+      failOnError: true,
+      dependsOn: ['final-signoff'],
+    });
+    const consistencyGate = gate(artifact, 'final-artifact-consistency-gate');
+    expect(consistencyGate.command).toContain("['review-feedback.md', read('review-feedback.md')]");
+    expect(consistencyGate.command).toContain("['fix-loop-report.md', read('fix-loop-report.md')]");
+    expect(consistencyGate.command).toContain("['final-review-claude.md', read('final-review-claude.md')]");
+    expect(consistencyGate.command).toContain("['signoff.md', read('signoff.md')]");
+    expect(consistencyGate.command).not.toContain("['final-review-codex.md', read('final-review-codex.md')]");
+    expect(consistencyGate.command).toContain('FINAL_REVIEW_CODEX_PASS');
   });
 
   it('no-target code workflow file gate validates manifest contents, not source-shape grep', () => {
