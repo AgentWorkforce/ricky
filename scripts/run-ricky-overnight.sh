@@ -912,10 +912,10 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/signoff.md \
         'GENERATED_WORKFLOW_READY' \
-        && ! test -f workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts \
         && git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.ts 2>/dev/null \
         && git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.test.ts 2>/dev/null \
-        && grep -q 'obsolete workspace-split artifacts checked:' test/flat-layout-proof/flat-layout-proof.ts
+        && grep -q 'obsolete workspace-split artifacts checked:' test/flat-layout-proof/flat-layout-proof.ts \
+        && grep -q 'active references to obsolete workspace-split artifacts:' test/flat-layout-proof/flat-layout-proof.ts
       ;;
     *)
       return 1
