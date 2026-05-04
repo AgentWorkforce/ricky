@@ -37,7 +37,7 @@ async function main() {
       retries: 1,
     })
     .agent('documentation-lead', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'worker',
       role: 'Consolidates audit findings into a prioritized documentation fix plan.',
       retries: 1,
@@ -55,7 +55,7 @@ async function main() {
       retries: 2,
     })
     .agent('documentation-reviewer', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'reviewer',
       role: 'Reviews final documentation evidence and residual risks.',
       retries: 1,
