@@ -69,9 +69,11 @@ describe('Ricky flat src layout proof', () => {
     [
       'obsolete-package-split-artifacts-removed',
       [
+        'obsolete workspace-split artifacts checked: 5',
         'obsolete workspace-split artifacts present: 0',
         'tracked transient migration artifacts present: 0',
         'overnight script references obsolete workspace-split artifacts: 0',
+        'active references to obsolete workspace-split artifacts: 0',
         'obsolete artifact cleanup enforced: true',
       ],
     ],
