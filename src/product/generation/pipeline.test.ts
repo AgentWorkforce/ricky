@@ -294,6 +294,9 @@ describe('workflow generation pipeline', () => {
         expect.objectContaining({ id: 'review-codex', dependsOn: ['initial-soft-validation'] }),
       ]),
     );
+    expect(artifact.content).toContain('.agent("lead-claude", { cli: "codex", interactive: false');
+    expect(artifact.content).toContain('.agent("reviewer-claude", { cli: "codex", preset: "reviewer"');
+    expect(artifact.content).toContain('.agent("validator-claude", { cli: "codex", preset: "worker"');
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('docs/release-readiness.md');

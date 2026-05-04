@@ -185,11 +185,11 @@ function renderSource(input: {
 function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSpec[] {
   if (!isCodeWorkflow) {
     return [
-      { name: 'lead-claude', cli: 'claude', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
+      { name: 'lead-claude', cli: 'codex', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
       { name: 'author-codex', cli: 'codex', role: 'Writes the requested bounded artifact and keeps scope to declared files.', retries: 2 },
-      { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'Reviews artifact quality, scope, and evidence.', retries: 1 },
+      { name: 'reviewer-claude', cli: 'codex', preset: 'reviewer', role: 'Reviews artifact quality, scope, and evidence.', retries: 1 },
       { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews implementation practicality and deterministic checks.', retries: 1 },
-      { name: 'validator-claude', cli: 'claude', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
+      { name: 'validator-claude', cli: 'codex', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
     ];
   }
 
