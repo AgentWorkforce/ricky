@@ -10,10 +10,7 @@ describe('generated workflow hygiene', () => {
       .filter((entry) => entry.endsWith('.ts'))
       .sort();
 
-    expect(generatedWorkflows).toEqual([
-      'ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts',
-      'ricky-verify-simplified-cli-smoke.ts',
-    ]);
+    expect(generatedWorkflows).toEqual(['ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts']);
 
     const workflowBody = readFileSync(
       join(generatedDir, 'ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts'),
