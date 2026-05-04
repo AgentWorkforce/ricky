@@ -622,12 +622,12 @@ sync_repo_with_origin_main_if_safe() {
     return 0
   fi
 
-  if ! git fetch origin main >/dev/null 2>&1; then
+  if ! git fetch origin main:refs/remotes/origin/main >/dev/null 2>&1; then
     log "warning: failed to fetch origin/main before queue filtering"
     return 0
   fi
 
-  read -r ahead behind < <(git rev-list --left-right --count HEAD...origin/main)
+  read -r ahead behind < <(git rev-list --left-right --count HEAD...refs/remotes/origin/main)
 
   if (( ahead > 0 )); then
     log "skipping origin/main fast-forward because local main has ${ahead} unpushed commit(s)"
