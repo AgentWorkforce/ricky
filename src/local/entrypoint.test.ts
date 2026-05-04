@@ -91,6 +91,15 @@ function workflowArtifactWrites<T extends RecordedWrite>(writes: T[]): T[] {
   return writes.filter((write) => /^workflows\/generated\/.+\.ts$/.test(write.path));
 }
 
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function generationMetadataWrites<T extends RecordedWrite>(writes: T[]): T[] {
   return writes.filter((write) => write.path.startsWith('.workflow-artifacts/generated/'));
 }
@@ -2809,6 +2818,70 @@ describe('runLocal', () => {
       await expect(access(join(repo, 'node_modules'))).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(access(join(stateHome, 'ricky'))).resolves.toBeUndefined();
     } finally {
+      if (previousStateHome === undefined) {
+        delete process.env.RICKY_STATE_HOME;
+      } else {
+        process.env.RICKY_STATE_HOME = previousStateHome;
+      }
+      await rm(repo, { recursive: true, force: true });
+      await rm(stateHome, { recursive: true, force: true });
+    }
+  });
+
+  it('kills the SDK workflow process tree when the local timeout fires', async () => {
+    const { mkdir, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-timeout-repo-'));
+    const stateHome = await mkdtemp(join(tmpdir(), 'ricky-sdk-timeout-state-'));
+    const artifactPath = 'workflows/generated/hanging.workflow.js';
+    const pidFile = join(repo, 'child.pid');
+    const previousStateHome = process.env.RICKY_STATE_HOME;
+    let childPid: number | undefined;
+
+    try {
+      process.env.RICKY_STATE_HOME = stateHome;
+      await mkdir(join(repo, 'workflows/generated'), { recursive: true });
+      await writeFile(
+        join(repo, artifactPath),
+        [
+          "import { spawn } from 'node:child_process';",
+          "import { writeFileSync } from 'node:fs';",
+          "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
+          `writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+          'console.log(`spawned-child=${child.pid}`);',
+          'setInterval(() => {}, 1000);',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+
+      const result = await runLocal(
+        { source: 'workflow-artifact', artifactPath, stageMode: 'run' },
+        {
+          artifactReader: mockArtifactReader('console.log("hanging workflow");'),
+          localExecutor: {
+            cwd: repo,
+            timeoutMs: 500,
+          },
+        },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.evidence?.outcome_summary).toContain('timed out after 500ms');
+
+      childPid = Number((await readFile(pidFile, 'utf8')).trim());
+      expect(Number.isFinite(childPid)).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      expect(pidIsAlive(childPid)).toBe(false);
+    } finally {
+      if (childPid && pidIsAlive(childPid)) {
+        try {
+          process.kill(childPid, 'SIGKILL');
+        } catch {
+          // Best-effort cleanup for a failed regression assertion.
+        }
+      }
       if (previousStateHome === undefined) {
         delete process.env.RICKY_STATE_HOME;
       } else {
