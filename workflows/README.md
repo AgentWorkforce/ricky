@@ -66,6 +66,7 @@ The first major Ricky workflow initiative is a meta-workflow that generates a la
 - `03-close-local-execution-outcome-loop.ts` covers issue #3.
 - `04-tighten-onboarding-readiness-copy-and-checklist.ts` covers issues #4 and #7.
 - `05-prove-skill-embedding-boundary.ts` covers issue #5.
+- `06-close-local-run-product-loop.ts` closes the local run product loop.
 
 `wave10-agent-assistant-adoption/` contains the issue #14 adoption closeout program:
 - `00-execute-agent-assistant-adoption-program.ts` runs the full program. By default it uses `WAVE10_EXECUTION_MODE=parallel`, running doc closure and adapter implementation concurrently before live proof and handoff closure. Set `WAVE10_EXECUTION_MODE=sequential` for strict 01 -> 02 -> 03 -> 04 ordering.

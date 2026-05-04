@@ -12,17 +12,26 @@ This document describes how Ricky is composed at runtime, what execution model i
 
 Ricky is a product composed on top of Agent Assistant. It is not a standalone runtime stack.
 
-### Agent Assistant package status
+### Current dependency status
+
+| Package | Status | Role in Ricky |
+|---|---|---|
+| `@agent-assistant/turn-context` | Current | Bounded request/turn envelope primitive in the local path |
+| `@agentworkforce/harness-kit` | Current | BYOH execution coordination and harness integration |
+| `@agentworkforce/workload-router` | Current | Workload routing and dispatch |
+| `@agent-relay/sdk` | Current | Workflow builder, runner, and evidence APIs |
+| `@agent-relay/cloud` | Current | Cloud-mode workflow execution and coordination |
+
+### Planned Agent Assistant packages
 
 | Package | Role in Ricky |
 |---|---|
-| `@agent-assistant/turn-context` | Current direct dependency; Ricky uses it as a bounded request/turn envelope primitive in the local path |
 | `@agent-assistant/surfaces` | Planned for Slack ingress and webhook handling |
 | `@agent-assistant/webhook-runtime` | Planned for Slack signature verification, dedup, and thread handling |
 | `@agent-assistant/specialists` | Planned specialist orchestration and routing substrate |
 | `@agent-assistant/proactive` | Planned proactive failure notifications and follow-up |
 | `@agent-assistant/vfs` | Planned artifact persistence and evidence storage seam |
-| `@agent-assistant/harness` | Planned BYOH execution coordination seam |
+| `@agent-assistant/harness` | Planned BYOH execution coordination seam (may overlap with `@agentworkforce/harness-kit`) |
 | `@agent-assistant/sdk` | Planned shared assistant SDK primitives |
 
 ### What Ricky owns
@@ -614,7 +623,7 @@ No layer should import from a layer above it. Shared models are the only cross-c
 |---|---|---|
 | Node.js | >=20.x LTS | Required for stable ES2022 support, native fetch, and `node:test` if needed alongside Vitest |
 | TypeScript | >=5.4 | Required for `NoInfer`, satisfies constraints, and stable NodeNext module resolution |
-| Vitest | >=1.x | Test framework used throughout; aligns with the `vitest.config.ts` already in the repo |
+| Vitest | >=3.x | Test framework used throughout; aligns with the `vitest.config.ts` already in the repo |
 
 ### Relay SDK compatibility
 
