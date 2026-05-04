@@ -361,7 +361,7 @@ quarantine_repo_runtime_state() {
 on_exit() {
   local exit_code="$?"
 
-  if [[ -n "$RUN_PGID" ]]; then
+  if [[ -n "$RUN_PGID" && "$RUNNER_EXPECTS_DETACHED_PGID" != "true" ]]; then
     kill_process_group "$RUN_PGID"
   fi
 
