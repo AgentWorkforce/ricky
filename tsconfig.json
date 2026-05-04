@@ -12,5 +12,5 @@
     "types": ["node", "vitest/globals"],
     "noEmit": true
   },
-  "include": ["src", "test", "workflows", "scripts", "packages/cli/src/cli"]
+  "include": ["src", "test", "workflows", "scripts"]
 }

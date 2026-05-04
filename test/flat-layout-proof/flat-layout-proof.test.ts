@@ -42,7 +42,14 @@ describe('Ricky flat src layout proof', () => {
     ['single-package-manifest', ['package.json files found: 1', 'package.json file list: package.json']],
     [
       'single-tsconfig-covers-src',
-      ['tsconfig.json files found: 1', 'only root tsconfig.json: true', 'root include references src: true', 'root compilerOptions.strict: true'],
+      [
+        'tsconfig.json files found: 1',
+        'only root tsconfig.json: true',
+        'root include references src: true',
+        'root include references legacy packages paths: false',
+        'root include missing literal paths: (none)',
+        'root compilerOptions.strict: true',
+      ],
     ],
     ['single-vitest-config', ['vitest.config.ts files found: 1', 'only root vitest.config.ts: true', 'picks up src/**/*.test.ts: true', 'contains legacy packages/ test globs: false']],
     [

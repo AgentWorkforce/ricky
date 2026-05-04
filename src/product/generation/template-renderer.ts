@@ -328,9 +328,10 @@ function buildLeadPlanGateCommand(leadPlanPath: string): string {
     "const fs = require('node:fs');",
     `const leadPlanPath = ${literal(leadPlanPath)};`,
     "const body = fs.readFileSync(leadPlanPath, 'utf8');",
-    "for (const marker of ['GENERATION_LEAD_PLAN_READY', 'Non-goals', 'Routing contract', 'Implementation contract']) {",
+    "for (const marker of ['GENERATION_LEAD_PLAN_READY', 'Non-goals', 'Routing contract']) {",
     '  if (!body.includes(marker)) throw new Error(`lead plan missing required marker: ${marker}`);',
     '}',
+    "if (!/Implementation contract/i.test(body)) throw new Error('lead plan missing required marker: Implementation contract');",
     "console.log('LEAD_PLAN_GATE_OK');",
     'NODE',
   ].join('\n');
