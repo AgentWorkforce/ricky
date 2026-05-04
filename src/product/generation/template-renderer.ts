@@ -136,6 +136,8 @@ function renderSource(input: {
     '',
     renderLeadPlanStep(input.spec, input.artifactsDir),
     '',
+    renderGateStep(input.gates.find((gate) => gate.name === 'lead-plan-gate')!),
+    '',
     renderImplementationStep(input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'implement-artifact')),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-implementation-file-gate')!),
@@ -149,6 +151,8 @@ function renderSource(input: {
     renderReadReviewStep(input.artifactsDir),
     '',
     renderFixLoopStep(input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop')),
+    '',
+    renderGateStep(input.gates.find((gate) => gate.name === 'fix-loop-report-gate')!),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-verification-gate')!),
     '',
@@ -274,7 +278,18 @@ function buildGates(
     gate('lead-plan-gate', buildLeadPlanGateCommand(`${artifactsDir}/lead-plan.md`), 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('post-implementation-file-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['implement-artifact'], 'pre_review'),
     gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
-    gate('post-fix-verification-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['fix-loop'], 'post_fix'),
+    gate(
+      'fix-loop-report-gate',
+      [
+        `test -f ${shellQuote(`${artifactsDir}/fix-loop-report.md`)}`,
+        `tail -n 1 ${shellQuote(`${artifactsDir}/fix-loop-report.md`)} | tr -d '[:space:]' | grep -Eq '^FIX_LOOP_COMPLETE$'`,
+      ].join(' && '),
+      'output_contains',
+      true,
+      ['fix-loop'],
+      'post_fix',
+    ),
+    gate('post-fix-verification-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['fix-loop-report-gate'], 'post_fix'),
     gate('active-reference-gate', activeReferenceCommand, 'deterministic_gate', true, ['post-fix-verification-gate'], 'post_fix'),
     gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['active-reference-gate'], 'post_fix'),
     gate(
@@ -330,7 +345,7 @@ function buildLeadPlanGateCommand(leadPlanPath: string): string {
     "const body = fs.readFileSync(leadPlanPath, 'utf8');",
     "if (!body.includes('GENERATION_LEAD_PLAN_READY')) throw new Error('lead plan missing required marker: GENERATION_LEAD_PLAN_READY');",
     "if (!/non-goals?/i.test(body)) throw new Error('lead plan missing required marker: Non-goals');",
-    "const hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body);",
+    "const hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body) || /routes local execution through the generated Agent Relay artifact/i.test(body) || /Use the generated Agent Relay workflow artifact/i.test(body);",
     "if (!hasRoutingContract) throw new Error('lead plan missing required marker: Routing contract');",
     "const hasImplementationContract = /Implementation contract/i.test(body) || /This is an implementation spec/i.test(body);",
     "if (!hasImplementationContract) throw new Error('lead plan missing required marker: Implementation contract');",
@@ -743,7 +758,9 @@ Fix only concrete review or validation findings. Preserve the declared target bo
 ${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : ['No explicit targets supplied'])}
 ${renderToolSelectionSummary(selection)}
 
+Before exiting, write ${artifactsDir}/fix-loop-report.md summarizing the exact fixes you applied or explicitly saying that no repo changes were required, then end that file with FIX_LOOP_COMPLETE.
 Re-run ${isCodeWorkflow ? 'typecheck and tests' : 'document sanity checks'} before handing off to post-fix validation.`)},
+      verification: { type: 'file_exists', value: ${literal(`${artifactsDir}/fix-loop-report.md`)} },
     })`;
 }
 
@@ -758,6 +775,7 @@ ${selectionLines}
 Include:
 - files changed
 - source changes and implementation diff evidence
+- status-prefixed changed-file inventory and command summaries
 - dry-run command to execute before runtime launch
 - deterministic validation commands
 - review verdicts

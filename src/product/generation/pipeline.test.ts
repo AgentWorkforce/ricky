@@ -436,6 +436,8 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toMatch(/\bworkflow\(/);
     expect(artifact.content).toContain(`.channel("${artifact.channel}")`);
     expect(artifact.content).toContain('.run({ cwd: process.cwd() })');
+    expect(artifact.content).toContain('.step("lead-plan-gate"');
+    expect(artifact.content).toContain('.step("fix-loop-report-gate"');
     expect(artifact.content).toContain('review-claude');
     expect(artifact.content).toContain('review-codex');
     expect(gate(artifact, 'initial-soft-validation')).toMatchObject({
@@ -1000,11 +1002,17 @@ describe('workflow generation pipeline', () => {
     expect(result.success).toBe(true);
     const artifact = result.artifact!;
     const leadPlanGate = artifact.gates.find((g) => g.name === 'lead-plan-gate')!;
+    const fixLoopReportGate = artifact.gates.find((g) => g.name === 'fix-loop-report-gate')!;
+    const postFixGate = artifact.gates.find((g) => g.name === 'post-fix-verification-gate')!;
     const postImplementationGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
 
     expect(leadPlanGate.command).toContain('GENERATION_LEAD_PLAN_READY');
     expect(leadPlanGate.command).toContain('/non-goals?/i');
     expect(leadPlanGate.command).toContain('Routing contract');
+    expect(artifact.content).toContain('write .workflow-artifacts/generated/no-target-evidence-gates/fix-loop-report.md');
+    expect(fixLoopReportGate.command).toContain('FIX_LOOP_COMPLETE');
+    expect(fixLoopReportGate.dependsOn).toEqual(['fix-loop']);
+    expect(postFixGate.dependsOn).toEqual(['fix-loop-report-gate']);
     expect(postImplementationGate.command).toContain('cleanup-report.md');
     expect(postImplementationGate.command).toContain('cleanup-diff-inventory.txt');
     expect(postImplementationGate.command).toContain('validation-evidence.md');
