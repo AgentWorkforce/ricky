@@ -4,15 +4,21 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('generated workflow hygiene', () => {
-  it('keeps a single current cleanup workflow with the implementation contract', () => {
+  it('keeps only active generated workflows under source control', () => {
     const generatedDir = join(process.cwd(), 'workflows', 'generated');
-    const cleanupWorkflows = readdirSync(generatedDir)
-      .filter((entry) => /clean-up-the-codebase-to-remove/.test(entry))
+    const generatedWorkflows = readdirSync(generatedDir)
+      .filter((entry) => entry.endsWith('.ts'))
       .sort();
 
-    expect(cleanupWorkflows).toEqual(['ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts']);
+    expect(generatedWorkflows).toEqual([
+      'ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts',
+      'ricky-verify-simplified-cli-smoke.ts',
+    ]);
 
-    const workflowBody = readFileSync(join(generatedDir, cleanupWorkflows[0]), 'utf8');
+    const workflowBody = readFileSync(
+      join(generatedDir, 'ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts'),
+      'utf8',
+    );
     expect(workflowBody).toContain('IMPLEMENTATION_WORKFLOW_CONTRACT');
     expect(workflowBody).toContain('git diff gate comparing git diff --name-status');
     expect(workflowBody).toContain('Codex structural marker gate');

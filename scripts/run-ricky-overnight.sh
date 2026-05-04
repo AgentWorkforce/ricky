@@ -819,12 +819,6 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave12-simplified-workflow-cli/no-dead-end-proof/signoff.md \
         'NO_DEAD_END_SIGNOFF_COMPLETE'
       ;;
-    workflows/generated/ricky-generate-a-workflow-for-external-package-checks.ts)
-      git cat-file -e HEAD:workflows/generated/ricky-external-package-checks.ts 2>/dev/null \
-        && artifact_signoff_has_marker \
-          .workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/signoff.md \
-          'EXTERNAL_PACKAGE_CHECKS_READY'
-      ;;
     *)
       return 1
       ;;
