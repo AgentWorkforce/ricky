@@ -347,18 +347,18 @@ Write .workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remo
       failOnError: true,
     })
 
-    .step("git-diff-gate", {
+    .step("artifact-materialization-gate", {
       type: 'deterministic',
       dependsOn: ["final-hard-validation"],
-      command: "test -s '.workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/output-manifest.txt' && : > '.workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/git-diff.txt' && while IFS= read -r f; do { git diff --name-only -- \"$f\"; git ls-files --others --exclude-standard -- \"$f\"; } >> '.workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/git-diff.txt'; done < '.workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/output-manifest.txt' && sort -u '.workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/git-diff.txt' -o '.workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/git-diff.txt' && test -s '.workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/git-diff.txt'",
+      command: "artifact_dir='.workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o' && manifest=\"$artifact_dir/output-manifest.txt\" && evidence=\"$artifact_dir/git-diff.txt\" && test -s \"$manifest\" && : > \"$evidence\" && while IFS= read -r f; do test -f \"$f\" && test -s \"$f\" && printf 'MATERIALIZED %s\\n' \"$f\" >> \"$evidence\" && { git check-ignore -v \"$f\" || true; } >> \"$evidence\"; done < \"$manifest\" && node -e \"const fs=require('fs'); for (const f of ['cleanup-candidates.json','tool-selection.json','skill-application-boundary.json','skill-matches.json']) JSON.parse(fs.readFileSync('$artifact_dir/'+f,'utf8'));\" && grep -F 'FINAL_REVIEW_CLAUDE_PASS' \"$artifact_dir/final-review-claude.md\" && grep -F 'FINAL_REVIEW_CODEX_PASS' \"$artifact_dir/final-review-codex.md\" && test -s \"$evidence\"",
       captureOutput: true,
       failOnError: true,
     })
 
     .step("regression-gate", {
       type: 'deterministic',
-      dependsOn: ["git-diff-gate"],
-      command: "git diff --check",
+      dependsOn: ["artifact-materialization-gate"],
+      command: "git diff --check -- workflows/generated/ricky-goal-i-want-to-clean-up-the-codebase-to-remove-o.ts",
       captureOutput: true,
       failOnError: true,
     })

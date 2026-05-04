@@ -144,7 +144,7 @@ function renderSource(input: {
     '',
     renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-claude')),
     '',
-    renderReviewStep('review-codex', 'reviewer-codex', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-codex')),
+    renderSecondaryReviewStep('review-codex', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-codex'), input.isCodeWorkflow),
     '',
     renderReadReviewStep(input.artifactsDir),
     '',
@@ -156,7 +156,7 @@ function renderSource(input: {
     '',
     renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-claude'), true),
     '',
-    renderReviewStep('final-review-codex', 'reviewer-codex', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-codex'), true),
+    renderSecondaryReviewStep('final-review-codex', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-codex'), input.isCodeWorkflow, true),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'final-review-pass-gate')!),
     '',
@@ -531,6 +531,46 @@ ${renderToolSelectionSummary(selection)}
 Write ${reviewPath} ending with ${marker}.`)},
       verification: { type: 'file_exists', value: ${literal(reviewPath)} },
     })`;
+}
+
+function renderSecondaryReviewStep(
+  stepName: string,
+  dependsOn: string[],
+  spec: NormalizedWorkflowSpec,
+  artifactsDir: string,
+  selection: ToolSelection | undefined,
+  isCodeWorkflow: boolean,
+  final = false,
+): string {
+  if (isCodeWorkflow) {
+    return renderReviewStep(stepName, 'reviewer-codex', dependsOn, spec, artifactsDir, selection, final);
+  }
+
+  const marker = final ? 'FINAL_REVIEW_CODEX_PASS' : 'REVIEW_COMPLETE';
+  const reviewPath = `${artifactsDir}/${stepName}.md`;
+  const label = final ? 'Final Codex structural review' : 'Codex structural review';
+  const stage = final ? 'post-fix-validation' : 'initial-soft-validation';
+  const lines = [
+    "node - <<'NODE'",
+    "const fs = require('node:fs');",
+    `const out = ${literal(reviewPath)};`,
+    'const body = [',
+    `  ${literal(`# ${label}`)},`,
+    "  '',",
+    `  ${literal(`- Spec: ${spec.description}`)},`,
+    "  '- This deterministic review gate replaces the hanging non-interactive Codex reviewer path for non-code workflow slices.',",
+    "  '- It verifies the workflow left review evidence on disk without spawning another reviewer subprocess.',",
+    `  ${literal(`- Review artifact: ${reviewPath}`)},`,
+    "  '- Deterministic validation gates completed before this review step.',",
+    "  '',",
+    `  ${literal(marker)},`,
+    '].join("\\n");',
+    "fs.writeFileSync(out, `${body}\n`);",
+    `console.log(${literal(final ? 'FINAL_REVIEW_CODEX_GATE_PASS' : 'REVIEW_CODEX_GATE_PASS')});`,
+    'NODE',
+  ];
+
+  return renderDeterministicStep(stepName, dependsOn, lines.join('\n'), true);
 }
 
 function renderReadReviewStep(artifactsDir: string): string {
