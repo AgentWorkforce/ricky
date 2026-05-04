@@ -1150,8 +1150,24 @@ inspect_repo_changes() {
   git diff --stat > "$ARTIFACT_DIR/git-diff-stat.txt" || true
 }
 
+repo_has_captured_head_delta() {
+  local baseline=""
+  local current_head=""
+
+  if [[ -f "$LAST_COMMIT_FILE" ]]; then
+    baseline="$(cat "$LAST_COMMIT_FILE" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$baseline" ]]; then
+    baseline="$INITIAL_GIT_HEAD"
+  fi
+
+  current_head="$(git rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "$baseline" && -n "$current_head" && "$current_head" != "$baseline" ]]
+}
+
 repo_has_meaningful_delta() {
-  ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]]
+  ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]] || repo_has_captured_head_delta
 }
 
 commit_if_clean_delta() {
@@ -1164,9 +1180,19 @@ commit_if_clean_delta() {
   validate_repo
 
   local short
+  local head_advanced="false"
   short="$(basename "$workflow_path" .ts)"
-  git add -A ':!tmp/' ':!.workflow-artifacts/'
-  git commit -m "chore(overnight): capture $short progress" || true
+  if repo_has_captured_head_delta; then
+    head_advanced="true"
+  fi
+
+  if ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]]; then
+    git add -A ':!tmp/' ':!.workflow-artifacts/'
+    git commit -m "chore(overnight): capture $short progress" || true
+  elif [[ "$head_advanced" == "true" ]]; then
+    log "repo HEAD already advanced during $workflow_path; capturing committed state"
+  fi
+
   git push origin main || true
   git rev-parse HEAD > "$LAST_COMMIT_FILE"
   inspect_repo_changes
