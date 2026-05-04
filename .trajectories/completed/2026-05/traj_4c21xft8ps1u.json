@@ -1,0 +1,65 @@
+{
+  "id": "traj_4c21xft8ps1u",
+  "version": 1,
+  "task": {
+    "title": "Fix SDK workflow timeout cleanup PR"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-04T11:09:47.876Z",
+  "completedAt": "2026-05-04T11:10:59.543Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-04T11:09:52.978Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_ipmd4iktmvmc",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-04T11:09:52.978Z",
+      "endedAt": "2026-05-04T11:10:59.543Z",
+      "events": [
+        {
+          "ts": 1777892992979,
+          "type": "decision",
+          "content": "Opened dedicated trajectory after closing stale active trajectories: Opened dedicated trajectory after closing stale active trajectories",
+          "raw": {
+            "question": "Opened dedicated trajectory after closing stale active trajectories",
+            "chosen": "Opened dedicated trajectory after closing stale active trajectories",
+            "alternatives": [],
+            "reasoning": "AGENTS.md requires trajectory records for task work; two stale workflow-runner trajectories were active, so they were completed before starting this PR-specific trajectory."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1777893059463,
+          "type": "reflection",
+          "content": "PR #43 fixes SDK workflow timeout cleanup by aborting the SDK runner, killing the spawned process group on timeout, closing readline handles, and proving child cleanup with a regression test.",
+          "raw": {
+            "confidence": 0.9
+          },
+          "significance": "high",
+          "tags": [
+            "confidence:0.9"
+          ]
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Opened PR #43 to fix SDK workflow timeout cleanup. SDK script workflow runs now receive an AbortSignal, timeout aborts the runner, spawned scripts run detached so process-group cleanup can terminate broker/PTY/MCP children, and tests prove a hanging child process is gone after timeout. Verification: focused entrypoint tests, typecheck, and full npm test passed after rerunning one timing-flaky monitor test.",
+    "approach": "Standard approach",
+    "confidence": 0.9
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "1b8e0e5f867280c452eb6b248f9873aa5b4063a4",
+    "endRef": "1b8e0e5f867280c452eb6b248f9873aa5b4063a4"
+  }
+}
