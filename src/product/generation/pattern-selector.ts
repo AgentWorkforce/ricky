@@ -55,6 +55,7 @@ function collectSignals(spec: NormalizedWorkflowSpec, usesSwarmPatternSkill = fa
   if (/\b(critical|production|security|auth|billing|data loss)\b/.test(combinedText)) signals.push('critical or production constraint');
   if (/\b(review|approval|signoff)\b/.test(combinedText)) signals.push('review constraint');
   if (/\b(parallel|fan.?out|independent|many files|across files)\b/.test(combinedText)) signals.push('parallel work suggested');
+  if (/\b(clean ?up|remove|delete|unused|outdated|obsolete|stale)\b/.test(combinedText)) signals.push('deletion or cleanup risk');
   if (isDocOnly(spec)) signals.push('doc or spec oriented');
   if (spec.executionPreference === 'cloud') signals.push('cloud execution requested');
   if (spec.providerContext.surface === 'mcp') signals.push('mcp handoff surface');
@@ -122,6 +123,9 @@ function explainPattern(
   }
   if (pattern === 'supervisor') {
     return `Selected supervisor${skillPrefix} because the request is ${riskLevel} risk and needs coordinated planning, implementation, and review.`;
+  }
+  if (signals.includes('deletion or cleanup risk')) {
+    return `Selected pipeline${skillPrefix} because cleanup deletion has false-positive risk and should proceed through a linear evidence ladder.`;
   }
   return `Selected pipeline${skillPrefix} because the request is ${riskLevel} risk and can proceed through a linear reliability ladder.`;
 }

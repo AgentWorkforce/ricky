@@ -152,6 +152,8 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-verification-gate')!),
     '',
+    renderGateStep(input.gates.find((gate) => gate.name === 'active-reference-gate')!),
+    '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-validation')!),
     '',
     renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-claude'), true),
@@ -237,12 +239,15 @@ function buildGates(
   const fileExistsCommand = targetFiles.map((file) => `test -f ${shellQuote(file)}`).join(' && ');
   const grepPattern = isCodeWorkflow ? 'export|function|class|workflow\\(' : '#|##|TODO|Acceptance|Deliverables';
   const grepCommand = usingManifest
-    ? `test -s ${shellQuote(outputManifest)} && while IFS= read -r f; do test -f "$f"; done < ${shellQuote(outputManifest)}`
+    ? buildManifestFileGateCommand(outputManifest)
     : `grep -Eq ${shellQuote(grepPattern)} ${targetFiles.map(shellQuote).join(' ')}`;
   const gitDiffPath = `${artifactsDir}/git-diff.txt`;
   const gitDiffCommand = usingManifest
     ? buildManifestGitDiffCommand(outputManifest, gitDiffPath)
     : `{ git diff --name-only -- ${targetFiles.map(shellQuote).join(' ')}; git ls-files --others --exclude-standard -- ${targetFiles.map(shellQuote).join(' ')}; } > ${shellQuote(gitDiffPath)} && sort -u ${shellQuote(gitDiffPath)} -o ${shellQuote(gitDiffPath)} && test -s ${shellQuote(gitDiffPath)}`;
+  const activeReferenceCommand = usingManifest
+    ? buildActiveReferenceGateCommand(outputManifest, `${artifactsDir}/active-reference-check.txt`)
+    : `printf '%s\\n' 'No manifest-driven deleted paths to check.' > ${shellQuote(`${artifactsDir}/active-reference-check.txt`)}`;
   const testCommand = deriveTestCommand(spec);
   const typecheckCommand = 'npx tsc --noEmit';
   const acceptanceCommands = spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate));
@@ -261,7 +266,8 @@ function buildGates(
     gate('post-implementation-file-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['implement-artifact'], 'pre_review'),
     gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
     gate('post-fix-verification-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['fix-loop'], 'post_fix'),
-    gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['post-fix-verification-gate'], 'post_fix'),
+    gate('active-reference-gate', activeReferenceCommand, 'deterministic_gate', true, ['post-fix-verification-gate'], 'post_fix'),
+    gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['active-reference-gate'], 'post_fix'),
     gate(
       'final-review-pass-gate',
       [
@@ -279,16 +285,99 @@ function buildGates(
   ];
 }
 
-function buildManifestGitDiffCommand(outputManifest: string, gitDiffPath: string): string {
-  const quotedManifest = shellQuote(outputManifest);
-  const quotedGitDiffPath = shellQuote(gitDiffPath);
+function buildManifestFileGateCommand(outputManifest: string): string {
   return [
-    `test -s ${quotedManifest}`,
-    `: > ${quotedGitDiffPath}`,
-    `while IFS= read -r f; do { git diff --name-only -- "$f"; git ls-files --others --exclude-standard -- "$f"; } >> ${quotedGitDiffPath}; done < ${quotedManifest}`,
-    `sort -u ${quotedGitDiffPath} -o ${quotedGitDiffPath}`,
-    `test -s ${quotedGitDiffPath}`,
-  ].join(' && ');
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    `const manifest = ${literal(outputManifest)};`,
+    'const lines = fs.readFileSync(manifest, \'utf8\').split(/\\r?\\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith(\'#\'));',
+    'if (lines.length === 0) throw new Error(\'output manifest is empty\');',
+    'const parse = (line) => {',
+    '  const match = /^(A|M|D)\\s+(.+)$/.exec(line);',
+    '  return match ? { status: match[1], path: match[2] } : { status: null, path: line };',
+    '};',
+    'for (const entry of lines.map(parse)) {',
+    '  if (entry.status === \'D\') {',
+    '    if (fs.existsSync(entry.path)) throw new Error(`deleted manifest path still exists: ${entry.path}`);',
+    '    continue;',
+    '  }',
+    '  if (!fs.existsSync(entry.path)) throw new Error(`manifest path does not exist: ${entry.path}`);',
+    '}',
+    'console.log(\'MANIFEST_FILE_GATE_OK\');',
+    'NODE',
+  ].join('\n');
+}
+
+function buildManifestGitDiffCommand(outputManifest: string, gitDiffPath: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    "const { execFileSync } = require('node:child_process');",
+    `const manifest = ${literal(outputManifest)};`,
+    `const gitDiffPath = ${literal(gitDiffPath)};`,
+    'const rawLines = fs.readFileSync(manifest, \'utf8\').split(/\\r?\\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith(\'#\'));',
+    'if (rawLines.length === 0) throw new Error(\'output manifest is empty\');',
+    'const parse = (line) => {',
+    '  const match = /^(A|M|D)\\s+(.+)$/.exec(line);',
+    '  return match ? { status: match[1], path: match[2], exact: `${match[1]}\\t${match[2]}` } : { status: null, path: line, exact: null };',
+    '};',
+    'const expected = rawLines.map(parse);',
+    'const tracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'diff\', \'--name-status\'], { encoding: \'utf8\' })',
+    '  .split(/\\r?\\n/)',
+    '  .map((line) => line.trim())',
+    '  .filter(Boolean);',
+    'const untracked = execFileSync(\'git\', [\'ls-files\', \'--others\', \'--exclude-standard\'], { encoding: \'utf8\' })',
+    '  .split(/\\r?\\n/)',
+    '  .map((line) => line.trim())',
+    '  .filter(Boolean)',
+    '  .map((path) => `A\\t${path}`);',
+    'const actual = [...tracked, ...untracked].sort();',
+    'fs.writeFileSync(gitDiffPath, `${actual.join(\'\\n\')}\\n`);',
+    'if (actual.length === 0) throw new Error(\'git diff evidence is empty\');',
+    'const actualPaths = new Set(actual.map((line) => line.replace(/^[A-Z]+\\s+/, \'\')));',
+    'const expectedPaths = new Set(expected.map((entry) => entry.path));',
+    'for (const entry of expected) {',
+    '  if (entry.exact && !actual.includes(entry.exact)) throw new Error(`missing expected diff entry: ${entry.exact}`);',
+    '  if (!entry.exact && !actualPaths.has(entry.path)) throw new Error(`missing expected diff path: ${entry.path}`);',
+    '}',
+    'const extra = [...actualPaths].filter((path) => !expectedPaths.has(path) && !path.startsWith(\'.workflow-artifacts/\'));',
+    'if (extra.length > 0) throw new Error(`unexpected changed paths: ${extra.join(\', \')}`);',
+    'console.log(\'GIT_DIFF_GATE_OK\');',
+    'NODE',
+  ].join('\n');
+}
+
+function buildActiveReferenceGateCommand(outputManifest: string, evidencePath: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    "const { execFileSync } = require('node:child_process');",
+    `const manifest = ${literal(outputManifest)};`,
+    `const evidencePath = ${literal(evidencePath)};`,
+    'const lines = fs.readFileSync(manifest, \'utf8\').split(/\\r?\\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith(\'#\'));',
+    'const deleted = lines.map((line) => /^(A|M|D)\\s+(.+)$/.exec(line)).filter((match) => match && match[1] === \'D\').map((match) => match[2]);',
+    'if (deleted.length === 0) {',
+    '  fs.writeFileSync(evidencePath, \'No deleted paths declared; active reference gate skipped.\\n\');',
+    '  console.log(\'ACTIVE_REFERENCE_GATE_SKIPPED\');',
+    '  process.exit(0);',
+    '}',
+    'const files = execFileSync(\'git\', [\'ls-files\'], { encoding: \'utf8\' })',
+    '  .split(/\\r?\\n/)',
+    '  .filter(Boolean)',
+    '  .filter((path) => !path.startsWith(\'.workflow-artifacts/\') && !path.startsWith(\'.trajectories/\'));',
+    'const hits = [];',
+    'for (const removedPath of deleted) {',
+    '  for (const file of files) {',
+    '    if (file === removedPath) continue;',
+    '    const body = fs.readFileSync(file, \'utf8\');',
+    '    if (body.includes(removedPath)) hits.push(`${removedPath} referenced by ${file}`);',
+    '  }',
+    '}',
+    'fs.writeFileSync(evidencePath, hits.length === 0 ? `No active references found for:\\n${deleted.join(\'\\n\')}\\n` : `${hits.join(\'\\n\')}\\n`);',
+    'if (hits.length > 0) throw new Error(`active references remain: ${hits.join(\'; \')}`);',
+    'console.log(\'ACTIVE_REFERENCE_GATE_OK\');',
+    'NODE',
+  ].join('\n');
 }
 
 function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillContext): string {
@@ -428,6 +517,7 @@ function renderTargetContextCommand(targetContext: string, outputPath: string): 
 }
 
 function renderLeadPlanStep(spec: NormalizedWorkflowSpec, artifactsDir: string): string {
+  const nonGoals = defaultNonGoals(spec);
   return `    .step('lead-plan', {
       agent: 'lead-claude',
       dependsOn: ['skill-boundary-metadata-gate'],
@@ -449,10 +539,15 @@ Deliverables:
 ${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : ['A generated workflow artifact and any requested output files'])}
 
 Non-goals:
-${formatList(spec.constraints.filter((constraint) => constraint.category === 'scope').map((constraint) => constraint.constraint))}
+${formatList(nonGoals)}
+
+Routing contract:
+- Local: run through Agent Relay using the generated workflow artifact and persist artifacts under ${artifactsDir}.
+- Cloud: no separate cloud execution path is implied unless the normalized spec explicitly requests cloud; cloud callers receive the same generated artifact contract.
+- MCP: generated runtime agents must not use Relaycast management or messaging tools; MCP callers receive artifacts without a separate runtime management path.
 
 Verification commands:
-${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using grep, rg, or an equivalent assertion', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff gate combining git diff --name-only with git ls-files --others --exclude-standard and requiring a non-empty diff', 'PR URL or explicit result summary'])}
+${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using grep, rg, or an equivalent assertion', 'active-reference gate for deleted manifest paths', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff', 'PR URL or explicit result summary'])}
 
 Write ${artifactsDir}/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`)},
       verification: { type: 'file_exists', value: ${literal(`${artifactsDir}/lead-plan.md`)} },
@@ -467,7 +562,7 @@ function renderImplementationStep(
 ): string {
   const agent = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
   const selectionLines = renderSelectionFields(selection);
-  const noTargetInstructions = `No explicit file targets were supplied. Write all created file paths (one per line) to ${artifactsDir}/output-manifest.txt. Keep changes bounded.`;
+  const noTargetInstructions = `No explicit file targets were supplied. Write every changed path to ${artifactsDir}/output-manifest.txt using status-prefixed entries such as "A path", "M path", or "D path". Include deleted files and supporting edits. Keep changes bounded.`;
   return `    .step('implement-artifact', {
       agent: ${literal(agent)},
       dependsOn: ['lead-plan'],
@@ -496,6 +591,7 @@ Keep execution routing explicit for local, cloud, and MCP callers. Materialize o
 Generated workflow quality:
 - Include a real deterministic sanity gate over produced files, not just prose saying one exists.
 - Prefer grep, rg, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.
+- For cleanup or deletion work, persist a changed-files inventory with statuses, active-reference evidence for deleted paths, and command summaries for final signoff.
 - Keep each agent step bounded to one coherent slice. Split broad implementation or test-writing work into sequential/fan-out steps with deterministic gates between them instead of relying on a single long agent timeout.`)},
     })`;
 }
@@ -580,7 +676,9 @@ function renderReadReviewStep(artifactsDir: string): string {
     [
       `test -f ${shellQuote(`${artifactsDir}/review-claude.md`)}`,
       `test -f ${shellQuote(`${artifactsDir}/review-codex.md`)}`,
-      `cat ${shellQuote(`${artifactsDir}/review-claude.md`)} ${shellQuote(`${artifactsDir}/review-codex.md`)} > ${shellQuote(`${artifactsDir}/review-feedback.md`)}`,
+      `grep -F ${shellQuote('REVIEW_COMPLETE')} ${shellQuote(`${artifactsDir}/review-claude.md`)}`,
+      `grep -F ${shellQuote('REVIEW_COMPLETE')} ${shellQuote(`${artifactsDir}/review-codex.md`)}`,
+      `cat ${shellQuote(`${artifactsDir}/review-claude.md`)} ${shellQuote(`${artifactsDir}/review-codex.md`)} | tee ${shellQuote(`${artifactsDir}/review-feedback.md`)}`,
     ].join(' && '),
     true,
   );
@@ -595,13 +693,18 @@ function renderFixLoopStep(
   const selectionLines = renderSelectionFields(selection);
   return `    .step('fix-loop', {
       agent: 'validator-claude',
-      dependsOn: ['read-review-feedback'],
+      dependsOn: ['read-review-feedback', 'initial-soft-validation'],
 ${selectionLines}
       task: ${templateLiteral(`Run the 80-to-100 fix loop.
 
 Inputs:
 - ${artifactsDir}/review-feedback.md
-- initial validation output from the previous deterministic step
+
+Review feedback:
+{{steps.read-review-feedback.output}}
+
+Initial validation output:
+{{steps.initial-soft-validation.output}}
 
 Fix only concrete review or validation findings. Preserve the declared target boundary:
 ${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : ['No explicit targets supplied'])}
@@ -766,6 +869,26 @@ function formatList(items: string[]): string {
   const cleanItems = items.filter((item) => item.trim().length > 0);
   if (cleanItems.length === 0) return '- None declared';
   return cleanItems.map((item) => `- ${item}`).join('\n');
+}
+
+function defaultNonGoals(spec: NormalizedWorkflowSpec): string[] {
+  const declared = spec.constraints
+    .filter((constraint) => constraint.category === 'scope')
+    .map((constraint) => constraint.constraint);
+  if (declared.length > 0) return declared;
+
+  const text = [spec.description, spec.targetContext].filter(Boolean).join('\n').toLowerCase();
+  if (/\b(clean ?up|remove|delete|unused|outdated|obsolete|stale)\b/.test(text)) {
+    return [
+      'No deletion without concrete reference and usage evidence.',
+      'No source, test, config, docs, or workflow removal solely due to unfamiliarity.',
+      'No dependency cleanup or package metadata changes unless separately proven and requested.',
+      'No deletion of generated or historical artifacts unless explicitly proven unused.',
+      'No commits, pushes, or destructive shell operations during validation.',
+    ];
+  }
+
+  return [];
 }
 
 function literal(value: string): string {

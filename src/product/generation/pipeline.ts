@@ -231,7 +231,7 @@ export function validateGeneratedArtifact(
   if (!/vitest|npm test/.test(content)) {
     issues.push(blockingIssue('validation', 'TEST_GATE_MISSING', 'Rendered workflow has no test gate.'));
   }
-  if (!/git diff --name-only/.test(content)) {
+  if (!/git diff --(?:name-only|name-status)/.test(content) && !/['"]diff['"],\s*['"]--name-status['"]/.test(content)) {
     issues.push(blockingIssue('validation', 'GIT_DIFF_GATE_MISSING', 'Rendered workflow has no git-diff gate.'));
   }
   if (!/80-to-100|80.?to.?100/i.test(content) || !/fix-loop/.test(content) || !/final-review/.test(content)) {

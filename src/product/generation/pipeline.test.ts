@@ -94,6 +94,11 @@ describe('workflow generation pipeline', () => {
     expect(gate(artifact, 'post-fix-validation')).toMatchObject({
       stage: 'post_fix',
       failOnError: false,
+      dependsOn: ['active-reference-gate'],
+    });
+    expect(gate(artifact, 'active-reference-gate')).toMatchObject({
+      stage: 'post_fix',
+      failOnError: true,
       dependsOn: ['post-fix-verification-gate'],
     });
     expect(gate(artifact, 'final-review-pass-gate')).toMatchObject({
@@ -891,10 +896,11 @@ describe('workflow generation pipeline', () => {
 
     // Gate must NOT grep manifest for source-shape tokens (export|function|class|workflow)
     expect(fileGate.command).not.toMatch(/grep.*export\|function\|class/);
-    // Gate must validate manifest is non-empty and listed files exist
-    expect(fileGate.command).toContain('test -s');
-    expect(fileGate.command).toContain('read -r f');
-    expect(fileGate.command).toContain('test -f "$f"');
+    // Gate must validate manifest is non-empty and support status-prefixed cleanup entries.
+    expect(fileGate.command).toContain('output manifest is empty');
+    expect(fileGate.command).toContain('deleted manifest path still exists');
+    expect(fileGate.command).toContain('manifest path does not exist');
+    expect(fileGate.command).toContain('MANIFEST_FILE_GATE_OK');
   });
 
   it('renders deterministic artifact content for the same spec with controlled registry', () => {
@@ -946,9 +952,10 @@ describe('workflow generation pipeline', () => {
     const gitDiffGate = artifact.gates.find((g) => g.name === 'git-diff-gate')!;
 
     expect(gitDiffGate.command).toContain('output-manifest.txt');
-    expect(gitDiffGate.command).toContain('git diff --name-only -- "$f"');
-    expect(gitDiffGate.command).toContain('git ls-files --others --exclude-standard -- "$f"');
-    expect(gitDiffGate.command).toContain('sort -u');
+    expect(gitDiffGate.command).toContain("'diff', '--name-status'");
+    expect(gitDiffGate.command).toContain("'ls-files', '--others', '--exclude-standard'");
+    expect(gitDiffGate.command).toContain('missing expected diff entry');
+    expect(gitDiffGate.command).toContain('unexpected changed paths');
   });
 
   it('explicit target git diff gate includes untracked files for newly created outputs', () => {
