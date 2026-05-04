@@ -908,6 +908,15 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave12-simplified-workflow-cli/no-dead-end-proof/signoff.md \
         'NO_DEAD_END_SIGNOFF_COMPLETE'
       ;;
+    workflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/signoff.md \
+        'GENERATED_WORKFLOW_READY' \
+        && ! test -f workflows/wave4-local-byoh/05-prove-cli-onboarding-first-run-and-recovery.ts \
+        && git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.ts 2>/dev/null \
+        && git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.test.ts 2>/dev/null \
+        && grep -q 'obsolete workspace-split artifacts checked:' test/flat-layout-proof/flat-layout-proof.ts
+      ;;
     *)
       return 1
       ;;
