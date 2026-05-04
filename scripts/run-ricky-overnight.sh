@@ -143,6 +143,48 @@ artifact_runner_logs_show_failure() {
   return 1
 }
 
+artifact_checkpoint_indicates_queue_exhausted() {
+  local artifact_dir="$1"
+  local checkpoint_file="$artifact_dir/checkpoint.env"
+  local queue_file="$artifact_dir/queue.txt"
+  local current_index=""
+  local current_workflow=""
+  local queue_total="0"
+  local key raw_value value
+
+  [[ -d "$artifact_dir" ]] || return 1
+  [[ -f "$checkpoint_file" ]] || return 1
+  [[ -f "$queue_file" ]] || return 1
+
+  while IFS='=' read -r key raw_value; do
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    value="$(printf '%b' "${raw_value//\\/\\\\}")"
+    eval "value=$raw_value" 2>/dev/null || value="$raw_value"
+    case "$key" in
+      current_index) current_index="$value" ;;
+      current_workflow) current_workflow="$value" ;;
+    esac
+  done < "$checkpoint_file"
+
+  [[ "$current_index" =~ ^[0-9]+$ ]] || return 1
+  queue_total="$(grep -cve '^[[:space:]]*$' "$queue_file" 2>/dev/null || echo 0)"
+  [[ "$queue_total" =~ ^[0-9]+$ ]] || queue_total="0"
+
+  [[ -z "$current_workflow" ]] || return 1
+  (( current_index >= queue_total ))
+}
+
+artifact_queue_exhausted_terminal_status() {
+  local artifact_dir="$1"
+  local failed_file="$artifact_dir/failed.txt"
+
+  if [[ -s "$failed_file" ]]; then
+    printf 'complete-with-failures\n'
+  else
+    printf 'complete\n'
+  fi
+}
+
 clear_artifact_checkpoint() {
   local artifact_dir="$1"
 
@@ -165,6 +207,9 @@ mark_artifact_stale_or_complete() {
   elif artifact_runner_logs_show_success "$artifact_dir"; then
     resolved_status="complete"
     resolved_reason="runner completed before harness status flush"
+  elif artifact_checkpoint_indicates_queue_exhausted "$artifact_dir"; then
+    resolved_status="$(artifact_queue_exhausted_terminal_status "$artifact_dir")"
+    resolved_reason="queue exhausted before harness status flush"
   fi
 
   printf '%s\n' "$resolved_status" > "$status_file"
@@ -372,6 +417,13 @@ on_exit() {
         echo "complete" > "$STATUS_FILE"
         persist_checkpoint
         write_summary "complete"
+      elif artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR"; then
+        STATUS_REASON="queue exhausted before harness status flush"
+        local recovered_status
+        recovered_status="$(artifact_queue_exhausted_terminal_status "$ARTIFACT_DIR")"
+        echo "$recovered_status" > "$STATUS_FILE"
+        persist_checkpoint
+        write_summary "$recovered_status"
       else
         STATUS_REASON="process exited unexpectedly"
         echo "stale" > "$STATUS_FILE"
