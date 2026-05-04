@@ -133,6 +133,7 @@ Keep execution routing explicit for local, cloud, and MCP callers. Materialize o
     .step("review-claude", {
       agent: "reviewer-claude",
       dependsOn: ["initial-soft-validation"],
+      timeoutMs: 300_000,
 
       task: `Review the generated work.
 
@@ -170,6 +171,7 @@ Write .workflow-artifacts/generated/goal-i-want-a-documentation-pass-to-make-sur
     .step("review-codex", {
       agent: "reviewer-codex",
       dependsOn: ["initial-soft-validation"],
+      timeoutMs: 300_000,
 
       task: `Review the generated work.
 
@@ -249,6 +251,7 @@ Re-run document sanity checks before handing off to post-fix validation.`,
     .step("final-review-claude", {
       agent: "reviewer-claude",
       dependsOn: ["post-fix-validation"],
+      timeoutMs: 300_000,
 
       task: `Re-review the fixed state only.
 
@@ -286,6 +289,7 @@ Write .workflow-artifacts/generated/goal-i-want-a-documentation-pass-to-make-sur
     .step("final-review-codex", {
       agent: "reviewer-codex",
       dependsOn: ["post-fix-validation"],
+      timeoutMs: 300_000,
 
       task: `Re-review the fixed state only.
 
