@@ -1,0 +1,57 @@
+{
+  "version": "1.0.0",
+  "id": "5bfd7018-320a-4d1a-961f-99290cb7fc08",
+  "timestamp": "2026-05-04T11:15:05.555Z",
+  "trajectory": "traj_fdbff8qz8cg6",
+  "files": [
+    {
+      "path": "src/local/entrypoint.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 100,
+              "end_line": 121,
+              "revision": "e4038608bd75dc703db630bee108f83b14285999"
+            },
+            {
+              "start_line": 2908,
+              "end_line": 2978,
+              "revision": "e4038608bd75dc703db630bee108f83b14285999"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/local/entrypoint.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 43,
+              "end_line": 49,
+              "revision": "e4038608bd75dc703db630bee108f83b14285999"
+            },
+            {
+              "start_line": 797,
+              "end_line": 842,
+              "revision": "e4038608bd75dc703db630bee108f83b14285999"
+            },
+            {
+              "start_line": 849,
+              "end_line": 858,
+              "revision": "e4038608bd75dc703db630bee108f83b14285999"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
