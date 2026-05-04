@@ -681,6 +681,17 @@ append_unique_lines_from_file() {
   done < "$source_file"
 }
 
+remove_workflow_from_tracked_file() {
+  local workflow_path="$1"
+  local tracked_file="$2"
+  local filtered_file="${tracked_file}.filtered.tmp"
+
+  [[ -n "$workflow_path" && -f "$tracked_file" ]] || return 0
+
+  grep -Fxv "$workflow_path" "$tracked_file" > "$filtered_file" || true
+  mv "$filtered_file" "$tracked_file"
+}
+
 workflow_is_already_satisfied() {
   local workflow_path="$1"
 
@@ -1376,6 +1387,7 @@ run_one() {
       if repo_has_meaningful_delta; then
         log "idle workflow produced repo changes; validating before capture"
         commit_if_clean_delta "$workflow_path"
+        remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
         CURRENT_WORKFLOW=""
         persist_checkpoint
         return 0
@@ -1426,6 +1438,7 @@ run_one() {
 
     log "failure produced repo changes; validating before capture"
     commit_if_clean_delta "$workflow_path"
+    remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
     CURRENT_WORKFLOW=""
     persist_checkpoint
     return 0
@@ -1433,6 +1446,7 @@ run_one() {
 
   log "workflow completed: $workflow_path"
   commit_if_clean_delta "$workflow_path"
+  remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
   CURRENT_WORKFLOW=""
   persist_checkpoint
   return 0
