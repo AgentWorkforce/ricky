@@ -20,6 +20,10 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('git diff gate comparing git diff --name-status');
     expect(workflowBody).toContain('Codex structural marker gate');
     expect(workflowBody).toContain('must not be presented as independent review evidence');
+    expect(workflowBody).toContain('cleanup-candidate-prescan.txt');
+    expect(workflowBody).toContain('CLEANUP_CANDIDATE_PRESCAN_OK');
+    expect(workflowBody).toContain('Tracked agent config files');
+    expect(workflowBody).toContain('Relaycast permission references');
     expect(workflowBody).not.toContain('.agent("reviewer-codex"');
   });
 
@@ -31,7 +35,8 @@ describe('generated workflow hygiene', () => {
 
     expect(workflowBody).toContain('lead plan missing required marker');
     expect(workflowBody).toContain("verification: { type: 'output_contains', value: 'GENERATION_LEAD_PLAN_READY' }");
-    expect(workflowBody).toContain("dependsOn: ['lead-plan-gate']");
+    expect(workflowBody).toContain('dependsOn: ["lead-plan-gate"]');
+    expect(workflowBody).toContain("dependsOn: ['cleanup-candidate-prescan']");
     expect(workflowBody).toContain('cleanup-report.md');
     expect(workflowBody).toContain('cleanup-diff-inventory.txt');
     expect(workflowBody).toContain('validation-evidence.md');

@@ -84,9 +84,17 @@ Write .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-ou
       failOnError: true,
     })
 
+    .step("cleanup-candidate-prescan", {
+      type: 'deterministic',
+      dependsOn: ["lead-plan-gate"],
+      command: "{ printf '%s\\n' '# Cleanup Candidate Prescan' ''; printf '%s\\n' '## Generated workflow files'; git ls-files workflows/generated; printf '%s\\n' '' '## Top-level workflow hygiene tests'; git ls-files 'test/*.test.ts'; printf '%s\\n' '' '## Tracked agent config files'; git ls-files '.claude/*' '.agents/*' 'AGENTS.md'; printf '%s\\n' '' '## Relaycast permission references'; rg -n --fixed-strings 'mcp__relaycast__' .claude .agents workflows test package.json AGENTS.md || true; printf '%s\\n' '' '## Active request references'; rg -n --fixed-strings 'ricky-i-want-to-clean-up-the-codebase-to-remove-outdat' workflows test package.json || true; printf '%s\\n' '' 'CLEANUP_CANDIDATE_PRESCAN_OK'; } > '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/cleanup-candidate-prescan.txt' && grep -F 'CLEANUP_CANDIDATE_PRESCAN_OK' '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/cleanup-candidate-prescan.txt'",
+      captureOutput: true,
+      failOnError: true,
+    })
+
     .step('implement-artifact', {
       agent: "author-codex",
-      dependsOn: ['lead-plan-gate'],
+      dependsOn: ['cleanup-candidate-prescan'],
 
       task: `Author the requested workflow artifact.
 
@@ -114,6 +122,7 @@ Generated workflow quality:
 - Include a real deterministic sanity gate over produced files, not just prose saying one exists.
 - Prefer grep, rg, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.
 - For cleanup or deletion work, persist a changed-files inventory with statuses, active-reference evidence for deleted paths, and command summaries for final signoff.
+- Start from .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/cleanup-candidate-prescan.txt so cleanup candidates are based on tracked files and active request references.
 - Keep each agent step bounded to one coherent slice. Split broad implementation or test-writing work into sequential/fan-out steps with deterministic gates between them instead of relying on a single long agent timeout.`,
     })
 
