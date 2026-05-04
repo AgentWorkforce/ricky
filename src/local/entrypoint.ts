@@ -43,6 +43,7 @@ import type {
 
 const requireFromHere = createRequire(import.meta.url);
 const SCRIPT_PROCESS_KILL_GRACE_MS = 2_000;
+const FORWARDED_SCRIPT_PARENT_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 // ---------------------------------------------------------------------------
 // Local response contract
@@ -796,28 +797,46 @@ async function runScriptProcess(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let abortRequested = false;
+    let parentSignal: NodeJS.Signals | undefined;
     let forceKillHandle: ReturnType<typeof setTimeout> | undefined;
     const stdoutInterface = child.stdout ? createInterface({ input: child.stdout }) : undefined;
     const stderrInterface = child.stderr ? createInterface({ input: child.stderr }) : undefined;
     const cleanup = (): void => {
       options.signal?.removeEventListener('abort', onAbort);
+      for (const signal of FORWARDED_SCRIPT_PARENT_SIGNALS) {
+        process.off(signal, parentSignalHandlers[signal]);
+      }
       if (forceKillHandle) clearTimeout(forceKillHandle);
       stdoutInterface?.close();
       stderrInterface?.close();
     };
-    const killProcessTree = (signal: NodeJS.Signals): void => {
+    const killProcessTree = (signal: NodeJS.Signals, forceSignal: NodeJS.Signals = 'SIGKILL'): void => {
       sendSignalToChildTree(child, signal);
+      if (!forceKillHandle) {
+        forceKillHandle = setTimeout(() => {
+          sendSignalToChildTree(child, forceSignal);
+        }, SCRIPT_PROCESS_KILL_GRACE_MS);
+        forceKillHandle.unref?.();
+      }
     };
     const onAbort = (): void => {
       abortRequested = true;
       killProcessTree('SIGTERM');
-      forceKillHandle = setTimeout(() => {
-        killProcessTree('SIGKILL');
-      }, SCRIPT_PROCESS_KILL_GRACE_MS);
-      forceKillHandle.unref?.();
     };
+    const parentSignalHandlers = Object.fromEntries(
+      FORWARDED_SCRIPT_PARENT_SIGNALS.map((signal) => [
+        signal,
+        () => {
+          parentSignal = signal;
+          killProcessTree(signal);
+        },
+      ]),
+    ) as Record<NodeJS.Signals, () => void>;
 
     options.signal?.addEventListener('abort', onAbort, { once: true });
+    for (const signal of FORWARDED_SCRIPT_PARENT_SIGNALS) {
+      process.once(signal, parentSignalHandlers[signal]);
+    }
     child.once('error', (error) => {
       cleanup();
       reject(error);
@@ -830,6 +849,10 @@ async function runScriptProcess(
     }
     child.once('exit', (code, signal) => {
       cleanup();
+      if (parentSignal) {
+        reject(new Error(`script workflow run interrupted by ${parentSignal}`));
+        return;
+      }
       if (abortRequested || options.signal?.aborted) {
         reject(new Error('script workflow run aborted'));
         return;
