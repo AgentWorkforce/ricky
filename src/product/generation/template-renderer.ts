@@ -345,7 +345,7 @@ function buildLeadPlanGateCommand(leadPlanPath: string): string {
     "const body = fs.readFileSync(leadPlanPath, 'utf8');",
     "if (!body.includes('GENERATION_LEAD_PLAN_READY')) throw new Error('lead plan missing required marker: GENERATION_LEAD_PLAN_READY');",
     "if (!/non-goals?/i.test(body)) throw new Error('lead plan missing required marker: Non-goals');",
-    "const hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body) || /routes local execution through the generated Agent Relay artifact/i.test(body) || /Use the generated Agent Relay workflow artifact/i.test(body);",
+    "const hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body) || /Run local execution through the generated Agent Relay workflow artifact/i.test(body) || /routes local execution through the generated Agent Relay artifact/i.test(body) || /Use the generated Agent Relay workflow artifact/i.test(body);",
     "if (!hasRoutingContract) throw new Error('lead plan missing required marker: Routing contract');",
     "const hasImplementationContract = /Implementation contract/i.test(body) || /This is an implementation spec/i.test(body);",
     "if (!hasImplementationContract) throw new Error('lead plan missing required marker: Implementation contract');",
