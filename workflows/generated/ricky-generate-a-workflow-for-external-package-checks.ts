@@ -67,7 +67,7 @@ Keep execution routing explicit for local, cloud, and MCP callers. Materialize o
     .step("post-implementation-file-gate", {
       type: 'deterministic',
       dependsOn: ["implement-artifact"],
-      command: "test -f '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' && grep -Eq '#|##|TODO|Acceptance|Deliverables' '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt'",
+      command: "test -f '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' && test -s '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' && while IFS= read -r f; do test -f \"$f\"; done < '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt'",
       captureOutput: true,
       failOnError: true,
     })
@@ -142,7 +142,7 @@ Re-run document sanity checks before handing off to post-fix validation.`,
     .step("post-fix-verification-gate", {
       type: 'deterministic',
       dependsOn: ["fix-loop"],
-      command: "test -f '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' && grep -Eq '#|##|TODO|Acceptance|Deliverables' '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt'",
+      command: "test -f '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' && test -s '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' && while IFS= read -r f; do test -f \"$f\"; done < '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt'",
       captureOutput: true,
       failOnError: true,
     })
@@ -210,7 +210,7 @@ Write .workflow-artifacts/generated/generate-a-workflow-for-external-package-che
     .step("git-diff-gate", {
       type: 'deterministic',
       dependsOn: ["final-hard-validation"],
-      command: "git diff --name-only -- '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' > '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/git-diff.txt' && test -s '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/git-diff.txt'",
+      command: "test -s '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' && : > '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/git-diff.txt' && while IFS= read -r f; do { git diff --name-only -- \"$f\"; git ls-files --others --exclude-standard -- \"$f\"; } >> '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/git-diff.txt'; done < '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/output-manifest.txt' && sort -u '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/git-diff.txt' -o '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/git-diff.txt' && test -s '.workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/git-diff.txt'",
       captureOutput: true,
       failOnError: true,
     })
