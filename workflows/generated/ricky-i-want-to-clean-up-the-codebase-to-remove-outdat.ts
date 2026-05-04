@@ -190,12 +190,22 @@ Fix only concrete review or validation findings. Preserve the declared target bo
 
 Tool selection: runner=@agent-relay/sdk; concurrency=1; rule=project default runner @agent-relay/sdk.
 
+Before exiting, write .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/fix-loop-report.md summarizing the exact fixes you applied or explicitly saying that no repo changes were required, then end that file with FIX_LOOP_COMPLETE.
 Re-run document sanity checks before handing off to post-fix validation.`,
+      verification: { type: 'file_exists', value: ".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/fix-loop-report.md" },
+    })
+
+    .step("fix-loop-report-gate", {
+      type: 'deterministic',
+      dependsOn: ["fix-loop"],
+      command: "test -f '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/fix-loop-report.md' && tail -n 1 '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/fix-loop-report.md' | tr -d '[:space:]' | grep -Eq '^FIX_LOOP_COMPLETE$'",
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step("post-fix-verification-gate", {
       type: 'deterministic',
-      dependsOn: ["fix-loop"],
+      dependsOn: ["fix-loop-report-gate"],
       command: "test -f '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/output-manifest.txt' && node <<'NODE'\nconst fs = require('node:fs');\nconst manifest = \".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/output-manifest.txt\";\nconst lines = fs.readFileSync(manifest, 'utf8').split(/\\r?\\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));\nif (lines.length === 0) throw new Error('output manifest is empty');\nconst parse = (line) => {\n  const match = /^(A|M|D)\\s+(.+)$/.exec(line);\n  return match ? { status: match[1], path: match[2] } : { status: null, path: line };\n};\nfor (const entry of lines.map(parse)) {\n  if (entry.status === 'D') {\n    if (fs.existsSync(entry.path)) throw new Error(`deleted manifest path still exists: ${entry.path}`);\n    continue;\n  }\n  if (!fs.existsSync(entry.path)) throw new Error(`manifest path does not exist: ${entry.path}`);\n}\nconsole.log('MANIFEST_FILE_GATE_OK');\nNODE",
       captureOutput: true,
       failOnError: true,
