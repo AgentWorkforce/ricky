@@ -5,7 +5,7 @@ async function main() {
     .description("Goal: I want to clean up the codebase to remove outdated and unused files\n\nDesired outcome:\n- I want to clean up the codebase to remove outdated and unused files\n\nExecution mode:\n- Run locally through Agent Relay.\n\nEvidence:\n- Persist logs, generated artifacts, validation evidence, and a final outcome summary.\n\nSafety:\n- Apply only bounded, non-destructive fixes automatically.\n- Pause before credentials, destructive actions, dependency upgrades, commits, or pushes.\n\nAdditional context:\n- an orderly and clean codebase")
     .pattern("dag")
     .channel("wf-ricky-goal-i-want-to-clean-up-the-codebase-to-remove-o")
-    .maxConcurrency(4)
+    .maxConcurrency(1)
     .timeout(600000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 1000 })
 
@@ -216,18 +216,25 @@ Write .workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remo
       agent: 'validator-claude',
       dependsOn: ['read-review-feedback'],
 
-      task: `Run the 80-to-100 fix loop.
+      task: `Fix concrete review findings in the generated cleanup artifacts.
 
-Inputs:
-- .workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/review-feedback.md
-- initial validation output from the previous deterministic step
+Review feedback:
+{{steps.read-review-feedback.output}}
 
-Fix only concrete review or validation findings. Preserve the declared target boundary:
-- No explicit targets supplied
+Initial validation output:
+{{steps.initial-soft-validation.output}}
 
-Tool selection: runner=@agent-relay/sdk; concurrency=1; rule=project default runner @agent-relay/sdk.
+Rules:
+- Preserve the declared target boundary.
+- Keep this pass non-destructive. Do not delete files or broaden scope beyond the generated cleanup artifacts.
+- Align the workflow metadata with the rendered workflow shape.
+- If a finding is only about missing evidence, add the missing evidence to the existing generated artifacts.
+- Update .workflow-artifacts/generated/goal-i-want-to-clean-up-the-codebase-to-remove-o/implementation-outcome-summary.md with what changed in this fix pass.
+- Re-run document sanity checks before handing off to post-fix validation.
+- Do not claim success without leaving the artifact files updated on disk.
 
-Re-run document sanity checks before handing off to post-fix validation.`,
+Tool selection: runner=@agent-relay/sdk; concurrency=1; rule=project default runner @agent-relay/sdk.`,
+      verification: { type: 'exit_code', value: '0' },
     })
 
     .step("post-fix-verification-gate", {
