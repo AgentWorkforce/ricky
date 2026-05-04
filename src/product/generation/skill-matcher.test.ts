@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -130,6 +130,30 @@ describe('skill matcher', () => {
     );
   });
 
+  it('ignores stale project-local .claude skills while preserving active project registries', () => {
+    const project = mkdtempSync(join(tmpdir(), 'ricky-skill-registry-project-'));
+    try {
+      const nested = join(project, 'src', 'product');
+      mkdirSync(join(project, '.agents', 'skills', 'active-skill'), { recursive: true });
+      mkdirSync(join(project, '.claude', 'skills', 'legacy-skill'), { recursive: true });
+      mkdirSync(nested, { recursive: true });
+      writeSkill(join(project, '.agents', 'skills', 'active-skill', 'SKILL.md'), 'active-skill');
+      writeSkill(join(project, '.claude', 'skills', 'legacy-skill', 'SKILL.md'), 'legacy-skill');
+
+      process.chdir(nested);
+      resetSkillRegistryCache();
+
+      const skills = loadSkillRegistry();
+
+      expect(skills).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'active-skill' })]));
+      expect(skills).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'legacy-skill' })]));
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(project, { recursive: true, force: true });
+      resetSkillRegistryCache();
+    }
+  });
+
   it('discovers bundled package skills when invoked outside a project tree', () => {
     const emptyProject = mkdtempSync(join(tmpdir(), 'ricky-empty-project-'));
     try {
@@ -168,6 +192,10 @@ function registry(entries: Array<Partial<SkillRegistryDescriptor> & { id: string
     preferredRunner: entry.preferredRunner,
     ...entry,
   }));
+}
+
+function writeSkill(path: string, name: string): void {
+  writeFileSync(path, `---\nname: ${name}\ndescription: ${name} description\n---\n\nUse for ${name}.\n`);
 }
 
 function spec(description: string): NormalizedWorkflowSpec {
