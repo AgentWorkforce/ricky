@@ -366,6 +366,15 @@ trap on_exit EXIT
 
 acquire_global_lock
 
+append_generated_workflows_to_queue() {
+  local generated_workflow=""
+
+  for generated_workflow in workflows/generated/*.ts; do
+    [[ -f "$generated_workflow" ]] || continue
+    printf '%s\n' "$generated_workflow" >> "$QUEUE_FILE"
+  done
+}
+
 write_queue() {
   case "$QUEUE_MODE" in
     minimal)
@@ -397,6 +406,7 @@ workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
 workflows/wave2-product/02-workflow-generation-pipeline.ts
 workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
 EOF
+      append_generated_workflows_to_queue
       ;;
   esac
 }
