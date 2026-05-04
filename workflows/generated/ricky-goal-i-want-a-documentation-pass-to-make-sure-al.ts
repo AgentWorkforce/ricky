@@ -9,11 +9,11 @@ async function main() {
     .timeout(600000)
     .onError('retry', { maxRetries: 2, retryDelayMs: 1000 })
 
-    .agent("lead-claude", { cli: "claude", role: "Plans the generated workflow deliverables, boundaries, and verification gates.", retries: 1 })
+    .agent("lead-claude", { cli: "codex", role: "Plans the generated workflow deliverables, boundaries, and verification gates.", retries: 1 })
     .agent("author-codex", { cli: "codex", role: "Writes the requested bounded artifact and keeps scope to declared files.", retries: 2 })
-    .agent("reviewer-claude", { cli: "claude", preset: "reviewer", role: "Reviews artifact quality, scope, and evidence.", retries: 1 })
+    .agent("reviewer-claude", { cli: "codex", preset: "reviewer", role: "Reviews artifact quality, scope, and evidence.", retries: 1 })
     .agent("reviewer-codex", { cli: "codex", preset: "reviewer", role: "Reviews implementation practicality and deterministic checks.", retries: 1 })
-    .agent("validator-claude", { cli: "claude", preset: "worker", role: "Applies bounded fixes and confirms final signoff evidence.", retries: 2 })
+    .agent("validator-claude", { cli: "codex", preset: "worker", role: "Applies bounded fixes and confirms final signoff evidence.", retries: 2 })
 
     .step("prepare-context", {
       type: 'deterministic',
