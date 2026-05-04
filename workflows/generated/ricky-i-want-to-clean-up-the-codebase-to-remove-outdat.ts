@@ -153,7 +153,6 @@ Generated workflow quality:
     .step("review-claude", {
       agent: "reviewer-claude",
       dependsOn: ["initial-soft-validation"],
-      timeoutMs: 300_000,
 
       task: `Review the generated work.
 
@@ -248,7 +247,6 @@ Re-run document sanity checks before handing off to post-fix validation.`,
     .step("final-review-claude", {
       agent: "reviewer-claude",
       dependsOn: ["post-fix-validation"],
-      timeoutMs: 300_000,
 
       task: `Re-review the fixed state only.
 

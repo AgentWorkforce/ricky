@@ -26,7 +26,7 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('CLEANUP_EVIDENCE_SANITY_GATE_OK');
     expect(workflowBody).toContain('final-artifact-consistency-gate');
     expect(workflowBody).toContain('FINAL_ARTIFACT_CONSISTENCY_GATE_OK');
-    expect(workflowBody).toContain('timeoutMs: 300_000');
+    expect(workflowBody).not.toContain('timeoutMs: 300_000');
     expect(workflowBody).toContain('Tracked agent config files');
     expect(workflowBody).toContain('Relaycast permission references');
     expect(workflowBody).not.toContain('.agent("reviewer-codex"');

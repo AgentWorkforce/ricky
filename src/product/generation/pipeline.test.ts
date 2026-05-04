@@ -1267,7 +1267,7 @@ describe('workflow generation pipeline', () => {
     expect(content).toContain(`${artifactsDir}/review-codex.md`);
     expect(content).toContain(`${artifactsDir}/final-review-claude.md`);
     expect(content).toContain(`${artifactsDir}/final-review-codex.md`);
-    expect(content).toContain('timeoutMs: 300_000');
+    expect(content).not.toContain('timeoutMs: 300_000');
     expect(content).toContain(`${artifactsDir}/skill-application-boundary.json`);
     expect(content).toContain(`${artifactsDir}/skill-runtime-boundary.txt`);
     expect(content).toContain(`${artifactsDir}/signoff.md`);

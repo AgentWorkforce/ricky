@@ -660,7 +660,6 @@ function renderReviewStep(
       agent: ${literal(agent)},
       dependsOn: ${arrayLiteral(dependsOn)},
 ${selectionLines}
-      timeoutMs: 300_000,
       task: ${templateLiteral(`${final ? 'Re-review the fixed state only.' : 'Review the generated work.'}
 
 Assess:
