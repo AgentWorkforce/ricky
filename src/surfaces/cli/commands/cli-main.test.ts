@@ -764,6 +764,9 @@ describe('cliMain', () => {
     expect(output).toContain('Status: failed — generation did not complete');
     expect(output).toContain('Author: Workforce persona writer failed before authoring completed');
     expect(output).toContain('Generation: failed (status: error).');
+    expect(output).toContain('Workflow target: workflows/generated/docs-audit.ts');
+    expect(output).toContain('Artifact written: no');
+    expect(output).toContain('Workflow name: ricky-docs-audit');
     expect(output).toContain('Reason: WORKFORCE_PERSONA_WRITER_FAILED');
     expect(output).toContain('Next: Fix the generated workflow validation errors before local execution.');
     expect(output).not.toContain('Local handoff failed.');
