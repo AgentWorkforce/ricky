@@ -189,7 +189,7 @@ describe('local workflow flow', () => {
       }],
       logs: ['[local] workflow generation: failed'],
       warnings: ['Workforce persona writer did not complete: failed.'],
-      nextActions: ['Fix the generated workflow validation errors before local execution.'],
+      nextActions: ['Fix the Workforce persona response contract before local execution.'],
       generation: {
         stage: 'generate',
         status: 'error',

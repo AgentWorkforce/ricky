@@ -921,7 +921,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
         if (!generationResult.success || !artifact) {
           warnings.push(...generationResult.validation.errors);
-          nextActions.push('Fix the generated workflow validation errors before local execution.');
+          nextActions.push(nextActionForGenerationFailure(generationResult.validation.errors));
           generationStage = createGenerationStage(
             'error',
             artifact,
@@ -1445,6 +1445,12 @@ function createGenerationStage(
         }
       : decisionsForAssistantTurnContext(assistantTurnContext)),
   };
+}
+
+function nextActionForGenerationFailure(errors: string[]): string {
+  return errors.some((error) => /Workforce persona/i.test(error))
+    ? 'Fix the Workforce persona response contract before local execution.'
+    : 'Fix the generated workflow validation errors before local execution.';
 }
 
 async function writeGenerationMetadataArtifacts(
