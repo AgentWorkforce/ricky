@@ -581,7 +581,7 @@ Verification commands:
 ${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using grep, rg, or an equivalent assertion', 'active-reference gate for deleted manifest paths', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff', 'PR URL or explicit result summary'])}
 
 Write ${artifactsDir}/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`)},
-      verification: { type: 'file_exists', value: ${literal(`${artifactsDir}/lead-plan.md`)} },
+      verification: { type: 'output_contains', value: 'GENERATION_LEAD_PLAN_READY' },
     })`;
 }
 
@@ -596,7 +596,7 @@ function renderImplementationStep(
   const noTargetInstructions = `No explicit file targets were supplied. Write every changed path to ${artifactsDir}/output-manifest.txt using status-prefixed entries such as "A path", "M path", or "D path". Include deleted files and supporting edits. Keep changes bounded.`;
   return `    .step('implement-artifact', {
       agent: ${literal(agent)},
-      dependsOn: ['lead-plan'],
+      dependsOn: ['lead-plan-gate'],
 ${selectionLines}
       task: ${templateLiteral(`${isCodeWorkflow ? 'Implement the requested code-writing workflow slice.' : 'Author the requested workflow artifact.'}
 

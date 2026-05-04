@@ -30,6 +30,8 @@ describe('generated workflow hygiene', () => {
     );
 
     expect(workflowBody).toContain('lead plan missing required marker');
+    expect(workflowBody).toContain("verification: { type: 'output_contains', value: 'GENERATION_LEAD_PLAN_READY' }");
+    expect(workflowBody).toContain("dependsOn: ['lead-plan-gate']");
     expect(workflowBody).toContain('cleanup-report.md');
     expect(workflowBody).toContain('cleanup-diff-inventory.txt');
     expect(workflowBody).toContain('validation-evidence.md');

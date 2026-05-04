@@ -73,7 +73,7 @@ Verification commands:
 - PR URL or explicit result summary
 
 Write .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`,
-      verification: { type: 'file_exists', value: ".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/lead-plan.md" },
+      verification: { type: 'output_contains', value: 'GENERATION_LEAD_PLAN_READY' },
     })
 
     .step("lead-plan-gate", {
@@ -86,7 +86,7 @@ Write .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-ou
 
     .step('implement-artifact', {
       agent: "author-codex",
-      dependsOn: ['lead-plan'],
+      dependsOn: ['lead-plan-gate'],
 
       task: `Author the requested workflow artifact.
 
