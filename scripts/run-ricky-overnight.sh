@@ -496,6 +496,35 @@ LAST_FILTER_REMOVED_MISSING=0
 LAST_FILTER_REMOVED_STALE=0
 LAST_FILTER_REMOVED_SATISFIED=0
 
+prune_tracked_workflow_file_for_repo_state() {
+  local workflow_file="$1"
+  local filtered_file="${workflow_file}.filtered.tmp"
+  local workflow_path=""
+
+  [[ -f "$workflow_file" ]] || return 0
+  : > "$filtered_file"
+
+  while IFS= read -r workflow_path; do
+    [[ -n "$workflow_path" ]] || continue
+
+    if [[ ! -f "$workflow_path" ]]; then
+      continue
+    fi
+
+    if workflow_has_stale_package_targets "$workflow_path"; then
+      continue
+    fi
+
+    if workflow_is_already_satisfied "$workflow_path"; then
+      continue
+    fi
+
+    printf '%s\n' "$workflow_path" >> "$filtered_file"
+  done < "$workflow_file"
+
+  mv "$filtered_file" "$workflow_file"
+}
+
 filter_queue_for_repo_state() {
   local filtered_queue="$ARTIFACT_DIR/queue.filtered.tmp"
   local removed_count=0
@@ -535,6 +564,8 @@ filter_queue_for_repo_state() {
   done < "$QUEUE_FILE"
 
   mv "$filtered_queue" "$QUEUE_FILE"
+  prune_tracked_workflow_file_for_repo_state "$FAILED_FILE"
+  prune_tracked_workflow_file_for_repo_state "$SKIPPED_FILE"
   LAST_FILTER_REMOVED_TOTAL="$removed_count"
   LAST_FILTER_REMOVED_MISSING="$removed_missing"
   LAST_FILTER_REMOVED_STALE="$removed_stale"
