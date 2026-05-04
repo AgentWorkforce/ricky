@@ -8,7 +8,7 @@ async function main() {
     .description('Audit Ricky documentation against the current repository, apply only bounded non-destructive documentation fixes, and persist reviewable evidence.')
     .pattern('dag')
     .channel('wf-ricky-docs-reality-check')
-    .maxConcurrency(4)
+    .maxConcurrency(1)
     .timeout(3_600_000)
     .onError('fail-fast')
 
@@ -188,7 +188,13 @@ Only propose automatic fixes for documentation files. End with DOC_FIX_PLAN_READ
     .step('fix-plan-gate', {
       type: 'deterministic',
       dependsOn: ['consolidate-findings'],
-      command: `grep -Fq 'DOC_FIX_PLAN_READY' '${artifactDir}/doc-fix-plan.md' && grep -Eq 'SAFE_TO_FIX|NEEDS_HUMAN_REVIEW' '${artifactDir}/doc-fix-plan.md' && printf '%s\\n' 'FIX_PLAN_GATE_PASSED'`,
+      command: [
+        `bash -lc 'set -euo pipefail`,
+        `grep -Fq "DOC_FIX_PLAN_READY" "${artifactDir}/doc-fix-plan.md"`,
+        `grep -Eq "SAFE_TO_FIX|NEEDS_HUMAN_REVIEW" "${artifactDir}/doc-fix-plan.md"`,
+        `if grep "SAFE_TO_FIX" "${artifactDir}/doc-fix-plan.md" | grep -Eiq "package\\.json|tsconfig|lockfile|\\.ts[^.]*\\b" ; then echo "FIX_PLAN_CONTAINS_NON_DOC_SAFE_TO_FIX"; exit 1; fi`,
+        `echo FIX_PLAN_GATE_PASSED'`,
+      ].join('\n'),
       captureOutput: true,
       failOnError: true,
     })
