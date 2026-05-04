@@ -95,7 +95,7 @@ End the file with PACKAGE_AUDIT_COMPLETE.`,
         // Derive required package names from the inventory and verify each appears
         `for pkg in $(node -e "const inv = JSON.parse(require(\\\"fs\\\").readFileSync(\\\"${artifactDir}/external-package-inventory.json\\\",\\\"utf8\\\")); Object.keys({...inv.runtime,...inv.development}).forEach(n=>console.log(n))"); do grep -Fq -- "$pkg" "${artifactDir}/packages.txt" || { echo "MISSING: $pkg"; exit 1; }; done`,
         `echo AUDIT_GATE_PASSED'`,
-      ].join('; '),
+      ].join('\n'),
       captureOutput: true,
       failOnError: true,
     })
@@ -137,7 +137,7 @@ End the file with EXTERNAL_PACKAGE_CHECKS_READY.`,
         `grep -Fq "exit_code=0" "${artifactDir}/test.status"`,
         `echo "All status files report exit_code=0"`,
         `echo SIGNOFF_GATE_PASSED'`,
-      ].join('; '),
+      ].join('\n'),
       captureOutput: true,
       failOnError: true,
     })
