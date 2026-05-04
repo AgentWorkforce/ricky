@@ -63,7 +63,11 @@ Deliverables:
 - A generated workflow artifact and any requested output files
 
 Non-goals:
-- None declared
+- No deletion of tracked files without explicit owner approval
+- No modification of active .agent-relay/ runtime state or current .workflow-artifacts/ during execution
+- No commits, pushes, or dependency changes
+- No dist/ cleanup (managed by build-clean flows)
+- This is a dry-run inventory workflow; actual file deletion is a separate owner-approved step
 
 Verification commands:
 - file_exists gate for declared targets
