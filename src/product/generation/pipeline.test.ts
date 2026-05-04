@@ -984,7 +984,29 @@ describe('workflow generation pipeline', () => {
 
     expect(activeReferenceGate.command).toContain('fs.existsSync(file)');
     expect(activeReferenceGate.command).toContain('fs.statSync(file).isFile()');
+    expect(activeReferenceGate.command).toContain('basename referenced by');
     expect(activeReferenceGate.command).toContain('active references remain');
+  });
+
+  it('no-target lead plan and manifest gates require the declared evidence artifacts', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Remove an unused file without explicit target files.',
+        targetFiles: [],
+      }),
+      artifactPath: 'workflows/generated/no-target-evidence-gates.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const leadPlanGate = artifact.gates.find((g) => g.name === 'lead-plan-gate')!;
+    const postImplementationGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
+
+    expect(leadPlanGate.command).toContain('GENERATION_LEAD_PLAN_READY');
+    expect(leadPlanGate.command).toContain('Routing contract');
+    expect(postImplementationGate.command).toContain('cleanup-report.md');
+    expect(postImplementationGate.command).toContain('cleanup-diff-inventory.txt');
+    expect(postImplementationGate.command).toContain('validation-evidence.md');
   });
 
   it('explicit target git diff gate includes untracked files for newly created outputs', () => {

@@ -271,6 +271,7 @@ function buildGates(
       ['prepare-context'],
       'pre_review',
     ),
+    gate('lead-plan-gate', buildLeadPlanGateCommand(`${artifactsDir}/lead-plan.md`), 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('post-implementation-file-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['implement-artifact'], 'pre_review'),
     gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
     gate('post-fix-verification-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['fix-loop'], 'post_fix'),
@@ -298,6 +299,11 @@ function buildManifestFileGateCommand(outputManifest: string): string {
     'node <<\'NODE\'',
     "const fs = require('node:fs');",
     `const manifest = ${literal(outputManifest)};`,
+    `const requiredArtifacts = [${literal(outputManifest)}, ${literal(outputManifest.replace('output-manifest.txt', 'cleanup-report.md'))}, ${literal(outputManifest.replace('output-manifest.txt', 'cleanup-diff-inventory.txt'))}, ${literal(outputManifest.replace('output-manifest.txt', 'validation-evidence.md'))}];`,
+    'for (const file of requiredArtifacts) {',
+    '  if (!fs.existsSync(file)) throw new Error(`required artifact missing: ${file}`);',
+    '  if (fs.statSync(file).size === 0) throw new Error(`required artifact empty: ${file}`);',
+    '}',
     'const lines = fs.readFileSync(manifest, \'utf8\').split(/\\r?\\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith(\'#\'));',
     'if (lines.length === 0) throw new Error(\'output manifest is empty\');',
     'const parse = (line) => {',
@@ -312,6 +318,20 @@ function buildManifestFileGateCommand(outputManifest: string): string {
     '  if (!fs.existsSync(entry.path)) throw new Error(`manifest path does not exist: ${entry.path}`);',
     '}',
     'console.log(\'MANIFEST_FILE_GATE_OK\');',
+    'NODE',
+  ].join('\n');
+}
+
+function buildLeadPlanGateCommand(leadPlanPath: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    `const leadPlanPath = ${literal(leadPlanPath)};`,
+    "const body = fs.readFileSync(leadPlanPath, 'utf8');",
+    "for (const marker of ['GENERATION_LEAD_PLAN_READY', 'Non-goals', 'Routing contract', 'Implementation contract']) {",
+    '  if (!body.includes(marker)) throw new Error(`lead plan missing required marker: ${marker}`);',
+    '}',
+    "console.log('LEAD_PLAN_GATE_OK');",
     'NODE',
   ].join('\n');
 }
@@ -375,10 +395,12 @@ function buildActiveReferenceGateCommand(outputManifest: string, evidencePath: s
     '  .filter((path) => !path.startsWith(\'.workflow-artifacts/\') && !path.startsWith(\'.trajectories/\'));',
     'const hits = [];',
     'for (const removedPath of deleted) {',
+    "  const basename = removedPath.split(/[/\\\\]/).pop();",
     '  for (const file of files) {',
     '    if (file === removedPath || !fs.existsSync(file) || !fs.statSync(file).isFile()) continue;',
     '    const body = fs.readFileSync(file, \'utf8\');',
     '    if (body.includes(removedPath)) hits.push(`${removedPath} referenced by ${file}`);',
+    '    else if (basename && body.includes(basename)) hits.push(`${removedPath} basename referenced by ${file}`);',
     '  }',
     '}',
     'fs.writeFileSync(evidencePath, hits.length === 0 ? `No active references found for:\\n${deleted.join(\'\\n\')}\\n` : `${hits.join(\'\\n\')}\\n`);',
