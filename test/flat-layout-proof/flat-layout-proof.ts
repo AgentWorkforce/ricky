@@ -21,6 +21,7 @@ export type FlatLayoutProofCaseName =
   | 'cli-bin-still-wired'
   | 'legacy-packages-removed'
   | 'obsolete-package-split-artifacts-removed'
+  | 'placeholder-smoke-test-removed'
   | 'surface-folder-shape'
   | 'layer-direction-by-folder';
 
@@ -86,7 +87,15 @@ function fileExists(relPath: string): boolean {
 
 function shouldSkipDirectory(repoPath: string): boolean {
   const parts = repoPath.split('/');
-  return parts.includes('node_modules') || repoPath === '.git' || repoPath.startsWith('.git/') || repoPath.startsWith('.claude/worktrees/');
+  return (
+    parts.includes('node_modules')
+    || repoPath === '.git'
+    || repoPath.startsWith('.git/')
+    || repoPath.startsWith('.agent-relay/')
+    || repoPath.startsWith('.claude/worktrees/')
+    || repoPath.startsWith('.workflow-artifacts/')
+    || repoPath.startsWith('.trajectories/')
+  );
 }
 
 function listFiles(relPath = '.'): string[] {
@@ -239,6 +248,17 @@ function obsoletePackageSplitArtifacts(): string[] {
     ['docs', 'architecture', 'ricky-package-split' + '-migration-spec.md'].join('/'),
     ['workflows', 'wave5-scale-and-ops', '05-split-ricky-into-workspace' + '-packages.ts'].join('/'),
   ];
+}
+
+function textFileForReferenceScan(file: string): boolean {
+  return /\.(?:cjs|js|json|jsonc|md|mjs|sh|ts|tsx|txt|yaml|yml)$/.test(file);
+}
+
+function activeReferencesToPath(targetPath: string): string[] {
+  return listFiles('.')
+    .filter((file) => file !== targetPath && textFileForReferenceScan(file))
+    .filter((file) => !file.startsWith('test/flat-layout-proof/'))
+    .filter((file) => readText(file).includes(targetPath));
 }
 
 export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
@@ -486,6 +506,31 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
           [
             ...presentArtifacts.map((file) => `Obsolete workspace-split artifact still exists: ${file}`),
             ...overnightReferences.map((file) => `Overnight script still references obsolete workspace-split artifact: ${file}`),
+          ],
+        );
+      },
+    },
+    {
+      name: 'placeholder-smoke-test-removed',
+      description: 'The old root smoke placeholder test is removed now that the repo has focused proof coverage.',
+      evaluate: () => {
+        const placeholderPath = 'test/smoke.test.ts';
+        const placeholderExists = fileExists(placeholderPath);
+        const activeReferences = activeReferencesToPath(placeholderPath);
+        const allRemoved = !placeholderExists && activeReferences.length === 0;
+
+        return result(
+          'placeholder-smoke-test-removed',
+          [allRemoved],
+          [
+            `placeholder smoke test exists: ${placeholderExists}`,
+            `active references to test/smoke.test.ts: ${activeReferences.length}`,
+            `placeholder smoke cleanup enforced: ${allRemoved}`,
+          ],
+          [],
+          [
+            ...(placeholderExists ? [`Placeholder smoke test still present: ${placeholderPath}`] : []),
+            ...activeReferences.map((file) => `Active reference to ${placeholderPath}: ${file}`),
           ],
         );
       },

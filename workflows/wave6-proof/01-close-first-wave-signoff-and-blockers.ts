@@ -232,7 +232,7 @@ async function main() {
         "// Each family lists commands the closure agent MUST attempt (at least one must succeed)",
         "// or explicitly document why it cannot run (which forces a blocker).",
         "const validationFamilies = {",
-        "  'repo-standards': ['npx vitest run test/smoke.test.ts test/package-proof/package-layout-proof.test.ts'],",
+        "  'repo-standards': ['npx vitest run test/flat-layout-proof/flat-layout-proof.test.ts'],",
         "  'toolchain': ['npm run typecheck', 'npm test'],",
         "  'shared-models': ['npx vitest run packages/runtime/src/evidence/capture.test.ts'],",
         "  'architecture-docs': ['test -f docs/architecture/ricky-architecture-decision-log.md'],",

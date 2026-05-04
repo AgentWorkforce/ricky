@@ -29,6 +29,7 @@ describe('Ricky flat src layout proof', () => {
       'cli-bin-still-wired',
       'legacy-packages-removed',
       'obsolete-package-split-artifacts-removed',
+      'placeholder-smoke-test-removed',
       'surface-folder-shape',
       'layer-direction-by-folder',
     ]);
@@ -68,6 +69,14 @@ describe('Ricky flat src layout proof', () => {
         'obsolete workspace-split artifacts present: 0',
         'overnight script references obsolete workspace-split artifacts: 0',
         'obsolete artifact cleanup enforced: true',
+      ],
+    ],
+    [
+      'placeholder-smoke-test-removed',
+      [
+        'placeholder smoke test exists: false',
+        'active references to test/smoke.test.ts: 0',
+        'placeholder smoke cleanup enforced: true',
       ],
     ],
     ['surface-folder-shape', ['src/surfaces exists: true', 'src/surfaces/cli exists: true', 'future surfaces documented: slack/, web/, mac/']],
