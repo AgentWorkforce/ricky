@@ -79,7 +79,7 @@ Write .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-ou
     .step("lead-plan-gate", {
       type: 'deterministic',
       dependsOn: ["lead-plan"],
-      command: "node <<'NODE'\nconst fs = require('node:fs');\nconst leadPlanPath = \".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/lead-plan.md\";\nconst body = fs.readFileSync(leadPlanPath, 'utf8');\nfor (const marker of ['GENERATION_LEAD_PLAN_READY', 'Non-goals', 'Routing contract']) {\n  if (!body.includes(marker)) throw new Error(`lead plan missing required marker: ${marker}`);\n}\nif (!/Implementation contract/i.test(body)) throw new Error('lead plan missing required marker: Implementation contract');\nconsole.log('LEAD_PLAN_GATE_OK');\nNODE",
+      command: "node <<'NODE'\nconst fs = require('node:fs');\nconst leadPlanPath = \".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/lead-plan.md\";\nconst body = fs.readFileSync(leadPlanPath, 'utf8');\nif (!body.includes('GENERATION_LEAD_PLAN_READY')) throw new Error('lead plan missing required marker: GENERATION_LEAD_PLAN_READY');\nif (!/non-goals?/i.test(body)) throw new Error('lead plan missing required marker: Non-goals');\nif (!/Routing contract/i.test(body)) throw new Error('lead plan missing required marker: Routing contract');\nif (!/Implementation contract/i.test(body)) throw new Error('lead plan missing required marker: Implementation contract');\nconsole.log('LEAD_PLAN_GATE_OK');\nNODE",
       captureOutput: true,
       failOnError: true,
     })

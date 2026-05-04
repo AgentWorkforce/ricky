@@ -1003,6 +1003,7 @@ describe('workflow generation pipeline', () => {
     const postImplementationGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
 
     expect(leadPlanGate.command).toContain('GENERATION_LEAD_PLAN_READY');
+    expect(leadPlanGate.command).toContain('/non-goals?/i');
     expect(leadPlanGate.command).toContain('Routing contract');
     expect(postImplementationGate.command).toContain('cleanup-report.md');
     expect(postImplementationGate.command).toContain('cleanup-diff-inventory.txt');
