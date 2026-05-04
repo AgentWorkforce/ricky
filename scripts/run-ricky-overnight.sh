@@ -15,6 +15,30 @@ GLOBAL_STATE_ROOT="$REPO_ROOT/.workflow-artifacts/overnight-state"
 GLOBAL_LOCK_DIR="$GLOBAL_STATE_ROOT/active.lock"
 GLOBAL_LOCK_FILE="$GLOBAL_LOCK_DIR/lock.env"
 RESUME_FLAG="${1:-}"
+
+if [[ "$RESUME_FLAG" == "--help" || "$RESUME_FLAG" == "-h" ]]; then
+  cat <<'EOF'
+Usage: scripts/run-ricky-overnight.sh [--resume]
+
+Options:
+  --resume  Restore the latest saved overnight checkpoint for the selected queue mode.
+  -h, --help  Show this help text and exit.
+EOF
+  exit 0
+fi
+
+if [[ -n "$RESUME_FLAG" && "$RESUME_FLAG" != "--resume" ]]; then
+  printf 'Unknown option: %s\n\n' "$RESUME_FLAG" >&2
+  cat <<'EOF' >&2
+Usage: scripts/run-ricky-overnight.sh [--resume]
+
+Options:
+  --resume  Restore the latest saved overnight checkpoint for the selected queue mode.
+  -h, --help  Show this help text and exit.
+EOF
+  exit 2
+fi
+
 STAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_DIR="$REPO_ROOT/.workflow-artifacts/overnight-$STAMP"
 LOG_FILE="$ARTIFACT_DIR/overnight.log"
