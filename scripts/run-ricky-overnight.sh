@@ -656,11 +656,6 @@ workflow_is_already_satisfied() {
         && npm run typecheck >/dev/null \
         && npm test >/dev/null
       ;;
-    workflows/wave5-scale-and-ops/05-split-ricky-into-workspace-packages.ts)
-      artifact_signoff_has_marker \
-        .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/per-workflow/wave5-scale-and-ops__05-split-ricky-into-workspace-packages/signoff.md \
-        'SIGNED_OFF'
-      ;;
     workflows/wave6-proof/01-close-first-wave-signoff-and-blockers.ts)
       test -f .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/closure-summary.md \
         && grep -Eq 'Result:\*\* 16/16 SIGNED_OFF, 0 BLOCKED|\*\*Result:\*\* 16/16 SIGNED_OFF, 0 BLOCKED' .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/closure-summary.md

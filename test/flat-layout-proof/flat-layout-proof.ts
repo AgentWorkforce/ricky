@@ -20,6 +20,7 @@ export type FlatLayoutProofCaseName =
   | 'no-cross-package-aliases'
   | 'cli-bin-still-wired'
   | 'legacy-packages-removed'
+  | 'obsolete-package-split-artifacts-removed'
   | 'surface-folder-shape'
   | 'layer-direction-by-folder';
 
@@ -231,6 +232,13 @@ function layerDirectionViolations(): Array<{ file: string; specifier: string; ta
       }),
     ),
   ).sort((left, right) => `${left.file}:${left.specifier}`.localeCompare(`${right.file}:${right.specifier}`));
+}
+
+function obsoletePackageSplitArtifacts(): string[] {
+  return [
+    ['docs', 'architecture', 'ricky-package-split' + '-migration-spec.md'].join('/'),
+    ['workflows', 'wave5-scale-and-ops', '05-split-ricky-into-workspace' + '-packages.ts'].join('/'),
+  ];
 }
 
 export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
@@ -452,6 +460,33 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
                 'packages/ directory still exists after the flat-layout collapse',
                 ...packageFiles.map((file) => `legacy package file still present: ${file}`),
               ],
+        );
+      },
+    },
+    {
+      name: 'obsolete-package-split-artifacts-removed',
+      description: 'Superseded workspace-split migration artifacts are absent after the flat-layout collapse.',
+      evaluate: () => {
+        const obsoleteArtifacts = obsoletePackageSplitArtifacts();
+        const presentArtifacts = obsoleteArtifacts.filter((file) => fileExists(file));
+        const overnightScript = fileExists('scripts/run-ricky-overnight.sh') ? readText('scripts/run-ricky-overnight.sh') : '';
+        const overnightReferences = obsoleteArtifacts.filter((file) => overnightScript.includes(file));
+        const allRemoved = presentArtifacts.length === 0;
+        const noOvernightReferences = overnightReferences.length === 0;
+
+        return result(
+          'obsolete-package-split-artifacts-removed',
+          [allRemoved, noOvernightReferences],
+          [
+            `obsolete workspace-split artifacts present: ${presentArtifacts.length}`,
+            `overnight script references obsolete workspace-split artifacts: ${overnightReferences.length}`,
+            `obsolete artifact cleanup enforced: ${allRemoved && noOvernightReferences}`,
+          ],
+          [],
+          [
+            ...presentArtifacts.map((file) => `Obsolete workspace-split artifact still exists: ${file}`),
+            ...overnightReferences.map((file) => `Overnight script still references obsolete workspace-split artifact: ${file}`),
+          ],
         );
       },
     },
