@@ -20,6 +20,7 @@ export type FlatLayoutProofCaseName =
   | 'no-cross-package-aliases'
   | 'cli-bin-still-wired'
   | 'legacy-packages-removed'
+  | 'obsolete-package-split-artifacts-removed'
   | 'surface-folder-shape'
   | 'layer-direction-by-folder';
 
@@ -196,6 +197,18 @@ function includeReferencesSrc(include: unknown): boolean {
   return Array.isArray(include) && include.some((entry) => typeof entry === 'string' && (entry === 'src' || entry.startsWith('src/')));
 }
 
+function tsconfigIncludeEntries(include: unknown): string[] {
+  return Array.isArray(include) ? include.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function tsconfigIncludePathExists(entry: string): boolean {
+  if (/[*?[\]{}]/.test(entry)) {
+    return true;
+  }
+
+  return pathExists(entry);
+}
+
 function specifierTargetLayer(file: string, specifier: string): string | null {
   if (!specifier.startsWith('.')) {
     const absoluteSrcMatch = /^src\/([^/]+)/.exec(specifier);
@@ -219,6 +232,13 @@ function layerDirectionViolations(): Array<{ file: string; specifier: string; ta
       }),
     ),
   ).sort((left, right) => `${left.file}:${left.specifier}`.localeCompare(`${right.file}:${right.specifier}`));
+}
+
+function obsoletePackageSplitArtifacts(): string[] {
+  return [
+    ['docs', 'architecture', 'ricky-package-split' + '-migration-spec.md'].join('/'),
+    ['workflows', 'wave5-scale-and-ops', '05-split-ricky-into-workspace' + '-packages.ts'].join('/'),
+  ];
 }
 
 export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
@@ -296,18 +316,24 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
               compilerOptions?: { strict?: unknown };
             }>('tsconfig.json')
           : {};
-        const include = Array.isArray(rootTsconfig.include) ? rootTsconfig.include : [];
+        const include = tsconfigIncludeEntries(rootTsconfig.include);
         const onlyRootTsconfig = configs.length === 1 && configs[0] === 'tsconfig.json';
         const includesSrc = includeReferencesSrc(rootTsconfig.include);
         const strictMode = rootTsconfig.compilerOptions?.strict === true;
+        const legacyPackageIncludes = include.filter((entry) => entry === 'packages' || entry.startsWith('packages/'));
+        const missingIncludes = include.filter((entry) => !tsconfigIncludePathExists(entry));
+        const noLegacyPackageIncludes = legacyPackageIncludes.length === 0;
+        const allLiteralIncludesExist = missingIncludes.length === 0;
 
         return result(
           'single-tsconfig-covers-src',
-          [onlyRootTsconfig, includesSrc, strictMode],
+          [onlyRootTsconfig, includesSrc, strictMode, noLegacyPackageIncludes, allLiteralIncludesExist],
           [
             `tsconfig.json files found: ${configs.length}`,
             `only root tsconfig.json: ${onlyRootTsconfig}`,
             `root include references src: ${includesSrc}`,
+            `root include references legacy packages paths: ${!noLegacyPackageIncludes}`,
+            `root include missing literal paths: ${missingIncludes.join(', ') || '(none)'}`,
             `root include: ${JSON.stringify(include)}`,
             `root compilerOptions.strict: ${String(rootTsconfig.compilerOptions?.strict ?? '(missing)')}`,
           ],
@@ -316,6 +342,8 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
             ...(onlyRootTsconfig ? [] : [`Expected only root tsconfig.json, found: ${configs.join(', ') || '(none)'}`]),
             ...(includesSrc ? [] : ['Root tsconfig.json include does not reference src']),
             ...(strictMode ? [] : ['Root tsconfig.json does not enable compilerOptions.strict']),
+            ...legacyPackageIncludes.map((entry) => `Root tsconfig.json still includes legacy package path: ${entry}`),
+            ...missingIncludes.map((entry) => `Root tsconfig.json includes missing path: ${entry}`),
           ],
         );
       },
@@ -432,6 +460,33 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
                 'packages/ directory still exists after the flat-layout collapse',
                 ...packageFiles.map((file) => `legacy package file still present: ${file}`),
               ],
+        );
+      },
+    },
+    {
+      name: 'obsolete-package-split-artifacts-removed',
+      description: 'Superseded workspace-split migration artifacts are absent after the flat-layout collapse.',
+      evaluate: () => {
+        const obsoleteArtifacts = obsoletePackageSplitArtifacts();
+        const presentArtifacts = obsoleteArtifacts.filter((file) => fileExists(file));
+        const overnightScript = fileExists('scripts/run-ricky-overnight.sh') ? readText('scripts/run-ricky-overnight.sh') : '';
+        const overnightReferences = obsoleteArtifacts.filter((file) => overnightScript.includes(file));
+        const allRemoved = presentArtifacts.length === 0;
+        const noOvernightReferences = overnightReferences.length === 0;
+
+        return result(
+          'obsolete-package-split-artifacts-removed',
+          [allRemoved, noOvernightReferences],
+          [
+            `obsolete workspace-split artifacts present: ${presentArtifacts.length}`,
+            `overnight script references obsolete workspace-split artifacts: ${overnightReferences.length}`,
+            `obsolete artifact cleanup enforced: ${allRemoved && noOvernightReferences}`,
+          ],
+          [],
+          [
+            ...presentArtifacts.map((file) => `Obsolete workspace-split artifact still exists: ${file}`),
+            ...overnightReferences.map((file) => `Overnight script still references obsolete workspace-split artifact: ${file}`),
+          ],
         );
       },
     },

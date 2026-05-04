@@ -143,6 +143,48 @@ artifact_runner_logs_show_failure() {
   return 1
 }
 
+artifact_checkpoint_indicates_queue_exhausted() {
+  local artifact_dir="$1"
+  local checkpoint_file="$artifact_dir/checkpoint.env"
+  local queue_file="$artifact_dir/queue.txt"
+  local current_index=""
+  local current_workflow=""
+  local queue_total="0"
+  local key raw_value value
+
+  [[ -d "$artifact_dir" ]] || return 1
+  [[ -f "$checkpoint_file" ]] || return 1
+  [[ -f "$queue_file" ]] || return 1
+
+  while IFS='=' read -r key raw_value; do
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    value="$(printf '%b' "${raw_value//\\/\\\\}")"
+    eval "value=$raw_value" 2>/dev/null || value="$raw_value"
+    case "$key" in
+      current_index) current_index="$value" ;;
+      current_workflow) current_workflow="$value" ;;
+    esac
+  done < "$checkpoint_file"
+
+  [[ "$current_index" =~ ^[0-9]+$ ]] || return 1
+  queue_total="$(grep -cve '^[[:space:]]*$' "$queue_file" 2>/dev/null || echo 0)"
+  [[ "$queue_total" =~ ^[0-9]+$ ]] || queue_total="0"
+
+  [[ -z "$current_workflow" ]] || return 1
+  (( current_index >= queue_total ))
+}
+
+artifact_queue_exhausted_terminal_status() {
+  local artifact_dir="$1"
+  local failed_file="$artifact_dir/failed.txt"
+
+  if [[ -s "$failed_file" ]]; then
+    printf 'complete-with-failures\n'
+  else
+    printf 'complete\n'
+  fi
+}
+
 clear_artifact_checkpoint() {
   local artifact_dir="$1"
 
@@ -165,6 +207,9 @@ mark_artifact_stale_or_complete() {
   elif artifact_runner_logs_show_success "$artifact_dir"; then
     resolved_status="complete"
     resolved_reason="runner completed before harness status flush"
+  elif artifact_checkpoint_indicates_queue_exhausted "$artifact_dir"; then
+    resolved_status="$(artifact_queue_exhausted_terminal_status "$artifact_dir")"
+    resolved_reason="queue exhausted before harness status flush"
   fi
 
   printf '%s\n' "$resolved_status" > "$status_file"
@@ -372,6 +417,13 @@ on_exit() {
         echo "complete" > "$STATUS_FILE"
         persist_checkpoint
         write_summary "complete"
+      elif artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR"; then
+        STATUS_REASON="queue exhausted before harness status flush"
+        local recovered_status
+        recovered_status="$(artifact_queue_exhausted_terminal_status "$ARTIFACT_DIR")"
+        echo "$recovered_status" > "$STATUS_FILE"
+        persist_checkpoint
+        write_summary "$recovered_status"
       else
         STATUS_REASON="process exited unexpectedly"
         echo "stale" > "$STATUS_FILE"
@@ -444,6 +496,35 @@ LAST_FILTER_REMOVED_MISSING=0
 LAST_FILTER_REMOVED_STALE=0
 LAST_FILTER_REMOVED_SATISFIED=0
 
+prune_tracked_workflow_file_for_repo_state() {
+  local workflow_file="$1"
+  local filtered_file="${workflow_file}.filtered.tmp"
+  local workflow_path=""
+
+  [[ -f "$workflow_file" ]] || return 0
+  : > "$filtered_file"
+
+  while IFS= read -r workflow_path; do
+    [[ -n "$workflow_path" ]] || continue
+
+    if [[ ! -f "$workflow_path" ]]; then
+      continue
+    fi
+
+    if workflow_has_stale_package_targets "$workflow_path"; then
+      continue
+    fi
+
+    if workflow_is_already_satisfied "$workflow_path"; then
+      continue
+    fi
+
+    printf '%s\n' "$workflow_path" >> "$filtered_file"
+  done < "$workflow_file"
+
+  mv "$filtered_file" "$workflow_file"
+}
+
 filter_queue_for_repo_state() {
   local filtered_queue="$ARTIFACT_DIR/queue.filtered.tmp"
   local removed_count=0
@@ -483,6 +564,8 @@ filter_queue_for_repo_state() {
   done < "$QUEUE_FILE"
 
   mv "$filtered_queue" "$QUEUE_FILE"
+  prune_tracked_workflow_file_for_repo_state "$FAILED_FILE"
+  prune_tracked_workflow_file_for_repo_state "$SKIPPED_FILE"
   LAST_FILTER_REMOVED_TOTAL="$removed_count"
   LAST_FILTER_REMOVED_MISSING="$removed_missing"
   LAST_FILTER_REMOVED_STALE="$removed_stale"
@@ -656,11 +739,6 @@ workflow_is_already_satisfied() {
         && npm run typecheck >/dev/null \
         && npm test >/dev/null
       ;;
-    workflows/wave5-scale-and-ops/05-split-ricky-into-workspace-packages.ts)
-      artifact_signoff_has_marker \
-        .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/per-workflow/wave5-scale-and-ops__05-split-ricky-into-workspace-packages/signoff.md \
-        'SIGNED_OFF'
-      ;;
     workflows/wave6-proof/01-close-first-wave-signoff-and-blockers.ts)
       test -f .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/closure-summary.md \
         && grep -Eq 'Result:\*\* 16/16 SIGNED_OFF, 0 BLOCKED|\*\*Result:\*\* 16/16 SIGNED_OFF, 0 BLOCKED' .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/closure-summary.md
@@ -818,12 +896,6 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave12-simplified-workflow-cli/no-dead-end-proof/signoff.md \
         'NO_DEAD_END_SIGNOFF_COMPLETE'
-      ;;
-    workflows/generated/ricky-generate-a-workflow-for-external-package-checks.ts)
-      git cat-file -e HEAD:workflows/generated/ricky-external-package-checks.ts 2>/dev/null \
-        && artifact_signoff_has_marker \
-          .workflow-artifacts/generated/generate-a-workflow-for-external-package-checks/signoff.md \
-          'EXTERNAL_PACKAGE_CHECKS_READY'
       ;;
     *)
       return 1

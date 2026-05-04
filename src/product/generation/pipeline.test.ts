@@ -94,6 +94,11 @@ describe('workflow generation pipeline', () => {
     expect(gate(artifact, 'post-fix-validation')).toMatchObject({
       stage: 'post_fix',
       failOnError: false,
+      dependsOn: ['active-reference-gate'],
+    });
+    expect(gate(artifact, 'active-reference-gate')).toMatchObject({
+      stage: 'post_fix',
+      failOnError: true,
       dependsOn: ['post-fix-verification-gate'],
     });
     expect(gate(artifact, 'final-review-pass-gate')).toMatchObject({
@@ -291,14 +296,23 @@ describe('workflow generation pipeline', () => {
         expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-claude' }),
         expect.objectContaining({ id: 'implement-artifact', agentRole: 'author-codex' }),
         expect.objectContaining({ id: 'review-claude', dependsOn: ['initial-soft-validation'] }),
-        expect.objectContaining({ id: 'review-codex', dependsOn: ['initial-soft-validation'] }),
+        expect.objectContaining({
+          id: 'review-codex',
+          agentRole: 'deterministic',
+          name: 'Codex structural marker gate',
+          dependsOn: ['initial-soft-validation'],
+        }),
       ]),
     );
     expect(artifact.content).toContain('.agent("lead-claude", { cli: "codex", interactive: false');
     expect(artifact.content).toContain('.agent("reviewer-claude", { cli: "codex", preset: "reviewer"');
+    expect(artifact.content).not.toContain('.agent("reviewer-codex"');
     expect(artifact.content).toContain('.agent("validator-claude", { cli: "codex", preset: "worker"');
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
+    expect(artifact.content).toContain('Codex structural marker gate');
+    expect(artifact.content).toContain('must not be presented as independent review evidence');
+    expect(artifact.content).toContain('Substantive review evidence comes from the Claude review steps plus deterministic validation gates');
     expect(artifact.content).toContain('docs/release-readiness.md');
     expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
@@ -312,10 +326,12 @@ describe('workflow generation pipeline', () => {
           agent: 'reviewer-claude',
           concurrency: 1,
         }),
+      ]),
+    );
+    expect(result.toolSelection.selections).not.toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           stepId: 'review-codex',
-          agent: 'reviewer-codex',
-          concurrency: 1,
         }),
       ]),
     );
@@ -420,6 +436,8 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toMatch(/\bworkflow\(/);
     expect(artifact.content).toContain(`.channel("${artifact.channel}")`);
     expect(artifact.content).toContain('.run({ cwd: process.cwd() })');
+    expect(artifact.content).toContain('.step("lead-plan-gate"');
+    expect(artifact.content).toContain('.step("fix-loop-report-gate"');
     expect(artifact.content).toContain('review-claude');
     expect(artifact.content).toContain('review-codex');
     expect(gate(artifact, 'initial-soft-validation')).toMatchObject({
@@ -891,10 +909,11 @@ describe('workflow generation pipeline', () => {
 
     // Gate must NOT grep manifest for source-shape tokens (export|function|class|workflow)
     expect(fileGate.command).not.toMatch(/grep.*export\|function\|class/);
-    // Gate must validate manifest is non-empty and listed files exist
-    expect(fileGate.command).toContain('test -s');
-    expect(fileGate.command).toContain('read -r f');
-    expect(fileGate.command).toContain('test -f "$f"');
+    // Gate must validate manifest is non-empty and support status-prefixed cleanup entries.
+    expect(fileGate.command).toContain('output manifest is empty');
+    expect(fileGate.command).toContain('deleted manifest path still exists');
+    expect(fileGate.command).toContain('manifest path does not exist');
+    expect(fileGate.command).toContain('MANIFEST_FILE_GATE_OK');
   });
 
   it('renders deterministic artifact content for the same spec with controlled registry', () => {
@@ -946,9 +965,57 @@ describe('workflow generation pipeline', () => {
     const gitDiffGate = artifact.gates.find((g) => g.name === 'git-diff-gate')!;
 
     expect(gitDiffGate.command).toContain('output-manifest.txt');
-    expect(gitDiffGate.command).toContain('git diff --name-only -- "$f"');
-    expect(gitDiffGate.command).toContain('git ls-files --others --exclude-standard -- "$f"');
-    expect(gitDiffGate.command).toContain('sort -u');
+    expect(gitDiffGate.command).toContain("'diff', '--name-status'");
+    expect(gitDiffGate.command).toContain("'ls-files', '--others', '--exclude-standard'");
+    expect(gitDiffGate.command).toContain('missing expected diff entry');
+    expect(gitDiffGate.command).toContain('unexpected changed paths');
+  });
+
+  it('no-target active reference gate skips missing tracked paths before reading files', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Remove an unused file without explicit target files.',
+        targetFiles: [],
+      }),
+      artifactPath: 'workflows/generated/no-target-active-reference.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const activeReferenceGate = artifact.gates.find((g) => g.name === 'active-reference-gate')!;
+
+    expect(activeReferenceGate.command).toContain('fs.existsSync(file)');
+    expect(activeReferenceGate.command).toContain('fs.statSync(file).isFile()');
+    expect(activeReferenceGate.command).toContain('basename referenced by');
+    expect(activeReferenceGate.command).toContain('active references remain');
+  });
+
+  it('no-target lead plan and manifest gates require the declared evidence artifacts', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Remove an unused file without explicit target files.',
+        targetFiles: [],
+      }),
+      artifactPath: 'workflows/generated/no-target-evidence-gates.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const leadPlanGate = artifact.gates.find((g) => g.name === 'lead-plan-gate')!;
+    const fixLoopReportGate = artifact.gates.find((g) => g.name === 'fix-loop-report-gate')!;
+    const postFixGate = artifact.gates.find((g) => g.name === 'post-fix-verification-gate')!;
+    const postImplementationGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
+
+    expect(leadPlanGate.command).toContain('GENERATION_LEAD_PLAN_READY');
+    expect(leadPlanGate.command).toContain('/non-goals?/i');
+    expect(leadPlanGate.command).toContain('Routing contract');
+    expect(artifact.content).toContain('write .workflow-artifacts/generated/no-target-evidence-gates/fix-loop-report.md');
+    expect(fixLoopReportGate.command).toContain('FIX_LOOP_COMPLETE');
+    expect(fixLoopReportGate.dependsOn).toEqual(['fix-loop']);
+    expect(postFixGate.dependsOn).toEqual(['fix-loop-report-gate']);
+    expect(postImplementationGate.command).toContain('cleanup-report.md');
+    expect(postImplementationGate.command).toContain('cleanup-diff-inventory.txt');
+    expect(postImplementationGate.command).toContain('validation-evidence.md');
   });
 
   it('explicit target git diff gate includes untracked files for newly created outputs', () => {

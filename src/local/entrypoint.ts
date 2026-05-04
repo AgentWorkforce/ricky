@@ -10,6 +10,7 @@ import type { ArtifactReader, LocalInvocationRequest, LocalStageMode, RawHandoff
 import { assembleRickyTurnContext } from './assistant-turn-context-adapter.js';
 import { normalizeRequest } from './request-normalizer.js';
 import type { TurnContextAssembly } from '@agent-assistant/turn-context';
+import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -41,6 +42,8 @@ import type {
 } from '../runtime/types.js';
 
 const requireFromHere = createRequire(import.meta.url);
+const SCRIPT_PROCESS_KILL_GRACE_MS = 2_000;
+const FORWARDED_SCRIPT_PARENT_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 // ---------------------------------------------------------------------------
 // Local response contract
@@ -263,6 +266,7 @@ export interface ScriptWorkflowRunnerOptions {
   cwd: string;
   env?: Record<string, string>;
   timeoutMs?: number;
+  signal?: AbortSignal;
   startFrom?: string;
   previousRunId?: string;
   resume?: string;
@@ -369,12 +373,15 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
 
     emit('started', 'SDK script workflow started', { workflowFile: request.workflowFile, cwd: request.cwd });
 
+    const abortController = new AbortController();
+
     try {
       const runnerResult = await withTimeout(
         this.runner(request.workflowFile, {
           cwd: request.cwd,
           env: request.env,
           timeoutMs: request.timeoutMs,
+          signal: abortController.signal,
           startFrom: retry.startFromStep,
           previousRunId: retry.previousRunId,
           onStdout: (line) => {
@@ -389,6 +396,7 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
           },
         }),
         request.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+        () => abortController.abort(),
       );
       const reportedFailure =
         failureFromScriptWorkflowResult(runnerResult) ?? failureFromScriptWorkflowOutput(stdout, stderr);
@@ -569,10 +577,16 @@ function buildLocalSnippet(lines: string[], maxLines: number): LogSnippet {
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout?: () => void): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<T>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
+    timeout = setTimeout(() => {
+      try {
+        onTimeout?.();
+      } finally {
+        reject(new Error(`timed out after ${timeoutMs}ms`));
+      }
+    }, timeoutMs);
   });
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeout) clearTimeout(timeout);
@@ -771,19 +785,78 @@ async function runScriptProcess(
   };
 
   await new Promise<void>((resolvePromise, reject) => {
+    if (options.signal?.aborted) {
+      reject(new Error('script workflow run aborted'));
+      return;
+    }
+
     const child = spawn(command, args, {
       cwd: options.cwd,
       env,
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    child.once('error', reject);
+    let abortRequested = false;
+    let parentSignal: NodeJS.Signals | undefined;
+    let forceKillHandle: ReturnType<typeof setTimeout> | undefined;
+    const stdoutInterface = child.stdout ? createInterface({ input: child.stdout }) : undefined;
+    const stderrInterface = child.stderr ? createInterface({ input: child.stderr }) : undefined;
+    const cleanup = (): void => {
+      options.signal?.removeEventListener('abort', onAbort);
+      for (const signal of FORWARDED_SCRIPT_PARENT_SIGNALS) {
+        process.off(signal, parentSignalHandlers[signal]);
+      }
+      if (forceKillHandle) clearTimeout(forceKillHandle);
+      stdoutInterface?.close();
+      stderrInterface?.close();
+    };
+    const killProcessTree = (signal: NodeJS.Signals, forceSignal: NodeJS.Signals = 'SIGKILL'): void => {
+      sendSignalToChildTree(child, signal);
+      if (!forceKillHandle) {
+        forceKillHandle = setTimeout(() => {
+          sendSignalToChildTree(child, forceSignal);
+        }, SCRIPT_PROCESS_KILL_GRACE_MS);
+        forceKillHandle.unref?.();
+      }
+    };
+    const onAbort = (): void => {
+      abortRequested = true;
+      killProcessTree('SIGTERM');
+    };
+    const parentSignalHandlers = Object.fromEntries(
+      FORWARDED_SCRIPT_PARENT_SIGNALS.map((signal) => [
+        signal,
+        () => {
+          parentSignal = signal;
+          killProcessTree(signal);
+        },
+      ]),
+    ) as Record<NodeJS.Signals, () => void>;
+
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    for (const signal of FORWARDED_SCRIPT_PARENT_SIGNALS) {
+      process.once(signal, parentSignalHandlers[signal]);
+    }
+    child.once('error', (error) => {
+      cleanup();
+      reject(error);
+    });
     if (child.stdout) {
-      createInterface({ input: child.stdout }).on('line', (line) => options.onStdout?.(line));
+      stdoutInterface?.on('line', (line) => options.onStdout?.(line));
     }
     if (child.stderr) {
-      createInterface({ input: child.stderr }).on('line', (line) => options.onStderr?.(line));
+      stderrInterface?.on('line', (line) => options.onStderr?.(line));
     }
     child.once('exit', (code, signal) => {
+      cleanup();
+      if (parentSignal) {
+        reject(new Error(`script workflow run interrupted by ${parentSignal}`));
+        return;
+      }
+      if (abortRequested || options.signal?.aborted) {
+        reject(new Error('script workflow run aborted'));
+        return;
+      }
       if (code === 0) {
         resolvePromise();
         return;
@@ -795,6 +868,34 @@ async function runScriptProcess(
       reject(new Error(`${label} exited with code ${code}`));
     });
   });
+}
+
+function sendSignalToChildTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.pid && process.platform !== 'win32') {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (error) {
+      if (!isNoSuchProcessError(error)) {
+        try {
+          child.kill(signal);
+        } catch {
+          // Best-effort cleanup after timeout; the caller still reports the timeout.
+        }
+        return;
+      }
+    }
+  }
+
+  try {
+    child.kill(signal);
+  } catch {
+    // Best-effort cleanup after timeout; the caller still reports the timeout.
+  }
+}
+
+function isNoSuchProcessError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'ESRCH';
 }
 
 async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefined> {

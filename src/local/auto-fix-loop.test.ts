@@ -183,14 +183,14 @@ describe('runWithAutoFix', () => {
 
     expect(capturedEvidence).toBeDefined();
     const repair = repairWorkflowDeterministically({
-      artifactPath: 'workflows/demo-auto-fix/broken-greeting.ts',
+      artifactPath: 'workflows/generated/broken-greeting.ts',
       artifactContent: brokenDemoWorkflowContent(),
       evidence: capturedEvidence!,
     }, new Error('No Workforce persona could be resolved'));
 
     expect(repair).toMatchObject({
       applied: true,
-      artifactPath: 'workflows/demo-auto-fix/broken-greeting.ts',
+      artifactPath: 'workflows/generated/broken-greeting.ts',
       mode: 'deterministic',
       summary: expect.stringContaining('bounded deterministic workflow repair'),
       warnings: [expect.stringContaining('Workforce persona repair unavailable')],
