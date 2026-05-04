@@ -368,7 +368,7 @@ function buildActiveReferenceGateCommand(outputManifest: string, evidencePath: s
     'const hits = [];',
     'for (const removedPath of deleted) {',
     '  for (const file of files) {',
-    '    if (file === removedPath) continue;',
+    '    if (file === removedPath || !fs.existsSync(file) || !fs.statSync(file).isFile()) continue;',
     '    const body = fs.readFileSync(file, \'utf8\');',
     '    if (body.includes(removedPath)) hits.push(`${removedPath} referenced by ${file}`);',
     '  }',

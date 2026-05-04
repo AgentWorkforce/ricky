@@ -958,6 +958,24 @@ describe('workflow generation pipeline', () => {
     expect(gitDiffGate.command).toContain('unexpected changed paths');
   });
 
+  it('no-target active reference gate skips missing tracked paths before reading files', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Remove an unused file without explicit target files.',
+        targetFiles: [],
+      }),
+      artifactPath: 'workflows/generated/no-target-active-reference.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const activeReferenceGate = artifact.gates.find((g) => g.name === 'active-reference-gate')!;
+
+    expect(activeReferenceGate.command).toContain('fs.existsSync(file)');
+    expect(activeReferenceGate.command).toContain('fs.statSync(file).isFile()');
+    expect(activeReferenceGate.command).toContain('active references remain');
+  });
+
   it('explicit target git diff gate includes untracked files for newly created outputs', () => {
     const result = generate({
       spec: spec({
