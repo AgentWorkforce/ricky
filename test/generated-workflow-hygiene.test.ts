@@ -24,6 +24,8 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('CLEANUP_CANDIDATE_PRESCAN_OK');
     expect(workflowBody).toContain('cleanup-evidence-sanity-gate');
     expect(workflowBody).toContain('CLEANUP_EVIDENCE_SANITY_GATE_OK');
+    expect(workflowBody).toContain('final-artifact-consistency-gate');
+    expect(workflowBody).toContain('FINAL_ARTIFACT_CONSISTENCY_GATE_OK');
     expect(workflowBody).toContain('timeoutMs: 300_000');
     expect(workflowBody).toContain('Tracked agent config files');
     expect(workflowBody).toContain('Relaycast permission references');
@@ -47,5 +49,7 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('validation evidence missing deterministic command names');
     expect(workflowBody).toContain('basename referenced by');
     expect(workflowBody).toContain('status-prefixed changed-file inventory and command summaries');
+    expect(workflowBody).toContain('missing manifest path');
+    expect(workflowBody).toContain('mentions stale non-manifest target');
   });
 });

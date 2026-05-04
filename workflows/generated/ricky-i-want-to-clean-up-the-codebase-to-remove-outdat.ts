@@ -323,11 +323,59 @@ Include:
 - PR URL or a clear result location/status when PR creation is intentionally out of scope
 - skill application boundary from .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/skill-application-boundary.json
 - remaining risks or environmental blockers
+- every current output-manifest path, and no stale cleanup targets unless those targets are in the current manifest
 
 Tool selection: runner=@agent-relay/sdk; concurrency=1; rule=project default runner @agent-relay/sdk.
 
 End with GENERATED_WORKFLOW_READY.`,
       verification: { type: 'file_exists', value: ".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/signoff.md" },
+    })
+
+    .step("final-artifact-consistency-gate", {
+      type: 'deterministic',
+      dependsOn: ["final-signoff"],
+      command: `node <<'NODE'
+const fs = require('node:fs');
+const base = '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat';
+const read = (name) => fs.readFileSync(base + '/' + name, 'utf8');
+const manifestLines = read('output-manifest.txt')
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter((line) => line && !line.startsWith('#'));
+if (manifestLines.length === 0) throw new Error('output manifest is empty');
+const manifestPaths = manifestLines.map((line) => {
+  const match = /^(A|M|D)\s+(.+)$/.exec(line);
+  if (!match) throw new Error('manifest entry lacks status prefix: ' + line);
+  return match[2];
+});
+const docs = [
+  ['final-review-claude.md', read('final-review-claude.md')],
+  ['final-review-codex.md', read('final-review-codex.md')],
+  ['signoff.md', read('signoff.md')],
+];
+for (const [name, body] of docs) {
+  for (const path of manifestPaths) {
+    if (!body.includes(path)) throw new Error(name + ' missing manifest path: ' + path);
+  }
+}
+const staleTargets = [
+  ['test', 'smoke' + '.test' + '.ts'].join('/'),
+  'smoke' + '.test' + '.ts',
+  ['workflows', 'wave6-proof', '01-close-first-wave-signoff-and-blockers.ts'].join('/'),
+  ['test', 'generated-workflow-hygiene.test.ts'].join('/'),
+];
+const manifestSet = new Set(manifestPaths);
+for (const [name, body] of docs) {
+  for (const stale of staleTargets) {
+    if (!manifestSet.has(stale) && body.includes(stale)) {
+      throw new Error(name + ' mentions stale non-manifest target: ' + stale);
+    }
+  }
+}
+console.log('FINAL_ARTIFACT_CONSISTENCY_GATE_OK');
+NODE`,
+      captureOutput: true,
+      failOnError: true,
     })
 
     .run({ cwd: process.cwd() });
