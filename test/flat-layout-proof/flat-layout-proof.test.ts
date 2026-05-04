@@ -31,6 +31,7 @@ describe('Ricky flat src layout proof', () => {
       'cli-bin-still-wired',
       'legacy-packages-removed',
       'obsolete-package-split-artifacts-removed',
+      'runtime-debug-canaries-removed',
       'placeholder-smoke-test-removed',
       'surface-folder-shape',
       'layer-direction-by-folder',
@@ -72,6 +73,14 @@ describe('Ricky flat src layout proof', () => {
         'tracked transient migration artifacts present: 0',
         'overnight script references obsolete workspace-split artifacts: 0',
         'obsolete artifact cleanup enforced: true',
+      ],
+    ],
+    [
+      'runtime-debug-canaries-removed',
+      [
+        'obsolete runtime debug workflows present: 0',
+        'active references to obsolete runtime debug workflows: 0',
+        'runtime debug canary cleanup enforced: true',
       ],
     ],
     [

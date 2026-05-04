@@ -21,6 +21,7 @@ export type FlatLayoutProofCaseName =
   | 'cli-bin-still-wired'
   | 'legacy-packages-removed'
   | 'obsolete-package-split-artifacts-removed'
+  | 'runtime-debug-canaries-removed'
   | 'placeholder-smoke-test-removed'
   | 'surface-folder-shape'
   | 'layer-direction-by-folder';
@@ -92,6 +93,8 @@ function shouldSkipDirectory(repoPath: string): boolean {
     || repoPath === '.git'
     || repoPath.startsWith('.git/')
     || repoPath.startsWith('.agent-relay/')
+    || repoPath.startsWith('.agent-relay.stale.')
+    || repoPath.startsWith('.relay/')
     || repoPath.startsWith('.claude/worktrees/')
     || repoPath.startsWith('.workflow-artifacts/')
     || repoPath.startsWith('.trajectories/')
@@ -249,6 +252,13 @@ function obsoletePackageSplitArtifacts(): string[] {
     ['workflows', 'wave5-scale-and-ops', '05-split-ricky-into-workspace' + '-packages.ts'].join('/'),
     ['.workflow-artifacts', 'wave11-flat-layout-collapse', 'collapse-packages-into-src', 'code' + 'mod.mjs'].join('/'),
     ['.workflow-artifacts', 'wave11-flat-layout-collapse', 'collapse-packages-into-src', 'migration' + '-execution.md'].join('/'),
+  ];
+}
+
+function obsoleteRuntimeDebugWorkflows(): string[] {
+  return [
+    ['workflows', 'wave0-foundation', '99-debug-codex' + '-worker-runtime' + '.ts'].join('/'),
+    ['workflows', 'wave0-foundation', '100-debug-codex' + '-source-edit-runtime' + '.ts'].join('/'),
   ];
 }
 
@@ -509,6 +519,33 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
           [
             ...presentArtifacts.map((file) => `Obsolete workspace-split artifact still exists: ${file}`),
             ...overnightReferences.map((file) => `Overnight script still references obsolete workspace-split artifact: ${file}`),
+          ],
+        );
+      },
+    },
+    {
+      name: 'runtime-debug-canaries-removed',
+      description: 'One-off Codex runtime debug canary workflows are removed now that their findings are captured in docs and product workflows use deterministic tiny-write paths.',
+      evaluate: () => {
+        const obsoleteWorkflows = obsoleteRuntimeDebugWorkflows();
+        const presentWorkflows = obsoleteWorkflows.filter((file) => fileExists(file));
+        const activeReferences = obsoleteWorkflows.flatMap((file) =>
+          activeReferencesToPath(file).map((reference) => `${file} referenced by ${reference}`),
+        );
+        const allRemoved = presentWorkflows.length === 0 && activeReferences.length === 0;
+
+        return result(
+          'runtime-debug-canaries-removed',
+          [allRemoved],
+          [
+            `obsolete runtime debug workflows present: ${presentWorkflows.length}`,
+            `active references to obsolete runtime debug workflows: ${activeReferences.length}`,
+            `runtime debug canary cleanup enforced: ${allRemoved}`,
+          ],
+          [],
+          [
+            ...presentWorkflows.map((file) => `Obsolete runtime debug workflow still present: ${file}`),
+            ...activeReferences.map((reference) => `Active reference to obsolete runtime debug workflow: ${reference}`),
           ],
         );
       },

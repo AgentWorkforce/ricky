@@ -84,11 +84,12 @@ Conclusion:
 4. Avoid giant inline file payloads inside workflow TypeScript.
 5. When a live rerun advances from opaque worker stalls to ordinary deterministic gate bugs, that is real progress, not noise.
 
+## Cleanup status
+
+The minimal reproducers that informed these notes were one-off debug canaries. Their conclusions are preserved here and in the Wave 4 completion findings, while the checked-in canary workflow files have been removed so the workflow tree stays focused on active product and proof flows.
+
 ## Next recommended steps
 
 1. Finish stabilizing live execution of `04` through review/fix/signoff.
 2. Commit and push the helper-script execution-path fix.
 3. Apply the same execution-path pattern to `05` where appropriate.
-4. Preserve the minimal reproducers as runtime canaries:
-   - `workflows/wave0-foundation/99-debug-codex-worker-runtime.ts`
-   - `workflows/wave0-foundation/100-debug-codex-source-edit-runtime.ts`

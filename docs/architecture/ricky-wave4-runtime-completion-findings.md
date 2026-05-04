@@ -19,8 +19,7 @@ The main findings are:
 
 ## Minimal reproducer 1: temp-file write
 
-A dedicated runtime reproducer workflow was added:
-- `workflows/wave0-foundation/99-debug-codex-worker-runtime.ts`
+An obsolete dedicated runtime reproducer workflow was used and later removed after its findings were captured in this document.
 
 It performs:
 1. deterministic setup
@@ -43,8 +42,7 @@ Observed behavior:
 
 ## Minimal reproducer 2: existing-source-file edit
 
-A second runtime reproducer was added:
-- `workflows/wave0-foundation/100-debug-codex-source-edit-runtime.ts`
+A second obsolete runtime reproducer was used and later removed after its findings were captured in this document.
 
 It performs:
 1. deterministic setup of an existing `.ts` source file under `tmp/runtime-debug/`
