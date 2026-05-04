@@ -365,8 +365,10 @@ function renderToolSelectionSummary(selection?: ToolSelection): string {
 }
 
 function renderAgentLine(member: TeamMemberSpec): string {
-  const options = [`cli: ${literal(member.cli)}`, `role: ${literal(member.role)}`, `retries: ${member.retries}`];
-  if (member.preset) options.splice(1, 0, `preset: ${literal(member.preset)}`);
+  const options = [`cli: ${literal(member.cli)}`];
+  if (member.preset) options.push(`preset: ${literal(member.preset)}`);
+  if (member.interactive === false) options.push('interactive: false');
+  options.push(`role: ${literal(member.role)}`, `retries: ${member.retries}`);
   if (member.model) options.push(`model: ${literal(member.model)}`);
   return `    .agent(${literal(member.name)}, { ${options.join(', ')} })`;
 }

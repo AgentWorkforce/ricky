@@ -64,6 +64,7 @@ describe('workflow generation pipeline', () => {
         expect.objectContaining({ id: 'final-signoff', dependsOn: ['regression-gate'] }),
       ]),
     );
+    expect(artifact.content).toContain('.agent("lead-claude", { cli: "claude", interactive: false');
     expect(artifact.content).toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
     expect(artifact.content).toContain('.agent("validator-claude"');
