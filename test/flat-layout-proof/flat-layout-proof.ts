@@ -267,11 +267,29 @@ function obsoleteRuntimeDebugWorkflows(): string[] {
 }
 
 function legacyClaudeSkillMirrorArtifacts(): string[] {
-  return [
+  const candidates = [
     ['.claude', 'skills', 'choosing-swarm-patterns', 'SKILL.md'].join('/'),
     ['.claude', 'skills', 'writing-agent-relay-workflows', 'SKILL.md'].join('/'),
     ['.claude', 'skills', 'relay-80-100-workflow', 'SKILL.md'].join('/'),
   ];
+  const prpmManagedClaudeSkillPaths = new Set(prpmLockInstalledPaths());
+  return candidates.filter((file) => !prpmManagedClaudeSkillPaths.has(file));
+}
+
+function prpmLockInstalledPaths(): string[] {
+  if (!fileExists('prpm.lock')) {
+    return [];
+  }
+  let lock: { packages?: Record<string, { installedPath?: string }> };
+  try {
+    lock = readJson<{ packages?: Record<string, { installedPath?: string }> }>('prpm.lock');
+  } catch {
+    return [];
+  }
+  const packages = lock.packages ?? {};
+  return Object.values(packages)
+    .map((entry) => entry?.installedPath)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
 function textFileForReferenceScan(file: string): boolean {
