@@ -298,20 +298,37 @@ EOF
   fi
 }
 
-reconcile_stale_state_dirs() {
+iterate_known_state_dirs() {
   local state_dir=""
+  local emitted_custom_state_dir="false"
+
   for state_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*; do
     [[ -d "$state_dir" ]] || continue
-    reconcile_stale_state_dir "$state_dir/checkpoint.env"
+    printf '%s\n' "$state_dir"
+    if [[ "$state_dir" == "$STATE_ROOT" ]]; then
+      emitted_custom_state_dir="true"
+    fi
   done
+
+  if [[ -d "$STATE_ROOT" && "$emitted_custom_state_dir" != "true" ]]; then
+    printf '%s\n' "$STATE_ROOT"
+  fi
+}
+
+reconcile_stale_state_dirs() {
+  local state_dir=""
+  while IFS= read -r state_dir; do
+    [[ -d "$state_dir" ]] || continue
+    reconcile_stale_state_dir "$state_dir/checkpoint.env"
+  done < <(iterate_known_state_dirs)
 }
 
 clear_all_state_checkpoints() {
   local state_dir=""
-  for state_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*; do
+  while IFS= read -r state_dir; do
     [[ -d "$state_dir" ]] || continue
     rm -f "$state_dir/checkpoint.env" "$state_dir/latest-run.txt"
-  done
+  done < <(iterate_known_state_dirs)
 }
 
 finalize_current_artifact_checkpoint() {
