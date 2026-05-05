@@ -533,7 +533,7 @@ function repairSentinelGuardedRehydration(content: string): { content: string; c
 
   const next = content.replace(guardPattern, (match, path: string, indent: string, body: string, marker: string) => {
     const sentinelCheckPattern = new RegExp(
-      `tail -n 1 '${escapeRegex(path)}'[^\\n]*\\| grep[^\\n]*'\\^${escapeRegex(marker)}\\$'`,
+      `tail -n 1 '${escapeRegExp(path)}'[^\\n]*\\| grep[^\\n]*'\\^${escapeRegExp(marker)}\\$'`,
     );
     if (!sentinelCheckPattern.test(content)) return match;
 
@@ -542,10 +542,6 @@ function repairSentinelGuardedRehydration(content: string): { content: string; c
   });
 
   return { content: next, changes: [...new Set(changes)] };
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function repairAgentStepTimeouts(content: string, evidence: WorkflowRunEvidence): { content: string; changes: string[] } {
