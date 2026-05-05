@@ -31,6 +31,7 @@ describe('Ricky flat src layout proof', () => {
       'cli-bin-still-wired',
       'legacy-packages-removed',
       'obsolete-package-split-artifacts-removed',
+      'legacy-claude-skill-mirror-removed',
       'runtime-debug-canaries-removed',
       'placeholder-smoke-test-removed',
       'surface-folder-shape',
@@ -75,6 +76,16 @@ describe('Ricky flat src layout proof', () => {
         'overnight script references obsolete workspace-split artifacts: 0',
         'active references to obsolete workspace-split artifacts: 0',
         'obsolete artifact cleanup enforced: true',
+      ],
+    ],
+    [
+      'legacy-claude-skill-mirror-removed',
+      [
+        'legacy Claude skill mirrors checked: 3',
+        'legacy Claude skill mirrors present: 0',
+        'prpm.lock references legacy Claude skill mirrors: 0',
+        'active references to legacy Claude skill mirrors: 0',
+        'canonical project skill registry is .agents/skills: true',
       ],
     ],
     [

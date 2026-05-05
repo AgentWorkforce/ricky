@@ -21,6 +21,7 @@ export type FlatLayoutProofCaseName =
   | 'cli-bin-still-wired'
   | 'legacy-packages-removed'
   | 'obsolete-package-split-artifacts-removed'
+  | 'legacy-claude-skill-mirror-removed'
   | 'runtime-debug-canaries-removed'
   | 'placeholder-smoke-test-removed'
   | 'surface-folder-shape'
@@ -260,6 +261,14 @@ function obsoleteRuntimeDebugWorkflows(): string[] {
   return [
     ['workflows', 'wave0-foundation', '99-debug-codex' + '-worker-runtime' + '.ts'].join('/'),
     ['workflows', 'wave0-foundation', '100-debug-codex' + '-source-edit-runtime' + '.ts'].join('/'),
+  ];
+}
+
+function legacyClaudeSkillMirrorArtifacts(): string[] {
+  return [
+    ['.claude', 'skills', 'choosing-swarm-patterns', 'SKILL.md'].join('/'),
+    ['.claude', 'skills', 'writing-agent-relay-workflows', 'SKILL.md'].join('/'),
+    ['.claude', 'skills', 'relay-80-100-workflow', 'SKILL.md'].join('/'),
   ];
 }
 
@@ -527,6 +536,40 @@ export function getFlatLayoutProofCases(): FlatLayoutProofCase[] {
             ...presentArtifacts.map((file) => `Obsolete workspace-split artifact still exists: ${file}`),
             ...overnightReferences.map((file) => `Overnight script still references obsolete workspace-split artifact: ${file}`),
             ...activeReferences.map((reference) => `Active reference to obsolete workspace-split artifact: ${reference}`),
+          ],
+        );
+      },
+    },
+    {
+      name: 'legacy-claude-skill-mirror-removed',
+      description: 'Project-local Claude skill mirrors are absent; .agents/skills is the canonical project registry.',
+      evaluate: () => {
+        const mirrorArtifacts = legacyClaudeSkillMirrorArtifacts();
+        const presentArtifacts = mirrorArtifacts.filter((file) => fileExists(file));
+        const lockfile = readText('prpm.lock');
+        const lockReferences = mirrorArtifacts.filter((file) => lockfile.includes(file));
+        const activeReferences = mirrorArtifacts.flatMap((file) =>
+          activeReferencesToPath(file).map((reference) => `${file} referenced by ${reference}`),
+        );
+        const allRemoved = presentArtifacts.length === 0;
+        const noLockReferences = lockReferences.length === 0;
+        const noActiveReferences = activeReferences.length === 0;
+
+        return result(
+          'legacy-claude-skill-mirror-removed',
+          [allRemoved, noLockReferences, noActiveReferences],
+          [
+            `legacy Claude skill mirrors checked: ${mirrorArtifacts.length}`,
+            `legacy Claude skill mirrors present: ${presentArtifacts.length}`,
+            `prpm.lock references legacy Claude skill mirrors: ${lockReferences.length}`,
+            `active references to legacy Claude skill mirrors: ${activeReferences.length}`,
+            `canonical project skill registry is .agents/skills: ${directoryExists('.agents/skills')}`,
+          ],
+          [],
+          [
+            ...presentArtifacts.map((file) => `Legacy Claude skill mirror still exists: ${file}`),
+            ...lockReferences.map((file) => `prpm.lock still references legacy Claude skill mirror: ${file}`),
+            ...activeReferences.map((reference) => `Active reference to legacy Claude skill mirror: ${reference}`),
           ],
         );
       },
