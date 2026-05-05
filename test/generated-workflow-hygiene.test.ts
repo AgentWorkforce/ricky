@@ -35,8 +35,8 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).not.toContain('timeoutMs: 300_000');
     expect(workflowBody).toContain('Tracked agent config files');
     expect(workflowBody).toContain('Relaycast permission references');
-    expect(workflowBody).toContain('obsolete package-split workflow cleanup delta');
-    expect(workflowBody).toContain("'03-shared-models' + '-and-config.ts'");
+    expect(workflowBody).toContain('obsolete historical next-wave workflow cleanup delta');
+    expect(workflowBody).toContain("'02-next-wave' + '-backlog-and-proof-plan.ts'");
     expect(workflowBody).not.toContain(deletedSkillMirrorPath);
     expect(workflowBody).not.toContain('.agent("reviewer-codex"');
   });
@@ -57,6 +57,7 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('manifest lacks status-prefixed changed paths');
     expect(workflowBody).toContain('validation evidence missing deterministic command names');
     expect(workflowBody).toContain('No active references found for:');
+    expect(workflowBody).toContain('scripts/run-ricky-overnight.sh');
     expect(workflowBody).toContain('status-prefixed changed-file inventory and command summaries');
     expect(workflowBody).toContain('missing manifest path');
     expect(workflowBody).toContain('mentions stale non-manifest target');

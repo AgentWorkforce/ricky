@@ -169,16 +169,16 @@ const parsed = manifestLines.map((line) => {
   return { status: match[1], path: match[2], exact: match[1] + '\t' + match[2] };
 });
 const deleted = parsed.filter((entry) => entry.status === 'D');
-const staleWorkflow = ['workflows', 'wave0-foundation', '03-shared-models' + '-and-config.ts'].join('/');
+const staleWorkflow = ['workflows', 'wave5-scale-and-ops', '02-next-wave' + '-backlog-and-proof-plan.ts'].join('/');
 const required = [
+  'M\tscripts/run-ricky-overnight.sh',
   'M\ttest/flat-layout-proof/flat-layout-proof.test.ts',
   'M\ttest/flat-layout-proof/flat-layout-proof.ts',
-  'M\tworkflows/meta/build-application-workflows.ts',
   'M\tworkflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts',
   'D\t' + staleWorkflow,
 ];
 if (!deleted.some((entry) => entry.path === staleWorkflow)) {
-  throw new Error('manifest missing obsolete package-split shared-model workflow deletion');
+  throw new Error('manifest missing obsolete historical next-wave workflow deletion');
 }
 const diff = execFileSync('git', ['diff', '--name-status'], { encoding: 'utf8' })
   .trim()
@@ -192,9 +192,9 @@ for (const entry of deleted) {
 }
 const proof = fs.readFileSync('test/flat-layout-proof/flat-layout-proof.ts', 'utf8');
 if (!proof.includes('obsolete workspace-split artifacts checked:')) throw new Error('flat layout proof missing obsolete artifact evidence');
-const meta = fs.readFileSync('workflows/meta/build-application-workflows.ts', 'utf8');
-if (meta.includes(staleWorkflow) || meta.includes('03-shared-models' + '-and-config.ts')) {
-  throw new Error('meta catalog still references obsolete package-split workflow');
+const overnight = fs.readFileSync('scripts/run-ricky-overnight.sh', 'utf8');
+if (overnight.includes(staleWorkflow) || overnight.includes('02-next-wave' + '-backlog-and-proof-plan.ts')) {
+  throw new Error('overnight runner still references obsolete historical next-wave workflow');
 }
 const activeReferenceEvidence = fs.readFileSync(base + '/active-reference-check.txt', 'utf8');
 if (!/(ACTIVE_REFERENCE_GATE_OK|No active references found)/.test(activeReferenceEvidence)) {
@@ -204,8 +204,8 @@ const body = [
   '# Cleanup review (deterministic pass)',
   '',
   '- Declared cleanup delta matches the live tracked diff: PASS',
-  '- Obsolete package-split shared-model workflow remains absent: PASS',
-  '- Meta workflow catalog no longer lists the removed workflow: PASS',
+  '- Obsolete historical next-wave planning workflow is removed: PASS',
+  '- Overnight runner no longer lists the removed workflow: PASS',
   '- Flat-layout proof covers the obsolete package-split workflow cleanup: PASS',
   '- Routing remains coherent because the active generated workflow artifact is this file and remains present: PASS',
   '',
@@ -335,18 +335,18 @@ const out = base + '/final-review-claude.md';
 const diffCheck = execFileSync('git', ['diff', '--check'], { encoding: 'utf8' }).trim();
 if (diffCheck.length > 0) throw new Error('git diff --check reported issues:\n' + diffCheck);
 const outputManifest = fs.readFileSync(base + '/output-manifest.txt', 'utf8').trim();
-const staleWorkflow = ['workflows', 'wave0-foundation', '03-shared-models' + '-and-config.ts'].join('/');
+const staleWorkflow = ['workflows', 'wave5-scale-and-ops', '02-next-wave' + '-backlog-and-proof-plan.ts'].join('/');
 if (!outputManifest.includes(staleWorkflow)) {
-  throw new Error('output manifest missing obsolete package-split workflow deletion');
+  throw new Error('output manifest missing obsolete historical next-wave workflow deletion');
 }
-if (!outputManifest.includes('workflows/meta/build-application-workflows.ts')) throw new Error('output manifest missing meta catalog update');
+if (!outputManifest.includes('scripts/run-ricky-overnight.sh')) throw new Error('output manifest missing overnight runner update');
 if (!outputManifest.includes('workflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts')) {
   throw new Error('output manifest missing generated workflow gate update');
 }
 const body = [
   '# Cleanup final review (deterministic pass)',
   '',
-  '- Manifest captures the obsolete package-split workflow cleanup delta: PASS',
+  '- Manifest captures the obsolete historical next-wave workflow cleanup delta: PASS',
   '- Post-fix validation completed before final review: PASS',
   '- Diff hygiene remains clean (git diff --check): PASS',
   '',
@@ -457,6 +457,7 @@ const staleTargets = [
   ['test', 'smoke' + '.test' + '.ts'].join('/'),
   'smoke' + '.test' + '.ts',
   ['workflows', 'wave0-foundation', '03-shared-models' + '-and-config.ts'].join('/'),
+  ['workflows', 'wave5-scale-and-ops', '02-next-wave' + '-backlog-and-proof-plan.ts'].join('/'),
   ['workflows', 'wave6-proof', '01-close-first-wave-signoff-and-blockers.ts'].join('/'),
   ['workflows', 'wave11-flat-layout-collapse', '01-collapse-packages-into-src.ts'].join('/'),
 ];

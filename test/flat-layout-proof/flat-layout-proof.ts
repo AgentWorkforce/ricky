@@ -252,6 +252,7 @@ function obsoletePackageSplitArtifacts(): string[] {
     ['docs', 'architecture', 'ricky-package-split' + '-migration-spec.md'].join('/'),
     ['workflows', 'wave0-foundation', '03-shared-models' + '-and-config.ts'].join('/'),
     ['workflows', 'wave5-scale-and-ops', '05-split-ricky-into-workspace' + '-packages.ts'].join('/'),
+    ['workflows', 'wave5-scale-and-ops', '02-next-wave' + '-backlog-and-proof-plan.ts'].join('/'),
     ['workflows', 'wave4-local-byoh', '05-prove-cli-onboarding-first-run-and-recovery.ts'].join('/'),
     ['.workflow-artifacts', 'wave11-flat-layout-collapse', 'collapse-packages-into-src', 'code' + 'mod.mjs'].join('/'),
     ['.workflow-artifacts', 'wave11-flat-layout-collapse', 'collapse-packages-into-src', 'migration' + '-execution.md'].join('/'),
