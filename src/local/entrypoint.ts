@@ -2000,7 +2000,7 @@ function classifyCoordinatorBlocker(
   }
 
   const missingEnvVars = extractMissingEnvVars(combined);
-  if (missingEnvVars.length > 0 || /(?:missing|required).*(?:env|environment)|not set/i.test(combined)) {
+  if (missingEnvVars.length > 0 || hasMissingEnvironmentMessage(combined)) {
     return blocker({
       code: 'MISSING_ENV_VAR',
       category: 'environment',
@@ -2071,13 +2071,41 @@ function npxNoInstallPackage(args: string[]): string | undefined {
   return args[noInstallIndex + 1];
 }
 
+function hasMissingEnvironmentMessage(text: string): boolean {
+  for (const line of text.split(/\r?\n/)) {
+    if (/\bnot\s+missing\s+env(?:ironment)?\b/i.test(line)) continue;
+    if (/(?:missing|required).{0,80}(?:env(?:ironment)?(?:\s+variable)?)/i.test(line)) return true;
+    if (/(?:env(?:ironment)?(?:\s+variable)?).{0,80}(?:missing|required|not\s+set|unset)/i.test(line)) return true;
+    if (/\b[A-Z][A-Z0-9_]{2,}\b\s+(?:is\s+)?(?:missing|required|not\s+set|unset)/.test(line)) return true;
+  }
+  return false;
+}
+
 function extractMissingEnvVars(text: string): string[] {
   const names = new Set<string>();
-  for (const match of text.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
-    const name = match[1];
-    if (['ENOENT', 'PATH'].includes(name)) continue;
-    names.add(name);
+
+  for (const line of text.split(/\r?\n/)) {
+    if (/\bnot\s+missing\s+env(?:ironment)?\b/i.test(line)) continue;
+    if (!/(?:env(?:ironment)?(?:\s+variable)?|variable|not\s+set|unset|missing|required)/i.test(line)) {
+      continue;
+    }
+
+    for (const match of line.matchAll(/\b[A-Z][A-Z0-9_]{2,}\b/g)) {
+      const name = match[0];
+      if (['ENOENT', 'PATH'].includes(name)) continue;
+
+      const index = match.index ?? 0;
+      const context = line.slice(Math.max(0, index - 100), index + name.length + 100).toLowerCase();
+      const hasEnvContext = /env(?:ironment)?(?:\s+variable)?|variable/.test(context);
+      const hasMissingContext = /missing|required|not\s+set|unset/.test(context);
+      const nameHasState = new RegExp(`\\b${name}\\b\\s+(?:is\\s+)?(?:missing|required|not\\s+set|unset)`).test(line);
+
+      if ((hasEnvContext && hasMissingContext) || nameHasState) {
+        names.add(name);
+      }
+    }
   }
+
   return [...names];
 }
 
