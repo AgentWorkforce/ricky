@@ -357,7 +357,7 @@ describe('runWithAutoFix', () => {
   it('uses the persona repair path even when the debugger recommends guided repair', async () => {
     const runSingleAttempt = vi
       .fn()
-      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'))
+      .mockResolvedValueOnce(blockerResponse('INVALID_ARTIFACT', 'run-1', 'runtime-launch'))
       .mockResolvedValueOnce(successResponse('run-2'));
     const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('guided repair workflow'));
 
@@ -373,6 +373,40 @@ describe('runWithAutoFix', () => {
     expect(runSingleAttempt).toHaveBeenCalledTimes(2);
     expect(workflowRepairer).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(true);
+  });
+
+  it('does not auto-repair missing environment prerequisites', async () => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValue(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'));
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('should not run'));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 7,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: guidedDebugger,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+    expect(workflowRepairer).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.auto_fix).toMatchObject({
+      max_attempts: 7,
+      final_status: 'blocker',
+      resumed: false,
+      attempts: [
+        expect.objectContaining({
+          attempt: 1,
+          blocker_code: 'MISSING_ENV_VAR',
+          fix_error: 'external setup blocker; no safe automatic workflow repair',
+        }),
+      ],
+    });
+    expect(result.auto_fix?.escalation?.summary).toContain('environment or credentials prerequisite');
+    expect(result.nextActions.join('\n')).toContain('Set TEST_TOKEN before retrying.');
   });
 
   it('routes semantic workflow failures to persona repair instead of deterministic repair', async () => {
