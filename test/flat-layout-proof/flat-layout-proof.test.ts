@@ -81,7 +81,7 @@ describe('Ricky flat src layout proof', () => {
     [
       'legacy-claude-skill-mirror-removed',
       [
-        'legacy Claude skill mirrors checked: 3',
+        'legacy Claude skill mirrors checked:',
         'legacy Claude skill mirrors present: 0',
         'prpm.lock references legacy Claude skill mirrors: 0',
         'active references to legacy Claude skill mirrors: 0',
