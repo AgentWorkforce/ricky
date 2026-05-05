@@ -2099,14 +2099,19 @@ function extractMissingEnvVars(text: string): string[] {
       const hasEnvContext = /env(?:ironment)?(?:\s+variable)?|variable/.test(context);
       const hasMissingContext = /missing|required|not\s+set|unset/.test(context);
       const nameHasState = new RegExp(`\\b${name}\\b\\s+(?:is\\s+)?(?:missing|required|not\\s+set|unset)`).test(line);
+      const explicitEnvReference = new RegExp(`(?:\\$|process\\.env\\.)${name}\\b|\\b${name}=`).test(line);
 
-      if ((hasEnvContext && hasMissingContext) || nameHasState) {
+      if (explicitEnvReference || (((hasEnvContext && hasMissingContext) || nameHasState) && looksLikeConfigEnvName(name))) {
         names.add(name);
       }
     }
   }
 
   return [...names];
+}
+
+function looksLikeConfigEnvName(name: string): boolean {
+  return name.includes('_') || name.length > 3;
 }
 
 async function writeRuntimeLogs(result: CoordinatorResult): Promise<LocalExecutionEvidence['logs']> {

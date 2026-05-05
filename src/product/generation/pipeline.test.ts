@@ -435,6 +435,9 @@ describe('workflow generation pipeline', () => {
     expect(artifact.channel).not.toBe('general');
     expect(artifact.content).toMatch(/\bworkflow\(/);
     expect(artifact.content).toContain(`.channel("${artifact.channel}")`);
+    expect(artifact.content).toContain('RICKY_WORKFLOW_ENV_LOADER');
+    expect(artifact.content).toContain('loadRickyWorkflowEnv();');
+    expect(artifact.content).toContain("['.env.local', '.env']");
     expect(artifact.content).toContain('.run({ cwd: process.cwd() })');
     expect(artifact.content).toContain('.step("lead-plan-gate"');
     expect(artifact.content).toContain('.step("fix-loop-report-gate"');

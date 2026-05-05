@@ -171,6 +171,7 @@ export function buildWorkflowRepairPersonaTask(options: WorkforcePersonaRepairOp
     '- Return the full repaired TypeScript workflow artifact, not a diff.',
     '- Preserve the artifact path and keep the workflow runnable from the same file.',
     '- Fix the workflow artifact itself; do not ask the user to run manual recovery unless the workflow cannot safely express the prerequisite.',
+    '- For MISSING_ENV_VAR failures, first make the workflow load repo-local `.env.local` and `.env` without overwriting shell exports, then add a fast `MISSING_ENV_VAR: NAME` assertion for known required variables before long-running agent steps. Do not fabricate secret values.',
     '- Preserve or improve the 80-to-100 loop: implementation, deterministic validation, review, final hard gate, and signoff evidence.',
     '- Ensure the failed step can be resumed by Ricky using --start-from with the failed step id and the previous run id.',
     '- Keep side effects explicit and bounded. Do not commit, push, open PRs, or perform destructive file operations.',

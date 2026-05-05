@@ -327,7 +327,7 @@ function isV1DirectBlocker(code: string | undefined): boolean {
 }
 
 function isExternalSetupBlocker(code: string | undefined): boolean {
-  return code === 'MISSING_ENV_VAR' || code === 'CREDENTIALS_REJECTED' || code === 'WORKDIR_DIRTY';
+  return code === 'CREDENTIALS_REJECTED' || code === 'WORKDIR_DIRTY';
 }
 
 async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<WorkflowRepairResult> {
@@ -367,11 +367,17 @@ async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<Work
 }
 
 export function repairWorkflowDeterministically(
-  input: Pick<WorkflowRepairInput, 'artifactPath' | 'artifactContent' | 'evidence'>,
+  input: Pick<WorkflowRepairInput, 'artifactPath' | 'artifactContent' | 'evidence'> & Partial<Pick<WorkflowRepairInput, 'response'>>,
   personaError?: unknown,
 ): WorkflowRepairResult | null {
   let content = input.artifactContent;
   const changes: string[] = [];
+
+  const envRepair = repairMissingEnvVarPreflight(content, input.evidence, input.response);
+  if (envRepair.content !== content) {
+    content = envRepair.content;
+    changes.push(...envRepair.changes);
+  }
 
   const timeoutRepair = repairAgentStepTimeouts(content, input.evidence);
   if (timeoutRepair.content !== content) {
@@ -425,6 +431,186 @@ export function repairWorkflowDeterministically(
       ? [`Workforce persona repair unavailable (${errorMessage(personaError)}); used deterministic workflow repair fallback.`]
       : ['Used deterministic workflow repair fallback.'],
   };
+}
+
+function repairMissingEnvVarPreflight(
+  content: string,
+  evidence: WorkflowRunEvidence,
+  response?: LocalResponse,
+): { content: string; changes: string[] } {
+  if (!isMissingEnvVarFailure(evidence, response)) return { content, changes: [] };
+
+  const requiredEnvVars = missingEnvVarsFromFailure(evidence, response);
+  const next = injectWorkflowEnvLoader(content, requiredEnvVars);
+  if (next === content) return { content, changes: [] };
+
+  const assertion = requiredEnvVars.length > 0
+    ? ` and fast assertion for ${requiredEnvVars.join(', ')}`
+    : '';
+  return {
+    content: next,
+    changes: [`added repo-local .env loader${assertion}`],
+  };
+}
+
+function isMissingEnvVarFailure(evidence: WorkflowRunEvidence, response?: LocalResponse): boolean {
+  if (response?.execution?.blocker?.code === 'MISSING_ENV_VAR') return true;
+  const text = workflowFailureText(evidence);
+  return /\bMISSING_ENV_VAR\b|(?:missing|required).*(?:env|environment)|not set/i.test(text);
+}
+
+function missingEnvVarsFromFailure(evidence: WorkflowRunEvidence, response?: LocalResponse): string[] {
+  const names = new Set<string>();
+  for (const name of response?.execution?.blocker?.context.missing ?? []) {
+    if (isConcreteEnvVarName(name)) names.add(name);
+  }
+
+  const text = workflowFailureText(evidence);
+  const patterns = [
+    /\bMISSING_ENV_VAR:\s*([A-Z][A-Z0-9_]*(?:\s*,\s*[A-Z][A-Z0-9_]*)*)/g,
+    /(?:env(?:ironment)?(?:\s+variable)?|variable)\s+['"`]?([A-Z][A-Z0-9_]{2,})['"`]?/gi,
+    /\b([A-Z][A-Z0-9_]{2,})\b\s+(?:is\s+)?(?:missing|required|not\s+set|unset)/gi,
+    /(?:missing|required|not\s+set|unset)[^A-Z\n]{0,80}\b([A-Z][A-Z0-9_]{2,})\b/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = match[1] ?? '';
+      for (const name of value.split(/\s*,\s*/)) {
+        if (isConcreteEnvVarName(name)) names.add(name);
+      }
+    }
+  }
+
+  return [...names].sort();
+}
+
+function workflowFailureText(evidence: WorkflowRunEvidence): string {
+  return [
+    ...evidence.logs.map((log) => log.excerpt),
+    ...evidence.deterministicGates.flatMap((gate) => [
+      gate.outputExcerpt,
+      gate.stdoutExcerpt,
+      gate.stderrExcerpt,
+    ]),
+    ...evidence.steps.flatMap((step) => [
+      step.error,
+      ...step.logs.map((log) => log.excerpt),
+      ...step.deterministicGates.flatMap((gate) => [
+        gate.outputExcerpt,
+        gate.stdoutExcerpt,
+        gate.stderrExcerpt,
+      ]),
+      ...step.verifications.flatMap((verification) => [
+        verification.message,
+        verification.outputExcerpt,
+        verification.stdoutExcerpt,
+        verification.stderrExcerpt,
+      ]),
+    ]),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join('\n');
+}
+
+function isConcreteEnvVarName(name: string): boolean {
+  return /^[A-Z][A-Z0-9_]{2,}$/.test(name)
+    && !['ENOENT', 'PATH'].includes(name)
+    && (name.includes('_') || name.length > 3);
+}
+
+function injectWorkflowEnvLoader(content: string, requiredEnvVars: string[]): string {
+  let next = content;
+  let changed = false;
+
+  if (!next.includes("from 'node:fs'") && !next.includes('from "node:fs"')) {
+    next = insertAfterWorkflowImport(next, "import * as rickyWorkflowFs from 'node:fs';");
+    changed = true;
+  }
+  if (!next.includes("from 'node:path'") && !next.includes('from "node:path"')) {
+    next = insertAfterWorkflowImport(next, "import * as rickyWorkflowPath from 'node:path';");
+    changed = true;
+  }
+  if (!next.includes('RICKY_WORKFLOW_ENV_LOADER')) {
+    next = insertBeforeMain(next, rickyWorkflowEnvLoaderSource());
+    changed = true;
+  } else if (requiredEnvVars.length > 0 && !next.includes('function assertRickyWorkflowEnv')) {
+    next = insertBeforeMain(next, rickyWorkflowEnvAssertSource());
+    changed = true;
+  }
+
+  const calls = [
+    '  loadRickyWorkflowEnv();',
+    ...(requiredEnvVars.length > 0 ? [`  assertRickyWorkflowEnv(${JSON.stringify(requiredEnvVars)});`] : []),
+  ];
+  for (const call of calls) {
+    if (next.includes(call.trim())) continue;
+    const updated = next.includes('async function main()')
+      ? next.replace(/async function main\(\) \{\n/, (match) => `${match}${call}\n`)
+      : next.replace(/\bworkflow\(/, `${call.trim()}\nworkflow(`);
+    if (updated !== next) {
+      next = updated;
+      changed = true;
+    }
+  }
+
+  return changed ? next : content;
+}
+
+function insertAfterWorkflowImport(content: string, importLine: string): string {
+  const workflowImport = /^import\s+\{\s*workflow\s+\}\s+from\s+['"]@agent-relay\/sdk\/workflows['"];?\n/m;
+  if (workflowImport.test(content)) {
+    return content.replace(workflowImport, (match) => `${match}${importLine}\n`);
+  }
+  return `${importLine}\n${content}`;
+}
+
+function insertBeforeMain(content: string, helper: string): string {
+  if (content.includes('async function main()')) {
+    return content.replace(/\nasync function main\(\)/, `\n${helper}\n\nasync function main()`);
+  }
+  return `${helper}\n\n${content}`;
+}
+
+function rickyWorkflowEnvLoaderSource(): string {
+  return `// RICKY_WORKFLOW_ENV_LOADER: load repo-local env files before spawning workflow agents.
+function loadRickyWorkflowEnv(cwd = process.cwd()) {
+  for (const file of ['.env.local', '.env']) {
+    const path = rickyWorkflowPath.join(cwd, file);
+    if (!rickyWorkflowFs.existsSync(path)) continue;
+    const body = rickyWorkflowFs.readFileSync(path, 'utf8');
+    for (const rawLine of body.split(/\\r?\\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const match = /^(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.*)$/.exec(line);
+      if (!match) continue;
+      const [, key, rawValue] = match;
+      if (!key || rawValue === undefined || process.env[key] !== undefined) continue;
+      process.env[key] = unquoteRickyWorkflowEnvValue(rawValue);
+    }
+  }
+}
+
+function assertRickyWorkflowEnv(names: string[]): void {
+  const missing = names.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
+  }
+}
+
+function unquoteRickyWorkflowEnvValue(value: string): string {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}`;
+}
+
+function rickyWorkflowEnvAssertSource(): string {
+  return `function assertRickyWorkflowEnv(names: string[]): void {
+  const missing = names.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
+  }
+}`;
 }
 
 function summaryFromRepairMetadata(metadata: Record<string, unknown>): string {

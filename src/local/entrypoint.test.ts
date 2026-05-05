@@ -1564,6 +1564,27 @@ describe('runLocal', () => {
       expect(result.nextActions).toEqual(['export GITHUB_TOKEN=...']);
     });
 
+    it('does not turn prose acronyms near missing-env text into export commands', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stderr: ['Required runtime environment is missing: Owner: MSD backend; Relaycast API key resolved.'],
+      });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.blocker?.code).toBe('MISSING_ENV_VAR');
+      expect(result.execution?.blocker?.context.missing).toEqual(['required environment variable']);
+      expect(result.nextActions.join('\n')).not.toContain('export API=');
+      expect(result.nextActions.join('\n')).not.toContain('export MSD=');
+    });
+
     it('keeps stop-after-generation artifact-only output without launching runtime', async () => {
       const localExecutor = memoryLocalExecutorOptions({
         exitCode: 127,

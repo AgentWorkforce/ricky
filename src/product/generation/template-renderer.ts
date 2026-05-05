@@ -116,10 +116,16 @@ function renderSource(input: {
   const onError = input.pattern.riskLevel === 'low' ? "'fail-fast'" : `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS} }`;
   const lines: string[] = [
     "import { workflow } from '@agent-relay/sdk/workflows';",
+    "import * as rickyWorkflowFs from 'node:fs';",
+    "import * as rickyWorkflowPath from 'node:path';",
     '',
     '// IMPLEMENTATION_WORKFLOW_CONTRACT: implementation specs must produce source changes, tests, non-empty diff evidence, and PR/result reporting.',
+    '// RICKY_WORKFLOW_ENV_LOADER: load repo-local env files before spawning workflow agents.',
+    '',
+    renderWorkflowEnvLoaderHelper(),
     '',
     'async function main() {',
+    '  loadRickyWorkflowEnv();',
     `  const result = await workflow(${literal(input.workflowId)})`,
     `    .description(${literal(input.spec.description)})`,
     `    .pattern(${literal(input.pattern.pattern)})`,
@@ -820,6 +826,40 @@ function renderDeterministicStep(name: string, dependsOn: string[], command: str
       captureOutput: true,
       failOnError: ${failOnError},
     })`;
+}
+
+function renderWorkflowEnvLoaderHelper(): string {
+  return `function loadRickyWorkflowEnv(cwd = process.cwd()) {
+  for (const file of ['.env.local', '.env']) {
+    const path = rickyWorkflowPath.join(cwd, file);
+    if (!rickyWorkflowFs.existsSync(path)) continue;
+    const body = rickyWorkflowFs.readFileSync(path, 'utf8');
+    for (const rawLine of body.split(/\\r?\\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const match = /^(?:export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.*)$/.exec(line);
+      if (!match) continue;
+      const [, key, rawValue] = match;
+      if (!key || rawValue === undefined || process.env[key] !== undefined) continue;
+      process.env[key] = unquoteRickyWorkflowEnvValue(rawValue);
+    }
+  }
+}
+
+function unquoteRickyWorkflowEnvValue(value: string): string {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function assertRickyWorkflowEnv(names: string[]): void {
+  const missing = names.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
+  }
+}`;
 }
 
 function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string {
