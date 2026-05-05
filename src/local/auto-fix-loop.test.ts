@@ -285,6 +285,40 @@ describe('runWithAutoFix', () => {
     expect(repair?.content).not.toContain('NON_TRANSIENT=$(git diff --name-only | rg -v');
   });
 
+  it('deterministically hardens sentinel-guarded rehydration so corrupt artifacts get regenerated on retry', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/sentinel-rehydration.ts',
+      artifactContent: sentinelGuardedRehydrationWorkflowContent(),
+      evidence: sentinelGuardedRehydrationFailureEvidence(),
+    });
+
+    expect(repair).toMatchObject({
+      applied: true,
+      mode: 'deterministic',
+      summary: expect.stringContaining("hardened sentinel-guarded rehydration for '${artifactDir}/final-review-claude.md'"),
+    });
+    expect(repair?.summary).toContain('marker: final_review_claude_pass');
+    expect(repair?.content).toContain(
+      `if [ ! -f '\${artifactDir}/final-review-claude.md' ] || ! tail -n 1 '\${artifactDir}/final-review-claude.md' | tr -d '[:space:]' | grep -qE '^final_review_claude_pass$'; then`,
+    );
+    expect(repair?.content).toContain(
+      `if [ ! -f '\${artifactDir}/final-review-codex.md' ] || ! tail -n 1 '\${artifactDir}/final-review-codex.md' | tr -d '[:space:]' | grep -qE '^final_review_codex_pass$'; then`,
+    );
+    expect(repair?.content).not.toMatch(
+      /if \[ ! -f '\$\{artifactDir\}\/final-review-claude\.md' \]; then/,
+    );
+  });
+
+  it('skips sentinel-guard hardening when no later tail-grep check references the same path and marker', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/sentinel-no-check.ts',
+      artifactContent: sentinelGuardedRehydrationWithoutTailCheckContent(),
+      evidence: sentinelGuardedRehydrationFailureEvidence(),
+    });
+
+    expect(repair).toBeNull();
+  });
+
   it('persona repair failure escalates without retrying', async () => {
     const runSingleAttempt = vi.fn().mockResolvedValue(blockerResponse('MISSING_BINARY', 'run-1', 'install-deps'));
 
@@ -994,6 +1028,109 @@ function gitDiffManifestFailureEvidence(): WorkflowRunEvidence {
     logs: [{
       stream: 'stderr',
       excerpt: '[workflow] FAILED: Step "verify-non-empty-implementation-diff" failed: Command failed with exit code 1',
+    }],
+    narrative: [],
+    routing: [],
+  };
+}
+
+function sentinelGuardedRehydrationWorkflowContent(): string {
+  return [
+    "import { workflow } from '@agent-relay/sdk/workflows';",
+    '',
+    "const artifactDir = '.workflow-artifacts/generated/example';",
+    '',
+    "workflow('sentinel-rehydration')",
+    "  .step('final-review-pass-gate', {",
+    "    type: 'deterministic',",
+    '    command: `set -euo pipefail',
+    "mkdir -p '${artifactDir}'",
+    "if [ ! -f '${artifactDir}/final-review-claude.md' ]; then",
+    "  cat > '${artifactDir}/final-review-claude.md' <<'EOF'",
+    'Final review summary (claude)',
+    '- some content',
+    'final_review_claude_pass',
+    'EOF',
+    'fi',
+    "if [ ! -f '${artifactDir}/final-review-codex.md' ]; then",
+    "  cat > '${artifactDir}/final-review-codex.md' <<'EOF'",
+    'Final review summary (codex)',
+    '- some content',
+    'final_review_codex_pass',
+    'EOF',
+    'fi',
+    "tail -n 1 '${artifactDir}/final-review-claude.md' | tr -d '[:space:]' | grep -E '^final_review_claude_pass$'",
+    "tail -n 1 '${artifactDir}/final-review-codex.md' | tr -d '[:space:]' | grep -E '^final_review_codex_pass$'`,",
+    '    captureOutput: true,',
+    '    failOnError: true,',
+    '  })',
+    '  .run({ cwd: process.cwd() });',
+    '',
+  ].join('\n');
+}
+
+function sentinelGuardedRehydrationWithoutTailCheckContent(): string {
+  return [
+    "import { workflow } from '@agent-relay/sdk/workflows';",
+    '',
+    "const artifactDir = '.workflow-artifacts/generated/example';",
+    '',
+    "workflow('sentinel-no-check')",
+    "  .step('seed-readme', {",
+    "    type: 'deterministic',",
+    '    command: `set -euo pipefail',
+    "mkdir -p '${artifactDir}'",
+    "if [ ! -f '${artifactDir}/readme.md' ]; then",
+    "  cat > '${artifactDir}/readme.md' <<'EOF'",
+    'Seeded readme content',
+    'readme_seeded',
+    'EOF',
+    'fi',
+    "test -f '${artifactDir}/readme.md'`,",
+    '    captureOutput: true,',
+    '    failOnError: true,',
+    '  })',
+    '  .run({ cwd: process.cwd() });',
+    '',
+  ].join('\n');
+}
+
+function sentinelGuardedRehydrationFailureEvidence(): WorkflowRunEvidence {
+  return {
+    runId: 'sentinel-run-1',
+    workflowId: 'wf-sentinel-rehydration',
+    workflowName: 'sentinel-rehydration',
+    status: 'failed',
+    startedAt: '2026-05-04T00:00:00.000Z',
+    completedAt: '2026-05-04T00:00:08.000Z',
+    steps: [{
+      stepId: 'final-review-pass-gate',
+      stepName: 'final-review-pass-gate',
+      status: 'failed',
+      startedAt: '2026-05-04T00:00:07.000Z',
+      completedAt: '2026-05-04T00:00:08.000Z',
+      error: 'Command failed with exit code 1',
+      verifications: [{
+        type: 'exit_code',
+        passed: false,
+        expected: '0',
+        actual: '1',
+        message: 'Command failed with exit code 1',
+        command: "tail -n 1 '.workflow-artifacts/generated/example/final-review-claude.md' | tr -d '[:space:]' | grep -E '^final_review_claude_pass$'",
+        exitCode: 1,
+      }],
+      deterministicGates: [],
+      logs: [],
+      artifacts: [],
+      history: [],
+      retries: [],
+      narrative: [],
+    }],
+    deterministicGates: [],
+    artifacts: [{ path: 'workflows/generated/sentinel-rehydration.ts', kind: 'file' }],
+    logs: [{
+      stream: 'stderr',
+      excerpt: '[workflow] FAILED: Step "final-review-pass-gate" failed: Command failed with exit code 1',
     }],
     narrative: [],
     routing: [],
