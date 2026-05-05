@@ -128,6 +128,28 @@ export async function runWithAutoFix(
     };
     attempts.push(attemptSummary);
 
+    if (isExternalSetupBlocker(blockerCode)) {
+      attemptSummary.fix_error = 'external setup blocker; no safe automatic workflow repair';
+      const classification = classifyFailure(evidence);
+      const debuggerResult = debugWorkflowRun({ evidence, classification });
+      const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+      escalated.nextActions = [
+        ...escalated.nextActions,
+        debuggerResult.summary,
+        ...debuggerResult.recommendation.steps.map((step) => step.description),
+      ];
+      attachEscalationOptions(escalated, {
+        request: currentRequest,
+        response,
+        debuggerResult,
+        reason: 'The blocker is an environment or credentials prerequisite outside Ricky\'s safe auto-fix scope.',
+        trackingRunId,
+        artifactPath: resolveArtifactPath(currentRequest, response),
+        ...(failedStep ? { failedStep } : {}),
+      });
+      return escalated;
+    }
+
     if (attempt >= maxAttempts) {
       return withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
     }
@@ -302,6 +324,10 @@ export async function runWithAutoFix(
 
 function isV1DirectBlocker(code: string | undefined): boolean {
   return code === 'MISSING_BINARY' || code === 'NETWORK_TRANSIENT';
+}
+
+function isExternalSetupBlocker(code: string | undefined): boolean {
+  return code === 'MISSING_ENV_VAR' || code === 'CREDENTIALS_REJECTED' || code === 'WORKDIR_DIRTY';
 }
 
 async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<WorkflowRepairResult> {
