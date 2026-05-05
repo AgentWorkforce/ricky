@@ -381,6 +381,12 @@ export function repairWorkflowDeterministically(
     changes.push(...gitDiffRepair.changes);
   }
 
+  const sentinelGuardRepair = repairSentinelGuardedRehydration(content);
+  if (sentinelGuardRepair.content !== content) {
+    content = sentinelGuardRepair.content;
+    changes.push(...sentinelGuardRepair.changes);
+  }
+
   if (content === input.artifactContent || changes.length === 0) return null;
 
   return {
@@ -516,6 +522,30 @@ function repairBareGitDiffManifestGates(content: string): { content: string; cha
   );
 
   return { content: next, changes: [...new Set(changes)] };
+}
+
+function repairSentinelGuardedRehydration(content: string): { content: string; changes: string[] } {
+  if (!content.includes("<<'EOF'") || !content.includes("tail -n 1")) return { content, changes: [] };
+
+  const changes: string[] = [];
+  const guardPattern =
+    /if \[ ! -f '([^']+)' \];\s*then\n([ \t]*)cat > '\1' <<'EOF'\n([\s\S]*?)\n([A-Za-z0-9_]+)\nEOF\n[ \t]*fi/g;
+
+  const next = content.replace(guardPattern, (match, path: string, indent: string, body: string, marker: string) => {
+    const sentinelCheckPattern = new RegExp(
+      `tail -n 1 '${escapeRegex(path)}'[^\\n]*\\| grep[^\\n]*'\\^${escapeRegex(marker)}\\$'`,
+    );
+    if (!sentinelCheckPattern.test(content)) return match;
+
+    changes.push(`hardened sentinel-guarded rehydration for '${path}' (marker: ${marker})`);
+    return `if [ ! -f '${path}' ] || ! tail -n 1 '${path}' | tr -d '[:space:]' | grep -qE '^${marker}$'; then\n${indent}cat > '${path}' <<'EOF'\n${body}\n${marker}\nEOF\n${indent}fi`;
+  });
+
+  return { content: next, changes: [...new Set(changes)] };
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function repairAgentStepTimeouts(content: string, evidence: WorkflowRunEvidence): { content: string; changes: string[] } {
