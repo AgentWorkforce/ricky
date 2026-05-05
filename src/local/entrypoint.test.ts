@@ -1547,7 +1547,7 @@ describe('runLocal', () => {
       const localExecutor = memoryLocalExecutorOptions({
         exitCode: 1,
         stdout: ['Spec context mentions API, MSD, and GENERATED_WORKFLOW_READY.'],
-        stderr: ['missing env var GITHUB_TOKEN'],
+        stderr: ['missing env var GITHUB_TOKEN before calling API for MSD workflows'],
       });
       const result = await runLocal(
         {
@@ -1562,6 +1562,8 @@ describe('runLocal', () => {
       expect(result.execution?.blocker?.code).toBe('MISSING_ENV_VAR');
       expect(result.execution?.blocker?.context.missing).toEqual(['GITHUB_TOKEN']);
       expect(result.nextActions).toEqual(['export GITHUB_TOKEN=...']);
+      expect(result.nextActions.join('\n')).not.toContain('export API=');
+      expect(result.nextActions.join('\n')).not.toContain('export MSD=');
     });
 
     it('does not turn prose acronyms near missing-env text into export commands', async () => {

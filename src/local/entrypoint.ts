@@ -2072,11 +2072,11 @@ function npxNoInstallPackage(args: string[]): string | undefined {
 }
 
 function hasMissingEnvironmentMessage(text: string): boolean {
-  for (const line of text.split(/\r?\n/)) {
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine);
     if (/\bnot\s+missing\s+env(?:ironment)?\b/i.test(line)) continue;
     if (/(?:missing|required).{0,80}(?:env(?:ironment)?(?:\s+variable)?)/i.test(line)) return true;
     if (/(?:env(?:ironment)?(?:\s+variable)?).{0,80}(?:missing|required|not\s+set|unset)/i.test(line)) return true;
-    if (/\b[A-Z][A-Z0-9_]{2,}\b\s+(?:is\s+)?(?:missing|required|not\s+set|unset)/.test(line)) return true;
   }
   return false;
 }
@@ -2084,34 +2084,45 @@ function hasMissingEnvironmentMessage(text: string): boolean {
 function extractMissingEnvVars(text: string): string[] {
   const names = new Set<string>();
 
-  for (const line of text.split(/\r?\n/)) {
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine);
     if (/\bnot\s+missing\s+env(?:ironment)?\b/i.test(line)) continue;
-    if (!/(?:env(?:ironment)?(?:\s+variable)?|variable|not\s+set|unset|missing|required)/i.test(line)) {
-      continue;
+    if (!hasMissingEnvironmentMessage(line)) continue;
+
+    for (const match of line.matchAll(/\bMISSING_ENV_VAR:\s*([A-Z][A-Z0-9_]*(?:\s*,\s*[A-Z][A-Z0-9_]*)*)/g)) {
+      addEnvNames(names, match[1]);
     }
 
-    for (const match of line.matchAll(/\b[A-Z][A-Z0-9_]{2,}\b/g)) {
-      const name = match[0];
-      if (['ENOENT', 'PATH'].includes(name)) continue;
+    for (const match of line.matchAll(/\b(?:missing|required|unset|not\s+set)\s+(?:runtime\s+)?(?:env(?:ironment)?(?:\s+var(?:iable)?)?|variable)\s+([A-Z][A-Z0-9_]{2,})\b/gi)) {
+      addEnvNames(names, match[1]);
+    }
 
-      const index = match.index ?? 0;
-      const context = line.slice(Math.max(0, index - 100), index + name.length + 100).toLowerCase();
-      const hasEnvContext = /env(?:ironment)?(?:\s+variable)?|variable/.test(context);
-      const hasMissingContext = /missing|required|not\s+set|unset/.test(context);
-      const nameHasState = new RegExp(`\\b${name}\\b\\s+(?:is\\s+)?(?:missing|required|not\\s+set|unset)`).test(line);
-      const explicitEnvReference = new RegExp(`(?:\\$|process\\.env\\.)${name}\\b|\\b${name}=`).test(line);
+    for (const match of line.matchAll(/\b(?:env(?:ironment)?(?:\s+var(?:iable)?)?|variable)\s+([A-Z][A-Z0-9_]{2,})\b.{0,24}\b(?:missing|required|not\s+set|unset)\b/gi)) {
+      addEnvNames(names, match[1]);
+    }
 
-      if (explicitEnvReference || (((hasEnvContext && hasMissingContext) || nameHasState) && looksLikeConfigEnvName(name))) {
-        names.add(name);
-      }
+    for (const match of line.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b\s+(?:env(?:ironment)?(?:\s+var(?:iable)?)?|variable)\s+(?:is\s+)?(?:missing|required|not\s+set|unset)\b/gi)) {
+      addEnvNames(names, match[1]);
+    }
+
+    for (const match of line.matchAll(/\b(?:missing|required|unset|not\s+set)\s+(?:\$|process\.env\.)([A-Z][A-Z0-9_]{2,})\b/gi)) {
+      addEnvNames(names, match[1]);
+    }
+
+    for (const match of line.matchAll(/(?:\$|process\.env\.)([A-Z][A-Z0-9_]{2,})\b.{0,32}\b(?:missing|required|not\s+set|unset)\b/gi)) {
+      addEnvNames(names, match[1]);
     }
   }
 
   return [...names];
 }
 
-function looksLikeConfigEnvName(name: string): boolean {
-  return name.includes('_') || name.length > 3;
+function addEnvNames(names: Set<string>, value: string | undefined): void {
+  for (const name of (value ?? '').split(/\s*,\s*/)) {
+    if (/^[A-Z][A-Z0-9_]{2,}$/.test(name) && !['ENOENT', 'PATH'].includes(name)) {
+      names.add(name);
+    }
+  }
 }
 
 async function writeRuntimeLogs(result: CoordinatorResult): Promise<LocalExecutionEvidence['logs']> {
