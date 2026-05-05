@@ -1,6 +1,6 @@
 ---
 name: writing-agent-relay-workflows
-description: Use when building multi-agent workflows with the relay broker-sdk - covers conversation-shape vs pipeline-shape coordination, the WorkflowBuilder API, DAG step dependencies, agent definitions, step output chaining via {{steps.X.output}}, verification gates, evidence-based completion, owner decisions, dedicated channels, dynamic channel management (subscribe/unsubscribe/mute/unmute), swarm patterns, chat-native coordination recipes (Q/A, broadcast-ack, peer review, escalation, standup, hand-off), error handling, event listeners, step sizing rules, authoring best practices, and the lead+workers team pattern for complex steps
+description: Use when building multi-agent workflows with the relay broker-sdk - covers conversation-shape vs pipeline-shape coordination, the WorkflowBuilder API, DAG step dependencies, agent definitions, step output chaining via {{steps.X.output}}, verification gates, evidence-based completion, owner decisions, dedicated channels, dynamic channel management (subscribe/unsubscribe/mute/unmute), swarm patterns, chat-native coordination recipes (Q/A, broadcast-ack, peer review, standup, hand-off), error handling, event listeners, step sizing rules, authoring best practices, and the lead+workers team pattern for complex steps
 ---
 
 ### Overview
@@ -309,6 +309,10 @@ export function applyCloudRepoSetup<T>(wf: T, opts: CloudRepoSetupOptions): T {
 - Show that the original failure no longer occurs
 - **Record residual risks**
 - Call out what was not covered
+- **Ship the result as a PR**
+- Open the pull request from the workflow itself with the GitHub primitive
+- See [Shipping the Result — Open a PR via the GitHub Primitive](#shipping-the-result--open-a-pr-via-the-github-primitive) below
+- A workflow that fixes a bug and stops short of the PR has only done half the loop
 - disposable sandbox / cloud workspace
 - Docker / containerized environment
 - fresh local shell with isolated paths
@@ -316,6 +320,72 @@ export function applyCloudRepoSetup<T>(wf: T, opts: CloudRepoSetupOptions): T {
 - defines the acceptance contract
 - chooses the best swarm pattern
 - then authors the final fix/validation workflow
+
+### Shipping the Result — Open a PR via the GitHub Primitive
+
+#### The minimal "open a PR" recipe
+
+```typescript
+import { workflow } from '@agent-relay/sdk/workflows';
+import { GitHubStepExecutor, createGitHubStep } from '@agent-relay/github-primitive';
+
+const REPO = 'AgentWorkforce/cloud';
+const BRANCH = `agent-relay/run-${Date.now()}`;
+
+// Auto-detect runtime: gh CLI locally, Nango/relay-cloud in cloud.
+// You don't need to wire any of the cloud config yourself when running
+// in `agent-relay cloud run` — the cloud bootstrap injects it.
+const github = new GitHubStepExecutor({ runtime: 'auto' });
+
+await workflow('feature-x')
+  // ... your real steps that produce code changes ...
+  .step('write-marker', {
+    type: 'deterministic',
+    command: `echo "fix landed at $(date -u)" >> CHANGELOG.md`,
+  })
+
+  // Branch off main on the remote.
+  .step(createGitHubStep({
+    name: 'create-branch',
+    dependsOn: ['write-marker'],
+    action: 'createBranch',
+    repo: REPO,
+    params: { branch: BRANCH, source: 'main' },
+  }), { executor: github })
+
+  // Commit the change to the branch via Contents API.
+  .step(createGitHubStep({
+    name: 'commit-change',
+    dependsOn: ['create-branch'],
+    action: 'createFile',
+    repo: REPO,
+    params: {
+      path: 'CHANGELOG.md',
+      branch: BRANCH,
+      content: '<file body here>',
+      message: 'chore: changelog entry',
+    },
+  }), { executor: github })
+
+  // Open the PR. This is the load-bearing step.
+  .step(createGitHubStep({
+    name: 'open-pr',
+    dependsOn: ['commit-change'],
+    action: 'createPR',
+    repo: REPO,
+    params: {
+      title: 'feat: ship feature X',
+      head: BRANCH,
+      base: 'main',
+      body: '## Summary\n\n- ...\n\n## Test plan\n\n- [x] ...',
+      draft: false,
+    },
+    output: { mode: 'data', format: 'json', path: 'html_url' },
+  }), { executor: github })
+
+  .run({ cwd: process.cwd() });
+```
+
 
 ### Key Concepts
 
@@ -475,7 +545,7 @@ Edit files as assigned. Report completion. Fix issues from feedback.`,
   task: `You are the integrator on #wf-feature.
 Before writing code, post a direct question to @schema-owner asking which
 table owns the new field. Do NOT proceed until @schema-owner replies in
-channel. If no reply arrives in 5 minutes, escalate by @-mentioning the lead.`,
+channel. If no reply arrives in 5 minutes, @-mention the lead.`,
 })
 ```
 
@@ -507,25 +577,7 @@ commit SHA. Then wait for @reviewer's verdict in channel.
 })
 ```
 
-#### 4. Escalation (human-in-the-loop)
-
-```typescript
-.step('integrate', {
-  agent: 'integrator',
-  task: `... do the work ...
-
-If you encounter ANY of these blockers, do NOT guess and do NOT exit:
-  - missing/invalid API credential
-  - spec contradicts existing code in a way that requires a product decision
-  - upstream service returning errors you cannot reproduce locally
-
-Instead, post to #wf-feature: "@khaliqgant BLOCKED: <one-line reason>"
-followed by the specific question. Then wait. The channel is bridged to
-Slack — a human will respond. Resume only after the human's reply.`,
-})
-```
-
-#### 5. Standup / Status Probe
+#### 4. Standup / Status Probe
 
 ```typescript
 .step('lead-coordinate', {
@@ -535,7 +587,7 @@ Slack — a human will respond. Resume only after the human's reply.`,
 Every 10 minutes, post a status probe: "@impl-a @impl-b status?"
 Each worker should reply with one of:
   - "RUNNING <step>" (still working)
-  - "BLOCKED <reason>" (escalate per recipe #4)
+  - "BLOCKED <reason>" (@-mention the lead with the blocker)
   - "DONE <artifact>" (ready for review)
 
 If a worker is silent for two probes in a row, mark them stalled and
@@ -543,7 +595,7 @@ reassign their work to a peer.`,
 })
 ```
 
-#### 6. Hand-Off with Context
+#### 5. Hand-Off with Context
 
 ```typescript
 .step('impl-a-work', {
@@ -734,8 +786,7 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 | Mistake | Fix |
 |---------|-----|
 | Treating relay as transport, not as a coordination layer (every step is `preset: 'worker'`, every handoff is `{{steps.X.output}}`) | Default to **Conversation shape** for non-trivial work — interactive agents on a shared channel. Pipeline-shape is only correct when the work could be expressed as a `bash | bash | bash` pipe. |
-| Interactive agents on a channel whose task strings don't tell them to talk to each other | Pick a [Chat-Native Coordination Recipe](#chat-native-coordination-recipes) (Q/A, Broadcast/Ack, Peer Review, Escalation, Standup, Hand-Off) and bake it into the task prompt — otherwise you're paying for a chat substrate you're not using |
-| Workflow has no human-in-loop escape hatch — agents either guess or `/exit` on a blocker | Add the [Escalation recipe](#4-escalation-human-in-the-loop): on real blockers, `@-mention` a human in a Slack-bridged channel and wait for a reply |
+| Interactive agents on a channel whose task strings don't tell them to talk to each other | Pick a [Chat-Native Coordination Recipe](#chat-native-coordination-recipes) (Q/A, Broadcast/Ack, Peer Review, Standup, Hand-Off) and bake it into the task prompt — otherwise you're paying for a chat substrate you're not using |
 | All workflows run sequentially | Group independent workflows into parallel waves (4-7x speedup) |
 | Every step depends on the previous one | Only add `dependsOn` when there's a real data dependency |
 | Self-review step with no timeout | Set `timeout: 300_000` (5 min) — Codex hangs in non-interactive review |
