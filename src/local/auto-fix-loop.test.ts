@@ -375,11 +375,12 @@ describe('runWithAutoFix', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('does not auto-repair missing environment prerequisites', async () => {
+  it('repairs missing environment prerequisites in the workflow artifact before retrying', async () => {
     const runSingleAttempt = vi
       .fn()
-      .mockResolvedValue(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'));
-    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('should not run'));
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'))
+      .mockResolvedValueOnce(successResponse('run-2'));
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired env workflow'));
 
     const result = await runWithAutoFix(baseRequest, {
       maxAttempts: 7,
@@ -390,23 +391,58 @@ describe('runWithAutoFix', () => {
       artifactWriter: vi.fn().mockResolvedValue(undefined),
     });
 
-    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
-    expect(workflowRepairer).not.toHaveBeenCalled();
-    expect(result.ok).toBe(false);
+    expect(runSingleAttempt).toHaveBeenCalledTimes(2);
+    expect(workflowRepairer).toHaveBeenCalledWith(expect.objectContaining({
+      failedStep: 'runtime-launch',
+      runId: 'run-1',
+      response: expect.objectContaining({
+        execution: expect.objectContaining({
+          blocker: expect.objectContaining({ code: 'MISSING_ENV_VAR' }),
+        }),
+      }),
+    }));
+    expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
+      previousRunId: 'run-1',
+      retryOfRunId: 'run-1',
+      startFromStep: 'runtime-launch',
+    });
+    expect(result.ok).toBe(true);
     expect(result.auto_fix).toMatchObject({
       max_attempts: 7,
-      final_status: 'blocker',
-      resumed: false,
+      final_status: 'ok',
       attempts: [
         expect.objectContaining({
           attempt: 1,
           blocker_code: 'MISSING_ENV_VAR',
-          fix_error: 'external setup blocker; no safe automatic workflow repair',
+          applied_fix: expect.objectContaining({
+            mode: 'workforce-persona',
+            summary: 'persona patched the workflow',
+          }),
         }),
+        expect.objectContaining({ attempt: 2, status: 'ok', run_id: 'run-2' }),
       ],
     });
-    expect(result.auto_fix?.escalation?.summary).toContain('environment or credentials prerequisite');
-    expect(result.nextActions.join('\n')).toContain('Set TEST_TOKEN before retrying.');
+  });
+
+  it('deterministically adds env loading and fast assertions for missing env failures', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/foo.ts',
+      artifactContent: workflowContent(),
+      evidence: missingEnvEvidence(),
+      response: blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'),
+    });
+
+    expect(repair).toMatchObject({
+      applied: true,
+      mode: 'deterministic',
+      summary: expect.stringContaining('repo-local .env loader'),
+    });
+    expect(repair?.content).toContain('RICKY_WORKFLOW_ENV_LOADER');
+    expect(repair?.content).toContain("import * as rickyWorkflowFs from 'node:fs';");
+    expect(repair?.content).toContain("import * as rickyWorkflowPath from 'node:path';");
+    expect(repair?.content).toContain('loadRickyWorkflowEnv();');
+    expect(repair?.content).toContain('assertRickyWorkflowEnv(["TEST_TOKEN"]);');
+    expect(repair?.content).toContain('MISSING_ENV_VAR:');
   });
 
   it('routes semantic workflow failures to persona repair instead of deterministic repair', async () => {
@@ -886,6 +922,39 @@ function workflowRepair(content: string) {
 
 function workflowContent(): string {
   return 'import { workflow } from "@agent-relay/sdk/workflows";\nworkflow("foo").run({ cwd: process.cwd() });\n';
+}
+
+function missingEnvEvidence(): WorkflowRunEvidence {
+  return {
+    runId: 'run-1',
+    workflowId: 'wf-1',
+    workflowName: 'foo',
+    status: 'failed',
+    startedAt: '2026-04-28T00:00:00.000Z',
+    completedAt: '2026-04-28T00:00:01.000Z',
+    steps: [
+      {
+        stepId: 'runtime-launch',
+        stepName: 'runtime-launch',
+        status: 'failed',
+        startedAt: '2026-04-28T00:00:00.000Z',
+        completedAt: '2026-04-28T00:00:01.000Z',
+        error: 'MISSING_ENV_VAR: TEST_TOKEN',
+        verifications: [],
+        deterministicGates: [],
+        logs: [{ stream: 'stderr', excerpt: 'MISSING_ENV_VAR: TEST_TOKEN' }],
+        artifacts: [],
+        history: [],
+        retries: [],
+        narrative: [],
+      },
+    ],
+    deterministicGates: [],
+    artifacts: [{ path: 'workflows/generated/foo.ts', kind: 'file' }],
+    logs: [{ stream: 'stderr', excerpt: 'MISSING_ENV_VAR: TEST_TOKEN' }],
+    narrative: [],
+    routing: [],
+  };
 }
 
 function demoArtifactDir(): string {

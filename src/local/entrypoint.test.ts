@@ -1543,6 +1543,50 @@ describe('runLocal', () => {
       expect(result.nextActions.join('\n')).not.toMatch(/rerun.*later|vague/i);
     });
 
+    it('extracts env recovery steps only from explicit missing-env messages', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stdout: ['Spec context mentions API, MSD, and GENERATED_WORKFLOW_READY.'],
+        stderr: ['missing env var GITHUB_TOKEN before calling API for MSD workflows'],
+      });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.blocker?.code).toBe('MISSING_ENV_VAR');
+      expect(result.execution?.blocker?.context.missing).toEqual(['GITHUB_TOKEN']);
+      expect(result.nextActions).toEqual(['export GITHUB_TOKEN=...']);
+      expect(result.nextActions.join('\n')).not.toContain('export API=');
+      expect(result.nextActions.join('\n')).not.toContain('export MSD=');
+    });
+
+    it('does not turn prose acronyms near missing-env text into export commands', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stderr: ['Required runtime environment is missing: Owner: MSD backend; Relaycast API key resolved.'],
+      });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.blocker?.code).toBe('MISSING_ENV_VAR');
+      expect(result.execution?.blocker?.context.missing).toEqual(['required environment variable']);
+      expect(result.nextActions.join('\n')).not.toContain('export API=');
+      expect(result.nextActions.join('\n')).not.toContain('export MSD=');
+    });
+
     it('keeps stop-after-generation artifact-only output without launching runtime', async () => {
       const localExecutor = memoryLocalExecutorOptions({
         exitCode: 127,
@@ -2863,6 +2907,7 @@ describe('runLocal', () => {
         [
           "import { spawn } from 'node:child_process';",
           "import { writeFileSync } from 'node:fs';",
+          "console.log('Runtime banner mentions API, MSD, and GENERATED_WORKFLOW_READY but not missing env.');",
           "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
           `writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
           'console.log(`spawned-child=${child.pid}`);',
@@ -2885,6 +2930,9 @@ describe('runLocal', () => {
 
       expect(result.ok).toBe(false);
       expect(result.execution?.evidence?.outcome_summary).toContain('timed out after 500ms');
+      expect(result.execution?.blocker?.code).toBe('NETWORK_UNREACHABLE');
+      expect(result.nextActions.join('\n')).not.toContain('export API=');
+      expect(result.nextActions.join('\n')).not.toContain('export MSD=');
 
       childPid = Number((await readFile(pidFile, 'utf8')).trim());
       expect(Number.isFinite(childPid)).toBe(true);

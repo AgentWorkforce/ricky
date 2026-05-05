@@ -16,6 +16,7 @@ Compact execution rules for agents writing Ricky workflows.
 10. If generating workflows in bulk, run structural sanity checks and `agent-relay run --dry-run` before sign-off.
 11. End serious workflows with `.run({ cwd: process.cwd() })`.
 12. Keep commit/push boundaries explicit and deterministic.
+13. Load repo-local `.env.local`/`.env` before `.run(...)` without overwriting exported values, and fail fast with `MISSING_ENV_VAR: NAME` for required env vars before long-running agent steps.
 
 ## Must-not
 
