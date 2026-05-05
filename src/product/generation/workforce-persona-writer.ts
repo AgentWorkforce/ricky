@@ -723,9 +723,13 @@ function validateArtifactContent(content: string): void {
   if (!/\bworkflow\(/.test(content)) {
     throw new WorkforcePersonaWriterError('Workforce persona artifact does not call workflow().');
   }
-  if (!/\.run\(\{ cwd: process\.cwd\(\) \}\)/.test(content)) {
+  if (!hasExplicitRunCwd(content)) {
     throw new WorkforcePersonaWriterError('Workforce persona artifact must run with explicit cwd.');
   }
+}
+
+function hasExplicitRunCwd(content: string): boolean {
+  return /\.run\s*\(\s*\{[\s\S]*?\bcwd\s*:\s*process\.cwd\s*\(\s*\)[\s\S]*?\}\s*\)/.test(content);
 }
 
 function validateMetadata(metadata: Record<string, unknown>): void {
