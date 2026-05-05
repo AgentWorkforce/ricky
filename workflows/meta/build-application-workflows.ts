@@ -110,10 +110,10 @@ async function main() {
 
 This plan defines the first bounded batch of generated Ricky application workflows.
 
-**Total workflows: 16**
+**Total workflows: 15**
 
 Distribution:
-- Wave 0 (Foundation): 4
+- Wave 0 (Foundation): 3
 - Wave 1 (Runtime): 3
 - Wave 2 (Product Core): 4
 - Wave 3 (Cloud API): 2
@@ -122,7 +122,7 @@ Distribution:
 
 ### Why this size
 
-16 workflows is large enough to form a real execution layer across all waves while still staying reviewable in one pass. The extra Wave 0 slot is deliberate: Ricky should not claim meaningful typecheck and test gates until the repo has an explicit toolchain and validation foundation. The priority still skews toward Wave 0 to Wave 2 because Ricky cannot serve users without foundation, runtime, and core product logic. Waves 3 to 5 get lighter coverage because they depend on earlier waves being real.
+15 workflows is large enough to form a real execution layer across all waves while still staying reviewable in one pass. The priority still skews toward Wave 0 to Wave 2 because Ricky cannot serve users without foundation, runtime, and core product logic. Waves 3 to 5 get lighter coverage because they depend on earlier waves being real.
 
 ### Product truth constraints applied
 
@@ -142,7 +142,6 @@ Distribution:
 |----|----------|------|------------------|------------|
 | W0-01 | \`01-repo-standards-and-conventions.ts\` | wave0-foundation | Enforce repo conventions | doc/spec |
 | W0-02 | \`02-toolchain-and-validation-foundation.ts\` | wave0-foundation | Toolchain and validation setup | implementation |
-| W0-03 | \`03-shared-models-and-config.ts\` | wave0-foundation | Shared types and config | implementation |
 | W0-04 | \`04-initial-architecture-docs.ts\` | wave0-foundation | Architecture reference docs | doc/spec |
 | W1-01 | \`01-local-run-coordinator.ts\` | wave1-runtime | Local execution coordinator | implementation |
 | W1-02 | \`02-workflow-evidence-model.ts\` | wave1-runtime | Evidence capture model | implementation |
@@ -178,15 +177,6 @@ Distribution:
 - **Validation gates:** file_exists for each required toolchain file, \`npx tsc --noEmit\`, \`npx vitest run\`, tracked plus untracked scoped change detection, final signoff artifact.
 - **Recommended team shape:** implementation
 - **80 to 100 validation shape:** toolchain materialization gates, soft validation, reviews, fix loop, post-fix validation, final re-review, final hard validation, scoped regression gate, final signoff.
-
-#### W0-03: \`03-shared-models-and-config.ts\`
-- **Target folder:** \`workflows/wave0-foundation/\`
-- **Purpose:** Create shared TypeScript model and config foundations that later runtime and product workflows import.
-- **Why first batch:** Later runtime and product workflows need shared types instead of inventing ad hoc shapes.
-- **Primary files touched:** \`src/shared/models/workflow-evidence.ts\`, \`src/shared/models/workflow-config.ts\`, \`src/shared/models/index.ts\`, \`src/shared/constants.ts\`
-- **Validation gates:** file_exists for each file, \`npx tsc --noEmit\`, grep for exports, tracked plus untracked scoped change detection, final signoff artifact.
-- **Recommended team shape:** implementation
-- **80 to 100 validation shape:** file gates, soft typecheck, validation gap fix loop if needed, reviews, post-fix validation, final re-review, final hard gate, scoped regression gate, final signoff.
 
 #### W0-04: \`04-initial-architecture-docs.ts\`
 - **Target folder:** \`workflows/wave0-foundation/\`

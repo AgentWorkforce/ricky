@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('generated workflow hygiene', () => {
+  const deletedSkillMirrorPath = ['.claude', 'skills', 'writing-agent-relay-workflows', 'SKILL.md'].join('/');
+
   it('keeps only active generated workflows under source control', () => {
     const generatedDir = join(process.cwd(), 'workflows', 'generated');
     const generatedWorkflows = readdirSync(generatedDir)
@@ -33,6 +35,9 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).not.toContain('timeoutMs: 300_000');
     expect(workflowBody).toContain('Tracked agent config files');
     expect(workflowBody).toContain('Relaycast permission references');
+    expect(workflowBody).toContain('obsolete package-split workflow cleanup delta');
+    expect(workflowBody).toContain("'03-shared-models' + '-and-config.ts'");
+    expect(workflowBody).not.toContain(deletedSkillMirrorPath);
     expect(workflowBody).not.toContain('.agent("reviewer-codex"');
   });
 
@@ -51,7 +56,7 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('validation-evidence.md');
     expect(workflowBody).toContain('manifest lacks status-prefixed changed paths');
     expect(workflowBody).toContain('validation evidence missing deterministic command names');
-    expect(workflowBody).toContain('basename referenced by');
+    expect(workflowBody).toContain('No active references found for:');
     expect(workflowBody).toContain('status-prefixed changed-file inventory and command summaries');
     expect(workflowBody).toContain('missing manifest path');
     expect(workflowBody).toContain('mentions stale non-manifest target');

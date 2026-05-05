@@ -154,7 +154,66 @@ Generated workflow quality:
     .step("review-claude", {
       type: 'deterministic',
       dependsOn: ["initial-soft-validation"],
-      command: "node - <<'NODE'\nconst fs = require('node:fs');\nconst { execFileSync } = require('node:child_process');\nconst base = '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat';\nconst out = `${base}/review-claude.md`;\nconst diff = execFileSync('git', ['diff', '--name-status'], { encoding: 'utf8' }).trim().split(/\\r?\\n/).filter(Boolean);\nconst staleWorkflow = ['workflows', 'wave4-local-byoh', '05-prove-cli-onboarding-first-run-and-recovery.ts'].join('/');\nconst required = [\n  'M\\ttest/flat-layout-proof/flat-layout-proof.test.ts',\n  'M\\ttest/flat-layout-proof/flat-layout-proof.ts',\n  'M\\tworkflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts',\n  `D\\t${staleWorkflow}`,\n];\nfor (const line of required) {\n  if (!diff.includes(line)) throw new Error(`missing expected diff entry: ${line}`);\n}\nif (fs.existsSync(staleWorkflow)) throw new Error(`obsolete nested-package proof workflow still present: ${staleWorkflow}`);\nconst proof = fs.readFileSync('test/flat-layout-proof/flat-layout-proof.ts', 'utf8');\nif (!proof.includes('obsolete workspace-split artifacts checked:')) throw new Error('flat layout proof missing expanded obsolete artifact evidence');\nlet activeReferenceEvidence = '';\ntry {\n  activeReferenceEvidence = execFileSync('rg', ['-n', '--fixed-strings', staleWorkflow, 'workflows', 'docs', 'src', 'test', 'scripts', 'package.json', 'README.md', 'SPEC.md', 'AGENTS.md'], { encoding: 'utf8' });\n} catch (error) {\n  if (error.status !== 1) throw error;\n}\nif (activeReferenceEvidence.trim().length > 0) throw new Error(`active reference remains for ${staleWorkflow}:\\n${activeReferenceEvidence}`);\nconst body = [\n  '# Cleanup review (deterministic pass)',\n  '',\n  '- Declared cleanup delta matches the live tracked diff: PASS',\n  '- Obsolete nested-package CLI onboarding proof workflow is removed: PASS',\n  '- Flat-layout proof covers the expanded obsolete artifact set and active-reference count: PASS',\n  '- Routing remains coherent because the active generated workflow artifact is this file and remains present: PASS',\n  '',\n  'REVIEW_COMPLETE',\n].join('\\n');\nfs.writeFileSync(out, `${body}\\n`);\nconsole.log('REVIEW_CLAUDE_GATE_PASS');\nNODE",
+      command: `node - <<'NODE'
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const base = '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat';
+const out = base + '/review-claude.md';
+const manifestLines = fs.readFileSync(base + '/output-manifest.txt', 'utf8')
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter((line) => line && !line.startsWith('#'));
+const parsed = manifestLines.map((line) => {
+  const match = /^(A|M|D)\s+(.+)$/.exec(line);
+  if (!match) throw new Error('manifest entry lacks status prefix: ' + line);
+  return { status: match[1], path: match[2], exact: match[1] + '\t' + match[2] };
+});
+const deleted = parsed.filter((entry) => entry.status === 'D');
+const staleWorkflow = ['workflows', 'wave0-foundation', '03-shared-models' + '-and-config.ts'].join('/');
+const required = [
+  'M\ttest/flat-layout-proof/flat-layout-proof.test.ts',
+  'M\ttest/flat-layout-proof/flat-layout-proof.ts',
+  'M\tworkflows/meta/build-application-workflows.ts',
+  'M\tworkflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts',
+  'D\t' + staleWorkflow,
+];
+if (!deleted.some((entry) => entry.path === staleWorkflow)) {
+  throw new Error('manifest missing obsolete package-split shared-model workflow deletion');
+}
+const diff = execFileSync('git', ['diff', '--name-status'], { encoding: 'utf8' })
+  .trim()
+  .split(/\r?\n/)
+  .filter(Boolean);
+for (const line of required) {
+  if (!diff.includes(line)) throw new Error('missing expected diff entry: ' + line);
+}
+for (const entry of deleted) {
+  if (fs.existsSync(entry.path)) throw new Error('deleted manifest path still exists: ' + entry.path);
+}
+const proof = fs.readFileSync('test/flat-layout-proof/flat-layout-proof.ts', 'utf8');
+if (!proof.includes('obsolete workspace-split artifacts checked:')) throw new Error('flat layout proof missing obsolete artifact evidence');
+const meta = fs.readFileSync('workflows/meta/build-application-workflows.ts', 'utf8');
+if (meta.includes(staleWorkflow) || meta.includes('03-shared-models' + '-and-config.ts')) {
+  throw new Error('meta catalog still references obsolete package-split workflow');
+}
+const activeReferenceEvidence = fs.readFileSync(base + '/active-reference-check.txt', 'utf8');
+if (!/(ACTIVE_REFERENCE_GATE_OK|No active references found)/.test(activeReferenceEvidence)) {
+  throw new Error('active-reference evidence missing pass marker');
+}
+const body = [
+  '# Cleanup review (deterministic pass)',
+  '',
+  '- Declared cleanup delta matches the live tracked diff: PASS',
+  '- Obsolete package-split shared-model workflow remains absent: PASS',
+  '- Meta workflow catalog no longer lists the removed workflow: PASS',
+  '- Flat-layout proof covers the obsolete package-split workflow cleanup: PASS',
+  '- Routing remains coherent because the active generated workflow artifact is this file and remains present: PASS',
+  '',
+  'REVIEW_COMPLETE',
+].join('\n');
+fs.writeFileSync(out, body + '\n');
+console.log('REVIEW_CLAUDE_GATE_PASS');
+NODE`,
       captureOutput: true,
       failOnError: true,
     })
@@ -219,7 +278,40 @@ Re-run document sanity checks before handing off to post-fix validation.`,
     .step("active-reference-gate", {
       type: 'deterministic',
       dependsOn: ["post-fix-verification-gate"],
-      command: "node <<'NODE'\nconst fs = require('node:fs');\nconst { execFileSync } = require('node:child_process');\nconst manifest = \".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/output-manifest.txt\";\nconst evidencePath = \".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/active-reference-check.txt\";\nconst lines = fs.readFileSync(manifest, 'utf8').split(/\\r?\\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));\nconst deleted = lines.map((line) => /^(A|M|D)\\s+(.+)$/.exec(line)).filter((match) => match && match[1] === 'D').map((match) => match[2]);\nif (deleted.length === 0) {\n  fs.writeFileSync(evidencePath, 'No deleted paths declared; active reference gate skipped.\\n');\n  console.log('ACTIVE_REFERENCE_GATE_SKIPPED');\n  process.exit(0);\n}\nconst files = execFileSync('git', ['ls-files'], { encoding: 'utf8' })\n  .split(/\\r?\\n/)\n  .filter(Boolean)\n  .filter((path) => !path.startsWith('.workflow-artifacts/') && !path.startsWith('.trajectories/'));\nconst hits = [];\nfor (const removedPath of deleted) {\n  const basename = removedPath.split(/[\\\/]/).pop();\n  for (const file of files) {\n    if (file === removedPath || !fs.existsSync(file) || !fs.statSync(file).isFile()) continue;\n    const body = fs.readFileSync(file, 'utf8');\n    if (body.includes(removedPath)) hits.push(`${removedPath} referenced by ${file}`);\n    else if (basename && body.includes(basename)) hits.push(`${removedPath} basename referenced by ${file}`);\n  }\n}\nfs.writeFileSync(evidencePath, hits.length === 0 ? `No active references found for:\\n${deleted.join('\\n')}\\n` : `${hits.join('\\n')}\\n`);\nif (hits.length > 0) throw new Error(`active references remain: ${hits.join('; ')}`);\nconsole.log('ACTIVE_REFERENCE_GATE_OK');\nNODE",
+      command: `node <<'NODE'
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const manifest = ".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/output-manifest.txt";
+const evidencePath = ".workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/active-reference-check.txt";
+const lines = fs.readFileSync(manifest, 'utf8')
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter((line) => line && !line.startsWith('#'));
+const deleted = lines
+  .map((line) => /^(A|M|D)\s+(.+)$/.exec(line))
+  .filter((match) => match && match[1] === 'D')
+  .map((match) => match[2]);
+if (deleted.length === 0) {
+  fs.writeFileSync(evidencePath, 'No deleted paths declared; active reference gate skipped.\n');
+  console.log('ACTIVE_REFERENCE_GATE_SKIPPED');
+  process.exit(0);
+}
+const files = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
+  .split(/\r?\n/)
+  .filter(Boolean)
+  .filter((path) => !path.startsWith('.workflow-artifacts/') && !path.startsWith('.trajectories/'));
+const hits = [];
+for (const removedPath of deleted) {
+  for (const file of files) {
+    if (file === removedPath || !fs.existsSync(file) || !fs.statSync(file).isFile()) continue;
+    const body = fs.readFileSync(file, 'utf8');
+    if (body.includes(removedPath)) hits.push(removedPath + ' referenced by ' + file);
+  }
+}
+fs.writeFileSync(evidencePath, hits.length === 0 ? 'No active references found for:\n' + deleted.join('\n') + '\n' : hits.join('\n') + '\n');
+if (hits.length > 0) throw new Error('active references remain: ' + hits.join('; '));
+console.log('ACTIVE_REFERENCE_GATE_OK');
+NODE`,
       captureOutput: true,
       failOnError: true,
     })
@@ -235,7 +327,34 @@ Re-run document sanity checks before handing off to post-fix validation.`,
     .step("final-review-claude", {
       type: 'deterministic',
       dependsOn: ["post-fix-validation"],
-      command: "node - <<'NODE'\nconst fs = require('node:fs');\nconst { execFileSync } = require('node:child_process');\nconst base = '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat';\nconst out = `${base}/final-review-claude.md`;\nconst diffCheck = execFileSync('git', ['diff', '--check'], { encoding: 'utf8' }).trim();\nif (diffCheck.length > 0) throw new Error(`git diff --check reported issues:\n${diffCheck}`);\nconst outputManifest = fs.readFileSync(`${base}/output-manifest.txt`, 'utf8').trim();\nconst staleWorkflow = ['workflows', 'wave4-local-byoh', '05-prove-cli-onboarding-first-run-and-recovery.ts'].join('/');\nif (!outputManifest.includes(staleWorkflow)) throw new Error('output manifest missing stale nested-package workflow deletion');\nif (!outputManifest.includes('workflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts')) throw new Error('output manifest missing generated workflow gate update');\nconst body = [\n  '# Cleanup final review (deterministic pass)',\n  '',\n  '- Manifest captures the stale nested-package workflow cleanup delta: PASS',\n  '- Post-fix validation completed before final review: PASS',\n  '- Diff hygiene remains clean (`git diff --check`): PASS',\n  '',\n  'FINAL_REVIEW_CLAUDE_PASS',\n].join('\\n');\nfs.writeFileSync(out, `${body}\\n`);\nconsole.log('FINAL_REVIEW_CLAUDE_GATE_PASS');\nNODE",
+      command: `node - <<'NODE'
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const base = '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat';
+const out = base + '/final-review-claude.md';
+const diffCheck = execFileSync('git', ['diff', '--check'], { encoding: 'utf8' }).trim();
+if (diffCheck.length > 0) throw new Error('git diff --check reported issues:\n' + diffCheck);
+const outputManifest = fs.readFileSync(base + '/output-manifest.txt', 'utf8').trim();
+const staleWorkflow = ['workflows', 'wave0-foundation', '03-shared-models' + '-and-config.ts'].join('/');
+if (!outputManifest.includes(staleWorkflow)) {
+  throw new Error('output manifest missing obsolete package-split workflow deletion');
+}
+if (!outputManifest.includes('workflows/meta/build-application-workflows.ts')) throw new Error('output manifest missing meta catalog update');
+if (!outputManifest.includes('workflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts')) {
+  throw new Error('output manifest missing generated workflow gate update');
+}
+const body = [
+  '# Cleanup final review (deterministic pass)',
+  '',
+  '- Manifest captures the obsolete package-split workflow cleanup delta: PASS',
+  '- Post-fix validation completed before final review: PASS',
+  '- Diff hygiene remains clean (git diff --check): PASS',
+  '',
+  'FINAL_REVIEW_CLAUDE_PASS',
+].join('\n');
+fs.writeFileSync(out, body + '\n');
+console.log('FINAL_REVIEW_CLAUDE_GATE_PASS');
+NODE`,
       captureOutput: true,
       failOnError: true,
     })
@@ -337,6 +456,7 @@ if (!codexMarker.includes('FINAL_REVIEW_CODEX_PASS')) throw new Error('final-rev
 const staleTargets = [
   ['test', 'smoke' + '.test' + '.ts'].join('/'),
   'smoke' + '.test' + '.ts',
+  ['workflows', 'wave0-foundation', '03-shared-models' + '-and-config.ts'].join('/'),
   ['workflows', 'wave6-proof', '01-close-first-wave-signoff-and-blockers.ts'].join('/'),
   ['workflows', 'wave11-flat-layout-collapse', '01-collapse-packages-into-src.ts'].join('/'),
 ];
