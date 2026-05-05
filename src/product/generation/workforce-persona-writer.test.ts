@@ -105,6 +105,36 @@ describe('workforce persona workflow writer', () => {
     expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
   });
 
+  it('accepts multiline run options when cwd is explicit', () => {
+    const parsed = parsePersonaWorkflowResponse(JSON.stringify({
+      artifact: {
+        path: 'workflows/generated/persona.ts',
+        content: multilineRunSource(),
+      },
+      metadata: {
+        workflowName: 'persona',
+        agents: ['lead'],
+      },
+    }), 'workflows/generated/persona.ts');
+
+    expect(parsed.responseFormat).toBe('structured-json');
+    expect(parsed.content).toContain('cwd: process.cwd()');
+    expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
+  });
+
+  it('still rejects persona artifacts that run without an explicit cwd', () => {
+    expect(() => parsePersonaWorkflowResponse(JSON.stringify({
+      artifact: {
+        path: 'workflows/generated/persona.ts',
+        content: workflowSource().replace('.run({ cwd: process.cwd() });', '.run();'),
+      },
+      metadata: {
+        workflowName: 'persona',
+        agents: ['lead'],
+      },
+    }), 'workflows/generated/persona.ts')).toThrow(/explicit cwd/);
+  });
+
   it('recovers expected artifact content from disk when structured output omits inline content', () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-response-'));
     const artifactPath = 'workflows/generated/persona.ts';
@@ -642,6 +672,18 @@ function workflowSource(): string {
     '});',
     '',
   ].join('\n');
+}
+
+function multilineRunSource(): string {
+  return workflowSource().replace(
+    '    .run({ cwd: process.cwd() });',
+    [
+      '    .run({',
+      '      cwd: process.cwd(),',
+      '      timeoutMs: 120000,',
+      '    });',
+    ].join('\n'),
+  );
 }
 
 function spec(overrides: { description?: string; targetFiles?: string[] } = {}): NormalizedWorkflowSpec {
