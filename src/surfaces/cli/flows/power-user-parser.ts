@@ -3,7 +3,7 @@ import { isRickyMode } from '../cli/mode-selector.js';
 import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
 
 export type PowerUserCommand = 'run' | 'help' | 'version' | 'status' | 'connect';
-export type PowerUserSurface = 'legacy' | 'local' | 'cloud' | 'status' | 'connect';
+export type PowerUserSurface = 'legacy' | 'local' | 'cloud' | 'workflow' | 'status' | 'connect';
 export type ConnectTarget = 'cloud' | 'agents' | 'integrations';
 
 const DEFAULT_CLOUD_AGENT_TARGETS = ['claude', 'codex', 'opencode', 'gemini'];
@@ -66,11 +66,14 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
     return parseConnect(argv.slice(1));
   }
 
-  const surface = first === 'local' || first === 'cloud' ? first : 'legacy';
+  const surface = first === 'local' || first === 'cloud' || first === 'workflow' ? first : 'legacy';
   const effectiveArgv = surface === 'legacy' ? argv : argv.slice(1);
   const explicitMode = readMode(effectiveArgv);
+  const modeFlagPresent = effectiveArgv.includes('--mode');
   const mode = surface === 'local' || surface === 'cloud'
     ? surface
+    : surface === 'workflow'
+      ? explicitMode ?? (modeFlagPresent ? undefined : 'local')
     : explicitMode;
 
   const parsed = withCommonFlags(
@@ -104,6 +107,9 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const workforcePersonaWriterCli = parseWorkforcePersonaWriterCliFlag(effectiveArgv);
 
   const errors: string[] = [...(parsed.errors ?? [])];
+  if (surface === 'workflow' && modeFlagPresent && !explicitMode) {
+    errors.push('--mode must be one of: local, cloud, or both.');
+  }
   if (effectiveArgv.includes('--workforce-persona') && effectiveArgv.includes('--no-workforce-persona')) {
     errors.push('--workforce-persona and --no-workforce-persona cannot be combined.');
   }

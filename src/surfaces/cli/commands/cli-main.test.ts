@@ -218,6 +218,34 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses the workflow one-shot command for local runs and Cloud generation', () => {
+    expect(parseArgs(['workflow', '--spec-file', './SPEC.md', '--run'])).toMatchObject({
+      command: 'run',
+      surface: 'workflow',
+      mode: 'local',
+      specFile: './SPEC.md',
+      runRequested: true,
+    });
+
+    const cloud = parseArgs(['workflow', '--spec-file', './SPEC.md', '--mode', 'cloud']);
+    expect(cloud).toMatchObject({
+      command: 'run',
+      surface: 'workflow',
+      mode: 'cloud',
+      specFile: './SPEC.md',
+    });
+    expect(cloud).not.toHaveProperty('runRequested');
+  });
+
+  it('surfaces invalid workflow mode values as CLI argument errors', () => {
+    expect(parseArgs(['workflow', '--spec-file', './SPEC.md', '--mode', 'clodu'])).toMatchObject({
+      command: 'run',
+      surface: 'workflow',
+      specFile: './SPEC.md',
+      errors: ['--mode must be one of: local, cloud, or both.'],
+    });
+  });
+
   it('does not run local or Cloud --workflow artifacts unless --run is present', () => {
     const localPreview = parseArgs(['local', '--workflow', 'workflows/generated/release-health.ts']);
     expect(localPreview).toMatchObject({
@@ -335,6 +363,9 @@ describe('renderHelp', () => {
 
     expect(helpText).toContain('Happy path:');
     expect(helpText).toContain('ricky local --spec <text>');
+    expect(helpText).toContain('ricky workflow --spec-file <path> --run');
+    expect(helpText).toContain('ricky workflow --spec-file <path> --mode cloud');
+    expect(helpText).not.toContain('ricky workflow --spec-file <path> --mode cloud --run');
     expect(helpText).toContain('ricky run <path> --background');
     expect(helpText).toContain('ricky run <artifact> --start-from <step>');
     expect(helpText).toContain('ricky status --run <run-id>');

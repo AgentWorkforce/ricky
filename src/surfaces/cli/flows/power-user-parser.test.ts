@@ -26,6 +26,37 @@ describe('power user parser defaults', () => {
     });
   });
 
+  it('parses the workflow one-shot command for local execution and Cloud generation', () => {
+    expect(parsePowerUserArgs(['workflow', '--spec-file', './SPEC.md', '--run'])).toMatchObject({
+      command: 'run',
+      surface: 'workflow',
+      mode: 'local',
+      specFile: './SPEC.md',
+      runRequested: true,
+    });
+
+    const cloud = parsePowerUserArgs(['workflow', '--spec-file', './SPEC.md', '--mode', 'cloud']);
+    expect(cloud).toMatchObject({
+      command: 'run',
+      surface: 'workflow',
+      mode: 'cloud',
+      specFile: './SPEC.md',
+    });
+    expect(cloud).not.toHaveProperty('runRequested');
+  });
+
+  it('reports invalid workflow mode values instead of defaulting to local', () => {
+    expect(parsePowerUserArgs(['workflow', '--spec-file', './SPEC.md', '--mode', 'clodu'])).toMatchObject({
+      command: 'run',
+      surface: 'workflow',
+      specFile: './SPEC.md',
+      errors: ['--mode must be one of: local, cloud, or both.'],
+    });
+    expect(parsePowerUserArgs(['workflow', '--spec-file', './SPEC.md', '--mode'])).toMatchObject({
+      errors: ['--mode must be one of: local, cloud, or both.'],
+    });
+  });
+
   it('honors explicit auto-fix and refinement disables', () => {
     const parsed = parsePowerUserArgs(['local', '--spec', 'build a workflow', '--run', '--no-auto-fix', '--no-refine']);
 

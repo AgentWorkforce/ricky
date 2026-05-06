@@ -952,6 +952,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         logs.push(`[local] spec path: ${request.specPath}`);
       }
 
+      onProgress?.('Reading spec and preparing local context...');
       if (request.mode === 'cloud') {
         warnings.push(
           'Cloud mode was requested but this is the local/BYOH entrypoint. ' +
@@ -963,6 +964,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
       const intakeResult = intake(toRawSpecPayload(request));
       logs.push(`[local] spec intake route: ${intakeResult.routing?.target ?? 'none'}`);
+      onProgress?.(`Spec intake routed to ${intakeResult.routing?.target ?? 'clarify'}...`);
 
       warnings.push(...intakeResult.parseWarnings);
       warnings.push(...intakeResult.validationIssues.map((issue) => `${issue.field}: ${issue.message}`));
@@ -1001,7 +1003,10 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           refine: request.refine,
           ...(workforcePersonaWriter ? { workforcePersonaWriter } : {}),
         };
-        onProgress?.('ricky is writing the workflow...');
+        onProgress?.('Selecting workflow pattern, agents, and validation gates...');
+        onProgress?.(generationInput.workforcePersonaWriter
+          ? 'Authoring workflow with Workforce persona...'
+          : 'Rendering workflow artifact...');
         generationResult = generationInput.workforcePersonaWriter
           ? await generateWithWorkforcePersona(generationInput)
           : generate(generationInput);
@@ -1036,6 +1041,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
         }
 
+        onProgress?.(`Writing workflow artifact to ${artifact.artifactPath}...`);
         await artifactWriter.writeArtifact(artifact.artifactPath, artifact.content, cwd);
         if (options.persistGenerationMetadataArtifacts === true) {
           await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);

@@ -69,7 +69,8 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
     expect(artifact.content).toContain('.agent("validator-claude"');
     expect(artifact.content).toContain('80-to-100 fix loop');
-    expect(artifact.content).toContain('deterministic sanity gate using grep, rg, or an equivalent assertion');
+    expect(artifact.content).toContain('deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion');
+    expect(artifact.content).toContain('If using rg, guard it with command -v rg');
     expect(artifact.content).toContain('Generated workflow quality');
     expect(artifact.content).toContain('Keep each agent step bounded to one coherent slice');
     expect(result.toolSelection.selections).toEqual(
@@ -608,7 +609,7 @@ describe('workflow generation pipeline', () => {
     );
   });
 
-  it('accepts ripgrep as an equivalent deterministic sanity gate', () => {
+  it('rejects ripgrep gates without real fallback control flow because rg may be absent', () => {
     const implementationSpec = spec({
       description: 'Implement local workflow generation checks with resilient sanity validation.',
       targetFiles: ['src/product/generation/pipeline.ts'],
@@ -629,7 +630,7 @@ describe('workflow generation pipeline', () => {
       gates: gatesWithoutGrep.map((gate) => gate.name === 'post-implementation-file-gate'
         ? {
             ...gate,
-            command: "test -f src/product/generation/pipeline.ts && rg -e 'export|function|class' src/product/generation/pipeline.ts",
+            command: "command -v rg >/dev/null 2>&1 && rg -e 'export|function|class' src/product/generation/pipeline.ts && grep -Eq 'pipeline' README.md",
           }
         : gate),
     };
@@ -641,6 +642,51 @@ describe('workflow generation pipeline', () => {
       implementationSpec,
     );
 
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'RIPGREP_REQUIRES_FALLBACK' }),
+      ]),
+    );
+  });
+
+  it('accepts ripgrep sanity gates when they include a grep fallback', () => {
+    const implementationSpec = spec({
+      description: 'Implement local workflow generation checks with resilient sanity validation.',
+      targetFiles: ['src/product/generation/pipeline.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/resilient-sanity.ts',
+    });
+    const base = artifact(result);
+    const gatesWithoutGrep = base.gates.map((gate) => ({
+      ...gate,
+      command: gate.command
+        .replace(/\bgit\s+grep\b/g, 'printf')
+        .replace(/\bgrep\b/g, 'printf'),
+    }));
+    const rgArtifact = {
+      ...base,
+      gates: gatesWithoutGrep.map((gate) => gate.name === 'post-implementation-file-gate'
+        ? {
+            ...gate,
+            command: "test -f src/product/generation/pipeline.ts && { if command -v rg >/dev/null 2>&1; then rg -e 'export|function|class' src/product/generation/pipeline.ts; else grep -Eq 'export|function|class' src/product/generation/pipeline.ts; fi; }",
+          }
+        : gate),
+    };
+
+    const validation = validateGeneratedArtifact(
+      rgArtifact,
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    );
+
+    expect(validation.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'RIPGREP_REQUIRES_FALLBACK' }),
+      ]),
+    );
     expect(validation.issues).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: 'GREP_GATE_MISSING' }),

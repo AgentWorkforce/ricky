@@ -619,7 +619,7 @@ Routing contract:
 - MCP: generated runtime agents must not use Relaycast management or messaging tools; MCP callers receive artifacts without a separate runtime management path.
 
 Verification commands:
-${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using grep, rg, or an equivalent assertion', 'active-reference gate for deleted manifest paths', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff', 'PR URL or explicit result summary'])}
+${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion', 'active-reference gate for deleted manifest paths', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff', 'PR URL or explicit result summary'])}
 
 Write ${artifactsDir}/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`)},
       verification: { type: 'output_contains', value: 'GENERATION_LEAD_PLAN_READY' },
@@ -663,7 +663,8 @@ Keep execution routing explicit for local, cloud, and MCP callers. Materialize o
 
 Generated workflow quality:
 - Include a real deterministic sanity gate over produced files, not just prose saying one exists.
-- Prefer grep, rg, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.
+- Prefer POSIX grep, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.
+- If using rg, guard it with command -v rg and provide a grep or git grep fallback.
 - For cleanup or deletion work, persist a changed-files inventory with statuses, active-reference evidence for deleted paths, and command summaries for final signoff.
 - For cleanup or deletion work, start from ${artifactsDir}/cleanup-candidate-prescan.txt and cite that exact path in ${artifactsDir}/cleanup-report.md so the evidence trail names its prescan input.
 - Keep each agent step bounded to one coherent slice. Split broad implementation or test-writing work into sequential/fan-out steps with deterministic gates between them instead of relying on a single long agent timeout.`)},
