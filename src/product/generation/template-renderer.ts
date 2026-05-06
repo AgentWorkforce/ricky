@@ -2,9 +2,13 @@ import { readFileSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import {
   CHANNEL_PREFIX,
+  DEFAULT_FIX_LOOP_TIMEOUT_MS,
+  DEFAULT_IMPLEMENT_TIMEOUT_MS,
+  DEFAULT_LEAD_PLAN_TIMEOUT_MS,
   DEFAULT_MAX_CONCURRENCY,
   DEFAULT_RETRY_BACKOFF_MS,
   DEFAULT_RETRY_MAX_ATTEMPTS,
+  DEFAULT_REVIEW_TIMEOUT_MS,
   DEFAULT_TIMEOUT_MS,
 } from '../../shared/constants.js';
 import type { SwarmPattern } from '../../shared/models/workflow-config.js';
@@ -588,6 +592,7 @@ function renderLeadPlanStep(spec: NormalizedWorkflowSpec, artifactsDir: string):
   return `    .step('lead-plan', {
       agent: 'lead-claude',
       dependsOn: ['skill-boundary-metadata-gate'],
+      timeoutMs: ${DEFAULT_LEAD_PLAN_TIMEOUT_MS},
       task: ${templateLiteral(`Plan the workflow execution from the normalized spec.
 
 Generation-time skill boundary:
@@ -634,6 +639,7 @@ function renderImplementationStep(
       agent: ${literal(agent)},
       dependsOn: ['lead-plan-gate'],
 ${selectionLines}
+      timeoutMs: ${DEFAULT_IMPLEMENT_TIMEOUT_MS},
       task: ${templateLiteral(`${isCodeWorkflow ? 'Implement the requested code-writing workflow slice.' : 'Author the requested workflow artifact.'}
 
 IMPLEMENTATION_WORKFLOW_CONTRACT:
@@ -680,6 +686,7 @@ function renderReviewStep(
       agent: ${literal(agent)},
       dependsOn: ${arrayLiteral(dependsOn)},
 ${selectionLines}
+      timeoutMs: ${DEFAULT_REVIEW_TIMEOUT_MS},
       task: ${templateLiteral(`${final ? 'Re-review the fixed state only.' : 'Review the generated work.'}
 
 Assess:
@@ -763,6 +770,7 @@ function renderFixLoopStep(
       agent: 'validator-claude',
       dependsOn: ['read-review-feedback', 'initial-soft-validation'],
 ${selectionLines}
+      timeoutMs: ${DEFAULT_FIX_LOOP_TIMEOUT_MS},
       task: ${templateLiteral(`Run the 80-to-100 fix loop.
 
 Inputs:
@@ -790,6 +798,7 @@ function renderFinalSignoffStep(artifactsDir: string, selection?: ToolSelection)
       agent: 'validator-claude',
       dependsOn: ['regression-gate'],
 ${selectionLines}
+      timeoutMs: ${DEFAULT_REVIEW_TIMEOUT_MS},
       task: ${templateLiteral(`Write ${artifactsDir}/signoff.md.
 
 Include:

@@ -1587,6 +1587,43 @@ describe('runLocal', () => {
       expect(result.nextActions.join('\n')).not.toContain('export MSD=');
     });
 
+    it('does not classify incidental "auth"/"token" mentions in agent output as CREDENTIALS_REJECTED', async () => {
+      // Codex/claude TUIs print the words "auth" and "token" constantly during normal operation.
+      // The classifier must not bucket every failure that captured those bytes into a credentials blocker.
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stdout: [
+          'Codex CLI banner — context window 80% remaining.',
+          'tool: read_file path=src/auth/middleware.ts',
+          'token usage: 12345 / 200000',
+        ],
+        stderr: ['some unrelated runtime failure'],
+      });
+      const result = await runLocal(
+        { source: 'cli', spec: 'generate a local workflow', stageMode: 'run' },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.blocker?.code).not.toBe('CREDENTIALS_REJECTED');
+      expect(result.execution?.blocker?.category).not.toBe('credentials');
+    });
+
+    it('still classifies real credential failures (401/unauthorized/invalid token) as CREDENTIALS_REJECTED', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stderr: ['HTTP 401 Unauthorized: invalid api key'],
+      });
+      const result = await runLocal(
+        { source: 'cli', spec: 'generate a local workflow', stageMode: 'run' },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.blocker?.code).toBe('CREDENTIALS_REJECTED');
+      expect(result.execution?.blocker?.category).toBe('credentials');
+    });
+
     it('keeps stop-after-generation artifact-only output without launching runtime', async () => {
       const localExecutor = memoryLocalExecutorOptions({
         exitCode: 127,
@@ -2930,7 +2967,8 @@ describe('runLocal', () => {
 
       expect(result.ok).toBe(false);
       expect(result.execution?.evidence?.outcome_summary).toContain('timed out after 500ms');
-      expect(result.execution?.blocker?.code).toBe('NETWORK_UNREACHABLE');
+      expect(result.execution?.blocker?.code).toBe('STEP_TIMEOUT');
+      expect(result.execution?.blocker?.category).toBe('timeout');
       expect(result.nextActions.join('\n')).not.toContain('export API=');
       expect(result.nextActions.join('\n')).not.toContain('export MSD=');
 
