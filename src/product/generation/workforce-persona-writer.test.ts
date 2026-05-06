@@ -35,7 +35,8 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('Matched Ricky generation skills');
     expect(task).toContain('80-to-100 fix loop');
     expect(task).toContain('deterministic sanity gate');
-    expect(task).toContain('grep, rg, git grep');
+    expect(task).toContain('POSIX grep, git grep');
+    expect(task).toContain('If using rg, guard it with command -v rg');
     expect(task).toContain('Keep agent steps bounded');
     expect(task).toContain('Structured response contract');
     expect(task).toContain('fenced ```ts artifact block plus a fenced ```json metadata block');

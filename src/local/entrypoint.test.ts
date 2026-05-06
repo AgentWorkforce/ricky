@@ -1202,7 +1202,11 @@ describe('runLocal', () => {
 
     expect(result.ok).toBe(true);
     expect(progress).toEqual([
-      'ricky is writing the workflow...',
+      'Reading spec and preparing local context...',
+      'Spec intake routed to generate...',
+      'Selecting workflow pattern, agents, and validation gates...',
+      'Rendering workflow artifact...',
+      expect.stringMatching(/^Writing workflow artifact to workflows\/generated\/.+\.ts\.\.\.$/),
       'Running workflow...',
     ]);
   });

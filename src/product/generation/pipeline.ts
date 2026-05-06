@@ -222,7 +222,15 @@ export function validateGeneratedArtifact(
     issues.push(blockingIssue(
       'validation',
       'GREP_GATE_MISSING',
-      'Rendered workflow has no deterministic sanity gate such as grep, rg, or an equivalent assertion.',
+      'Rendered workflow has no deterministic sanity gate such as grep, git grep, or an equivalent assertion.',
+    ));
+  }
+  const unguardedRipgrepGates = artifact.gates.filter((gate) => usesRipgrep(gate.command) && !hasRipgrepFallback(gate.command));
+  if (unguardedRipgrepGates.length > 0) {
+    issues.push(blockingIssue(
+      'validation',
+      'RIPGREP_REQUIRES_FALLBACK',
+      `Rendered workflow uses rg without a grep fallback in: ${unguardedRipgrepGates.map((gate) => gate.name).join(', ')}.`,
     ));
   }
   if (!/npx tsc --noEmit/.test(content)) {
@@ -368,6 +376,19 @@ function isSanityGateCommand(command: string): boolean {
     /\[\[\s+.+(?:==|=~)\s+.+\]\]/,
     /\bcase\b.+\bin\b.+\besac\b/,
   ].some((pattern) => typeof pattern === 'boolean' ? pattern : pattern.test(normalized));
+}
+
+function usesRipgrep(command: string): boolean {
+  return /(?:^|[;&|()\s])rg(?:\s|$)/.test(command.replace(/\\\n/g, ' '));
+}
+
+function hasRipgrepFallback(command: string): boolean {
+  const normalized = command.replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!usesRipgrep(normalized)) return true;
+  const ifElseFallback = /\bif\b.*\b(?:command\s+-v|which)\s+rg\b.*\bthen\b.*\brg\b.*\belse\b.*\b(?:git\s+grep|grep)\b.*\bfi\b/.test(normalized);
+  const andOrFallback = /\b(?:command\s+-v|which)\s+rg\b.*&&.*\brg\b.*\|\|.*\b(?:git\s+grep|grep)\b/.test(normalized);
+  const plainOrFallback = /\brg\b.*\|\|.*\b(?:git\s+grep|grep)\b/.test(normalized);
+  return ifElseFallback || andOrFallback || plainOrFallback;
 }
 
 function isInlineAssertionCommand(command: string): boolean {
