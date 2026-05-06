@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 
 import {
   defaultWorkforcePersonaResolver,
-  DEFAULT_WORKFORCE_PERSONA_TIER,
   parsePersonaWorkflowResponse,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
   WorkforcePersonaWriterError,
@@ -216,9 +215,12 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+const DEFAULT_WORKFORCE_PERSONA_REPAIR_TIER = 'best-value';
+
 function personaResolverOptions(options: { tier?: string; installRoot?: string; attempt?: number }): { tier?: string; installRoot?: string } {
+  const baseTier = options.tier ?? DEFAULT_WORKFORCE_PERSONA_REPAIR_TIER;
   const resolved: { tier?: string; installRoot?: string } = {
-    tier: options.attempt !== undefined && options.attempt > 3 ? 'best' : options.tier ?? DEFAULT_WORKFORCE_PERSONA_TIER,
+    tier: options.attempt !== undefined && options.attempt > 3 ? 'best' : baseTier,
   };
   if (options.installRoot) resolved.installRoot = options.installRoot;
   return resolved;

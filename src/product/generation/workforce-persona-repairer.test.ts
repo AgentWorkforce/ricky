@@ -113,7 +113,7 @@ describe('workforce persona workflow repairer', () => {
         maxAttempts: 3,
       },
     });
-    expect(resolverOptions).toEqual([{ tier: 'best', installRoot: '/state/ricky/persona-repair-skills' }]);
+    expect(resolverOptions).toEqual([{ tier: 'best-value', installRoot: '/state/ricky/persona-repair-skills' }]);
   });
 
   it('upgrades repair persona resolution to best after the third failed retry', async () => {

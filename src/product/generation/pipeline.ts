@@ -22,7 +22,7 @@ import {
   type WorkforcePersonaPrewriteRepairAttempt,
 } from './workforce-persona-writer.js';
 
-const DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 3;
+const DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 4;
 const MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 8;
 
 export function generate(input: GenerationInput): GenerationResult {
