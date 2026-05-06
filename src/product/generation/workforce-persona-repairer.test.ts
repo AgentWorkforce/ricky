@@ -17,6 +17,20 @@ describe('workforce persona workflow repairer', () => {
       previousRunId: 'relay-run-1',
       attempt: 1,
       maxAttempts: 3,
+      previousAttempts: [{
+        attempt: 1,
+        repairedArtifactPath: 'workflows/generated/failing.ts',
+        repairSummary: 'added env loader',
+        repairMode: 'workforce-persona',
+        retryAttempt: 2,
+        outcome: {
+          status: 'blocker',
+          failedStep: 'install-deps',
+          blockerCode: 'MISSING_ENV_VAR',
+          runId: 'relay-run-2',
+          debuggerSummary: 'same env assertion still failed',
+        },
+      }],
     });
 
     expect(task).toContain('Repair an Agent Relay workflow artifact for Ricky');
@@ -27,6 +41,9 @@ describe('workforce persona workflow repairer', () => {
     expect(task).toContain('--start-from');
     expect(task).toContain('Structured response contract');
     expect(task).toContain('Do not echo the schema, do not return a patch');
+    expect(task).toContain('Previous repair attempts that did not resolve the workflow');
+    expect(task).toContain('added env loader');
+    expect(task).toContain('same repair strategy');
   });
 
   it('invokes the workflow persona and returns a full repaired artifact', async () => {
@@ -96,7 +113,50 @@ describe('workforce persona workflow repairer', () => {
         maxAttempts: 3,
       },
     });
-    expect(resolverOptions).toEqual([{ tier: 'best', installRoot: '/state/ricky/persona-repair-skills' }]);
+    expect(resolverOptions).toEqual([{ tier: 'best-value', installRoot: '/state/ricky/persona-repair-skills' }]);
+  });
+
+  it('upgrades repair persona resolution to best after the third failed retry', async () => {
+    const resolverOptions: Array<Record<string, unknown>> = [];
+    const resolver: WorkforcePersonaResolver = async (_intents, options) => {
+      resolverOptions.push(options);
+      return {
+        source: 'package',
+        intent: 'agent-relay-workflow',
+        warnings: [],
+        context: {
+          selection: {
+            personaId: 'agent-relay-workflow',
+            tier: options?.tier ?? 'minimum',
+            runtime: { harness: 'codex', model: 'codex/test' },
+          },
+          sendMessage() {
+            return execution(JSON.stringify({
+              artifact: {
+                path: 'workflows/generated/failing.ts',
+                content: workflowSource('after'),
+              },
+              metadata: { summary: 'patched after escalation' },
+            }));
+          },
+        },
+      };
+    };
+
+    await repairWorkflowWithWorkforcePersona({
+      repoRoot: '/repo',
+      artifactPath: 'workflows/generated/failing.ts',
+      artifactContent: workflowSource('before'),
+      evidence: { runId: 'relay-run-4', status: 'failed' },
+      classification: { failureClass: 'retry_exhaustion' },
+      debuggerResult: { repairMode: 'guided', summary: 'still failing after repairs' },
+      attempt: 4,
+      maxAttempts: 5,
+      tier: 'minimum',
+      resolver,
+    });
+
+    expect(resolverOptions).toEqual([{ tier: 'best' }]);
   });
 });
 

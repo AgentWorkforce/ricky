@@ -317,6 +317,70 @@ describe('workforce persona workflow writer', () => {
     );
   });
 
+  it('threads failed pre-write repair attempts into later persona repairs and escalates attempt four to best', async () => {
+    const base = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/prewrite-learning.ts',
+    });
+    expect(base.success).toBe(true);
+    const tasks: string[] = [];
+    const resolverOptions: Array<Record<string, unknown> | undefined> = [];
+    const resolver: WorkforcePersonaResolver = async (_intents, options) => {
+      resolverOptions.push(options);
+      return {
+        source: 'package',
+        intent: 'agent-relay-workflow',
+        warnings: [],
+        context: {
+          selection: {
+            personaId: 'agent-relay-workflow',
+            tier: options?.tier ?? 'best',
+            runtime: { harness: 'codex', model: 'codex/test' },
+          },
+          sendMessage(task) {
+            tasks.push(task);
+            const content = tasks.length < 5
+              ? `${base.artifact!.content}\n}`
+              : base.artifact!.content;
+            return execution(personaResponse('workflows/generated/prewrite-learning.ts', content));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/prewrite-learning.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'prewrite-learning',
+        targetMode: 'local',
+        tier: 'minimum',
+        repairAttempts: 4,
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(tasks).toHaveLength(5);
+    expect(tasks[4]).toContain('Previous pre-write repair attempts that still failed');
+    expect(tasks[4]).toContain('"attempt": 3');
+    expect(tasks[4]).toContain('Use those failed repair attempts as negative evidence');
+    expect(resolverOptions.map((options) => options?.tier)).toEqual([
+      'minimum',
+      'minimum',
+      'minimum',
+      'minimum',
+      'best',
+    ]);
+  });
+
   it('falls back to Ricky deterministic rendering when persona pre-write repair is still invalid', async () => {
     const base = generate({
       spec: spec({

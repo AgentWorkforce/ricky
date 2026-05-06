@@ -51,6 +51,8 @@ export interface GenerationInput {
     installSkills?: boolean;
     installRoot?: string;
     tier?: string;
+    /** Maximum pre-write validation repair attempts before falling back to deterministic rendering. */
+    repairAttempts?: number;
     personaIntentCandidates?: readonly string[];
     resolver?: import('./workforce-persona-writer.js').WorkforcePersonaResolver;
   };

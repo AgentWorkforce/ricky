@@ -90,6 +90,48 @@ describe('runWithAutoFix', () => {
     });
   });
 
+  it('passes failed repair history into the next workflow repair attempt', async () => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'))
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-2', 'runtime-launch'))
+      .mockResolvedValueOnce(successResponse('run-3'));
+    const workflowRepairer = vi
+      .fn()
+      .mockResolvedValueOnce(workflowRepair('first repaired workflow'))
+      .mockResolvedValueOnce(workflowRepair('second repaired workflow'));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 4,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: guidedDebugger,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(workflowRepairer).toHaveBeenCalledTimes(2);
+    expect(workflowRepairer.mock.calls[0][0].previousAttempts).toEqual([]);
+    expect(workflowRepairer.mock.calls[1][0].previousAttempts).toEqual([
+      expect.objectContaining({
+        attempt: 1,
+        repairedArtifactPath: 'workflows/generated/foo.ts',
+        repairSummary: 'persona patched the workflow',
+        repairMode: 'workforce-persona',
+        personaRunId: 'persona-run-1',
+        retryAttempt: 2,
+        outcome: expect.objectContaining({
+          status: 'blocker',
+          failedStep: 'runtime-launch',
+          blockerCode: 'MISSING_ENV_VAR',
+          runId: 'run-2',
+          debuggerSummary: 'Set TEST_TOKEN before retrying.',
+        }),
+      }),
+    ]);
+  });
+
   it('emits concise foreground progress during repair and retry', async () => {
     const progress: string[] = [];
     const runSingleAttempt = vi

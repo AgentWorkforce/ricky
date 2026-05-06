@@ -111,10 +111,19 @@ export interface WorkforcePersonaWriterOptions {
   personaIntentCandidates?: readonly string[];
   resolver?: WorkforcePersonaResolver;
   skillContext?: SkillContext;
-  validationFeedback?: {
-    errors: string[];
-    previousContent: string;
-  };
+  validationFeedback?: WorkforcePersonaValidationFeedback;
+}
+
+export interface WorkforcePersonaValidationFeedback {
+  errors: string[];
+  previousContent: string;
+  previousAttempts?: WorkforcePersonaPrewriteRepairAttempt[];
+}
+
+export interface WorkforcePersonaPrewriteRepairAttempt {
+  attempt: number;
+  requestedFixes: string[];
+  returnedErrors: string[];
 }
 
 export interface WorkforcePersonaWriterMetadata {
@@ -451,10 +460,7 @@ export function buildWorkflowPersonaTask(
     outputPath: string;
     relevantFiles: Array<{ path: string; content?: string }>;
     skillContext?: SkillContext;
-    validationFeedback?: {
-      errors: string[];
-      previousContent: string;
-    };
+    validationFeedback?: WorkforcePersonaValidationFeedback;
   },
 ): string {
   const contract = {
@@ -551,7 +557,7 @@ export function buildWorkflowPersonaTask(
 }
 
 function renderValidationFeedbackForPersona(
-  feedback: { errors: string[]; previousContent: string } | undefined,
+  feedback: WorkforcePersonaValidationFeedback | undefined,
 ): string[] {
   if (!feedback) return [];
   return [
@@ -561,6 +567,15 @@ function renderValidationFeedbackForPersona(
     'Validation errors:',
     safeJson(feedback.errors),
     '',
+    ...(feedback.previousAttempts && feedback.previousAttempts.length > 0
+      ? [
+          'Previous pre-write repair attempts that still failed:',
+          safeJson(feedback.previousAttempts),
+          '',
+          'Use those failed repair attempts as negative evidence. Do not repeat the same fix unless the current validation errors prove it was incomplete.',
+          '',
+        ]
+      : []),
     'Previous rejected artifact:',
     '```ts',
     feedback.previousContent.trimEnd(),
