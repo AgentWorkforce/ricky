@@ -13,7 +13,7 @@ export const WAVE_FOLDER_NAMES = [
 
 export const DEFAULT_MAX_CONCURRENCY = 4;
 
-export const DEFAULT_RUN_TIMEOUT_MS = 600_000;
+export const DEFAULT_RUN_TIMEOUT_MS = 1_800_000;
 
 export const DEFAULT_TIMEOUT_MS = DEFAULT_RUN_TIMEOUT_MS;
 
