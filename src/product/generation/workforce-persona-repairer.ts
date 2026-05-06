@@ -22,6 +22,7 @@ export interface WorkforcePersonaRepairOptions {
   blocker?: unknown;
   failedStep?: string;
   previousRunId?: string;
+  previousAttempts?: WorkforcePersonaRepairAttempt[];
   attempt: number;
   maxAttempts: number;
   timeoutSeconds?: number;
@@ -33,6 +34,23 @@ export interface WorkforcePersonaRepairOptions {
   onProgress?: WorkforcePersonaSendOptions['onProgress'];
   personaIntentCandidates?: readonly string[];
   resolver?: WorkforcePersonaResolver;
+}
+
+export interface WorkforcePersonaRepairAttempt {
+  attempt: number;
+  repairedArtifactPath: string;
+  repairSummary: string;
+  repairMode: string;
+  personaRunId?: string;
+  retryAttempt: number;
+  outcome: {
+    status: 'failed' | 'blocker' | 'error';
+    failedStep?: string;
+    blockerCode?: string;
+    runId?: string;
+    classification?: unknown;
+    debuggerSummary?: string;
+  };
 }
 
 export interface WorkforcePersonaRepairMetadata {
@@ -166,11 +184,15 @@ export function buildWorkflowRepairPersonaTask(options: WorkforcePersonaRepairOp
       evidence: options.evidence,
     }),
     '',
+    'Previous repair attempts that did not resolve the workflow:',
+    safeJson(options.previousAttempts ?? []),
+    '',
     'Repair requirements:',
     '- Return only the final response object or fallback fenced artifact blocks. Do not echo the schema, do not return a patch, and do not describe the patch outside metadata.',
     '- Return the full repaired TypeScript workflow artifact, not a diff.',
     '- Preserve the artifact path and keep the workflow runnable from the same file.',
     '- Fix the workflow artifact itself; do not ask the user to run manual recovery unless the workflow cannot safely express the prerequisite.',
+    '- Treat previous repair attempts as negative evidence: account for why they did not resolve the next run, and do not repeat the same repair strategy unless the new evidence proves it was incomplete.',
     '- For MISSING_ENV_VAR failures, first make the workflow load repo-local `.env.local` and `.env` without overwriting shell exports, then add a fast `MISSING_ENV_VAR: NAME` assertion for known required variables before long-running agent steps. Do not fabricate secret values.',
     '- Preserve or improve the 80-to-100 loop: implementation, deterministic validation, review, final hard gate, and signoff evidence.',
     '- Ensure the failed step can be resumed by Ricky using --start-from with the failed step id and the previous run id.',
@@ -194,8 +216,10 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function personaResolverOptions(options: { tier?: string; installRoot?: string }): { tier?: string; installRoot?: string } {
-  const resolved: { tier?: string; installRoot?: string } = { tier: options.tier ?? DEFAULT_WORKFORCE_PERSONA_TIER };
+function personaResolverOptions(options: { tier?: string; installRoot?: string; attempt?: number }): { tier?: string; installRoot?: string } {
+  const resolved: { tier?: string; installRoot?: string } = {
+    tier: options.attempt !== undefined && options.attempt > 3 ? 'best' : options.tier ?? DEFAULT_WORKFORCE_PERSONA_TIER,
+  };
   if (options.installRoot) resolved.installRoot = options.installRoot;
   return resolved;
 }

@@ -12,6 +12,7 @@ import { debugWorkflowRun as defaultDebugWorkflowRun } from '../product/speciali
 import type { DebuggerResult } from '../product/specialists/debugger/types.js';
 import type { WorkflowRunEvidence, WorkflowStepEvidence } from '../shared/models/workflow-evidence.js';
 import { repairWorkflowWithWorkforcePersona } from '../product/generation/workforce-persona-repairer.js';
+import type { WorkforcePersonaRepairAttempt } from '../product/generation/workforce-persona-repairer.js';
 import { localRunStateRoot } from '../shared/state-paths.js';
 
 export interface AutoFixAttemptSummary {
@@ -37,6 +38,7 @@ export interface WorkflowRepairInput {
   cwd: string;
   failedStep?: string;
   runId?: string;
+  previousAttempts?: WorkforcePersonaRepairAttempt[];
   attempt: number;
   maxAttempts: number;
   onProgress?: (message: string) => void;
@@ -92,11 +94,13 @@ export async function runWithAutoFix(
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const onProgress = options.onProgress;
   const attempts: AutoFixAttemptSummary[] = [];
+  const previousRepairAttempts: WorkforcePersonaRepairAttempt[] = [];
   const warnings: string[] = [];
   const trackingRunId = resolveTrackingRunId(request) ?? `ricky-local-${randomUUID()}`;
   let currentRequest: LocalInvocationRequest = { ...request, autoFix: undefined };
   let lastResponse: LocalResponse | undefined;
   let retryOfRunId: string | undefined;
+  let pendingRepairAttempt: Omit<WorkforcePersonaRepairAttempt, 'outcome'> | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     onProgress?.(`Running workflow (attempt ${attempt}/${maxAttempts})...`);
@@ -156,6 +160,20 @@ export async function runWithAutoFix(
 
     const classification = classifyFailure(evidence);
     const debuggerResult = debugWorkflowRun({ evidence, classification });
+    if (pendingRepairAttempt && pendingRepairAttempt.retryAttempt === attempt) {
+      previousRepairAttempts.push({
+        ...pendingRepairAttempt,
+        outcome: {
+          status: attemptSummary.status === 'ok' ? 'failed' : attemptSummary.status,
+          ...(failedStep ? { failedStep } : {}),
+          ...(blockerCode ? { blockerCode } : {}),
+          ...(runId ? { runId } : {}),
+          classification,
+          debuggerSummary: debuggerResult.summary,
+        },
+      });
+      pendingRepairAttempt = undefined;
+    }
     const repairTarget = await resolveWorkflowRepairTarget(currentRequest, response);
 
     if (repairTarget) {
@@ -172,6 +190,7 @@ export async function runWithAutoFix(
           cwd: repairTarget.cwd,
           ...(failedStep ? { failedStep } : {}),
           ...(runId ? { runId } : {}),
+          previousAttempts: [...previousRepairAttempts],
           attempt,
           maxAttempts,
           ...(onProgress ? { onProgress } : {}),
@@ -204,6 +223,14 @@ export async function runWithAutoFix(
           artifact_path: repairedArtifactPath,
           summary: repair.summary,
           ...(repair.runId ? { persona_run_id: repair.runId } : {}),
+        };
+        pendingRepairAttempt = {
+          attempt,
+          repairedArtifactPath,
+          repairSummary: repair.summary,
+          repairMode: repair.mode ?? 'workforce-persona',
+          ...(repair.runId ? { personaRunId: repair.runId } : {}),
+          retryAttempt: attempt + 1,
         };
         warnings.push(...(repair.warnings ?? []));
 
@@ -348,6 +375,7 @@ async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<Work
       blocker: input.response.execution?.blocker,
       ...(input.failedStep ? { failedStep: input.failedStep } : {}),
       ...(input.runId ? { previousRunId: input.runId } : {}),
+      previousAttempts: input.previousAttempts ?? [],
       attempt: input.attempt,
       maxAttempts: input.maxAttempts,
       installRoot: join(localRunStateRoot(input.cwd), 'workforce-persona-repair-skills'),

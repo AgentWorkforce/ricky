@@ -19,7 +19,11 @@ import {
   applyPersonaArtifactToRenderedArtifact,
   writeWorkflowWithWorkforcePersona,
   WorkforcePersonaWriterError,
+  type WorkforcePersonaPrewriteRepairAttempt,
 } from './workforce-persona-writer.js';
+
+const DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 3;
+const MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 8;
 
 export function generate(input: GenerationInput): GenerationResult {
   const skillContext = loadSkills(input.spec, input.skillOverrides, input.templateOverride);
@@ -95,13 +99,18 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
     let finalArtifact = applyPersonaArtifactToRenderedArtifact(artifact, personaResult);
     let validation = validateGeneratedArtifact(finalArtifact, baseResult.patternDecision, baseResult.skillContext, input.spec);
     let finalPersonaMetadata = personaResult.metadata;
+    const repairAttempts = resolvePrewriteRepairAttempts(input.workforcePersonaWriter?.repairAttempts);
+    const previousRepairAttempts: WorkforcePersonaPrewriteRepairAttempt[] = [];
 
-    if (!validation.valid) {
+    for (let repairAttempt = 1; !validation.valid && repairAttempt <= repairAttempts; repairAttempt += 1) {
+      const requestedFixes = validation.errors;
       const repairResult = await writeWorkflowWithWorkforcePersona(input.spec, {
         ...writerOptions,
+        tier: workforcePersonaTierForRepairAttempt(writerOptions.tier, repairAttempt),
         validationFeedback: {
-          errors: validation.errors,
+          errors: requestedFixes,
           previousContent: finalArtifact.content,
+          previousAttempts: previousRepairAttempts,
         },
       });
       const repairedArtifact = applyPersonaArtifactToRenderedArtifact(artifact, repairResult);
@@ -117,19 +126,31 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
             'Ricky pre-write validation repaired the Workforce persona artifact before writing.',
           ],
         };
-      } else {
-        const fallbackMessage = `Ricky pre-write validation rejected the Workforce persona artifact after repair (${repairValidation.errors[0] ?? 'unknown validation error'}); used Ricky deterministic renderer instead.`;
-        const fallbackIssue = warningIssue('validation', 'WORKFORCE_PERSONA_PREWRITE_REPAIR_FALLBACK', fallbackMessage);
-        return {
-          ...baseResult,
-          success: true,
-          validation: addValidationWarning(baseResult.validation, fallbackIssue),
-          workforcePersona: {
-            ...repairResult.metadata,
-            warnings: [...repairResult.metadata.warnings, fallbackMessage],
-          },
-        };
+        break;
       }
+
+      previousRepairAttempts.push({
+        attempt: repairAttempt,
+        requestedFixes,
+        returnedErrors: repairValidation.errors,
+      });
+      finalArtifact = repairedArtifact;
+      validation = repairValidation;
+      finalPersonaMetadata = repairResult.metadata;
+    }
+
+    if (!validation.valid) {
+      const fallbackMessage = `Ricky pre-write validation rejected the Workforce persona artifact after ${repairAttempts} repair attempt(s) (${validation.errors[0] ?? 'unknown validation error'}); used Ricky deterministic renderer instead.`;
+      const fallbackIssue = warningIssue('validation', 'WORKFORCE_PERSONA_PREWRITE_REPAIR_FALLBACK', fallbackMessage);
+      return {
+        ...baseResult,
+        success: true,
+        validation: addValidationWarning(baseResult.validation, fallbackIssue),
+        workforcePersona: {
+          ...finalPersonaMetadata,
+          warnings: [...finalPersonaMetadata.warnings, fallbackMessage],
+        },
+      };
     }
 
     const plannedChecks = buildPlannedChecks(finalArtifact, input.dryRunEnabled !== false);
@@ -184,6 +205,16 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       },
     };
   }
+}
+
+function resolvePrewriteRepairAttempts(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS;
+  if (!Number.isFinite(value)) return DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS;
+  return Math.max(0, Math.min(MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS, Math.floor(value)));
+}
+
+function workforcePersonaTierForRepairAttempt(tier: string | undefined, repairAttempt: number): string | undefined {
+  return repairAttempt > 3 ? 'best' : tier;
 }
 
 export function validateGeneratedArtifact(
