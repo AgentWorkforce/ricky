@@ -98,6 +98,7 @@ export type LocalBlockerCode =
   | 'INVALID_ARTIFACT'
   | 'UNSUPPORTED_RUNTIME'
   | 'CREDENTIALS_REJECTED'
+  | 'STEP_TIMEOUT'
   | 'WORKDIR_DIRTY'
   | 'NETWORK_UNREACHABLE'
   | 'NETWORK_TRANSIENT';
@@ -108,6 +109,7 @@ export type LocalBlockerCategory =
   | 'dependency'
   | 'workflow_invalid'
   | 'resource'
+  | 'timeout'
   | 'unsupported';
 
 export interface LocalClassifiedBlocker {
@@ -1979,6 +1981,26 @@ function classifyCoordinatorBlocker(
     });
   }
 
+  // Coordinator-reported timeouts are an authoritative signal — classify them
+  // before falling back to regex-based heuristics that match incidental "auth"
+  // or "token" mentions in PTY/agent output. See classifyCoordinatorBlocker
+  // ordering note: timeout takes precedence over credentials.
+  if (result.status === 'timed_out') {
+    return blocker({
+      code: 'STEP_TIMEOUT',
+      category: 'timeout',
+      detectedDuring: 'launch',
+      message: `Workflow runtime exceeded its time budget: ${signal}.`,
+      missing: ['workflow completion within configured timeout'],
+      found: [`cwd=${result.cwd}`, `durationMs=${result.durationMs ?? 'unknown'}`],
+      steps: [
+        'Resume from the last completed step with `ricky run <artifact> --start-from <step> --previous-run-id <id>`.',
+        'Raise per-step `timeoutMs` for the step that ran long, or split the step into smaller agents/gates.',
+        command,
+      ],
+    });
+  }
+
   if (result.exitCode === 127 || /(?:command not found|enoent|not found)/i.test(combined)) {
     const isSdkScriptRoute = result.invocation.command === DEFAULT_LOCAL_ROUTE.command;
     return blocker({
@@ -2014,7 +2036,7 @@ function classifyCoordinatorBlocker(
     });
   }
 
-  if (/(?:credential|auth|unauthorized|forbidden|token|api key)/i.test(combined)) {
+  if (matchesCredentialFailure(combined)) {
     return blocker({
       code: 'CREDENTIALS_REJECTED',
       category: 'credentials',
@@ -2069,6 +2091,34 @@ function npxNoInstallPackage(args: string[]): string | undefined {
   const noInstallIndex = args.indexOf('--no-install');
   if (noInstallIndex === -1) return undefined;
   return args[noInstallIndex + 1];
+}
+
+// Match credential failures by requiring an explicit rejection signal — bare
+// mentions of "auth" or "token" in agent PTY output were yielding false
+// positives for any failure that ran codex/claude (their TUIs print the words
+// constantly). Require co-occurring rejection markers (401/403, "invalid token",
+// "unauthorized", "credentials rejected/expired", etc.) on the same line.
+function matchesCredentialFailure(text: string): boolean {
+  const FAILURE_MARKERS = [
+    /\b401\b/i,
+    /\b403\b/i,
+    /\bunauthori[sz]ed\b/i,
+    /\bforbidden\b/i,
+    /\bauthentication\s+(?:failed|error|required)\b/i,
+    /\bauthori[sz]ation\s+(?:failed|error|denied|required)\b/i,
+    /\binvalid(?:\s+|_)(?:api[\s_-]?key|token|credentials?|bearer)\b/i,
+    /\bexpired\s+(?:api[\s_-]?key|token|credentials?|session)\b/i,
+    /\bcredentials?\s+(?:rejected|invalid|expired|denied|required|missing)\b/i,
+    /\b(?:api[\s_-]?key|token)\s+(?:rejected|invalid|expired|missing|required|not\s+(?:found|set|valid))\b/i,
+    /\b(?:please\s+)?(?:sign|log)[-\s]?in\s+(?:again|required)\b/i,
+  ];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine);
+    for (const marker of FAILURE_MARKERS) {
+      if (marker.test(line)) return true;
+    }
+  }
+  return false;
 }
 
 function hasMissingEnvironmentMessage(text: string): boolean {
