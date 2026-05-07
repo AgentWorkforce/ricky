@@ -1135,6 +1135,9 @@ function allVerificationsPassed(run: WorkflowRunEvidence): boolean {
   return [
     ...run.deterministicGates.flatMap((gate) => gate.verifications),
     ...run.steps.flatMap((step) => step.verifications),
+    ...run.steps.flatMap((step) =>
+      step.deterministicGates.flatMap((gate) => gate.verifications),
+    ),
   ].every((verification) => verification.passed);
 }
 

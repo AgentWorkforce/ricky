@@ -16,6 +16,7 @@ import {
   buildEvidenceOutcome,
   buildStatusBreakdown,
 } from './capture.js';
+import * as evidenceIndex from './index.js';
 import type { VerificationResult, WorkflowStepEvidence } from './types.js';
 
 const FIXED_NOW = new Date('2026-04-26T10:00:00.000Z');
@@ -685,11 +686,45 @@ describe('summarizeEvidence', () => {
     ]);
   });
 
+  it('checks externally loaded step gate verifications even when step verifications are not duplicated', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const step = completeStep({
+      ...createStepEvidence({ stepId: 's-1', stepName: 'external-gate' }),
+      deterministicGates: [createDeterministicGate({
+        gateName: 'external-gate',
+        verifications: [
+          {
+            type: 'exit_code',
+            passed: false,
+            expected: '0',
+            actual: '1',
+            message: 'external gate failed',
+          },
+        ],
+      })],
+    }, 'passed');
+
+    const completed = completeRun({ ...run, steps: [step] });
+    const summary = summarizeEvidence(completed);
+
+    expect(summary.allVerificationsPassed).toBe(false);
+    expect(summary.allDeterministicGatesPassed).toBe(false);
+  });
+
   it('reports allDeterministicGatesPassed as true when no gates exist', () => {
     const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
     const completed = completeRun(run);
     const summary = summarizeEvidence(completed);
     expect(summary.allDeterministicGatesPassed).toBe(true);
+  });
+});
+
+describe('evidence barrel exports', () => {
+  it('exposes capture helpers and collectors from the public evidence index', () => {
+    expect(evidenceIndex.createRunEvidence).toBe(createRunEvidence);
+    expect(evidenceIndex.buildEvidenceOutcome).toBe(buildEvidenceOutcome);
+    expect(evidenceIndex.collectFixLoopAttempts).toBeTypeOf('function');
+    expect(evidenceIndex.auditDeterministicGates).toBeTypeOf('function');
   });
 });
 
