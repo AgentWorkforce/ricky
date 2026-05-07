@@ -25,6 +25,7 @@ function evaluateInitialSoftRun(result: CommandResult | undefined, required: boo
   if (!result) {
     return step({
       phase: 'initial_soft_run',
+      evidenceLabel: 'initial_soft_run',
       passed: !required,
       blocking: required,
       severity: required ? 'error' : 'warning',
@@ -37,6 +38,7 @@ function evaluateInitialSoftRun(result: CommandResult | undefined, required: boo
 
   return step({
     phase: 'initial_soft_run',
+    evidenceLabel: 'initial_soft_run',
     passed: true,
     blocking: false,
     severity: result.exitCode === 0 ? 'info' : 'warning',
@@ -53,6 +55,7 @@ function evaluateFixLoop(result: CommandResult | undefined, fixAttempts: number 
   if (!result) {
     return step({
       phase: 'fix_loop',
+      evidenceLabel: 'fix_loop',
       passed: false,
       blocking: true,
       severity: 'error',
@@ -65,6 +68,7 @@ function evaluateFixLoop(result: CommandResult | undefined, fixAttempts: number 
   if (attempts > maxFixAttempts) {
     return step({
       phase: 'fix_loop',
+      evidenceLabel: 'fix_loop',
       passed: false,
       blocking: true,
       severity: 'error',
@@ -77,6 +81,7 @@ function evaluateFixLoop(result: CommandResult | undefined, fixAttempts: number 
   if (result.exitCode !== 0 && attempts === 0) {
     return step({
       phase: 'fix_loop',
+      evidenceLabel: 'fix_loop',
       passed: false,
       blocking: true,
       severity: 'error',
@@ -88,6 +93,7 @@ function evaluateFixLoop(result: CommandResult | undefined, fixAttempts: number 
 
   return step({
     phase: 'fix_loop',
+    evidenceLabel: 'fix_loop',
     passed: true,
     blocking: false,
     severity: result.exitCode === 0 ? 'info' : 'warning',
@@ -103,6 +109,7 @@ function evaluateFinalGate(finalResult: CommandResult | undefined, initialResult
   if (!finalResult && initialResult && required) {
     return step({
       phase: 'final_gate',
+      evidenceLabel: 'final_hard_gate',
       passed: false,
       blocking: true,
       severity: 'error',
@@ -115,6 +122,7 @@ function evaluateFinalGate(finalResult: CommandResult | undefined, initialResult
   if (!result) {
     return step({
       phase: 'final_gate',
+      evidenceLabel: 'final_hard_gate',
       passed: !required,
       blocking: required,
       severity: required ? 'error' : 'warning',
@@ -127,6 +135,7 @@ function evaluateFinalGate(finalResult: CommandResult | undefined, initialResult
 
   return step({
     phase: 'final_gate',
+    evidenceLabel: 'final_hard_gate',
     passed: result.exitCode === 0,
     blocking: result.exitCode !== 0,
     severity: result.exitCode === 0 ? 'info' : 'error',
@@ -143,6 +152,7 @@ function evaluateBuildGate(result: CommandResult | undefined, required: boolean)
   if (!result) {
     return step({
       phase: 'build_typecheck_gate',
+      evidenceLabel: 'build_typecheck_gate',
       passed: !required,
       blocking: required,
       severity: required ? 'error' : 'warning',
@@ -155,6 +165,7 @@ function evaluateBuildGate(result: CommandResult | undefined, required: boolean)
 
   return step({
     phase: 'build_typecheck_gate',
+    evidenceLabel: 'build_typecheck_gate',
     passed: result.exitCode === 0,
     blocking: result.exitCode !== 0,
     severity: result.exitCode === 0 ? 'info' : 'error',
@@ -177,6 +188,7 @@ function evaluateRegressionGate(
     const required = config.requireTest || config.requireRegression;
     return step({
       phase: 'regression_gate',
+      evidenceLabel: 'regression_gate',
       passed: !required,
       blocking: required,
       severity: required ? 'error' : 'warning',
@@ -190,6 +202,7 @@ function evaluateRegressionGate(
   const failed = results.find((result) => result.exitCode !== 0);
   return step({
     phase: 'regression_gate',
+    evidenceLabel: 'regression_gate',
     passed: !failed,
     blocking: Boolean(failed),
     severity: failed ? 'error' : 'info',

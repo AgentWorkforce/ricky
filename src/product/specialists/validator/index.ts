@@ -8,6 +8,7 @@ export type {
   FindingLocation,
   FindingSeverity,
   ProofLoopConfig,
+  ProofLoopEvidenceLabel,
   ProofLoopPhase,
   ProofLoopStep,
   SignoffVerdict,

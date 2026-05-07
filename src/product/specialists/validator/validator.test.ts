@@ -29,12 +29,13 @@ describe('validateWorkflow', () => {
       blockingFindings: [],
       warningFindings: [],
     });
-    expect(result.proofLoopSteps.map((step) => [step.phase, step.passed, step.blocking])).toEqual([
-      ['initial_soft_run', true, false],
-      ['fix_loop', true, false],
-      ['final_gate', true, false],
-      ['build_typecheck_gate', true, false],
-      ['regression_gate', true, false],
+    expect(result.structuralFindings.every((finding) => finding.passed || finding.severity === 'warning')).toBe(true);
+    expect(result.proofLoopSteps.map((step) => [step.phase, step.evidenceLabel, step.passed, step.blocking])).toEqual([
+      ['initial_soft_run', 'initial_soft_run', true, false],
+      ['fix_loop', 'fix_loop', true, false],
+      ['final_gate', 'final_hard_gate', true, false],
+      ['build_typecheck_gate', 'build_typecheck_gate', true, false],
+      ['regression_gate', 'regression_gate', true, false],
     ]);
   });
 
@@ -262,6 +263,7 @@ describe('validateWorkflow', () => {
         passed: false,
         severity: 'warning',
         blocking: false,
+        path: 'workflows/generated/validator-specialist.ts',
         message: expect.stringContaining('src/product/generation'),
         fixHint: expect.stringContaining('Restrict regression allowlists'),
       }),
@@ -296,6 +298,7 @@ function expectBlockingFinding(result: ValidatorResult, check: StructuralCheckNa
       passed: false,
       severity: 'error',
       blocking: true,
+      path: 'workflows/generated/validator-specialist.ts',
       message: expect.stringMatching(message),
       fixHint: expect.any(String),
     }),

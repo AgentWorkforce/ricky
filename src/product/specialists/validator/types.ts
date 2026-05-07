@@ -60,8 +60,16 @@ export type ProofLoopPhase =
   | 'build_typecheck_gate'
   | 'regression_gate';
 
+export type ProofLoopEvidenceLabel =
+  | 'initial_soft_run'
+  | 'fix_loop'
+  | 'final_hard_gate'
+  | 'build_typecheck_gate'
+  | 'regression_gate';
+
 export interface ProofLoopStep {
   phase: ProofLoopPhase;
+  evidenceLabel: ProofLoopEvidenceLabel;
   passed: boolean;
   severity: FindingSeverity;
   blocking: boolean;
