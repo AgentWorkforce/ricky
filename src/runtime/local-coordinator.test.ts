@@ -761,6 +761,14 @@ describe('LocalCoordinator', () => {
     });
 
     expect(run).toHaveBeenCalledTimes(1);
+    expect(coordinator.getActiveRun('run-without-real-agent-relay')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/no-real-process.yaml'],
+        cwd: '/repo',
+      },
+    });
 
     invocation.emitStdout('unit runner captured stdout');
     invocation.emitStderr('unit runner captured stderr');
@@ -775,6 +783,14 @@ describe('LocalCoordinator', () => {
     });
     expect(result.stdout).toEqual(['unit runner captured stdout']);
     expect(result.stderr).toEqual(['unit runner captured stderr']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
     expect(result.events).toContainEqual(
       expect.objectContaining({
         kind: 'stdout',
