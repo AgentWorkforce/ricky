@@ -10,7 +10,7 @@ async function main() {
     .onError('retry', { maxRetries: 1, retryDelayMs: 10_000 })
 
     .agent('lead-claude', {
-      cli: 'claude',
+      cli: 'codex',
       interactive: false,
       role: 'Foundation lead who plans repo convention updates and keeps the scope limited to standards and workflow authoring rules.',
       retries: 1,
@@ -21,13 +21,13 @@ async function main() {
       retries: 2,
     })
     .agent('reviewer-claude', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'reviewer',
       role: 'Reviews convention updates for product alignment, enforceability, and missing workflow safety rules.',
       retries: 1,
     })
     .agent('validator-claude', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'worker',
       role: 'Validation owner who writes the final signoff after all gates pass.',
       retries: 1,
