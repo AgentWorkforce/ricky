@@ -1748,8 +1748,8 @@ export async function runInteractiveCli(
     mode: deps.mode,
     configStore: deps.configStore,
     providerStatus: deps.providerStatus,
-    compactForExecution: deps.handoff !== undefined,
-    skipFirstRunPersistence: deps.handoff !== undefined,
+    compactForExecution: deps.handoff !== undefined || deps.cloudRequest !== undefined,
+    skipFirstRunPersistence: deps.handoff !== undefined || deps.cloudRequest !== undefined,
     verbose: deps.verbose,
     signal: deps.signal,
   });

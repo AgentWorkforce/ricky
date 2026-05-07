@@ -1571,6 +1571,29 @@ describe('runInteractiveCli', () => {
       );
     });
 
+    it('power-user cloud run: onboarding skips welcome wizard when cloudRequest is provided', async () => {
+      const onboardFn = vi.fn().mockResolvedValue(onboarding('cloud'));
+
+      await runInteractiveCli({
+        onboard: onboardFn,
+        mode: 'cloud',
+        cloudRequest: cloudRequest(),
+        cloudExecutor: {
+          generate: vi.fn().mockResolvedValue({
+            artifacts: [], warnings: [], followUpActions: [],
+          }),
+        },
+      });
+
+      expect(onboardFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'cloud',
+          compactForExecution: true,
+          skipFirstRunPersistence: true,
+        }),
+      );
+    });
+
     it('welcome journey: onboarding result carries firstRun and bannerShown state', async () => {
       const firstRunResult = await runInteractiveCli({
         onboard: vi.fn().mockResolvedValue({
