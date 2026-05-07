@@ -230,6 +230,10 @@ describe('runWithAutoFix', () => {
       expect.stringContaining('Local execution must run through Agent Relay using the generated workflow artifact.'),
       '/repo',
     );
+    const repairedContent = artifactWriter.mock.calls.find(([path]) => path === 'workflows/generated/lead-plan-marker.ts')?.[1] as string;
+    expect(repairedContent).toContain('readyMarkerIndex = body.lastIndexOf(readyMarker)');
+    expect(repairedContent).toContain("body.slice(0, readyMarkerIndex).trimEnd() + section + '\\n\\n' + body.slice(readyMarkerIndex)");
+    expect(repairedContent).not.toContain("body.replace(/\\n*GENERATION_LEAD_PLAN_READY\\s*$");
     expect(runSingleAttempt.mock.calls[1][0]).toMatchObject({
       source: 'workflow-artifact',
       specPath: 'workflows/generated/lead-plan-marker.ts',
