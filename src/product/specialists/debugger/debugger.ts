@@ -14,7 +14,7 @@ export function debugWorkflowRun(input: DebuggerInput): DebuggerResult {
     recommendation,
     repairMode,
     summary: `${diagnosis.primaryCause.summary} ${recommendation.summary}`,
-    analyzedAt: input.analyzedAt ?? new Date().toISOString(),
+    analyzedAt: input.analyzedAt ?? evidenceTimestamp(input.evidence),
   };
 }
 
@@ -24,4 +24,8 @@ function deriveRepairMode(directRepairEligible: boolean, firstAction: string | u
     return 'manual';
   }
   return 'guided';
+}
+
+function evidenceTimestamp(input: DebuggerInput['evidence']): string {
+  return input.completedAt ?? input.startedAt;
 }
