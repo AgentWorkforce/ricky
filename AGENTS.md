@@ -205,6 +205,8 @@ For convention-only work, `CLAUDE.md` should remain a symlink to `AGENTS.md`. Up
 
 Convention-only workflows still need deterministic file-existence checks, grep or structural checks for the updated terms, symlink verification for `CLAUDE.md`, and scoped change detection limited to the declared convention files. The scoped change-detection gate must include both `git diff --name-only -- <declared-files>` and `git ls-files --others --exclude-standard -- <declared-files>`.
 
+The convention-only gate must check each declared file target directly, verify required terms with deterministic grep or structural checks, verify `CLAUDE.md -> AGENTS.md` when Claude instructions are in scope, and fail if scoped change detection reports files outside the declared convention targets.
+
 ## Runtime Shape
 
 Serious Ricky workflows must use the standard runtime wrapper:

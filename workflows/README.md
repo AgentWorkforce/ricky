@@ -156,6 +156,8 @@ For convention-only updates, the normal file boundary is `AGENTS.md`, symlinked 
 
 Convention-only workflow commits should stay inside that boundary unless the workflow contract explicitly expands scope. `CLAUDE.md` should remain a symlink to `AGENTS.md`, so Claude-facing behavior is verified through the symlink rather than forked into separate instructions.
 
+Convention-only verification should check each declared file exists, grep for the required standard terms, verify the `CLAUDE.md -> AGENTS.md` symlink when in scope, and run scoped change detection using both `git diff --name-only -- <declared-files>` and `git ls-files --others --exclude-standard -- <declared-files>`.
+
 ## Reliability traps
 
 Avoid these recurring failure modes:

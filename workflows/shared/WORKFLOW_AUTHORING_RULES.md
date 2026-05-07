@@ -26,7 +26,7 @@ Compact execution rules for agents writing Ricky workflows.
 20. Write final signoff artifacts under `.workflow-artifacts/` for significant implementation or generation workflows.
 21. In 80-to-100 validation loops, run the same validation first as a soft gate, fix from captured output, then rerun it as a hard gate before final signoff.
 22. For convention-only workflows, keep edits inside declared convention files and preserve `CLAUDE.md` as a symlink to `AGENTS.md` unless the contract explicitly says otherwise.
-23. For convention-only workflows, run file existence checks, grep or structural checks for the required terms, symlink checks when `CLAUDE.md` is in scope, and scoped change detection limited to declared convention files.
+23. For convention-only workflows, check each declared file exists, run grep or structural checks for the required terms, verify `CLAUDE.md -> AGENTS.md` when `CLAUDE.md` is in scope, and use scoped change detection limited to declared convention files.
 
 ## Must-not
 
