@@ -23,7 +23,13 @@ interface PlannedSlice {
 
 export function planMasterExecution(input: PlannerInput): MasterExecutionPlan {
   const wavePrefix = input.wavePrefix ?? DEFAULT_WAVE_PREFIX;
-  const desiredSlices = normalizeDesiredSlices(input);
+  const planAmbiguities: string[] = [];
+  const normalizedSlices = normalizeDesiredSlices(input);
+  const desiredSlices = applyMaxChildrenConstraint(
+    normalizedSlices,
+    input.constraints?.maxChildren,
+    planAmbiguities,
+  );
   const reservedIds = new Map<string, number>();
   const slices: PlannedSlice[] = desiredSlices.map((slice, index) => {
     const id = uniqueSlug(slice.id ?? slice.title, reservedIds);
@@ -38,14 +44,8 @@ export function planMasterExecution(input: PlannerInput): MasterExecutionPlan {
     };
   });
 
-  const planAmbiguities: string[] = [];
-  if (slices.length === 0) {
+  if (normalizedSlices.length === 0) {
     planAmbiguities.push('No desired slices or target files were provided for decomposition.');
-  }
-  if (input.constraints?.maxChildren !== undefined && slices.length > input.constraints.maxChildren) {
-    planAmbiguities.push(
-      `Plan contains ${slices.length} children, exceeding maxChildren ${input.constraints.maxChildren}.`,
-    );
   }
 
   markSliceAmbiguities(slices, input.constraints?.forbiddenPaths ?? []);
@@ -97,6 +97,24 @@ function normalizeDesiredSlices(input: PlannerInput): readonly PlannerDesiredSli
   }
 
   return [];
+}
+
+function applyMaxChildrenConstraint(
+  slices: readonly PlannerDesiredSlice[],
+  maxChildren: number | undefined,
+  planAmbiguities: string[],
+): readonly PlannerDesiredSlice[] {
+  if (maxChildren === undefined || !Number.isFinite(maxChildren)) {
+    return slices;
+  }
+
+  const limit = Math.max(0, Math.floor(maxChildren));
+  if (slices.length <= limit) {
+    return slices;
+  }
+
+  planAmbiguities.push(`Plan contains ${slices.length} children, exceeding maxChildren ${limit}; truncated.`);
+  return slices.slice(0, limit);
 }
 
 function markSliceAmbiguities(slices: readonly PlannedSlice[], forbiddenPaths: readonly string[]): void {
@@ -182,6 +200,7 @@ function buildChildPlan(input: {
 }): ChildWorkflowPlan {
   const signoffArtifactPath = `.workflow-artifacts/${input.wavePrefix}/${input.slice.id}/signoff.md`;
   const signoffMarker = markerForId(input.slice.id);
+  const workflowFilePath = `workflows/${input.wavePrefix}/${String(input.planIndex).padStart(2, '0')}-${input.slice.id}.ts`;
   const validationCommands = [DEFAULT_VALIDATION_COMMAND];
   const gates = buildDefaultGates({
     signoffArtifactPath,
@@ -189,13 +208,14 @@ function buildChildPlan(input: {
     targetFiles: input.slice.targetFiles,
     validationCommands,
     requiredGateMarkers: input.requiredGateMarkers,
+    workflowFilePath,
   });
 
   return {
     id: input.slice.id,
     title: input.slice.input.title,
     ...(input.slice.input.summary ? { summary: input.slice.input.summary } : {}),
-    workflowFilePath: `workflows/${input.wavePrefix}/${String(input.planIndex).padStart(2, '0')}-${input.slice.id}.ts`,
+    workflowFilePath,
     targetFiles: input.slice.targetFiles,
     allowedDirtyScope: [...input.slice.targetFiles, signoffArtifactPath],
     dependsOn: input.slice.dependsOn,
@@ -223,7 +243,9 @@ function buildDefaultGates(input: {
   targetFiles: readonly string[];
   validationCommands: readonly string[];
   requiredGateMarkers: readonly string[];
+  workflowFilePath: string;
 }): readonly ChildWorkflowGate[] {
+  const dryrunCommand = `agent-relay run --dry-run ${input.workflowFilePath}`;
   const gates: ChildWorkflowGate[] = [
     {
       id: `signoff_artifact:${input.signoffArtifactPath}`,
@@ -264,18 +286,14 @@ function buildDefaultGates(input: {
         command,
       }),
     ),
-  ];
-
-  if (input.targetFiles.some((targetFile) => /^workflows\/.+\.ts$/.test(targetFile))) {
-    const dryrunCommand = 'npm run typecheck';
-    gates.push({
-      id: `dryrun_command:${dryrunCommand}`,
+    {
+      id: `dryrun_command:${input.workflowFilePath}`,
       kind: 'dryrun_command',
-      description: 'Generated workflow passes a dry-run validation.',
+      description: 'Generated child workflow passes agent-relay dry-run validation.',
       required: true,
       command: dryrunCommand,
-    });
-  }
+    },
+  ];
 
   return gates;
 }

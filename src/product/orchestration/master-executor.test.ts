@@ -93,6 +93,11 @@ describe('planMasterExecution', () => {
           required: true,
           command: 'npm run typecheck',
         }),
+        expect.objectContaining({
+          kind: 'dryrun_command',
+          required: true,
+          command: `agent-relay run --dry-run ${apiChild.workflowFilePath}`,
+        }),
       ]),
     );
 
@@ -148,9 +153,131 @@ describe('planMasterExecution', () => {
     expect(children(plan)[0].ambiguous?.reason).toContain('Unknown dependency: missing-child.');
     expect(plan.ambiguous?.reason).toContain('Unknown dependency: missing-child.');
   });
+
+  it('rejects empty and cyclic specs as ambiguous', () => {
+    const emptyPlan = planMasterExecution({
+      title: 'No safe slice',
+      description: 'No desired slices or target files are available.',
+    });
+
+    expect(emptyPlan.children).toEqual([]);
+    expect(emptyPlan.ambiguous?.reason).toContain('No desired slices or target files');
+
+    const cyclicPlan = planMasterExecution({
+      title: 'Cyclic dependency plan',
+      description: 'Two slices depend on each other.',
+      desiredSlices: [
+        {
+          id: 'first',
+          title: 'First',
+          targetFiles: ['src/first.ts'],
+          dependsOn: ['second'],
+        },
+        {
+          id: 'second',
+          title: 'Second',
+          targetFiles: ['src/second.ts'],
+          dependsOn: ['first'],
+        },
+      ],
+    });
+
+    expect(cyclicPlan.ambiguous?.reason).toContain('Dependency cycle detected.');
+    expect(cyclicPlan.children.some((plannedChild) => plannedChild.ambiguous?.reason.includes('Dependency cycle'))).toBe(
+      true,
+    );
+  });
+
+  it('returns stable child ids and workflow paths across identical inputs', () => {
+    const input = {
+      title: 'Stable executor rollout',
+      description: 'The same spec should produce byte-stable execution plans.',
+      wavePrefix: 'wave99-stable',
+      desiredSlices: [
+        {
+          title: 'Runtime Policy',
+          targetFiles: ['src/runtime/policy.ts'],
+        },
+        {
+          title: 'Runtime Policy',
+          targetFiles: ['src/runtime/policy.test.ts'],
+        },
+        {
+          title: 'Telemetry Adapter',
+          targetFiles: ['src/runtime/telemetry.ts'],
+          dependsOn: ['runtime-policy'],
+        },
+      ],
+    };
+
+    const first = planMasterExecution(input);
+    const second = planMasterExecution(input);
+
+    expect(first).toEqual(second);
+    expect(children(first).map((plannedChild) => plannedChild.id)).toEqual([
+      'runtime-policy',
+      'runtime-policy-2',
+      'telemetry-adapter',
+    ]);
+    expect(children(first).map((plannedChild) => plannedChild.workflowFilePath)).toEqual([
+      'workflows/wave99-stable/01-runtime-policy.ts',
+      'workflows/wave99-stable/02-runtime-policy-2.ts',
+      'workflows/wave99-stable/03-telemetry-adapter.ts',
+    ]);
+  });
 });
 
 describe('runMasterExecution', () => {
+  it('runs every dependency wave only after the previous wave completed', async () => {
+    const plan = planMasterExecution({
+      title: 'Ordered rollout',
+      description: 'Runtime and docs complete before telemetry starts.',
+      desiredSlices: [
+        { id: 'runtime', title: 'Runtime', targetFiles: ['src/runtime.ts'] },
+        { id: 'docs', title: 'Docs', targetFiles: ['docs/runtime.md'] },
+        {
+          id: 'telemetry',
+          title: 'Telemetry',
+          targetFiles: ['src/telemetry.ts'],
+          dependsOn: ['runtime'],
+        },
+      ],
+    });
+    const events: string[] = [];
+    const controls = new Map<string, Deferred<void>>();
+
+    const execution = runMasterExecution(
+      plan,
+      async (plannedChild: ChildWorkflowPlan, ctx: RunnerContext) => {
+        events.push(`start:${plannedChild.id}`);
+        const control = deferred<void>();
+        controls.set(plannedChild.id, control);
+        await control.promise;
+        events.push(`finish:${plannedChild.id}`);
+        return passedRun(plannedChild, ctx.attempt);
+      },
+      { maxConcurrency: 2 },
+    );
+
+    await waitUntil(() =>
+      expect(events.filter((event) => event.startsWith('start:'))).toEqual(['start:runtime', 'start:docs']),
+    );
+    expect(events).not.toContain('start:telemetry');
+
+    controls.get('runtime')?.resolve();
+    await waitUntil(() => expect(events).toContain('finish:runtime'));
+    expect(events).not.toContain('start:telemetry');
+
+    controls.get('docs')?.resolve();
+    await waitUntil(() => expect(events).toContain('start:telemetry'));
+    controls.get('telemetry')?.resolve();
+
+    const result = await execution;
+    expect(result.decision).toEqual({ kind: 'complete' });
+    expect(events.indexOf('start:telemetry')).toBeGreaterThan(events.indexOf('finish:runtime'));
+    expect(events.indexOf('start:telemetry')).toBeGreaterThan(events.indexOf('finish:docs'));
+  });
+
   it('enforces maxConcurrency while running independent children', async () => {
     const plan = planMasterExecution({
       title: 'Parallel product slices',
@@ -268,6 +395,39 @@ describe('runMasterExecution', () => {
       childId: target.id,
       status: 'failed',
       evidence: { signoffPresent: false },
+    });
+  });
+
+  it('classifies a failed child with more than four target files as split', async () => {
+    const plan = planMasterExecution({
+      title: 'Oversized implementation slice',
+      description: 'A broad file scope should be split after failure.',
+      desiredSlices: [
+        {
+          id: 'wide-slice',
+          title: 'Wide slice',
+          targetFiles: [
+            'src/product/one.ts',
+            'src/product/two.ts',
+            'src/product/three.ts',
+            'src/product/four.ts',
+            'src/product/five.ts',
+          ],
+        },
+      ],
+    });
+    const target = children(plan)[0];
+
+    const result = await runMasterExecution(plan, async () =>
+      failedRun(target, {
+        signoffPresent: false,
+        errorMessage: 'implementation slice exceeded reviewable scope',
+      }),
+    );
+
+    expect(result.decision).toMatchObject({
+      kind: 'split',
+      childId: 'wide-slice',
     });
   });
 
@@ -433,6 +593,45 @@ describe('runMasterExecution', () => {
       signoffPresent: true,
       markerPresent: false,
     });
+  });
+
+  it('ignores failing optional gates when required gates passed', async () => {
+    const basePlan = singleChildPlan('Optional proof artifact');
+    const target = children(basePlan)[0];
+    const optionalGate: ChildWorkflowGate = {
+      id: 'optional:notes',
+      kind: 'dryrun_command',
+      description: 'Optional notes gate.',
+      required: false,
+      command: 'npm run optional-proof',
+    };
+    const childWithOptionalGate: ChildWorkflowPlan = {
+      ...target,
+      gates: [...target.gates, optionalGate],
+    };
+    const plan: MasterExecutionPlan = {
+      ...basePlan,
+      children: [childWithOptionalGate],
+    };
+
+    const result = await runMasterExecution(plan, async (plannedChild: ChildWorkflowPlan, ctx: RunnerContext) =>
+      passedRun(plannedChild, ctx.attempt, {
+        gateResults: [
+          ...passedGateResults(plannedChild.gates.filter((gate: ChildWorkflowGate) => gate.required)),
+          {
+            gateId: optionalGate.id,
+            kind: optionalGate.kind,
+            passed: false,
+            detail: 'Optional command did not run.',
+          },
+        ],
+      }),
+    );
+
+    expect(result.decision).toEqual({ kind: 'complete' });
+    expect(runFor(result, childWithOptionalGate.id).evidence.gateResults).not.toContainEqual(
+      expect.objectContaining({ gateId: optionalGate.id }),
+    );
   });
 
   it('does not invoke a dependent child when an upstream required gate failed', async () => {

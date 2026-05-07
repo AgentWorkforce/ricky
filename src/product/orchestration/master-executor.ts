@@ -15,6 +15,8 @@ export const DEFAULT_MASTER_EXECUTOR_OPTIONS: Readonly<MasterExecutorOptions> = 
   failurePolicy: 'stop',
 };
 
+const SPLIT_TARGET_FILE_THRESHOLD = 4;
+
 type RuntimeOptions = MasterExecutorOptions & {
   now: () => Date;
 };
@@ -413,6 +415,14 @@ function classifyDecision(
     const child = children.find((candidate) => candidate.id === result.childId);
     if (!child || result.status !== 'failed') {
       continue;
+    }
+
+    if (child.targetFiles.length > SPLIT_TARGET_FILE_THRESHOLD) {
+      return {
+        kind: 'split',
+        childId: result.childId,
+        reason: `Child ${result.childId} failed with ${child.targetFiles.length} target files, which exceeds the split threshold of ${SPLIT_TARGET_FILE_THRESHOLD}.`,
+      };
     }
 
     const failedGateKinds = new Set(
