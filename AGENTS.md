@@ -186,13 +186,87 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 - **Wave placement:** Place each workflow in the correct `workflows/wave<N>-<slug>/` folder. Top-level workflow files are reserved for explicitly shared or meta assets.
 - **Numeric prefix:** Use monotonically increasing numeric prefixes (`01-`, `02-`, ...) within each wave folder.
 - **Dedicated channel:** Every workflow must use a `wf-ricky-*` channel. Never use `general`.
-- **Deterministic gates:** After any agent step that edits files, add a deterministic verification gate such as `file_exists`, `exit_code`, grep checks, dry-run checks, or scoped `git diff` change detection.
-- **Review stage:** Every significant workflow must include review by an agent distinct from the writer when possible. Review artifacts for significant workflows must be written under `.workflow-artifacts/`.
+- **Deterministic gates:** After any agent step that edits files, add a deterministic verification gate such as `file_exists`, `exit_code`, grep checks, dry-run checks, or scoped `git diff` change detection. Prefer gate types in this order: `exit_code`, `file_exists`, `output_contains` only for deterministic sentinels not echoed by the task, then `custom`.
+- **Review stage:** Every significant workflow must include review by an agent distinct from the writer when possible. Prefer `writer=codex` with `reviewer=claude`, `writer=claude` with `reviewer=codex`, and both reviewers for critical workflows. Review artifacts for significant workflows must be written under `.workflow-artifacts/`.
 - **80-to-100 validation:** Serious implementation workflows must use a soft-gate, fix, hard-gate loop. The fix loop must include a post-fix re-review on the fixed state before final signoff. Passing compile or typecheck alone is not enough.
-- **Commit boundaries:** Do not run `git commit` or `git push` from agent steps unless the workflow explicitly owns that boundary and documents the expected files.
+- **Commit boundaries:** Do not run `git commit` or `git push` from agent steps unless the workflow explicitly owns that boundary and documents the expected files. Each workflow must state the expected branch naming pattern and whether PR creation is in or out of scope.
 - **Env loading:** Load `.env.local` and `.env` before `.run(...)` without overwriting exported values. Fail fast with `MISSING_ENV_VAR: <NAME>` before expensive agent steps.
 - **Scoped change detection:** After implementation steps, verify the repo changed in the expected scope using `git diff --name-only` plus `git ls-files --others --exclude-standard`, scoped to declared file targets. Do not use repo-wide `git diff --quiet` when unrelated work may be present.
 - **Signoff artifacts:** Serious implementation workflows must write a final signoff artifact under `.workflow-artifacts/`. Passing tests alone is not sufficient proof of completion.
+- **Workflow-level context reads:** High-value workflows must include deterministic runtime reads of standards and specs, such as `cat docs/workflows/WORKFLOW_STANDARDS.md`, instead of relying only on agent ambient context.
+
+## Runtime Shape
+
+Serious Ricky workflows must use the standard runtime wrapper:
+
+- import workflow APIs from `@agent-relay/sdk/workflows`
+- wrap execution in `async function main()`
+- call `main().catch(...)` with explicit error reporting and nonzero exit
+- end workflow execution with `.run({ cwd: process.cwd() })`
+
+Do not rely on implicit runtime defaults for long-running or multi-agent workflows. State these configuration calls explicitly:
+
+- `.channel("wf-ricky-...")`
+- `.pattern(...)`
+- `.maxConcurrency(...)`
+- `.timeout(...)`
+- `.onError(...)`
+
+## Swarm Pattern and Team Shape
+
+Choose the swarm pattern from the work shape:
+
+| Work shape | Preferred pattern |
+| --- | --- |
+| Spec, program, or meta planning | `supervisor` or `dag` |
+| Many independent artifacts | `dag` |
+| Interactive lead plus implementers | `dag` or `supervisor` |
+| Validation, fix, and rerun loops | `dag` |
+| Simple linear repo tightening | `supervisor` or `pipeline` |
+
+Use named roles instead of generic worker numbering. Preferred role names are:
+
+- `lead-claude`
+- `author-codex`
+- `author-claude`
+- `impl-primary-codex`
+- `impl-tests-codex`
+- `writer-codex`
+- `reviewer-claude`
+- `reviewer-codex`
+- `validator-claude`
+
+For implementation workflows, default to lead, `impl-primary-codex`, `impl-tests-codex`, `reviewer-claude`, `reviewer-codex`, and `validator-claude`. For standards and spec workflows, `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer are enough when the scope is narrow.
+
+## Meta-Workflow Artifact Layout
+
+Meta-workflows and significant workflow-generation runs must materialize audit artifacts under:
+
+```text
+.workflow-artifacts/<meta-slug>/
+```
+
+Expected artifacts include:
+
+- `plan.md`
+- `<workflow-id>-review.md`
+- `<workflow-id>-dryrun.txt`
+- `signoff.md`
+
+Do not commit transient artifact output unless the workflow explicitly owns that boundary.
+
+## Reliability Traps
+
+Check for these traps before signing off a Ricky workflow:
+
+1. No wave or program structure.
+2. No standards inputs read at runtime.
+3. No deterministic gates after edits.
+4. No review artifacts on disk.
+5. No dry-run validation for generated workflows.
+6. Overly broad agent tasks.
+7. Blind swarm pattern choice.
+8. No honest blocker reporting.
 
 ## Wave Structure
 
