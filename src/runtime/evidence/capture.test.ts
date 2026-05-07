@@ -14,6 +14,7 @@ import {
   completeRun,
   summarizeEvidence,
   buildEvidenceOutcome,
+  buildStatusBreakdown,
 } from './capture.js';
 import type { VerificationResult, WorkflowStepEvidence } from './types.js';
 
@@ -433,6 +434,19 @@ describe('completeRun', () => {
     const completed = completeRun(run);
     expect(completed.status).toBe('passed');
   });
+
+  it('honors caller status override before deterministic gate downgrade', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const failedStep = completeStep(
+      createStepEvidence({ stepId: 's-1', stepName: 'manual-review' }),
+      'failed',
+    );
+
+    const completed = completeRun({ ...run, steps: [failedStep] }, { status: 'passed' });
+
+    expect(completed.status).toBe('passed');
+    expect(completed.completedAt).toBeDefined();
+  });
 });
 
 describe('completeRun — deterministic gate authority', () => {
@@ -630,6 +644,47 @@ describe('summarizeEvidence', () => {
     expect(summary.allVerificationsPassed).toBe(true);
   });
 
+  it('keeps retry verification failures in fix-loop evidence without failing final verification summary', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    let step = createStepEvidence({ stepId: 's-1', stepName: 'fix-loop' });
+
+    step = appendStepEvent(step, {
+      kind: 'retry',
+      attempt: 1,
+      status: 'failed',
+      command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+      exitCode: 1,
+      verifications: [
+        {
+          type: 'exit_code',
+          passed: false,
+          expected: '0',
+          actual: '1',
+          command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+          exitCode: 1,
+        },
+      ],
+    });
+    step = appendStepEvent(step, {
+      kind: 'verification',
+      result: { type: 'exit_code', passed: true, expected: '0', actual: '0' },
+    });
+    step = completeStep(step, 'passed');
+
+    const completed = completeRun({ ...run, steps: [step] });
+    const outcome = buildEvidenceOutcome(completed);
+
+    expect(outcome.summary.allVerificationsPassed).toBe(true);
+    expect(outcome.fixLoopAttempts[0].verificationCommands).toEqual([
+      expect.objectContaining({
+        source: 'verification',
+        attempt: 1,
+        passed: false,
+        command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+      }),
+    ]);
+  });
+
   it('reports allDeterministicGatesPassed as true when no gates exist', () => {
     const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
     const completed = completeRun(run);
@@ -662,6 +717,66 @@ describe('completeRun — non-terminal step guard', () => {
     expect(result.status).toBe('running');
     expect(result.completedAt).toBeUndefined();
     expect(result.durationMs).toBeUndefined();
+  });
+});
+
+describe('buildStatusBreakdown', () => {
+  it('classifies terminal, active, incomplete, skipped, cancelled, and timed-out steps', () => {
+    const passed = completeStep(
+      createStepEvidence({ stepId: 's-passed', stepName: 'passed' }),
+      'passed',
+    );
+    const failed = completeStep(
+      createStepEvidence({ stepId: 's-failed', stepName: 'failed' }),
+      'failed',
+    );
+    const skipped = completeStep(
+      createStepEvidence({ stepId: 's-skipped', stepName: 'skipped' }),
+      'skipped',
+    );
+    const cancelled = completeStep(
+      createStepEvidence({ stepId: 's-cancelled', stepName: 'cancelled' }),
+      'cancelled',
+    );
+    const timedOut = completeStep(
+      createStepEvidence({ stepId: 's-timeout', stepName: 'timeout' }),
+      'timed_out',
+    );
+    const pending = createStepEvidence({ stepId: 's-pending', stepName: 'pending' });
+    const running = appendStepEvent(
+      createStepEvidence({ stepId: 's-running', stepName: 'running' }),
+      { kind: 'status_change', status: 'running' },
+    );
+
+    const breakdown = buildStatusBreakdown({
+      ...createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' }),
+      status: 'running',
+      steps: [passed, failed, skipped, cancelled, timedOut, pending, running],
+    });
+
+    expect(breakdown.run).toEqual({
+      status: 'running',
+      class: 'active',
+      terminal: false,
+    });
+    expect(breakdown.byStepStatus).toEqual({
+      pending: ['s-pending'],
+      running: ['s-running'],
+      passed: ['s-passed'],
+      failed: ['s-failed'],
+      skipped: ['s-skipped'],
+      cancelled: ['s-cancelled'],
+      timed_out: ['s-timeout'],
+    });
+    expect(breakdown.terminalStepIds).toEqual([
+      's-passed',
+      's-failed',
+      's-skipped',
+      's-cancelled',
+      's-timeout',
+    ]);
+    expect(breakdown.activeStepIds).toEqual(['s-running']);
+    expect(breakdown.incompleteStepIds).toEqual(['s-pending', 's-running']);
   });
 });
 
@@ -774,6 +889,36 @@ describe('appendStepEvent — full retry object', () => {
     expect(step.retries[0].attempt).toBe(1);
     expect(step.retries[0].command).toBe('npm test');
     expect(step.retries[0].error).toBe('timeout');
+  });
+
+  it('stamps full retry verifications that omit recordedAt', () => {
+    let step = createStepEvidence({ stepId: 's-1', stepName: 'retry-full' });
+
+    step = appendStepEvent(step, {
+      kind: 'retry',
+      retry: {
+        attempt: 1,
+        stepId: 's-1',
+        status: 'failed',
+        verifications: [
+          {
+            type: 'exit_code',
+            passed: false,
+            expected: '0',
+            actual: '1',
+            command: 'npm test',
+            exitCode: 1,
+          },
+        ],
+      },
+    });
+
+    expect(step.retries[0].verifications).toEqual([
+      expect.objectContaining({
+        command: 'npm test',
+        recordedAt: FIXED_NOW.toISOString(),
+      }),
+    ]);
   });
 });
 
@@ -1108,6 +1253,7 @@ describe('workflow evidence capture scenarios', () => {
       path: '.workflow-artifacts/signoff.md',
       kind: 'report',
       description: 'review signoff path',
+      metadata: { reviewer: 'claude' },
     });
     run = attachRunLog(run, {
       path: '.workflow-artifacts/runner.log',
@@ -1120,6 +1266,7 @@ describe('workflow evidence capture scenarios', () => {
       path: 'src/runtime/evidence/capture.test.ts',
       kind: 'file',
       description: 'scoped test file',
+      metadata: { sha256: 'abc123' },
     });
     step = appendStepEvent(step, {
       kind: 'log',
@@ -1151,6 +1298,7 @@ describe('workflow evidence capture scenarios', () => {
         stepName: 'materialize evidence',
       },
     ]);
+    expect(outcome.artifacts.every((artifact) => !('metadata' in artifact))).toBe(true);
     expect(outcome.outputSnippets).toEqual([
       expect.objectContaining({
         source: 'log',

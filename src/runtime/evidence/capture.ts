@@ -819,6 +819,9 @@ function normalizeRetry(
     return {
       ...event.retry,
       stepId: event.retry.stepId || step.stepId,
+      verifications: event.retry.verifications?.map((verification) =>
+        stampVerification(verification, recordedAt),
+      ),
     };
   }
 
