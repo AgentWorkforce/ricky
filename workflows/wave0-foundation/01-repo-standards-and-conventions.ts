@@ -9,7 +9,7 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 1, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', {
+    .agent('lead-codex', {
       cli: 'codex',
       interactive: false,
       role: 'Foundation lead who plans repo convention updates and keeps the scope limited to standards and workflow authoring rules.',
@@ -20,13 +20,13 @@ async function main() {
       role: 'Documentation author who edits repo-level convention files and writes only the agreed Wave 0 standards content.',
       retries: 2,
     })
-    .agent('reviewer-claude', {
+    .agent('reviewer-codex-docs', {
       cli: 'codex',
       preset: 'reviewer',
       role: 'Reviews convention updates for product alignment, enforceability, and missing workflow safety rules.',
       retries: 1,
     })
-    .agent('validator-claude', {
+    .agent('validator-codex', {
       cli: 'codex',
       preset: 'worker',
       role: 'Validation owner who writes the final signoff after all gates pass.',
@@ -77,7 +77,7 @@ async function main() {
     })
 
     .step('plan-convention-updates', {
-      agent: 'lead-claude',
+      agent: 'lead-codex',
       dependsOn: ['read-workflow-standards', 'read-authoring-rules', 'read-generated-template', 'read-wave-plan', 'read-existing-targets'],
       task: `Plan a narrow Wave 0 convention update.
 
@@ -190,7 +190,7 @@ Write changes to disk. Do not print complete file contents.`,
     })
 
     .step('review-convention-files', {
-      agent: 'reviewer-claude',
+      agent: 'reviewer-codex-docs',
       dependsOn: ['initial-soft-validation'],
       task: `Review the Wave 0 repo convention updates.
 
@@ -260,7 +260,7 @@ Re-check these expectations before exiting:
     })
 
     .step('final-review-repo-standards', {
-      agent: 'reviewer-claude',
+      agent: 'reviewer-codex-docs',
       dependsOn: ['post-fix-validation-gate'],
       task: `Final review for the Wave 0 repo convention updates after fixes and post-fix validation.
 
@@ -318,7 +318,7 @@ Check the same review checklist again and verify any earlier concrete failures w
       failOnError: true,
     })
     .step('final-signoff', {
-      agent: 'validator-claude',
+      agent: 'validator-codex',
       dependsOn: ['regression-scope-gate'],
       task: `Write .workflow-artifacts/wave0-foundation/repo-standards/signoff.md.
 

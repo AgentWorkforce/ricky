@@ -295,7 +295,7 @@ describe('workflow generation pipeline', () => {
     expect(result.patternDecision.reason).toMatch(/choosing-swarm-patterns/i);
     expect(artifact.tasks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-claude' }),
+        expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-codex' }),
         expect.objectContaining({ id: 'implement-artifact', agentRole: 'author-codex' }),
         expect.objectContaining({ id: 'review-claude', dependsOn: ['initial-soft-validation'] }),
         expect.objectContaining({
@@ -306,10 +306,10 @@ describe('workflow generation pipeline', () => {
         }),
       ]),
     );
-    expect(artifact.content).toContain('.agent("lead-claude", { cli: "codex", interactive: false');
-    expect(artifact.content).toContain('.agent("reviewer-claude", { cli: "codex", preset: "reviewer"');
-    expect(artifact.content).not.toContain('.agent("reviewer-codex"');
-    expect(artifact.content).toContain('.agent("validator-claude", { cli: "codex", preset: "worker"');
+    expect(artifact.content).toContain('.agent("lead-codex", { cli: "codex", interactive: false');
+    expect(artifact.content).toContain('.agent("reviewer-codex", { cli: "codex", preset: "reviewer"');
+    expect(artifact.content).not.toContain('.agent("reviewer-claude"');
+    expect(artifact.content).toContain('.agent("validator-codex", { cli: "codex", preset: "worker"');
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('Codex structural marker gate');
@@ -325,7 +325,7 @@ describe('workflow generation pipeline', () => {
         }),
         expect.objectContaining({
           stepId: 'review-claude',
-          agent: 'reviewer-claude',
+          agent: 'reviewer-codex',
           concurrency: 1,
         }),
       ]),

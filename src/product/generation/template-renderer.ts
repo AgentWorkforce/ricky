@@ -148,7 +148,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!),
     '',
-    renderLeadPlanStep(input.artifactsDir, Boolean(input.spec.targetContext)),
+    renderLeadPlanStep(input.artifactsDir, Boolean(input.spec.targetContext), input.isCodeWorkflow),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'lead-plan-gate')!),
     '',
@@ -158,7 +158,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'initial-soft-validation')!),
     '',
-    renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-claude')),
+    renderReviewStep('review-claude', input.isCodeWorkflow ? 'reviewer-claude' : 'reviewer-codex', ['initial-soft-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-claude')),
     '',
     renderSecondaryReviewStep('review-codex', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-codex'), input.isCodeWorkflow),
     '',
@@ -174,7 +174,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-validation')!),
     '',
-    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude'), true),
+    renderReviewStep('final-review-claude', input.isCodeWorkflow ? 'reviewer-claude' : 'reviewer-codex', ['post-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude'), true),
     '',
     renderSecondaryReviewStep('final-review-codex', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-codex'), input.isCodeWorkflow, true),
     '',
@@ -186,7 +186,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'regression-gate')!),
     '',
-    renderFinalSignoffStep(input.artifactsDir, selectionFor(input.toolSelection, 'final-signoff')),
+    renderFinalSignoffStep(input.artifactsDir, input.isCodeWorkflow, selectionFor(input.toolSelection, 'final-signoff')),
     '',
     ...renderOptionalGateStep(input.gates.find((gate) => gate.name === 'final-artifact-consistency-gate')),
     '    .run({ cwd: process.cwd() });',
@@ -206,10 +206,10 @@ function renderSource(input: {
 function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSpec[] {
   if (!isCodeWorkflow) {
     return [
-      { name: 'lead-claude', cli: 'codex', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
+      { name: 'lead-codex', cli: 'codex', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
       { name: 'author-codex', cli: 'codex', role: 'Writes the requested bounded artifact and keeps scope to declared files.', retries: 2 },
-      { name: 'reviewer-claude', cli: 'codex', preset: 'reviewer', role: 'Reviews artifact quality, scope, and evidence.', retries: 1 },
-      { name: 'validator-claude', cli: 'codex', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
+      { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews artifact quality, scope, and evidence.', retries: 1 },
+      { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
     ];
   }
 
@@ -241,15 +241,15 @@ function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean): Work
     : 'Write deterministic final structural review-marker evidence without presenting it as an independent agent review.';
   return [
     task('prepare-context', 'Prepare context', 'deterministic', 'Read or materialize the normalized spec and target context.', []),
-    task('lead-plan', 'Lead plan', 'lead-claude', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
+    task('lead-plan', 'Lead plan', isCodeWorkflow ? 'lead-claude' : 'lead-codex', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
     task('implement-artifact', 'Implement artifact', implementer, describeImplementation(spec), ['lead-plan']),
-    task('review-claude', 'Review with Claude', 'reviewer-claude', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
+    task('review-claude', 'Review with Claude', isCodeWorkflow ? 'reviewer-claude' : 'reviewer-codex', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
     task('review-codex', codexReviewName, codexReviewRole, codexReviewDescription, ['initial-soft-validation']),
     task('read-review-feedback', 'Read review feedback', 'deterministic', 'Collect review verdicts before fixing.', ['review-claude', 'review-codex']),
-    task('fix-loop', '80-to-100 fix loop', 'validator-claude', 'Apply bounded fixes from review and validation feedback.', ['read-review-feedback']),
-    task('final-review-claude', 'Final review with Claude', 'reviewer-claude', 'Re-review the fixed state only.', ['post-fix-validation']),
+    task('fix-loop', '80-to-100 fix loop', isCodeWorkflow ? 'validator-claude' : 'validator-codex', 'Apply bounded fixes from review and validation feedback.', ['read-review-feedback']),
+    task('final-review-claude', 'Final review with Claude', isCodeWorkflow ? 'reviewer-claude' : 'reviewer-codex', 'Re-review the fixed state only.', ['post-fix-validation']),
     task('final-review-codex', finalCodexReviewName, codexReviewRole, finalCodexReviewDescription, ['post-fix-validation']),
-    task('final-signoff', 'Final signoff', 'validator-claude', 'Write final evidence summary after hard deterministic gates.', ['regression-gate']),
+    task('final-signoff', 'Final signoff', isCodeWorkflow ? 'validator-claude' : 'validator-codex', 'Write final evidence summary after hard deterministic gates.', ['regression-gate']),
   ];
 }
 
@@ -780,9 +780,10 @@ function buildGeneratedContextPackage(
   ];
 }
 
-function renderLeadPlanStep(artifactsDir: string, hasTargetContext: boolean): string {
+function renderLeadPlanStep(artifactsDir: string, hasTargetContext: boolean, isCodeWorkflow: boolean): string {
+  const agent = isCodeWorkflow ? 'lead-claude' : 'lead-codex';
   return `    .step('lead-plan', {
-      agent: 'lead-claude',
+      agent: ${literal(agent)},
       dependsOn: ['skill-boundary-metadata-gate'],
       timeoutMs: ${DEFAULT_LEAD_PLAN_TIMEOUT_MS},
       task: ${templateLiteral(`Plan the workflow execution from the packaged context files.
@@ -934,7 +935,7 @@ function renderFixLoopStep(
 ): string {
   const selectionLines = renderSelectionFields(selection);
   return `    .step('fix-loop', {
-      agent: 'validator-claude',
+      agent: ${literal(isCodeWorkflow ? 'validator-claude' : 'validator-codex')},
       dependsOn: ['read-review-feedback', 'initial-soft-validation'],
 ${selectionLines}
       timeoutMs: ${DEFAULT_FIX_LOOP_TIMEOUT_MS},
@@ -959,10 +960,10 @@ Re-run ${isCodeWorkflow ? 'typecheck and tests' : 'document sanity checks'} befo
     })`;
 }
 
-function renderFinalSignoffStep(artifactsDir: string, selection?: ToolSelection): string {
+function renderFinalSignoffStep(artifactsDir: string, isCodeWorkflow: boolean, selection?: ToolSelection): string {
   const selectionLines = renderSelectionFields(selection);
   return `    .step('final-signoff', {
-      agent: 'validator-claude',
+      agent: ${literal(isCodeWorkflow ? 'validator-claude' : 'validator-codex')},
       dependsOn: ['regression-gate'],
 ${selectionLines}
       timeoutMs: ${DEFAULT_REVIEW_TIMEOUT_MS},

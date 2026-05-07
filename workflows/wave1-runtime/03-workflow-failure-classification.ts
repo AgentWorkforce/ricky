@@ -9,12 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 1, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', { cli: 'codex', role: 'Failure taxonomy lead responsible for classification scope and product usefulness.', retries: 1 })
+    .agent('lead-codex', { cli: 'codex', role: 'Failure taxonomy lead responsible for classification scope and product usefulness.', retries: 1 })
     .agent('impl-primary-codex', { cli: 'codex', role: 'Primary implementer for classifier, failure types, and public exports.', retries: 2 })
     .agent('impl-tests-codex', { cli: 'codex', role: 'Test implementer for deterministic failure classification cases.', retries: 2 })
-    .agent('reviewer-claude', { cli: 'codex', preset: 'reviewer', role: 'Reviews taxonomy accuracy and fit for Ricky debugger/repair decisions.', retries: 1 })
+    .agent('reviewer-codex-product', { cli: 'codex', preset: 'reviewer', role: 'Reviews taxonomy accuracy and fit for Ricky debugger/repair decisions.', retries: 1 })
     .agent('reviewer-codex', { cli: 'codex', preset: 'reviewer', role: 'Reviews classifier implementation, edge cases, and tests.', retries: 1 })
-    .agent('validator-claude', { cli: 'codex', preset: 'worker', role: 'Runs validation and applies bounded fixes to reach the 80-to-100 bar.', retries: 2 })
+    .agent('validator-codex', { cli: 'codex', preset: 'worker', role: 'Runs validation and applies bounded fixes to reach the 80-to-100 bar.', retries: 2 })
 
     .step('prepare-context', {
       type: 'deterministic',
@@ -32,7 +32,7 @@ async function main() {
     })
 
     .step('lead-plan', {
-      agent: 'lead-claude',
+      agent: 'lead-codex',
       dependsOn: ['prepare-context'],
       task: `Plan the workflow failure classification model.
 
@@ -144,7 +144,7 @@ Review checklist:
     })
 
     .step('review-claude', {
-      agent: 'reviewer-claude',
+      agent: 'reviewer-codex-product',
       dependsOn: ['initial-soft-validation'],
       task: `Review the failure classifier for taxonomy quality and product fit.
 
@@ -172,7 +172,7 @@ Write .workflow-artifacts/wave1-runtime/workflow-failure-classification/review-c
     })
 
     .step('fix-loop', {
-      agent: 'validator-claude',
+      agent: 'validator-codex',
       dependsOn: ['review-claude', 'review-codex'],
       task: `Run the 80-to-100 fix loop for failure classification.
 
@@ -212,7 +212,7 @@ Write .workflow-artifacts/wave1-runtime/workflow-failure-classification/fix-loop
     })
 
     .step('final-review-claude', {
-      agent: 'reviewer-claude',
+      agent: 'reviewer-codex-product',
       dependsOn: ['post-fix-validation'],
       task: `Re-review failure classification after the fix loop.
 
@@ -280,7 +280,7 @@ Write .workflow-artifacts/wave1-runtime/workflow-failure-classification/final-re
       failOnError: true,
     })
     .step('final-signoff', {
-      agent: 'validator-claude',
+      agent: 'validator-codex',
       dependsOn: ['regression-gate'],
       task: `Write .workflow-artifacts/wave1-runtime/workflow-failure-classification/signoff.md.
 
