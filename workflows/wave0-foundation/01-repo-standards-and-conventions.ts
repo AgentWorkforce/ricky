@@ -216,29 +216,14 @@ If fixes are needed, list exact file-level changes. Write .workflow-artifacts/wa
     })
 
     .step('fix-review-feedback', {
-      agent: 'author-codex',
+      type: 'deterministic',
       dependsOn: ['review-convention-files'],
-      task: `Fix any concrete issues from .workflow-artifacts/wave0-foundation/repo-standards/review.md.
-
-Read before editing:
-- .workflow-artifacts/wave0-foundation/repo-standards/review.md
-- AGENTS.md
-- CLAUDE.md
-- workflows/README.md
-- workflows/shared/WORKFLOW_AUTHORING_RULES.md
-
-If the review passes, make no unrelated edits. If it fails, only patch the four target files:
-- AGENTS.md
-- CLAUDE.md
-- workflows/README.md
-- workflows/shared/WORKFLOW_AUTHORING_RULES.md
-
-Re-check these expectations before exiting:
-- Dedicated wf-ricky-* channel convention is documented.
-- Deterministic gates and review stages are required.
-- Wave folder structure is documented.
-- Commit/PR boundary remains limited to the target files.`,
-      verification: { type: 'exit_code', value: '0' },
+      command: [
+        'tail -n 1 .workflow-artifacts/wave0-foundation/repo-standards/review.md | tr -d "[:space:]*" | grep -Eq "^REVIEW_REPO_STANDARDS_PASS$"',
+        'echo W0_REPO_STANDARDS_REVIEW_ALREADY_PASSING',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step('post-fix-validation-gate', {
