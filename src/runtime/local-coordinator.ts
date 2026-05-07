@@ -73,6 +73,16 @@ export class LocalCoordinator {
       resolveResult = resolve;
     });
 
+    const notifyLifecycleObservers = (event: LifecycleEvent): void => {
+      for (const listener of this.emitter.listeners('lifecycle')) {
+        try {
+          (listener as (event: LifecycleEvent) => void)(event);
+        } catch {
+          // Observer failures must not break coordinator settlement or leak active state.
+        }
+      }
+    };
+
     const emit = (
       kind: LifecycleEvent['kind'],
       message?: string,
@@ -87,7 +97,7 @@ export class LocalCoordinator {
         data,
       };
       events.push(event);
-      this.emitter.emit('lifecycle', event);
+      notifyLifecycleObservers(event);
       return event;
     };
 

@@ -315,6 +315,22 @@ describe('LocalCoordinator', () => {
       status: 'cancelled',
       data: { exitCode: null, error: 'cancelled' },
     });
+
+    invocations[0].emitStdout('late output');
+    invocations[0].emitStderr('late error');
+    invocations[0].complete(0);
+    await Promise.resolve();
+
+    expect(result.stdout).toEqual(['step started']);
+    expect(result.stderr).toEqual(['waiting for reviewer']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'cancelled',
+    ]);
   });
 
   it('captures stdout, stderr, lifecycle events, snippets, and metadata as evidence', async () => {
@@ -581,6 +597,45 @@ describe('LocalCoordinator', () => {
     expect(result.events.at(-1)).toMatchObject({
       kind: 'error',
       status: 'failed',
+    });
+  });
+
+  it('settles and clears active state even when a lifecycle listener throws', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+    const stableListener = vi.fn();
+
+    coordinator.on('lifecycle', (event) => {
+      if (event.kind === 'completed') {
+        throw new Error('observer failed during completion');
+      }
+    });
+    coordinator.on('lifecycle', stableListener);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-listener-throw',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+    });
+
+    invocations[0].complete(0);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('passed');
+    expect(result.exitCode).toBe(0);
+    expect(coordinator.getActiveRun('run-listener-throw')).toBeUndefined();
+    expect(stableListener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 'run-listener-throw',
+        kind: 'completed',
+        status: 'passed',
+      }),
+    );
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'passed',
+      data: { exitCode: 0 },
     });
   });
 
