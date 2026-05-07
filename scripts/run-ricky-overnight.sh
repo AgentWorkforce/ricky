@@ -1339,6 +1339,7 @@ run_one() {
   local runner_pid=""
   local runner_exit="0"
   local last_progress_epoch="$(date +%s)"
+  local last_output_epoch="$last_progress_epoch"
   local last_observed_size="0"
   local current_output_size="0"
   RUN_RESULT="ran"
@@ -1412,13 +1413,16 @@ run_one() {
     fi
 
     current_output_size="$(runner_output_size "$runner_output")"
+    if (( current_output_size > last_observed_size )); then
+      last_output_epoch="$(date +%s)"
+    fi
     if runner_output_has_meaningful_progress "$runner_output" "$last_observed_size" "$current_output_size"; then
-      last_progress_epoch="$(date +%s)"
+      last_progress_epoch="$last_output_epoch"
     fi
     last_observed_size="$current_output_size"
 
-    if runner_output_idle_for_too_long "$last_progress_epoch" "$(date +%s)"; then
-      log "workflow runner went idle without meaningful progress for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
+    if runner_output_idle_for_too_long "$last_output_epoch" "$(date +%s)"; then
+      log "workflow runner produced no output for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
       kill_process_group "$RUN_PGID"
       wait "$runner_pid" 2>/dev/null || true
       echo "$workflow_path" >> "$FAILED_FILE"
