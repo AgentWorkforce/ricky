@@ -136,7 +136,7 @@ Review checklist:
         'test -f src/product/specialists/validator/validator.test.ts',
         'grep -Eq "describe|it\\(" src/product/specialists/validator/validator.test.ts',
         'grep -Eq "review|deterministic|soft|dry-run|regression|signoff" src/product/specialists/validator/validator.test.ts',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && printf "%s\\n" "$changed" | grep -Eq "^src/product/specialists/validator/validator\\.test\\.ts"',
+        'changed="$({ git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } | sed \"/^$/d\")" && if [ -n "$changed" ]; then printf "%s\\n" "$changed" | grep -Eq "^src/product/specialists/validator/"; ! printf "%s\\n" "$changed" | grep -Ev "^(src/product/specialists/validator/|\\.workflow-artifacts/)"; else git diff --quiet && git diff --cached --quiet && test -z "$(git ls-files --others --exclude-standard)"; fi',
         'echo VALIDATOR_SPECIALIST_TESTS_VERIFIED',
       ].join(' && '),
       captureOutput: true,

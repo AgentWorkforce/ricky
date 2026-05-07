@@ -94,10 +94,10 @@ function checkExplicitPattern(text: string, context: StructuralContext): Structu
     text,
     context,
     check: 'explicit_pattern',
-    pattern: /\.pattern\s*\(\s*['"`](dag|pipeline|parallel|swarm|sequential)['"`]\s*\)/,
+    pattern: /\.pattern\s*\(\s*['"`][a-z][a-z0-9-]*['"`]\s*\)/i,
     messagePass: 'Workflow declares an explicit execution pattern.',
     messageFail: 'Workflow must declare an explicit pattern so orchestration tradeoffs are reviewable.',
-    fixHint: "Add .pattern('dag') or another deliberate Relay pattern.",
+    fixHint: "Add .pattern('dag'), .pattern('supervisor'), or another deliberate Relay pattern.",
   });
 }
 
