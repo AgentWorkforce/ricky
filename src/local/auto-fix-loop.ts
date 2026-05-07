@@ -13,6 +13,13 @@ import type { DebuggerResult } from '../product/specialists/debugger/types.js';
 import type { WorkflowRunEvidence, WorkflowStepEvidence } from '../shared/models/workflow-evidence.js';
 import { repairWorkflowWithWorkforcePersona } from '../product/generation/workforce-persona-repairer.js';
 import type { WorkforcePersonaRepairAttempt } from '../product/generation/workforce-persona-repairer.js';
+import {
+  discoverDriftReports,
+  repairCodeFromDriftArtifacts,
+  type CodeDriftRepairOptions,
+  type CodeDriftRepairResult,
+  type CodeDriftTarget,
+} from './code-drift-repairer.js';
 import { localRunStateRoot } from '../shared/state-paths.js';
 
 export interface AutoFixAttemptSummary {
@@ -73,6 +80,14 @@ export interface RunWithAutoFixOptions {
     classification: FailureClassification;
   }) => DebuggerResult;
   workflowRepairer?: (input: WorkflowRepairInput) => Promise<WorkflowRepairResult>;
+  /**
+   * Optional repairer for "code drift" failures — when the workflow has
+   * generated structured drift reports under `.workflow-artifacts/**\/*-drift.json`
+   * indicating that target source code does not match an external reference.
+   * If unset, defaults to `repairCodeFromDriftArtifacts`. Dispatched before
+   * the workflow repairer when discoverable drift reports are present.
+   */
+  codeDriftRepairer?: (options: CodeDriftRepairOptions) => Promise<CodeDriftRepairResult>;
   artifactWriter?: (artifactPath: string, content: string, cwd: string) => Promise<void>;
   repairRunner?: (command: string, cwd: string) => Promise<{ exitCode: number }>;
   sleep?: (ms: number) => Promise<void>;
@@ -89,6 +104,7 @@ export async function runWithAutoFix(
   const classifyFailure = options.classifyFailure ?? defaultClassifyFailure;
   const debugWorkflowRun = options.debugWorkflowRun ?? defaultDebugWorkflowRun;
   const workflowRepairer = options.workflowRepairer ?? defaultWorkflowRepairer;
+  const codeDriftRepairer = options.codeDriftRepairer ?? repairCodeFromDriftArtifacts;
   const artifactWriter = options.artifactWriter ?? writeWorkflowArtifact;
   const repairRunner = options.repairRunner ?? runShellCommand;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -97,12 +113,22 @@ export async function runWithAutoFix(
   const previousRepairAttempts: WorkforcePersonaRepairAttempt[] = [];
   const warnings: string[] = [];
   const trackingRunId = resolveTrackingRunId(request) ?? `ricky-local-${randomUUID()}`;
+  // Used to ignore stale drift artifacts from prior runs when scanning for
+  // code-drift repair targets. Captured before the first attempt fires.
+  const runStartTimeMs = Date.now();
   let currentRequest: LocalInvocationRequest = { ...request, autoFix: undefined };
   let lastResponse: LocalResponse | undefined;
   let retryOfRunId: string | undefined;
   let pendingRepairAttempt: Omit<WorkforcePersonaRepairAttempt, 'outcome'> | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    // Per-attempt timestamp so drift discovery only considers artifacts the
+    // CURRENT attempt produced. Without this, a later unrelated failure
+    // could re-trigger code-drift repair on stale reports from a prior
+    // attempt (e.g. attempt 1 produced reports → repair → attempt 2 fails
+    // for an unrelated reason → discovery sees attempt 1's reports as
+    // "fresh" because runStartTimeMs hasn't moved).
+    const attemptStartTimeMs = Date.now();
     onProgress?.(`Running workflow (attempt ${attempt}/${maxAttempts})...`);
     const response = await options.runSingleAttempt(currentRequest);
     lastResponse = response;
@@ -174,6 +200,90 @@ export async function runWithAutoFix(
       });
       pendingRepairAttempt = undefined;
     }
+
+    // Code-drift dispatch — preferred over workflow repair when the
+    // workflow has emitted structured drift reports under
+    // .workflow-artifacts/**\/*-drift.json indicating that target source
+    // code (not the workflow itself) is what's wrong. Falls through to
+    // workflow repair if no actionable reports are found.
+    const codeDriftCwd = response.execution?.execution.cwd ?? request.invocationRoot ?? process.cwd();
+    // Use the more recent of run-start and attempt-start. attemptStartTimeMs
+    // alone would be ideal, but if the system clock skews backward between
+    // attempts (NTP correction during a long run) we don't want to silently
+    // accept artifacts from before this run began. Math.max guards both.
+    const driftDiscoveryFloor = Math.max(runStartTimeMs, attemptStartTimeMs);
+    const driftReports = await discoverDriftReports(codeDriftCwd, driftDiscoveryFloor);
+    if (driftReports) {
+      const driftTarget: CodeDriftTarget = { cwd: codeDriftCwd, reports: driftReports };
+      try {
+        onProgress?.(`Ricky is fixing target code (${driftReports.length} drift report${driftReports.length === 1 ? '' : 's'})...`);
+        const driftRepair = await codeDriftRepairer({
+          target: driftTarget,
+          attempt,
+          maxAttempts,
+          ...(failedStep ? { failedStep } : {}),
+          ...(runId ? { previousRunId: runId } : {}),
+        });
+        if (driftRepair.applied) {
+          attemptSummary.applied_fix = {
+            mode: 'code-drift',
+            reports: driftReports.map((r) => r.filePath),
+            summary: driftRepair.summary,
+            ...(driftRepair.runId ? { persona_run_id: driftRepair.runId } : {}),
+          };
+          warnings.push(...(driftRepair.warnings ?? []));
+          if (!runId) {
+            const warning = 'Auto-fix retry could not resolve a previous run id; retrying without step-level resume.';
+            attemptSummary.warning = warning;
+            warnings.push(warning);
+          } else if (!retryOfRunId) {
+            retryOfRunId = runId;
+          }
+          // Retry the workflow from the BEGINNING — not from the failed
+          // step. Verify-style workflows have a structure like:
+          //
+          //   verify-* (agent steps)  →  produce *-drift.json
+          //          ↓
+          //   artifact-* (gates)      →  validate report shape
+          //          ↓
+          //   aggregate-drift (gate)  →  fail if any DRIFT (this fails)
+          //
+          // Resuming with `startFromStep: aggregate-drift` after a code
+          // edit would just re-read the SAME stale drift artifacts from
+          // before the fix, fail again, and loop until max attempts. The
+          // verify-* agent steps need to re-run against the patched
+          // source so they regenerate fresh drift reports.
+          //
+          // We pay the cost of re-running successful steps (which is real
+          // — the verify agents re-fetch external docs), but correctness
+          // wins. If a future workflow needs cheaper resumption, it can
+          // declare a resume-anchor step in the drift report; for now,
+          // the safe default is full restart.
+          currentRequest = {
+            ...retryBaseRequest(currentRequest, response),
+            autoFix: undefined,
+            retry: {
+              attempt: attempt + 1,
+              maxAttempts,
+              ...(runId ? { previousRunId: runId, retryOfRunId: retryOfRunId ?? runId } : {}),
+              reason: `auto-fix retry after code-drift repair (${driftReports.length} report${driftReports.length === 1 ? '' : 's'}); restarting from workflow root so drift-producing steps re-run`,
+            },
+          };
+          onProgress?.('Retrying workflow from the beginning so drift-producing steps re-run against the patched source...');
+          continue;
+        }
+        // codeDriftRepairer returned applied=false: no-op, fall through to workflow repair.
+        warnings.push(`Code-drift repairer returned applied=false: ${driftRepair.summary}`);
+      } catch (error) {
+        warnings.push(...warningsFromError(error));
+        warnings.push(
+          `Code-drift repair failed; falling back to workflow repair: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        // Fall through to the workflow-repair path below — the failure
+        // might still be a workflow bug that workforce-persona can fix.
+      }
+    }
+
     const repairTarget = await resolveWorkflowRepairTarget(currentRequest, response);
 
     if (repairTarget) {
