@@ -1070,7 +1070,7 @@ describe('workflow generation pipeline', () => {
     const postImplementationGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
 
     expect(leadPlanGate.command).toContain('GENERATION_LEAD_PLAN_READY');
-    expect(leadPlanGate.command).toContain('/non-goals?/i');
+    expect(leadPlanGate.command).toContain('out[- ]of[- ]scope');
     expect(leadPlanGate.command).toContain('Routing contract');
     expect(artifact.content).toContain('write .workflow-artifacts/generated/no-target-evidence-gates/fix-loop-report.md');
     expect(fixLoopReportGate.command).toContain('FIX_LOOP_COMPLETE');
@@ -1079,6 +1079,22 @@ describe('workflow generation pipeline', () => {
     expect(postImplementationGate.command).toContain('cleanup-report.md');
     expect(postImplementationGate.command).toContain('cleanup-diff-inventory.txt');
     expect(postImplementationGate.command).toContain('validation-evidence.md');
+  });
+
+  it('renders out-of-scope constraints as lead-plan non-goals', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement Linear integration surface.',
+        targetFiles: ['src/surfaces/linear/index.ts'],
+        constraints: ['Non-goal: Passive Linear comment monitoring', 'Non-goal: Custom per-repo workflow templates'],
+      }),
+      artifactPath: 'workflows/generated/linear-scope.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact?.content).toContain('Non-goals:');
+    expect(result.artifact?.content).toContain('- Non-goal: Passive Linear comment monitoring');
+    expect(result.artifact?.content).toContain('Use this exact section heading in the lead plan.');
   });
 
   it('explicit target git diff gate includes untracked files for newly created outputs', () => {
@@ -1384,7 +1400,7 @@ function spec(overrides: SpecFixtureOverrides = {}): NormalizedWorkflowSpec {
     },
     constraints: constraints.map((constraint) => ({
       constraint,
-      category: /\bonly\b|\bmust\b/i.test(constraint) ? 'scope' : 'quality',
+      category: /\b(only|must|non[- ]?goal|out[- ]of[- ]scope)\b/i.test(constraint) ? 'scope' : 'quality',
     })),
     evidenceRequirements: evidenceRequirements.map((requirement) => ({
       requirement,

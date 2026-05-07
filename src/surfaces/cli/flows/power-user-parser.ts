@@ -4,7 +4,8 @@ import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
 
 export type PowerUserCommand = 'run' | 'help' | 'version' | 'status' | 'connect';
 export type PowerUserSurface = 'legacy' | 'local' | 'cloud' | 'workflow' | 'status' | 'connect';
-export type ConnectTarget = 'cloud' | 'agents' | 'integrations';
+export type ConnectTarget = 'cloud' | 'agents' | 'integrations' | 'linear';
+export type StatusTarget = 'linear';
 
 const DEFAULT_CLOUD_AGENT_TARGETS = ['claude', 'codex', 'opencode', 'gemini'];
 const DEFAULT_CLOUD_INTEGRATION_TARGETS = ['slack', 'github', 'notion', 'linear'];
@@ -14,6 +15,7 @@ export interface PowerUserParsedArgs {
   surface: PowerUserSurface;
   mode?: RickyMode;
   connectTarget?: ConnectTarget;
+  statusTarget?: StatusTarget;
   cloudTargets?: string[];
   runId?: string;
   spec?: string;
@@ -53,12 +55,24 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
 
   if (first === 'status') {
     const statusArgv = argv.slice(1);
-    const parsed = withCommonFlags({ command: 'status', surface: 'status' }, statusArgv);
-    const runId = readFlagValue(statusArgv, '--run');
+    const statusCandidate = statusArgv[0]?.trim().toLowerCase();
+    const statusTarget = readStatusTarget(statusArgv);
+    const effectiveStatusArgv = statusTarget ? statusArgv.slice(1) : statusArgv;
+    const parsed = withCommonFlags({ command: 'status', surface: 'status' }, effectiveStatusArgv);
+    const runId = readFlagValue(effectiveStatusArgv, '--run');
+    const errors: string[] = [...(parsed.errors ?? [])];
+    if (statusCandidate && !statusCandidate.startsWith('-') && !statusTarget) {
+      errors.push(`unknown status target: ${statusCandidate}`);
+    }
+    if (effectiveStatusArgv.includes('--run') && !runId) {
+      errors.push('--run requires a value.');
+    }
+
     return {
       ...parsed,
+      ...(statusTarget ? { statusTarget } : {}),
       ...(runId ? { runId } : {}),
-      ...(statusArgv.includes('--run') && !runId ? { errors: [...(parsed.errors ?? []), '--run requires a value.'] } : {}),
+      ...(errors.length > 0 ? { errors } : {}),
     };
   }
 
@@ -154,8 +168,8 @@ function parseConnect(argv: string[]): PowerUserParsedArgs {
   const base = withCommonFlags({ command: 'connect', surface: 'connect' }, argv.slice(target ? 1 : 0));
   const errors: string[] = [...(base.errors ?? [])];
 
-  if (target !== 'cloud' && target !== 'agents' && target !== 'integrations') {
-    errors.push('connect requires one of: cloud, agents, integrations.');
+  if (target !== 'cloud' && target !== 'agents' && target !== 'integrations' && target !== 'linear') {
+    errors.push('connect requires one of: cloud, agents, integrations, linear.');
     return { ...base, ...(errors.length > 0 ? { errors } : {}) };
   }
 
@@ -181,6 +195,11 @@ function resolveCloudTargets(
   if (target === 'agents') return DEFAULT_CLOUD_AGENT_TARGETS;
   if (target === 'integrations') return DEFAULT_CLOUD_INTEGRATION_TARGETS;
   return undefined;
+}
+
+function readStatusTarget(argv: string[]): StatusTarget | undefined {
+  const candidate = argv[0]?.trim().toLowerCase();
+  return candidate === 'linear' ? 'linear' : undefined;
 }
 
 function withCommonFlags<T extends Omit<PowerUserParsedArgs, 'json' | 'quiet' | 'verbose' | 'yes' | 'background' | 'foreground'>>(

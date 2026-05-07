@@ -44,6 +44,8 @@ import { defaultArtifactPathForWorkflowName } from '../flows/spec-intake-flow.js
 import { CLOUD_IMPLEMENTATION_AGENTS, CLOUD_OPTIONAL_INTEGRATIONS } from '../flows/cloud-workflow-flow.js';
 import { resolvePreferWorkforcePersonaWorkflowWriter } from '../flows/workforce-persona-cli-preference.js';
 import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
+import { getLinearConnectGuidance } from '../../linear/connect.js';
+import { linearStatusSummary, renderLinearStatus } from '../../linear/status.js';
 
 // ---------------------------------------------------------------------------
 // Parsed CLI arguments
@@ -54,6 +56,7 @@ export interface ParsedArgs {
   surface?: PowerUserSurface;
   mode?: RickyMode;
   connectTarget?: ConnectTarget;
+  statusTarget?: 'linear';
   cloudTargets?: string[];
   runId?: string;
   spec?: string;
@@ -148,6 +151,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.surface && parsed.surface !== 'legacy') result.surface = parsed.surface;
   if (parsed.mode) result.mode = parsed.mode;
   if (parsed.connectTarget) result.connectTarget = parsed.connectTarget;
+  if (parsed.statusTarget) result.statusTarget = parsed.statusTarget;
   if (parsed.cloudTargets) result.cloudTargets = parsed.cloudTargets;
   if (parsed.runId) result.runId = parsed.runId;
   if (parsed.spec !== undefined) result.spec = parsed.spec;
@@ -296,10 +300,12 @@ export function renderHelp(): string[] {
     '  ricky run <path> --cloud                          Run it in AgentWorkforce Cloud',
     '  ricky run <path> --background                     Run it in the background',
     '  ricky status --run <run-id>                         Check progress',
+    '  ricky status linear                                 Check Linear readiness',
     '',
     'Common commands:',
     '  ricky status                                        Show local and Cloud readiness',
     '  ricky connect cloud                                 Connect AgentWorkforce Cloud',
+    '  ricky connect linear                                Show Linear Actor app install guidance',
     '  ricky workflow --spec-file <path> --run             Generate, then run a workflow',
     '  ricky workflow --spec-file <path> --mode cloud       Generate with Cloud',
     '  ricky cloud --spec <text>                           Generate with Cloud',
@@ -710,6 +716,14 @@ async function renderStatus(parsed: ParsedArgs, cwd: string, deps: CliMainDeps =
     return renderRunMonitorStatus(parsed.runId, cwd, parsed);
   }
 
+  if (parsed.statusTarget === 'linear') {
+    const readiness = await readLinearStatusReadiness(deps);
+    if (parsed.json) {
+      return [JSON.stringify({ target: 'linear', ...linearStatusSummary(readiness) }, null, 2)];
+    }
+    return renderLinearStatus(readiness);
+  }
+
   const status = await statusPayload(cwd, deps);
   if (parsed.json) {
     return [JSON.stringify(status, null, 2)];
@@ -951,6 +965,17 @@ async function readStatusCloudReadiness(params: {
     return undefined;
   }
 }
+
+async function readLinearStatusReadiness(
+  deps: Pick<CliMainDeps, 'readCloudAuth' | 'resolveCloudWorkspace' | 'checkCloudReadiness'> = {},
+): Promise<CloudReadinessSnapshot | undefined> {
+  const warnings: string[] = [];
+  const auth = await readStatusCloudAuth(deps);
+  const workspaceId = await resolveStatusCloudWorkspaceId(deps, auth);
+  if (!deps.checkCloudReadiness && (!auth || !workspaceId)) return undefined;
+  return readStatusCloudReadiness({ deps, auth, workspaceId, warnings });
+}
+
 
 async function fetchStatusCloudReadiness(
   auth: StoredAuth,
@@ -1222,6 +1247,20 @@ function connectExitCode(payload: ConnectPayload): number {
 }
 
 async function connectPayload(parsed: ParsedArgs, deps: CliMainDeps): Promise<ConnectPayload> {
+  if (parsed.connectTarget === 'linear') {
+    const guidance = getLinearConnectGuidance();
+    return {
+      target: 'linear',
+      status: 'manual-dashboard',
+      message: [
+        'Linear uses the Cloud dashboard to install the Ricky OAuth Actor app.',
+        `Dashboard: ${guidance.dashboardUrl}`,
+      ].join('\n'),
+      warnings: [],
+      nextActions: [...guidance.instructions, 'ricky status linear'],
+    };
+  }
+
   if (parsed.connectTarget === 'agents') {
     const providers = parsed.cloudTargets ?? [];
     if (providers.length === 0) {

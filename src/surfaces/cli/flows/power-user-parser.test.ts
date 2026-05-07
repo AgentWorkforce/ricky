@@ -114,6 +114,15 @@ describe('power user parser defaults', () => {
     });
   });
 
+  it('rejects unknown status targets', () => {
+    expect(parsePowerUserArgs(['status', 'foo', '--json'])).toMatchObject({
+      command: 'status',
+      surface: 'status',
+      json: true,
+      errors: ['unknown status target: foo'],
+    });
+  });
+
   it('requires --run for power-user workflow artifact execution', () => {
     const preview = parsePowerUserArgs(['local', '--workflow', 'workflows/generated/review.ts']);
     expect(preview).toMatchObject({
