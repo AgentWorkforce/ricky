@@ -80,6 +80,62 @@ describe('runInteractiveCli', () => {
     expect(result.awaitingInput).toBe(false);
   });
 
+  it('asks handoff clarification questions and retries local generation with the answers', async () => {
+    const clarification = {
+      id: 'open-question-1',
+      question: 'Please clarify: choose package A or package B?',
+      reason: 'The spec contains an explicit unresolved question.',
+      blocking: true,
+    };
+    const blockedResponse: LocalResponse = {
+      ok: false,
+      exitCode: 1,
+      artifacts: [],
+      logs: ['[local] spec intake route: clarify'],
+      warnings: ['routing: Spec has unresolved workflow authoring questions'],
+      nextActions: ['Clarify: Please clarify: choose package A or package B?'],
+      clarificationQuestions: [clarification],
+      generation: {
+        stage: 'generate',
+        status: 'needs_clarification',
+        decisions: { clarification_questions: [clarification] },
+      },
+    };
+    const successResponse: LocalResponse = {
+      ok: true,
+      artifacts: [{ path: 'out/workflow.ts', type: 'text/typescript' }],
+      logs: ['[local] workflow generation: passed'],
+      warnings: [],
+      nextActions: ['Review workflow'],
+    };
+    const execute = vi.fn()
+      .mockResolvedValueOnce(blockedResponse)
+      .mockResolvedValueOnce(successResponse);
+
+    const result = await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      handoff: {
+        source: 'cli',
+        spec: [
+          'Generate a workflow.',
+          'Open questions:',
+          '- TBD: choose package A or package B',
+        ].join('\n'),
+        mode: 'local',
+      },
+      localExecutor: { execute },
+      inputClarificationAnswer: vi.fn().mockResolvedValue('Package B.'),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.localResult).toBe(successResponse);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[1][0]).toMatchObject({
+      spec: expect.stringContaining('Clarification answers:'),
+    });
+    expect(execute.mock.calls[1][0].spec).toContain('Package B.');
+  });
+
   it('passes deps.cwd as invocationRoot to an injected local executor when the handoff omits it', async () => {
     const localResponse: LocalResponse = {
       ok: true,

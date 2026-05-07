@@ -1675,6 +1675,7 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     ...(cloudRequest ? { cloudRequest } : {}),
     ...(localProgress ? { localProgress } : {}),
     ...(localRuntimeOutput ? { localRuntimeOutput } : {}),
+    allowClarificationPrompts: cliHandoff !== undefined && !parsed.json && !parsed.quiet,
     ...cloudRecoveryDeps,
     preferWorkforcePersonaWorkflowWriter:
       deps.preferWorkforcePersonaWorkflowWriter ??
@@ -1947,8 +1948,15 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     );
 
   if (shouldRenderNextActions) {
-    for (const action of localResult.nextActions.slice(0, 2)) {
-      lines.push(`Next: ${action}`);
+    const clarificationQuestions = localResult.clarificationQuestions ?? [];
+    if (localResult.generation?.status === 'needs_clarification' && clarificationQuestions.length > 0) {
+      for (const question of clarificationQuestions.slice(0, 5)) {
+        lines.push(`Next: Clarify: ${question.question}`);
+      }
+    } else {
+      for (const action of localResult.nextActions.slice(0, 2)) {
+        lines.push(`Next: ${action}`);
+      }
     }
   }
   return lines;
