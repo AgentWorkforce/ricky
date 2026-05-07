@@ -8,6 +8,7 @@ const RECEIVED_AT = '2026-04-26T00:00:00.000Z';
 
 interface SpecFixtureOverrides {
   description?: string;
+  targetContext?: string;
   targetFiles?: string[];
   constraints?: string[];
   evidenceRequirements?: string[];
@@ -1092,7 +1093,8 @@ describe('workflow generation pipeline', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.artifact?.content).toContain('Non-goals:');
+    expect(result.artifact?.content).toContain('.workflow-artifacts/generated/linear-scope/non-goals.md');
+    expect(result.artifact?.content).toContain('# Non-goals');
     expect(result.artifact?.content).toContain('- Non-goal: Passive Linear comment monitoring');
     expect(result.artifact?.content).toContain('Use this exact section heading in the lead plan.');
   });
@@ -1350,12 +1352,107 @@ describe('workflow generation pipeline', () => {
     expect(content).toContain(`${artifactsDir}/skill-application-boundary.json`);
     expect(content).toContain(`${artifactsDir}/skill-runtime-boundary.txt`);
     expect(content).toContain(`${artifactsDir}/signoff.md`);
+    expect(content).toContain(`${artifactsDir}/normalized-spec.md`);
+    expect(content).toContain(`${artifactsDir}/acceptance-contract.json`);
+    expect(content).toContain(`${artifactsDir}/lead-plan-instructions.md`);
+    expect(content).toContain(`${artifactsDir}/implementation-instructions.md`);
+    expect(content).toContain(`${artifactsDir}/review-checklist.md`);
+  });
+
+  it('packages long spec context into sidecar files instead of agent task bodies', () => {
+    const longSpecSentinel = 'VERY_LONG_INLINE_SENTINEL_SHOULD_ONLY_LIVE_IN_CONTEXT_PACKAGE';
+    const longDescription = [
+      'Implement prompt packaging for generated workflow context.',
+      longSpecSentinel,
+      'This paragraph is intentionally repeated so generated agent tasks must point at sidecar files instead of carrying the entire normalized spec.',
+    ].join(' ').repeat(80);
+    const result = generate({
+      spec: spec({
+        description: longDescription,
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+        acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/packaged-context.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const content = artifact(result).content;
+    expect(content).toContain('.workflow-artifacts/generated/packaged-context/normalized-spec.md');
+    expect(content).toContain('.workflow-artifacts/generated/packaged-context/acceptance-contract.json');
+
+    const prepareContextCommand = renderedStepCommand(content, 'prepare-context');
+    expect(prepareContextCommand).not.toContain(longSpecSentinel);
+    expect(prepareContextCommand).not.toContain('printf');
+    expect(prepareContextCommand.length).toBeLessThan(2000);
+    expect(renderedStepCommands(content).join('\n')).not.toContain(longSpecSentinel);
+
+    const taskBodies = renderedTaskBodies(content);
+    expect(taskBodies.length).toBeGreaterThan(0);
+    expect(taskBodies.join('\n')).not.toContain(longSpecSentinel);
+    expect(Math.max(...taskBodies.map((body) => body.length))).toBeLessThan(2500);
+  });
+
+  it('threads target context sidecars into planning and review prompts', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a workflow using the supplied target context.',
+        targetContext: 'docs/product/ricky-simplified-workflow-cli-spec.md',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+      }),
+      artifactPath: 'workflows/generated/target-context-aware.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const content = artifact(result).content;
+    const taskBodies = renderedTaskBodies(content);
+
+    expect(taskBodies.some((body) => body.includes('lead-plan-instructions.md') && body.includes('target-context.txt'))).toBe(true);
+    expect(taskBodies.some((body) => body.includes('review-checklist.md') && body.includes('target-context.txt'))).toBe(true);
+  });
+
+  it('restricts generated target context file reads to repo-relative workspace paths', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a workflow using a target context path.',
+        targetContext: '../outside-workspace.md',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+      }),
+      artifactPath: 'workflows/generated/target-context-path-guard.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const content = artifact(result).content;
+
+    expect(content).toContain('function resolveRickyGeneratedTargetContextPath(value: string): string | null');
+    expect(content).toContain('if (rickyWorkflowPath.isAbsolute(value)) return null;');
+    expect(content).toContain('const workspaceRoot = rickyWorkflowFs.realpathSync(process.cwd());');
+    expect(content).toContain('const candidatePath = rickyWorkflowPath.resolve(workspaceRoot, value);');
+    expect(content).toContain('realCandidatePath.startsWith(`${workspaceRoot}${rickyWorkflowPath.sep}`)');
+    expect(content).toContain('rickyWorkflowFs.writeFileSync(targetContext.outputPath, ensureTrailingNewline(targetContext.value));');
+    expect(content).not.toContain('existsSync(targetContext.value)');
+    expect(content).not.toContain('copyFileSync(targetContext.value');
   });
 });
 
 function artifact(result: ReturnType<typeof generate>): NonNullable<ReturnType<typeof generate>['artifact']> {
   expect(result.artifact).not.toBeNull();
   return result.artifact!;
+}
+
+function renderedTaskBodies(content: string): string[] {
+  return [...content.matchAll(/task:\s*`((?:[^`\\]|\\[\s\S])*)`/g)].map((match) => match[1].replace(/\\`/g, '`'));
+}
+
+function renderedStepCommand(content: string, stepName: string): string {
+  const stepIndex = content.search(new RegExp(`\\.step\\(${JSON.stringify(stepName)},`));
+  expect(stepIndex).toBeGreaterThanOrEqual(0);
+  const commandMatch = /command:\s*("(?:(?:\\[\s\S])|[^"\\])*")/.exec(content.slice(stepIndex));
+  expect(commandMatch).not.toBeNull();
+  return JSON.parse(commandMatch![1]) as string;
+}
+
+function renderedStepCommands(content: string): string[] {
+  return [...content.matchAll(/command:\s*("(?:(?:\\[\s\S])|[^"\\])*")/g)].map((match) => JSON.parse(match[1]) as string);
 }
 
 function gate(
@@ -1381,6 +1478,7 @@ function spec(overrides: SpecFixtureOverrides = {}): NormalizedWorkflowSpec {
     requestId: rawPayload.requestId,
     metadata: {},
   };
+  const targetContext = overrides.targetContext ?? null;
   const targetFiles = overrides.targetFiles ?? [];
   const constraints = overrides.constraints ?? [];
   const evidenceRequirements = overrides.evidenceRequirements ?? [];
@@ -1390,7 +1488,7 @@ function spec(overrides: SpecFixtureOverrides = {}): NormalizedWorkflowSpec {
     intent: 'generate',
     description,
     targetRepo: null,
-    targetContext: null,
+    targetContext,
     targetFiles,
     desiredAction: {
       kind: 'generate',
@@ -1424,7 +1522,7 @@ function spec(overrides: SpecFixtureOverrides = {}): NormalizedWorkflowSpec {
       intent: { primary: 'generate', signals: ['test fixture'] },
       description,
       targetRepo: undefined,
-      targetContext: undefined,
+      targetContext: targetContext ?? undefined,
       targetFiles,
       constraints,
       evidenceRequirements,
