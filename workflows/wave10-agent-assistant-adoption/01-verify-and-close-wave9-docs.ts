@@ -12,7 +12,7 @@ async function main() {
     .onError('retry', { maxRetries: 1, retryDelayMs: 10_000 })
 
     .agent('review-claude', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'reviewer',
       role: 'Performs a bounded acceptance review of already-authored Ricky agent-assistant product documents.',
       retries: 1,
