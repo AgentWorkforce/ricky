@@ -299,8 +299,10 @@ export function detectIntent(text: string): IntentSignal {
   const explicitGenerateWorkflow = isExplicitGenerateWorkflowRequest(haystack, generateSignals);
 
   const failedRunSignals = matches.find((match) => match.intent === 'debug')?.signals ?? [];
+  const explicitExecuteArtifact = isExplicitExecuteArtifactRequest(haystack);
   if (
     !explicitGenerateWorkflow &&
+    !explicitExecuteArtifact &&
     failedRunSignals.some((signal) => /failed|failure|stack trace|run id|timed out|timeout|exit code/i.test(signal))
   ) {
     return {
@@ -350,6 +352,18 @@ function isExplicitGenerateWorkflowRequest(haystack: string, generateSignals: st
   }
 
   return generateSignals.some((signal) => /new workflow|build a workflow|workflow spec|scaffold/i.test(signal));
+}
+
+function isExplicitExecuteArtifactRequest(haystack: string): boolean {
+  if (!/\b(?:run|execute|launch|start|kick off|invoke|rerun|restart)\b/.test(haystack)) return false;
+  if (!/\b(?:ready artifact|ready workflow|workflow artifact|artifact path)\b/.test(haystack)) return false;
+  if (!/(?:^|\s)(?:[./~]?[\w@.-]+\/)*workflows\/.+\.(?:ts|js|yaml|yml)\b|(?:^|\s)[\w@./~-]+\.workflow\.(?:ts|js|yaml|yml)\b/.test(haystack)) {
+    return false;
+  }
+
+  return !/\b(?:failed run|run id|stack trace|traceback|stdout|stderr|logs?|evidence|verification failed|timed out|timeout|exit code)\b/.test(
+    haystack,
+  );
 }
 
 function normalizeIntent(value: string): IntentKind {

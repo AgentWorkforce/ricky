@@ -246,6 +246,36 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.reason).toContain('executable workflow artifact');
   });
 
+  it('routes failure-named ready workflow artifacts to execute when no failed-run evidence exists', () => {
+    const result = intake(
+      natural('Run the ready artifact workflows/failure-analysis.workflow.ts for the current repository.'),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('execute');
+    expect(result.routing?.normalizedSpec.intent).toBe('execute');
+    expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBe('workflows/failure-analysis.workflow.ts');
+  });
+
+  it('keeps structured execute requests on execute even when artifact paths contain failure vocabulary', () => {
+    const result = intake({
+      kind: 'structured_json',
+      surface: 'api',
+      receivedAt: RECEIVED_AT,
+      requestId: 'api-execute-failure-artifact',
+      data: {
+        intent: 'execute',
+        description: 'Run the ready artifact workflows/failure-analysis.workflow.ts for the current repository.',
+        artifactPath: 'workflows/failure-analysis.workflow.ts',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('execute');
+    expect(result.routing?.normalizedSpec.intent).toBe('execute');
+    expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBe('workflows/failure-analysis.workflow.ts');
+  });
+
   it('excludes repository slugs from targetFiles', () => {
     const result = intake(
       natural('Build a workflow for repo AgentWorkforce/ricky to verify the local runtime.'),

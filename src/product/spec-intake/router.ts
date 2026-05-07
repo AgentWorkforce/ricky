@@ -118,14 +118,14 @@ function hasFailureEvidence(normalized: NormalizedWorkflowSpec): boolean {
   const text = [
     normalized.description,
     normalized.targetContext,
-    normalized.desiredAction.workflowFileHint,
-    ...normalized.targetFiles,
     ...normalized.evidenceRequirements.map((requirement) => requirement.requirement),
   ]
     .filter(Boolean)
     .join('\n');
 
-  return /\b(failed|failure|error|stack trace|run id|log|evidence|timed out|verification)\b/i.test(text);
+  return /\b(failed run|failing run|run id|stack trace|traceback|log|logs|evidence|stdout|stderr|timed out|timeout|verification failed)\b/i.test(
+    text,
+  );
 }
 
 function decision(

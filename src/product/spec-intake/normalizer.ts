@@ -191,17 +191,11 @@ function summarizeAction(description: string, intent: IntentKind): string {
 }
 
 function hasFailedRunEvidence(parsed: ParsedSpec): boolean {
-  const text = [
-    parsed.description,
-    parsed.targetContext,
-    ...parsed.targetFiles,
-    ...parsed.evidenceRequirements,
-    ...parsed.acceptanceGates,
-  ]
+  const text = [parsed.description, parsed.targetContext, ...parsed.evidenceRequirements, ...parsed.acceptanceGates]
     .filter(Boolean)
     .join('\n');
 
-  return /\b(?:failed|failure|failing|error|stack trace|traceback|run id|run-|timed out|timeout|verification failed|exit code [1-9])\b/i.test(
+  return /\b(?:failed run|failing run|run id|run-|stack trace|traceback|timed out|timeout|verification failed|exit code [1-9]|stdout|stderr|logs?|evidence)\b/i.test(
     text,
   );
 }
