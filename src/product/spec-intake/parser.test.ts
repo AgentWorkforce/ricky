@@ -31,10 +31,12 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('generate');
     expect(result.routing?.normalizedSpec.intent).toBe('generate');
+    expect(result.routing?.reason).toContain('author a new workflow');
     expect(result.routing?.normalizedSpec.desiredAction.specText).toContain('create a new workflow spec');
     expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBeUndefined();
     expect(result.routing?.normalizedSpec.targetFiles).toEqual([]);
     expect(result.routing?.normalizedSpec.providerContext.surface).toBe('claude_handoff');
+    expect(result.routing?.normalizedSpec.providerContext.surfaceLabel).toBe('Claude handoff');
     expect(result.routing?.normalizedSpec.sourceSpec.rawPayload.kind).toBe('natural_language');
   });
 
@@ -150,8 +152,12 @@ describe('spec intake parser, normalizer, and router', () => {
           description: 'Generate a workflow that triages flaky test evidence.',
           targetRepo: 'AgentWorkforce/ricky',
           context: 'product spec intake',
-          constraints: ['Only use deterministic local checks.'],
-          acceptanceGates: ['vitest parser tests pass'],
+          constraints: [
+            { constraint: 'Only use deterministic local checks.' },
+            { requirement: 'Do not call external services.' },
+          ],
+          evidence: [{ requirement: 'Output contains SPEC_INTAKE_READY.' }],
+          acceptanceGates: [{ gate: 'npm test exits 0' }],
         },
       },
     };
@@ -176,6 +182,23 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(normalized?.sourceSpec.surface).toBe('mcp');
     expect(normalized?.sourceSpec.providerContext.requestId).toBe('mcp-request');
     expect(normalized?.targetContext).toBe('product spec intake');
+    expect(normalized?.constraints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ constraint: 'Only use deterministic local checks.', category: 'scope' }),
+        expect.objectContaining({ constraint: 'Do not call external services.', category: 'other' }),
+      ]),
+    );
+    expect(normalized?.evidenceRequirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requirement: 'Output contains SPEC_INTAKE_READY.',
+          verificationType: 'output_contains',
+        }),
+      ]),
+    );
+    expect(normalized?.acceptanceGates).toEqual(
+      expect.arrayContaining([expect.objectContaining({ gate: 'npm test exits 0', kind: 'deterministic' })]),
+    );
   });
 
   it('routes failed-run evidence to debug', () => {
@@ -241,6 +264,7 @@ describe('spec intake parser, normalizer, and router', () => {
 
     expect(result.success).toBe(false);
     expect(result.routing?.target).toBe('clarify');
+    expect(result.routing?.reason).toContain('failed-run evidence');
     expect(result.validationIssues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -295,6 +319,7 @@ describe('spec intake parser, normalizer, and router', () => {
 
     expect(result.success).toBe(false);
     expect(result.routing?.target).toBe('clarify');
+    expect(result.routing?.reason).toContain('ambiguous');
     expect(result.validationIssues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

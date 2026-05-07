@@ -152,6 +152,7 @@ Review checklist:
     .step('review-claude', {
       agent: 'reviewer-claude',
       dependsOn: ['initial-soft-validation'],
+      timeoutMs: 180_000,
       task: `Review spec intake for Ricky product truth and user journey fit.
 
 Read src/product/spec-intake/ and initial validation output:
@@ -170,6 +171,7 @@ Write .workflow-artifacts/wave2-product/workflow-spec-intake/review-claude.md en
     .step('review-codex', {
       agent: 'reviewer-codex',
       dependsOn: ['initial-soft-validation'],
+      timeoutMs: 180_000,
       task: `Review spec intake implementation and tests.
 
 Read src/product/spec-intake/ and initial validation output:
@@ -225,6 +227,7 @@ Write .workflow-artifacts/wave2-product/workflow-spec-intake/fix-loop.md ending 
     .step('final-review-claude', {
       agent: 'reviewer-claude',
       dependsOn: ['post-fix-validation'],
+      timeoutMs: 180_000,
       task: `Re-review spec intake after the fix loop.
 
 Read src/product/spec-intake/, the fix-loop artifact, and post-fix validation output:
@@ -239,6 +242,7 @@ Write .workflow-artifacts/wave2-product/workflow-spec-intake/final-review-claude
     .step('final-review-codex', {
       agent: 'reviewer-codex',
       dependsOn: ['post-fix-validation'],
+      timeoutMs: 180_000,
       task: `Re-review spec intake implementation and tests after fixes.
 
 Read src/product/spec-intake/, the fix-loop artifact, and post-fix validation output:

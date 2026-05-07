@@ -108,6 +108,25 @@ const MCP_TOOL_INTENTS: Record<string, IntentKind> = {
 };
 
 const PATH_PATTERN = /(?:^|\s)([./~]?[\w@.-]+(?:\/[\w@.-]+)+(?:\.[A-Za-z0-9]+)?)/g;
+const STRUCTURED_TEXT_KEYS = [
+  'path',
+  'file',
+  'workflowFile',
+  'workflowPath',
+  'artifactPath',
+  'artifact_path',
+  'command',
+  'expected',
+  'description',
+  'summary',
+  'name',
+  'constraint',
+  'requirement',
+  'gate',
+  'criterion',
+  'criteria',
+  'value',
+];
 
 export function parseSpec(payload: RawSpecPayload): ParsedSpec {
   switch (payload.kind) {
@@ -596,7 +615,7 @@ function extractTargetFiles(text: string): string[] {
 }
 
 function extractLabeledLines(text: string, labels: string[]): string[] {
-  const labelPattern = labels.map(escapeRegExp).join('|');
+  const labelPattern = [...labels].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|');
   const pattern = new RegExp(`^(?:[-*]\\s*)?(?:${labelPattern})\\b\\s*:?\\s*(.+)$`, 'i');
   return text
     .split(/\r?\n/)
@@ -649,37 +668,13 @@ function readStringArray(data: Record<string, unknown>, keys: string[]): string[
           typeof item === 'string'
             ? item
             : isRecord(item)
-              ? readString(item, [
-                  'path',
-                  'file',
-                  'workflowFile',
-                  'workflowPath',
-                  'artifactPath',
-                  'artifact_path',
-                  'command',
-                  'expected',
-                  'description',
-                  'summary',
-                  'name',
-                ])
+              ? readString(item, STRUCTURED_TEXT_KEYS)
               : undefined,
         )
         .filter((item): item is string => Boolean(item));
     }
     if (isRecord(value)) {
-      const nested = readString(value, [
-        'path',
-        'file',
-        'workflowFile',
-        'workflowPath',
-        'artifactPath',
-        'artifact_path',
-        'command',
-        'expected',
-        'description',
-        'summary',
-        'name',
-      ]);
+      const nested = readString(value, STRUCTURED_TEXT_KEYS);
       if (nested) return [nested];
     }
     if (typeof value === 'string' && value.trim()) return [value.trim()];
