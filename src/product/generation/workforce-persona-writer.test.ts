@@ -259,6 +259,71 @@ describe('workforce persona workflow writer', () => {
     );
   });
 
+  it('runs the Workforce persona writer for master execution workflows', async () => {
+    const masterSpec = spec({
+      description: [
+        'Implement nested runner, runtime policy, telemetry, evals, and insights',
+        'as smaller workflows run by a master executor.',
+      ].join(' '),
+      targetFiles: [
+        'src/runtime/nested-runner.ts',
+        'src/runtime/policy.ts',
+        'src/telemetry/events.ts',
+        'src/evals/harness.ts',
+      ],
+    });
+    const base = generate({
+      spec: masterSpec,
+      artifactPath: 'workflows/generated/runtime-master.ts',
+    });
+    expect(base.success).toBe(true);
+    expect(base.masterExecutionPlan).toBeDefined();
+    const calls: Array<{ task: string; options: Record<string, unknown> | undefined }> = [];
+    const personaContent = base.artifact!.content.replace(
+      'RICKY_MASTER_EXECUTOR_WORKFLOW',
+      'RICKY_MASTER_EXECUTOR_WORKFLOW\n// WORKFORCE_PERSONA_MASTER_AUTHORING',
+    );
+    const resolver: WorkforcePersonaResolver = async (_intents, options) => ({
+      source: 'package',
+      intent: 'agent-relay-workflow',
+      warnings: [],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: options?.tier ?? 'best',
+          runtime: { harness: 'codex', model: 'codex/test' },
+        },
+        sendMessage(task, sendOptions) {
+          calls.push({ task, options: sendOptions as Record<string, unknown> | undefined });
+          return execution(personaResponse('workflows/generated/runtime-master.ts', personaContent));
+        },
+      },
+    });
+
+    const result = await generateWithWorkforcePersona({
+      spec: masterSpec,
+      artifactPath: 'workflows/generated/runtime-master.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'runtime-master',
+        targetMode: 'local',
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.masterExecutionPlan).toBeDefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].task).toContain('"outputPath": "workflows/generated/runtime-master.ts"');
+    expect(calls[0].options?.mode).toBe('one-shot');
+    expect(result.workforcePersona).toMatchObject({
+      personaId: 'agent-relay-workflow',
+      selectedIntent: 'agent-relay-workflow',
+      outputPath: 'workflows/generated/runtime-master.ts',
+    });
+    expect(result.artifact?.content).toContain('WORKFORCE_PERSONA_MASTER_AUTHORING');
+  });
+
   it('errors instead of writing a file when the harness returns malformed text', async () => {
     const resolver: WorkforcePersonaResolver = async () => ({
       source: 'package',

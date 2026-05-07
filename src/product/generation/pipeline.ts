@@ -83,9 +83,6 @@ export function generate(input: GenerationInput): GenerationResult {
 
 export async function generateWithWorkforcePersona(input: GenerationInput): Promise<GenerationResult> {
   const baseResult = generate({ ...input, workforcePersonaWriter: false });
-  if (baseResult.masterExecutionPlan) {
-    return baseResult;
-  }
   if (input.workforcePersonaWriter === false || !baseResult.artifact || !baseResult.success) {
     return baseResult;
   }
