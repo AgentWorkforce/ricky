@@ -478,7 +478,7 @@ function classifyDecision(
     }
   }
 
-  if (children.every((child) => childComplete(child, childResults))) {
+  if (children.length > 0 && children.every((child) => childComplete(child, childResults))) {
     return { kind: 'complete' };
   }
 

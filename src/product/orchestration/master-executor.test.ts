@@ -228,6 +228,25 @@ describe('planMasterExecution', () => {
 });
 
 describe('runMasterExecution', () => {
+  it('escalates an empty plan instead of reporting complete', async () => {
+    const emptyPlan = planMasterExecution({
+      title: 'No safe slice',
+      description: 'No desired slices or target files are available.',
+    });
+    expect(emptyPlan.children).toEqual([]);
+
+    let invoked = false;
+    const result = await runMasterExecution(emptyPlan, async () => {
+      invoked = true;
+      throw new Error('runner should not be invoked for an empty plan');
+    });
+
+    expect(invoked).toBe(false);
+    expect(result.childResults).toEqual([]);
+    expect(result.decision).toMatchObject({ kind: 'escalate' });
+    expect(result.decision).not.toEqual({ kind: 'complete' });
+  });
+
   it('runs every dependency wave only after the previous wave completed', async () => {
     const plan = planMasterExecution({
       title: 'Ordered rollout',
@@ -281,12 +300,13 @@ describe('runMasterExecution', () => {
   it('enforces maxConcurrency while running independent children', async () => {
     const plan = planMasterExecution({
       title: 'Parallel product slices',
-      description: 'Four independent slices can run in a bounded pool.',
+      description: 'Five independent slices can run in a bounded pool.',
       desiredSlices: [
         { id: 'slice-one', title: 'Slice one', targetFiles: ['src/a.ts'] },
         { id: 'slice-two', title: 'Slice two', targetFiles: ['src/b.ts'] },
         { id: 'slice-three', title: 'Slice three', targetFiles: ['src/c.ts'] },
         { id: 'slice-four', title: 'Slice four', targetFiles: ['src/d.ts'] },
+        { id: 'slice-five', title: 'Slice five', targetFiles: ['src/e.ts'] },
       ],
     });
     const controls = new Map<string, Deferred<void>>();
@@ -316,9 +336,15 @@ describe('runMasterExecution', () => {
     expect(peakConcurrency).toBe(2);
 
     controls.get('slice-two')?.resolve();
-    controls.get('slice-three')?.resolve();
     await waitUntil(() => expect(starts).toHaveLength(4));
+    expect(peakConcurrency).toBe(2);
+
+    controls.get('slice-three')?.resolve();
+    await waitUntil(() => expect(starts).toHaveLength(5));
+    expect(peakConcurrency).toBe(2);
+
     controls.get('slice-four')?.resolve();
+    controls.get('slice-five')?.resolve();
 
     const result = await execution;
     expect(result.decision).toEqual({ kind: 'complete' });
@@ -327,6 +353,7 @@ describe('runMasterExecution', () => {
       'slice-two',
       'slice-three',
       'slice-four',
+      'slice-five',
     ]);
   });
 
@@ -436,13 +463,13 @@ describe('runMasterExecution', () => {
     const target = children(plan)[0];
 
     const result = await runMasterExecution(plan, async () =>
-      blockedRun(target, 'MISSING_ENV_VAR: GITHUB_TOKEN'),
+      blockedRun(target, 'MISSING_ENV_VAR: ANTHROPIC_API_KEY'),
     );
 
     expect(result.decision).toEqual({
       kind: 'blocked',
       childId: target.id,
-      missing: ['GITHUB_TOKEN'],
+      missing: ['ANTHROPIC_API_KEY'],
     });
   });
 
@@ -451,17 +478,17 @@ describe('runMasterExecution', () => {
     const target = children(plan)[0];
 
     const result = await runMasterExecution(plan, async () => {
-      throw new Error('MISSING_ENV_VAR: GITHUB_TOKEN');
+      throw new Error('MISSING_ENV_VAR: ANTHROPIC_API_KEY');
     });
 
     expect(result.decision).toEqual({
       kind: 'blocked',
       childId: target.id,
-      missing: ['GITHUB_TOKEN'],
+      missing: ['ANTHROPIC_API_KEY'],
     });
     expect(runFor(result, target.id)).toMatchObject({
       status: 'blocked',
-      blockedReason: 'MISSING_ENV_VAR: GITHUB_TOKEN',
+      blockedReason: 'MISSING_ENV_VAR: ANTHROPIC_API_KEY',
     });
   });
 
