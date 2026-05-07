@@ -272,8 +272,10 @@ Write .workflow-artifacts/wave1-runtime/workflow-failure-classification/final-re
       dependsOn: ['build-typecheck-gate'],
       command: [
         'npx vitest run',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)" && if [ -n "$changed" ]; then printf "%s\\n" "$changed" | grep -Eq "^src/runtime/failure/"; fi',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/runtime/failure/|\\.workflow-artifacts/)"',
+        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'if [ -n "$changed" ]; then printf "%s\\n" "$changed" | grep -Eq "^src/runtime/failure/|^\\.workflow-artifacts/"; fi',
+        'unexpected="$(printf "%s\\n" "$changed" | grep -Ev "^(src/runtime/failure/|\\.workflow-artifacts/)$" || true)"',
+        'test -z "$unexpected"',
         'echo FAILURE_CLASSIFICATION_REGRESSION_PASS',
       ].join(' && '),
       captureOutput: true,
