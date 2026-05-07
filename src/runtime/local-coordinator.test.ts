@@ -239,6 +239,43 @@ describe('LocalCoordinator', () => {
     expect(result.status).toBe('timed_out');
   });
 
+  it('keeps timeout evidence stable when a killed command rejects later', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-timeout-late-reject',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 25,
+    });
+
+    invocations[0].emitStdout('before timeout');
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await resultPromise;
+
+    expect(invocations[0].killed).toBe(true);
+    expect(result.status).toBe('timed_out');
+    expect(result.exitCode).toBeNull();
+    expect(result.error).toBe('timed out after 25ms');
+    expect(result.stdout).toEqual(['before timeout']);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'timeout',
+      status: 'timed_out',
+      data: { exitCode: null, timeoutMs: 25 },
+    });
+
+    invocations[0].fail(new Error('process rejected after timeout'));
+    await Promise.resolve();
+
+    expect(result.status).toBe('timed_out');
+    expect(result.error).toBe('timed out after 25ms');
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'timeout',
+      status: 'timed_out',
+    });
+  });
+
   it('cancels active commands without hanging the test suite', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
