@@ -377,6 +377,40 @@ describe('LocalCoordinator', () => {
     ]);
   });
 
+  it('cancels during startup without invoking the injected command runner', async () => {
+    const { runner, run } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    coordinator.on('lifecycle', (event) => {
+      if (event.kind === 'started') {
+        coordinator.cancel(event.runId);
+      }
+    });
+
+    const result = await coordinator.launch({
+      runId: 'run-cancel-before-spawn',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(result.status).toBe('cancelled');
+    expect(result.exitCode).toBeNull();
+    expect(result.error).toBe('cancelled');
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'cancelled',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'cancelled',
+      status: 'cancelled',
+      data: { exitCode: null, error: 'cancelled' },
+    });
+    expect(coordinator.getActiveRun('run-cancel-before-spawn')).toBeUndefined();
+  });
+
   it('captures stdout, stderr, lifecycle events, snippets, and metadata as evidence', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
