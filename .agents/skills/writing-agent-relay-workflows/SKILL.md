@@ -218,25 +218,6 @@ runWorkflow().catch((error) => {
 });
 ```
 
-#### 1b. Make commit and PR boundaries explicit
-
-Workflows do **not** get a PR for free just because they pass validation. If the intended deliverable is a branch, commit, push, or GitHub PR, the workflow itself must own that boundary explicitly and document the expected file scope.
-
-Use this pattern only when the workflow is supposed to own repository delivery:
-
-1. Preflight the git state and fail on unexpected staged changes.
-2. Create or verify the intended branch.
-3. Run implementation, review, soft validation, fix, and hard validation gates.
-4. Stage only the declared target files and review/signoff artifacts.
-5. Commit with a deterministic message.
-6. Push the branch.
-7. Use the GitHub primitive or `gh pr create` to open the PR.
-8. Verify the PR URL/state deterministically and write it into the final signoff artifact.
-
-Do not hide commit/PR work in agent prose. Model it as deterministic steps whenever possible. If using an agent or GitHub primitive for PR creation, the downstream hard gate must still verify the PR exists before signoff.
-
-If commit or PR creation is intentionally outside the workflow, say that directly in the workflow description and signoff so the operator knows to do it after completion.
-
 #### 2b. Standard preflight template for resumable workflows
 
 ```ts
