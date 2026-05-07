@@ -4,7 +4,7 @@
 
 `ricky run <artifact> --cloud` parses correctly (PR #60 added the shorthand) and the CLI builds a structured `intent: 'execute'` Cloud request with the workflow path. But the request never leaves the CLI process: `runInteractiveCli` invokes `handleCloudGenerate(request, { executor: deps.cloudExecutor })`, and the default `cloudExecutor` is a stub at `src/cloud/api/generate-endpoint.ts:61` that returns:
 
-```
+```text
 Warning: Cloud generate stub: received spec (115 chars) for workspace <id>.
 Assumption: runtime-not-wired — The Cloud generation runtime is not wired yet, so no workflow artifacts were produced.
 Follow-up: wire-runtime — Connect the real Cloud generation runtime to replace this stub.
@@ -129,6 +129,13 @@ Two render changes on the `ricky` summary path:
 - When the run id is returned, render `Run id: <rickyRunId>` and `Status: ${status}` as their own lines (the existing renderer prints `Workflow id` only for the generate path).
 - When tailing, render each event as a single line in the existing `[workflow HH:MM]` format, matching local-run output. On terminal states, append a final summary line and the explicit follow-up command (`ricky status --run <id>`).
 
+When the `--json` flag is present, the CLI must suppress all live tail, status,
+and other human-readable event lines. The invocation
+`ricky run workflows/<existing-artifact>.ts --cloud --json` must write exactly
+one well-formed JSON object to stdout: on success it contains at minimum
+`runReceipt.runId`, and on missing or invalid Cloud auth it contains an
+actionable `error` object instead of mixed text output.
+
 ## Telemetry
 
 Reuse the existing CLI metadata (`cliMetadataFor`) — no new fields. The Cloud server already records `cli.handoff` etc.
@@ -158,7 +165,12 @@ The implementation workflow generated from this spec MUST satisfy:
 
 - `npm run typecheck` clean.
 - `npm test` clean (sans pre-existing flakes documented in the PR).
-- A real CLI invocation `ricky run workflows/<existing-artifact>.ts --cloud --json` returns a JSON object with a non-empty `runReceipt.runId` field when run with valid Cloud auth, and an actionable error when run without.
+- A real CLI invocation
+  `ricky run workflows/<existing-artifact>.ts --cloud --json` returns a single
+  well-formed JSON object with a non-empty `runReceipt.runId` field when run
+  with valid Cloud auth, suppresses live tail and human event/status lines, and
+  returns an actionable JSON `error` object when Cloud auth is missing or
+  invalid.
 - The probe used in PR #61 (`.workflow-artifacts/clarifications-proof/`-style harness) is extended with a `cloud-execute` directory containing the request shape captured against the fake server.
 - `defaultCloudExecutor` stays in place for tests but the production path no longer uses it for `intent: 'execute'`.
 
@@ -168,7 +180,15 @@ The implementation workflow generated from this spec MUST satisfy:
 2. **`cloudBaseUrl` resolution order.** Confirm that the stored Cloud auth record (`StoredAuth`) in this repo has a `cloudBaseUrl` field. If not, drop step 3 of the resolution chain in §Behavior and rely on env vars + the published default.
 3. **`fileType` detection.** The current artifact paths are `.ts`. Keep it permissive — accept `ts | mjs | cjs | js` and reject otherwise. Confirm the Cloud `WorkflowFileType` enum matches.
 4. **Run-id printing format.** Match the existing local-run printing convention exactly (look at `cli-main.ts:1858+` rendering for local runs and mirror it).
-5. **SSE vs polling for events.** The Cloud endpoint exposes an event stream; the CLI's existing local-run tailing uses polling. Pick SSE if the runtime supports `EventSource`-style streaming over fetch in Node 22 (which it does); otherwise fall back to a 1-second poll on `GET /runs/:id`.
+5. **SSE vs polling for events.** The Cloud endpoint exposes an event stream;
+   the CLI's existing local-run tailing uses polling. Pick `EventSource`-style
+   streaming over fetch in Node 22 when available so the CLI can render each
+   event as it arrives. If streaming is unavailable, fall back to repeated
+   1-second polls against the per-run events endpoint, using an incremental
+   cursor or timestamp such as `GET /runs/:id/events?after=<cursor>` and
+   emitting only events newer than the last cursor. A status-only
+   `GET /runs/:id` fallback is not sufficient for live tailing because it cannot
+   reproduce individual event lines.
 
 ## Related
 
