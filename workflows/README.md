@@ -75,6 +75,7 @@ Workflow files use a numeric prefix plus an outcome-based slug:
 Rules:
 - numeric prefixes increase monotonically within the wave folder
 - slugs describe the deliverable
+- top-level workflow files are reserved for shared or meta assets, not ordinary wave work
 - shared helpers stay under `workflows/shared/`
 - generated specs and templates stay under `workflows/meta/spec/`
 

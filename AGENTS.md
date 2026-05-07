@@ -183,6 +183,7 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 
 ## Mandatory Conventions
 
+- **Workflow contract:** Every non-trivial workflow must state its context inputs, deliverables, file targets, non-goals, verification commands, review expectations, branch naming pattern, and commit/PR boundary.
 - **Wave placement:** Place each workflow in the correct `workflows/wave<N>-<slug>/` folder. Top-level workflow files are reserved for explicitly shared or meta assets.
 - **Numeric prefix:** Use monotonically increasing numeric prefixes (`01-`, `02-`, ...) within each wave folder.
 - **Dedicated channel:** Every workflow must use a `wf-ricky-*` channel. Never use `general`.

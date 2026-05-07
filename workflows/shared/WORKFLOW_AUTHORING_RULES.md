@@ -21,6 +21,8 @@ Compact execution rules for agents writing Ricky workflows.
 15. Set `.channel()`, `.pattern()`, `.maxConcurrency()`, and `.timeout()` explicitly; add `.onError()` for long-running or multi-agent workflows.
 16. Prefer named roles over generic numbering. Default implementation team shape is `lead-claude`, `impl-primary-codex`, `impl-tests-codex`, `reviewer-claude`, `reviewer-codex`, and `validator-claude`; doc/spec workflows may use `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer.
 17. State the expected branch naming pattern and whether PR creation is in or out of scope.
+18. Use scoped change detection after implementation steps with `git diff --name-only` and `git ls-files --others --exclude-standard` limited to declared file targets.
+19. Write final signoff artifacts under `.workflow-artifacts/` for significant implementation or generation workflows.
 
 ## Must-not
 
@@ -32,6 +34,7 @@ Compact execution rules for agents writing Ricky workflows.
 6. Do not hand-tune generated workflows first when the template/spec/rules should be fixed upstream.
 7. Do not hide environmental blockers; document them explicitly.
 8. Do not sign off using review artifacts produced before the fix loop; re-review must evaluate the post-fix state.
+9. Do not use repo-wide `git diff --quiet` as the change-detection gate when unrelated work may be present.
 
 ## Default reliability pattern
 
