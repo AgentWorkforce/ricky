@@ -869,6 +869,22 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/signoff.md \
         'CLI_ONBOARDING_WORKFLOW_COMPLETE'
       ;;
+    workflows/wave0-foundation/01-repo-standards-and-conventions.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave0-foundation/repo-standards/signoff.md \
+        'W0_REPO_STANDARDS_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave0-foundation/repo-standards/final-review.md \
+        'REVIEW_REPO_STANDARDS_PASS' \
+        && test -f AGENTS.md \
+        && test -f CLAUDE.md \
+        && test -f workflows/README.md \
+        && test -f workflows/shared/WORKFLOW_AUTHORING_RULES.md \
+        && grep -Eiq 'workflow standards|deterministic gates|wave' AGENTS.md \
+        && grep -Eiq 'workflow standards|deterministic gates|wave' CLAUDE.md \
+        && grep -Eiq 'wf-ricky|deterministic|review' workflows/README.md \
+        && grep -Eq 'Must-do|Must-not' workflows/shared/WORKFLOW_AUTHORING_RULES.md
+      ;;
     workflows/wave0-foundation/02-toolchain-and-validation-foundation.ts)
       test -f package.json \
         && test -f tsconfig.json \
