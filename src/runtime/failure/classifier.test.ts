@@ -565,6 +565,50 @@ describe('unknown and mixed classification', () => {
     expect(result.confidence).toBe(Confidence.High);
   });
 
+  it('classifies passed run status with failed verification as verification_failure', () => {
+    let run = makeRun();
+    let step = makeStep();
+    step = appendStepEvent(step, {
+      kind: 'verification',
+      result: failingVerification({
+        type: 'output_contains',
+        expected: 'FAILURE_CLASSIFICATION_PLAN_READY',
+        actual: 'missing',
+      }),
+    });
+    step = completeStep(step, 'passed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    expect(run.status).toBe('passed');
+
+    const result = classifyFailure(run);
+    expect(result.failureClass).toBe(FailureClass.VerificationFailure);
+    expect(result.summary).not.toContain('no failure detected');
+  });
+
+  it('classifies summary-only passed run status with failed gate as verification_failure', () => {
+    let run = makeRun();
+    let step = makeStep();
+    step = completeStep(step, 'passed');
+    run = addStepToRun(run, step);
+
+    const gateResult = recordDeterministicGate(
+      run,
+      'final-signoff',
+      [failingVerification({ type: 'file_exists', expected: 'signoff.md', actual: 'missing' })],
+    );
+    run = { ...gateResult.run, status: 'passed' };
+
+    const summary = summarizeEvidence(run);
+    expect(summary.runStatus).toBe('passed');
+    expect(summary.allDeterministicGatesPassed).toBe(false);
+
+    const result = classifyFromSummary(summary);
+    expect(result.failureClass).toBe(FailureClass.VerificationFailure);
+    expect(result.summary).not.toContain('no failure detected');
+  });
+
   it('classifies a failed run with no matching signals as unknown', () => {
     let run = makeRun();
     let step = makeStep();
@@ -664,6 +708,26 @@ describe('unknown and mixed classification', () => {
         strength: Confidence.Medium,
       }),
     ]);
+  });
+
+  it('does not classify summary-only failed run with skipped and pending steps as deadlock', () => {
+    let run = makeRun();
+    let skipped = makeStep({ stepId: 'step-1', stepName: 'already-skipped' });
+    skipped = completeStep(skipped, 'skipped');
+    let pending = makeStep({ stepId: 'step-2', stepName: 'blocked' });
+    pending = appendStepEvent(pending, {
+      kind: 'status_change',
+      status: 'pending',
+    });
+    run = addStepToRun(addStepToRun(run, skipped), pending);
+    run = { ...run, status: 'failed' };
+
+    const summary = summarizeEvidence(run);
+    const result = classifyFromSummary(summary);
+
+    expect(summary.skippedSteps).toBe(1);
+    expect(result.failureClass).not.toBe(FailureClass.Deadlock);
+    expect(result.failureClass).toBe(FailureClass.Unknown);
   });
 });
 
@@ -829,10 +893,12 @@ describe('step overflow signal independence', () => {
     // Environment error is higher priority, but step overflow should be secondary
     expect(result.secondaryClasses).toContain(FailureClass.StepOverflow);
     // Verify the overflow signal is specific to retries, not borrowed from env
-    const overflowSignals = result.signals.filter(
-      (s) => s.observation.includes('retries across') || s.observation.includes('retries'),
+    expect(result.signals).toContainEqual(
+      expect.objectContaining({
+        source: 'step-overflow:run-summary',
+        observation: expect.stringContaining('total retries across'),
+      }),
     );
-    expect(overflowSignals.length).toBeGreaterThan(0);
   });
 });
 

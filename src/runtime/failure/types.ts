@@ -52,6 +52,10 @@ export const NextAction = {
 
 export type NextAction = (typeof NextAction)[keyof typeof NextAction];
 
+// ── Classifier Input ─────────────────────────────────────────────────
+
+export type PlainValidationSummary = string;
+
 // ── Evidence Signal ──────────────────────────────────────────────────
 
 export interface EvidenceSignal {
@@ -76,10 +80,14 @@ export interface FailureClassification {
   confidence: Confidence;
   /** Recommended next action */
   nextAction: NextAction;
+  /** Alias for consumers that present debugger/validator recommendations */
+  suggestedNextAction?: NextAction;
   /** Human-readable summary of the failure */
   summary: string;
   /** Evidence signals that contributed to this classification */
   signals: EvidenceSignal[];
+  /** Alias for consumers that expose explicitly matched classifier signals */
+  matchedSignals?: EvidenceSignal[];
   /** Secondary failure classes detected (if any) */
   secondaryClasses: FailureClass[];
 }

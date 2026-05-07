@@ -16,6 +16,7 @@ import { summarizeEvidence } from '../evidence/capture.js';
 import {
   type FailureClassification,
   type EvidenceSignal,
+  type PlainValidationSummary,
   FailureClass,
   Severity,
   Confidence,
@@ -49,26 +50,46 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
 
 const RETRY_OVERFLOW_THRESHOLD = 5;
 
+type ClassifierInput = WorkflowRunEvidence | EvidenceSummary | PlainValidationSummary;
+
 // ── Public API ───────────────────────────────────────────────────────
 
 /**
- * Classify a failure from full run evidence.
+ * Classify a failure from full run evidence, a structured summary, or a
+ * bootstrap plain-text validation summary.
  * Returns a classification even for passing runs (with failureClass 'unknown'
  * and a summary indicating no failure).
  */
-export function classifyFailure(evidence: WorkflowRunEvidence): FailureClassification {
-  const summary = summarizeEvidence(evidence);
-  return classifyWithFullEvidence(summary, evidence);
+export function classifyFailure(evidence: WorkflowRunEvidence): FailureClassification;
+export function classifyFailure(summary: EvidenceSummary): FailureClassification;
+export function classifyFailure(summary: PlainValidationSummary): FailureClassification;
+export function classifyFailure(input: ClassifierInput): FailureClassification {
+  if (typeof input === 'string') {
+    return classifyFromPlainSummary(input);
+  }
+
+  if (isEvidenceSummary(input)) {
+    return classifyFromSummaryOnly(input);
+  }
+
+  const summary = summarizeEvidence(input);
+  return classifyWithFullEvidence(summary, input);
 }
 
 /**
- * Classify from an EvidenceSummary, optionally with full evidence for
- * deeper signal extraction.
+ * Classify from an EvidenceSummary or plain validation summary, optionally
+ * with full evidence for deeper signal extraction.
  */
+export function classifyFromSummary(summary: EvidenceSummary, evidence?: WorkflowRunEvidence): FailureClassification;
+export function classifyFromSummary(summary: PlainValidationSummary): FailureClassification;
 export function classifyFromSummary(
-  summary: EvidenceSummary,
+  summary: EvidenceSummary | PlainValidationSummary,
   evidence?: WorkflowRunEvidence,
 ): FailureClassification {
+  if (typeof summary === 'string') {
+    return classifyFromPlainSummary(summary);
+  }
+
   if (evidence) {
     return classifyWithFullEvidence(summary, evidence);
   }
@@ -205,6 +226,56 @@ function classifyFromSummaryOnly(summary: EvidenceSummary): FailureClassificatio
   const primary = detected[0];
   const secondary = detected.slice(1);
   return buildClassification(primary, secondary, signals, summary);
+}
+
+// ── Internal classification from plain validation summary ────────────
+
+function classifyFromPlainSummary(summaryText: PlainValidationSummary): FailureClassification {
+  const text = summaryText.trim();
+  const summary = summaryForPlainText(text);
+
+  if (isPlainPass(text)) {
+    return noFailure(summary);
+  }
+
+  const signals: EvidenceSignal[] = [];
+  const detected: FailureClass[] = [];
+
+  if (/\b(timed?\s*out|timeout|deadline|time budget|exceeded .*time)\b/i.test(text)) {
+    signals.push(plainSignal(`Plain summary indicates timeout: ${truncate(text, 120)}`, Confidence.High));
+    detected.push(FailureClass.Timeout);
+  }
+
+  if (matchesEnvironmentPattern(text) || /\b(missing env|MISSING_ENV_VAR|module not found|dependency missing)\b/i.test(text)) {
+    signals.push(plainSignal(`Plain summary indicates environment error: ${truncate(text, 120)}`, Confidence.High));
+    detected.push(FailureClass.EnvironmentError);
+  }
+
+  if (/\b(deadlock|stuck|no progress|no terminal progress|pending forever|running forever)\b/i.test(text)) {
+    signals.push(plainSignal(`Plain summary indicates deadlock: ${truncate(text, 120)}`, Confidence.Medium));
+    detected.push(FailureClass.Deadlock);
+  }
+
+  if (/\b(step overflow|retry budget|retries exhausted|max attempts|too many attempts|retry storm)\b/i.test(text)) {
+    signals.push(plainSignal(`Plain summary indicates step overflow: ${truncate(text, 120)}`, Confidence.Medium));
+    detected.push(FailureClass.StepOverflow);
+  }
+
+  if (/\b(agent drift|step contract|ignored instructions?|wrong file|out of scope|did not meet|didn't meet)\b/i.test(text)) {
+    signals.push(plainSignal(`Plain summary indicates agent drift: ${truncate(text, 120)}`, Confidence.Medium));
+    detected.push(FailureClass.AgentDrift);
+  }
+
+  if (/\b(verification failed|validation failed|deterministic gate failed|gate failed|typecheck failed|tests? failed|expected .* got|exit code [1-9])\b/i.test(text)) {
+    signals.push(plainSignal(`Plain summary indicates verification failure: ${truncate(text, 120)}`, Confidence.Medium));
+    detected.push(FailureClass.VerificationFailure);
+  }
+
+  if (detected.length === 0) {
+    return unknownFailure(summary, signals);
+  }
+
+  return buildClassification(detected[0], detected.slice(1), signals, summary);
 }
 
 // ── Detection functions ──────────────────────────────────────────────
@@ -435,8 +506,58 @@ function detectVerificationFailure(
 
 // ── Helper functions ─────────────────────────────────────────────────
 
+function isEvidenceSummary(input: WorkflowRunEvidence | EvidenceSummary): input is EvidenceSummary {
+  return (
+    'runStatus' in input &&
+    typeof input.totalSteps === 'number' &&
+    typeof input.allVerificationsPassed === 'boolean' &&
+    typeof input.allDeterministicGatesPassed === 'boolean'
+  );
+}
+
 function matchesEnvironmentPattern(text: string): boolean {
   return ENV_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function summaryForPlainText(text: string): EvidenceSummary {
+  const passed = isPlainPass(text);
+  const timedOut = /\b(timed?\s*out|timeout|deadline)\b/i.test(text);
+  const failed = !passed && (timedOut || /\b(fail(?:ed|ure)?|error|deadlock|stuck|retry|overflow|denied|not found|missing)\b/i.test(text));
+
+  return {
+    runId: 'plain-summary',
+    workflowName: 'plain validation summary',
+    runStatus: timedOut ? 'timed_out' : passed ? 'passed' : failed ? 'failed' : 'failed',
+    totalSteps: 1,
+    passedSteps: passed ? 1 : 0,
+    failedSteps: failed && !timedOut ? 1 : 0,
+    skippedSteps: 0,
+    cancelledSteps: 0,
+    timedOutSteps: timedOut ? 1 : 0,
+    pendingSteps: 0,
+    runningSteps: 0,
+    allVerificationsPassed: passed,
+    allDeterministicGatesPassed: passed,
+    failedStepIds: failed ? ['plain-summary'] : [],
+    firstError: failed ? text : undefined,
+    totalDurationMs: undefined,
+    artifactCount: 0,
+    retryCount: /\b(retry|retries|attempts?)\b/i.test(text) ? RETRY_OVERFLOW_THRESHOLD : 0,
+    routeCount: 0,
+  };
+}
+
+function isPlainPass(text: string): boolean {
+  return /\b(pass(?:ed|ing)?|success(?:ful)?|all checks passed|no failure)\b/i.test(text) &&
+    !/\b(fail(?:ed|ure)?|error|timed?\s*out|timeout|deadlock|stuck)\b/i.test(text);
+}
+
+function plainSignal(observation: string, strength: Confidence): EvidenceSignal {
+  return {
+    observation,
+    source: 'plain-summary',
+    strength,
+  };
 }
 
 function isCleanPass(summary: EvidenceSummary): boolean {
@@ -528,8 +649,10 @@ function buildClassification(
     severity: config.severity(summary),
     confidence: deriveConfidence(signals),
     nextAction: config.nextAction,
+    suggestedNextAction: config.nextAction,
     summary: config.summarize(summary),
     signals,
+    matchedSignals: signals,
     secondaryClasses: secondary,
   };
 }
@@ -541,8 +664,10 @@ function noFailure(summary: EvidenceSummary): FailureClassification {
     severity: Severity.Low,
     confidence: Confidence.High,
     nextAction: NextAction.Retry,
+    suggestedNextAction: NextAction.Retry,
     summary: `Run "${summary.workflowName}" passed with ${summary.totalSteps} steps — no failure detected`,
     signals: [],
+    matchedSignals: [],
     secondaryClasses: [],
   };
 }
@@ -554,8 +679,10 @@ function stillRunning(summary: EvidenceSummary): FailureClassification {
     severity: Severity.Low,
     confidence: Confidence.Low,
     nextAction: NextAction.Retry,
+    suggestedNextAction: NextAction.Retry,
     summary: `Run "${summary.workflowName}" is still in progress (${summary.runningSteps} running, ${summary.pendingSteps} pending)`,
     signals: [],
+    matchedSignals: [],
     secondaryClasses: [],
   };
 }
@@ -570,8 +697,10 @@ function unknownFailure(
     severity: summary.failedSteps > 0 ? Severity.Medium : Severity.Low,
     confidence: Confidence.Low,
     nextAction: NextAction.Escalate,
+    suggestedNextAction: NextAction.Escalate,
     summary: `Run "${summary.workflowName}" failed but no deterministic classification matched (${summary.failedSteps} failed steps)`,
     signals,
+    matchedSignals: signals,
     secondaryClasses: [],
   };
 }
