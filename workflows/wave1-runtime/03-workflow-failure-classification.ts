@@ -9,12 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 1, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', { cli: 'claude', role: 'Failure taxonomy lead responsible for classification scope and product usefulness.', retries: 1 })
+    .agent('lead-claude', { cli: 'codex', role: 'Failure taxonomy lead responsible for classification scope and product usefulness.', retries: 1 })
     .agent('impl-primary-codex', { cli: 'codex', role: 'Primary implementer for classifier, failure types, and public exports.', retries: 2 })
     .agent('impl-tests-codex', { cli: 'codex', role: 'Test implementer for deterministic failure classification cases.', retries: 2 })
-    .agent('reviewer-claude', { cli: 'claude', preset: 'reviewer', role: 'Reviews taxonomy accuracy and fit for Ricky debugger/repair decisions.', retries: 1 })
+    .agent('reviewer-claude', { cli: 'codex', preset: 'reviewer', role: 'Reviews taxonomy accuracy and fit for Ricky debugger/repair decisions.', retries: 1 })
     .agent('reviewer-codex', { cli: 'codex', preset: 'reviewer', role: 'Reviews classifier implementation, edge cases, and tests.', retries: 1 })
-    .agent('validator-claude', { cli: 'claude', preset: 'worker', role: 'Runs validation and applies bounded fixes to reach the 80-to-100 bar.', retries: 2 })
+    .agent('validator-claude', { cli: 'codex', preset: 'worker', role: 'Runs validation and applies bounded fixes to reach the 80-to-100 bar.', retries: 2 })
 
     .step('prepare-context', {
       type: 'deterministic',
