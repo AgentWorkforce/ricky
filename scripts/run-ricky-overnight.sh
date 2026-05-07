@@ -762,12 +762,17 @@ workflow_is_already_satisfied() {
         && grep -q '"typecheck"' package.json \
         && grep -q '"test"' package.json \
         && ! grep -q 'prpm install @prpm/self-improving' package.json \
-        && test -d packages/shared \
-        && test -d packages/runtime \
-        && test -d packages/product \
-        && test -d packages/cloud \
-        && test -d packages/local \
-        && test -d packages/cli
+        && test -f tsconfig.json \
+        && grep -q '"exclude"' tsconfig.json \
+        && test -f vitest.config.ts \
+        && grep -q '.workflow-artifacts/\*\*' vitest.config.ts \
+        && grep -q '.agent-relay/\*\*' vitest.config.ts \
+        && test -f .gitignore \
+        && grep -q '^dist/$' .gitignore \
+        && grep -q '^\.workflow-artifacts/$' .gitignore \
+        && grep -q '^\.agent-relay/$' .gitignore \
+        && test -f README.md \
+        && grep -q 'Ricky is a single-package npm repo' README.md
       ;;
     workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts)
       git cat-file -e HEAD:test/package-proof/package-layout-proof.ts 2>/dev/null \
