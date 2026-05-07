@@ -111,6 +111,18 @@ describe('timeout classification', () => {
       nextAction: NextAction.Retry,
     });
     expect(result.signals.length).toBeGreaterThan(0);
+    expect(result.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'run-level',
+          strength: Confidence.High,
+        }),
+        expect.objectContaining({
+          source: 'step:step-1',
+          strength: Confidence.High,
+        }),
+      ]),
+    );
   });
 
   it('classifies when some steps timed out', () => {
@@ -158,6 +170,14 @@ describe('verification failure classification', () => {
       nextAction: NextAction.FixAndRetry,
     });
     expect(result.signals.some((s) => s.observation.includes('Gate'))).toBe(true);
+    expect(result.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'gate:typecheck',
+          strength: Confidence.High,
+        }),
+      ]),
+    );
   });
 
   it('classifies when step verifications fail', () => {
@@ -327,6 +347,14 @@ describe('environment error classification', () => {
       nextAction: NextAction.InvestigateEnvironment,
     });
     expect(result.signals.map((s) => s.observation).join('\n')).toContain('command not found');
+    expect(result.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'step:step-1/gate:deterministic-tooling',
+          strength: Confidence.High,
+        }),
+      ]),
+    );
     expect(result.secondaryClasses).toContain(FailureClass.VerificationFailure);
   });
 
@@ -468,6 +496,15 @@ describe('step overflow classification', () => {
       confidence: Confidence.Medium,
       nextAction: NextAction.Escalate,
     });
+    expect(result.summary).toContain('exhausted retry budget');
+    expect(result.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'step-overflow:step:step-1',
+          strength: Confidence.High,
+        }),
+      ]),
+    );
   });
 
   it('classifies overflow across multiple steps', () => {
@@ -599,6 +636,8 @@ describe('unknown and mixed classification', () => {
     );
     expect(result.signals.map((s) => s.observation).join('\n')).toContain('ENOENT');
     expect(result.signals.map((s) => s.observation).join('\n')).toContain('Verification');
+    expect(result.signals.every((signal) => signal.source.length > 0)).toBe(true);
+    expect(result.signals.every((signal) => signal.observation.length > 0)).toBe(true);
   });
 
   it('preserves low confidence for weak summary-only deadlock signals', () => {
@@ -795,6 +834,32 @@ describe('step overflow signal independence', () => {
       (s) => s.observation.includes('retries across') || s.observation.includes('retries'),
     );
     expect(overflowSignals.length).toBeGreaterThan(0);
+  });
+});
+
+describe('environment error false-positive guard', () => {
+  it('does not classify "test execution failed" as environment error', () => {
+    let run = makeRun();
+    let step = makeStep();
+    step = appendStepEvent(step, {
+      kind: 'error',
+      message: 'test execution failed: expected 200 but got 500',
+    });
+    step = appendStepEvent(step, {
+      kind: 'verification',
+      result: failingVerification({
+        type: 'exit_code',
+        expected: '0',
+        actual: '1',
+      }),
+    });
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+    // Should NOT be environment_error — "execution failed" is an application error
+    expect(result.failureClass).not.toBe(FailureClass.EnvironmentError);
   });
 });
 

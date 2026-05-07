@@ -36,7 +36,7 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
   /permission denied/i,
   /command not found/i,
   /spawn\s+\S+\s+ENOENT/i,
-  /exec.*failed/i,
+  /\bexec\s+failed/i,
   /no such file or directory/i,
   /out of memory/i,
   /cannot allocate memory/i,
@@ -82,7 +82,7 @@ function classifyWithFullEvidence(
   evidence: WorkflowRunEvidence,
 ): FailureClassification {
   // No failure — run passed
-  if (summary.runStatus === 'passed' && summary.failedSteps === 0 && summary.timedOutSteps === 0) {
+  if (isCleanPass(summary)) {
     return noFailure(summary);
   }
 
@@ -138,7 +138,7 @@ function classifyWithFullEvidence(
 // ── Internal classification from summary only ────────────────────────
 
 function classifyFromSummaryOnly(summary: EvidenceSummary): FailureClassification {
-  if (summary.runStatus === 'passed' && summary.failedSteps === 0 && summary.timedOutSteps === 0) {
+  if (isCleanPass(summary)) {
     return noFailure(summary);
   }
 
@@ -166,6 +166,7 @@ function classifyFromSummaryOnly(summary: EvidenceSummary): FailureClassificatio
     summary.passedSteps === 0 &&
     summary.timedOutSteps === 0 &&
     summary.cancelledSteps === 0 &&
+    summary.skippedSteps === 0 &&
     (summary.pendingSteps > 0 || summary.runningSteps > 0) &&
     summary.runStatus === 'failed'
   ) {
@@ -343,7 +344,7 @@ function detectStepOverflow(
     if (step.retries.length >= RETRY_OVERFLOW_THRESHOLD) {
       signals.push({
         observation: `Step "${step.stepName}" has ${step.retries.length} retries`,
-        source: `step:${step.stepId}`,
+        source: `step-overflow:step:${step.stepId}`,
         strength: Confidence.High,
       });
       addedStepSignal = true;
@@ -356,7 +357,7 @@ function detectStepOverflow(
   if (!addedStepSignal) {
     signals.push({
       observation: `${summary.retryCount} total retries across ${summary.totalSteps} steps exceeds threshold of ${RETRY_OVERFLOW_THRESHOLD}`,
-      source: 'run-summary',
+      source: 'step-overflow:run-summary',
       strength: Confidence.Medium,
     });
   }
@@ -436,6 +437,16 @@ function detectVerificationFailure(
 
 function matchesEnvironmentPattern(text: string): boolean {
   return ENV_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function isCleanPass(summary: EvidenceSummary): boolean {
+  return (
+    summary.runStatus === 'passed' &&
+    summary.failedSteps === 0 &&
+    summary.timedOutSteps === 0 &&
+    summary.allVerificationsPassed &&
+    summary.allDeterministicGatesPassed
+  );
 }
 
 function scanGatesForEnvErrors(
