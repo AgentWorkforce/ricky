@@ -91,6 +91,9 @@ function expectClassificationSurface(
   expect(result.nextAction).toBe(expected.nextAction);
   expect(result.suggestedNextAction).toBe(expected.nextAction);
   expect(result.matchedSignals).toBe(result.signals);
+  expect(result.summary.length).toBeGreaterThan(0);
+  expect(result.signals.every((signal) => signal.source.length > 0)).toBe(true);
+  expect(result.signals.every((signal) => signal.observation.length > 0)).toBe(true);
 }
 
 // ── Timeout ──────────────────────────────────────────────────────────
@@ -198,7 +201,18 @@ describe('verification failure classification', () => {
     run = completeRun(run);
 
     const result = classifyFailure(run);
-    expect(result.failureClass).toBe(FailureClass.VerificationFailure);
+    expectClassificationSurface(result, {
+      category: FailureClass.VerificationFailure,
+      severity: Severity.High,
+      confidence: Confidence.Medium,
+      nextAction: NextAction.FixAndRetry,
+    });
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'step:step-1',
+        strength: Confidence.High,
+      }),
+    ]);
   });
 });
 
@@ -570,7 +584,12 @@ describe('step overflow classification', () => {
     run = completeRun(run);
 
     const result = classifyFailure(run);
-    expect(result.failureClass).toBe(FailureClass.StepOverflow);
+    expectClassificationSurface(result, {
+      category: FailureClass.StepOverflow,
+      severity: Severity.Medium,
+      confidence: Confidence.Low,
+      nextAction: NextAction.Escalate,
+    });
     expect(result.signals).toContainEqual(
       expect.objectContaining({
         source: 'step-overflow:run-summary',
@@ -728,8 +747,6 @@ describe('unknown and mixed classification', () => {
     });
     expect(result.secondaryClasses).toEqual([FailureClass.VerificationFailure]);
     expect(result.isMixedFailure).toBe(true);
-    expect(result.matchedSignals).toBe(result.signals);
-    expect(result.suggestedNextAction).toBe(NextAction.InvestigateEnvironment);
     expect(result.signals).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -744,8 +761,6 @@ describe('unknown and mixed classification', () => {
     );
     expect(result.signals.map((s) => s.observation).join('\n')).toContain('ENOENT');
     expect(result.signals.map((s) => s.observation).join('\n')).toContain('Verification');
-    expect(result.signals.every((signal) => signal.source.length > 0)).toBe(true);
-    expect(result.signals.every((signal) => signal.observation.length > 0)).toBe(true);
   });
 
   it('preserves low confidence for weak summary-only deadlock signals', () => {
@@ -958,6 +973,12 @@ describe('step overflow signal independence', () => {
 
     const result = classifyFailure(run);
     // Environment error is higher priority, but step overflow should be secondary
+    expectClassificationSurface(result, {
+      category: FailureClass.EnvironmentError,
+      severity: Severity.High,
+      confidence: Confidence.Medium,
+      nextAction: NextAction.InvestigateEnvironment,
+    });
     expect(result.secondaryClasses).toContain(FailureClass.StepOverflow);
     // Verify the overflow signal is specific to retries, not borrowed from env
     expect(result.signals).toContainEqual(
