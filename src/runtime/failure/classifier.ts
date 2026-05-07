@@ -45,6 +45,10 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
   /network.*unreachable/i,
   /connection.*refused/i,
   /dns.*resolution.*failed/i,
+  /\bMISSING_ENV_VAR\b/i,
+  /\bmissing\s+(?:required\s+)?env(?:ironment)?(?:\s+var(?:iable)?)?\b/i,
+  /\brequired\s+env(?:ironment)?\s+var(?:iable)?\b/i,
+  /\benvironment\s+variable\b.*\bnot\s+set\b/i,
 ];
 
 // ── Step overflow threshold ──────────────────────────────────────────
