@@ -153,8 +153,8 @@ describe('workforce persona workflow writer', () => {
     expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
   });
 
-  it('still rejects persona artifacts that run without an explicit cwd', () => {
-    expect(() => parsePersonaWorkflowResponse(JSON.stringify({
+  it('parses persona artifacts without explicit cwd so pre-write validation can repair them', () => {
+    const parsed = parsePersonaWorkflowResponse(JSON.stringify({
       artifact: {
         path: 'workflows/generated/persona.ts',
         content: workflowSource().replace('.run({ cwd: process.cwd() });', '.run();'),
@@ -163,7 +163,10 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'persona',
         agents: ['lead'],
       },
-    }), 'workflows/generated/persona.ts')).toThrow(/explicit cwd/);
+    }), 'workflows/generated/persona.ts');
+
+    expect(parsed.responseFormat).toBe('structured-json');
+    expect(parsed.content).toContain('.run();');
   });
 
   it('recovers expected artifact content from disk when structured output omits inline content', () => {
@@ -460,6 +463,60 @@ describe('workforce persona workflow writer', () => {
     expect(tasks[1]).toContain('Ricky pre-write validation failed');
     expect(tasks[1]).toContain('Rendered artifact has unbalanced braces');
     expect(tasks[1]).toContain('Previous rejected artifact');
+    expect(result.workforcePersona?.warnings).toContain(
+      'Ricky pre-write validation repaired the Workforce persona artifact before writing.',
+    );
+  });
+
+  it('runs pre-write validation and asks the persona to repair missing explicit cwd before writing', async () => {
+    const base = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/prewrite-cwd-repair.ts',
+    });
+    expect(base.success).toBe(true);
+    const tasks: string[] = [];
+    const resolver: WorkforcePersonaResolver = async () => ({
+      source: 'package',
+      intent: 'agent-relay-workflow',
+      warnings: [],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          runtime: { harness: 'codex', model: 'codex/test' },
+        },
+        sendMessage(task) {
+          tasks.push(task);
+          const content = tasks.length === 1
+            ? replaceLast(base.artifact!.content, '.run({ cwd: process.cwd() });', '.run();')
+            : base.artifact!.content;
+          return execution(personaResponse('workflows/generated/prewrite-cwd-repair.ts', content));
+        },
+      },
+    });
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/prewrite-cwd-repair.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'prewrite-cwd-repair',
+        targetMode: 'local',
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact?.content).toContain('.run({ cwd: process.cwd() })');
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1]).toContain('Ricky pre-write validation failed');
+    expect(tasks[1]).toContain('Rendered workflow does not run with explicit cwd');
     expect(result.workforcePersona?.warnings).toContain(
       'Ricky pre-write validation repaired the Workforce persona artifact before writing.',
     );
@@ -864,6 +921,12 @@ function personaResponse(path: string, content: string): string {
     },
     metadata: { workflowName: path.split('/').pop()?.replace(/\.ts$/, '') },
   });
+}
+
+function replaceLast(value: string, search: string, replacement: string): string {
+  const index = value.lastIndexOf(search);
+  expect(index).toBeGreaterThanOrEqual(0);
+  return `${value.slice(0, index)}${replacement}${value.slice(index + search.length)}`;
 }
 
 function workflowSource(): string {

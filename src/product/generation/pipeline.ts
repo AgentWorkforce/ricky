@@ -18,6 +18,7 @@ import { renderMasterExecutionWorkflow, shouldUseMasterExecutionWorkflow } from 
 import { renderWorkflow } from './template-renderer.js';
 import {
   applyPersonaArtifactToRenderedArtifact,
+  hasExplicitWorkflowRunCwd,
   writeWorkflowWithWorkforcePersona,
   WorkforcePersonaClarificationError,
   WorkforcePersonaWriterError,
@@ -314,7 +315,7 @@ export function validateGeneratedArtifact(
   if (!/skill-application-boundary\.json/.test(content) || !/generation_time_only/.test(content) || !/runtimeEmbodiment/.test(content)) {
     issues.push(blockingIssue('validation', 'SKILL_BOUNDARY_EVIDENCE_MISSING', 'Rendered workflow does not expose generation-time skill boundary metadata.'));
   }
-  if (!/\.run\(\{ cwd: process\.cwd\(\) \}\)/.test(content)) {
+  if (!hasExplicitWorkflowRunCwd(content)) {
     issues.push(blockingIssue('validation', 'RUN_CWD_MISSING', 'Rendered workflow does not run with explicit cwd.'));
   }
 

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import {
   defaultWorkforcePersonaResolver,
+  hasExplicitWorkflowRunCwd,
   parsePersonaWorkflowResponse,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
   WorkforcePersonaWriterError,
@@ -117,6 +118,9 @@ export async function repairWorkflowWithWorkforcePersona(
   const parsed = parsePersonaWorkflowResponse(result.output, options.artifactPath);
   if (parsed.clarification || !parsed.content) {
     throw new WorkforcePersonaWriterError('Workforce persona repair response must include a repaired workflow artifact.');
+  }
+  if (!hasExplicitWorkflowRunCwd(parsed.content)) {
+    throw new WorkforcePersonaWriterError('Workforce persona repair artifact must run with explicit cwd.');
   }
   const responseFormat = parsed.responseFormat as 'structured-json' | 'fenced-artifact';
   return {

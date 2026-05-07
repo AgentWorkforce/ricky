@@ -532,6 +532,31 @@ describe('workflow generation pipeline', () => {
     expect(result.validation.issues).toEqual([]);
   });
 
+  it('requires the runtime run call itself to pass explicit cwd, ignoring embedded examples', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow generation tests with deterministic validation.',
+        targetFiles: ['src/product/generation/pipeline.test.ts'],
+        acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/pipeline-cwd.ts',
+    });
+    const baseArtifact = artifact(result);
+    const weakArtifact = {
+      ...baseArtifact,
+      content: replaceLast(baseArtifact.content, '.run({ cwd: process.cwd() });', '.run();'),
+    };
+
+    const validation = validateGeneratedArtifact(weakArtifact, result.patternDecision, result.skillContext);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'RUN_CWD_MISSING' }),
+      ]),
+    );
+  });
+
   it('marks implementation workflows with source-change and result evidence contracts', () => {
     const result = generate({
       spec: spec({
@@ -1528,6 +1553,12 @@ function gate(
   const match = artifact.gates.find((candidate) => candidate.name === name);
   expect(match).toBeDefined();
   return match!;
+}
+
+function replaceLast(value: string, search: string, replacement: string): string {
+  const index = value.lastIndexOf(search);
+  expect(index).toBeGreaterThanOrEqual(0);
+  return `${value.slice(0, index)}${replacement}${value.slice(index + search.length)}`;
 }
 
 function spec(overrides: SpecFixtureOverrides = {}): NormalizedWorkflowSpec {
