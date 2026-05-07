@@ -49,6 +49,8 @@ workflows/
 
 For the full policy, see `docs/workflows/WORKFLOW_STANDARDS.md`.
 
+Before authoring or reviewing workflows, read `docs/workflows/WORKFLOW_STANDARDS.md`, `workflows/shared/WORKFLOW_AUTHORING_RULES.md`, and the workflow-specific spec or program doc. For generated workflow work, also read `workflows/meta/spec/generated-workflow-template.md`.
+
 ## Wave folders
 
 Wave folders use `workflows/wave<N>-<slug>/` and represent staged product or runtime milestones:
@@ -142,6 +144,12 @@ Significant workflows must include:
 
 Meta-workflows should write artifacts under `.workflow-artifacts/<meta-slug>/`, including `plan.md`, `<workflow-id>-review.md`, `<workflow-id>-dryrun.txt`, and `signoff.md`.
 
+## Commit and PR boundaries
+
+Every workflow must state the expected branch naming pattern, file targets, verification commands, and whether commit or PR creation is in scope. Agent steps must not run `git commit` or `git push` unless the workflow explicitly owns that boundary and documents the exact files expected in the change.
+
+For convention-only updates, the normal file boundary is `AGENTS.md`, symlinked `CLAUDE.md`, `workflows/README.md`, and `workflows/shared/WORKFLOW_AUTHORING_RULES.md`, plus optional preserved review artifacts under `.workflow-artifacts/`.
+
 ## Reliability traps
 
 Avoid these recurring failure modes:
@@ -157,7 +165,7 @@ Avoid these recurring failure modes:
 
 ## Current batch plan
 
-The active workflow batch plan is at `.workflow-artifacts/ricky-meta/application-wave-plan.md`. It covers 16 workflows across waves 0-5.
+The active workflow batch plan is at `.workflow-artifacts/ricky-meta/application-wave-plan.md`. It covers 16 workflows across waves 0-5 and should be treated as the current operator reference for generated implementation batches. Wave-specific files still own their local contracts, file targets, non-goals, review expectations, and deterministic gates.
 
 ## Current GitHub Issue Workflows
 

@@ -23,6 +23,8 @@ Compact execution rules for agents writing Ricky workflows.
 17. State the expected branch naming pattern and whether PR creation is in or out of scope.
 18. Use scoped change detection after implementation steps with `git diff --name-only` and `git ls-files --others --exclude-standard` limited to declared file targets.
 19. Write final signoff artifacts under `.workflow-artifacts/` for significant implementation or generation workflows.
+20. In 80-to-100 validation loops, run the same validation first as a soft gate, fix from captured output, then rerun it as a hard gate before final signoff.
+21. For convention-only workflows, keep edits inside declared convention files and preserve `CLAUDE.md` as a symlink to `AGENTS.md` unless the contract explicitly says otherwise.
 
 ## Must-not
 
@@ -35,6 +37,8 @@ Compact execution rules for agents writing Ricky workflows.
 7. Do not hide environmental blockers; document them explicitly.
 8. Do not sign off using review artifacts produced before the fix loop; re-review must evaluate the post-fix state.
 9. Do not use repo-wide `git diff --quiet` as the change-detection gate when unrelated work may be present.
+10. Do not edit package metadata, runtime configuration, product source, generated wave workflows, or product specs from a convention-only workflow.
+11. Do not add broad prose that cannot be checked by deterministic gates or reviewer inspection.
 
 ## Default reliability pattern
 
@@ -63,6 +67,8 @@ Use this ladder for serious implementation workflows:
 9. Re-review on the fixed state; do not reuse stale pre-fix review artifacts.
 10. Materialize review and signoff artifacts under `.workflow-artifacts/` for significant workflows.
 11. Sign off only after the final deterministic gates pass.
+
+The ladder is mandatory when the workflow changes runtime behavior, generated workflows, user-visible behavior, or shared execution contracts. Documentation-only and convention-only workflows may use a lighter version, but they still need file existence checks, grep or structural checks, scoped change detection, and independent review when significant.
 
 ## Scoped Change-Detection Gate
 

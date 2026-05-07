@@ -196,6 +196,12 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 - **Signoff artifacts:** Serious implementation workflows must write a final signoff artifact under `.workflow-artifacts/`. Passing tests alone is not sufficient proof of completion.
 - **Workflow-level context reads:** High-value workflows must include deterministic runtime reads of standards and specs, such as `cat docs/workflows/WORKFLOW_STANDARDS.md`, instead of relying only on agent ambient context.
 
+## Repo Boundary For Convention Work
+
+When the task is to update Ricky workflow standards, conventions, or authoring rules, keep the change inside the declared convention files unless the workflow contract explicitly expands scope. Do not edit package metadata, runtime configuration, product source, generated wave workflows, or product specs for a convention-only update.
+
+For convention-only work, `CLAUDE.md` should remain a symlink to `AGENTS.md`. Update `AGENTS.md` as the shared source of truth and verify Claude-facing behavior through the symlink instead of forking separate Claude instructions.
+
 ## Runtime Shape
 
 Serious Ricky workflows must use the standard runtime wrapper:
