@@ -76,7 +76,7 @@ export async function runMasterExecution(
         childResults.push(result);
         finishedByChildId.set(child.id, result);
 
-        if (isBlockingResult(result) && resolvedOptions.failurePolicy === 'stop') {
+        if (resultBlocksProgress(result) && resolvedOptions.failurePolicy === 'stop') {
           haltedByFailure = result;
           abortActive(activeControllers);
         }
@@ -106,11 +106,12 @@ export async function runMasterExecution(
 
   const completedAtDate = resolvedOptions.now();
   const completedAt = completedAtDate.toISOString();
+  const orderedChildResults = orderChildResults(plan.children, childResults);
 
   return {
     plan,
-    childResults,
-    decision: classifyDecision(plan.children, childResults),
+    childResults: orderedChildResults,
+    decision: classifyDecision(plan.children, orderedChildResults),
     startedAt,
     completedAt,
     durationMs: Math.max(0, completedAtDate.getTime() - startedAtDate.getTime()),
@@ -296,8 +297,8 @@ async function runWaveRespectingParallelizable(
   }
 }
 
-function isBlockingResult(result: ChildWorkflowRunResult): boolean {
-  return result.status === 'failed' || result.status === 'blocked';
+function resultBlocksProgress(result: ChildWorkflowRunResult): boolean {
+  return !childResultComplete(result);
 }
 
 function abortActive(activeControllers: ReadonlySet<AbortController>): void {
@@ -412,6 +413,24 @@ function classifyDecision(
   }
 
   for (const result of childResults) {
+    if ((result.status === 'passed' || result.status === 'skipped') && !childResultComplete(result)) {
+      return {
+        kind: 'repair',
+        childId: result.childId,
+        reason: `Child ${result.childId} completed without satisfying all required evidence gates.`,
+      };
+    }
+
+    if (result.status === 'failed' && result.evidence.signoffPresent && !result.evidence.markerPresent) {
+      return {
+        kind: 'repair',
+        childId: result.childId,
+        reason: result.errorMessage ?? `Child ${result.childId} wrote signoff evidence without the required marker.`,
+      };
+    }
+  }
+
+  for (const result of childResults) {
     const child = children.find((candidate) => candidate.id === result.childId);
     if (!child || result.status !== 'failed') {
       continue;
@@ -459,16 +478,6 @@ function classifyDecision(
     }
   }
 
-  for (const result of childResults) {
-    if (result.status === 'failed' && result.evidence.signoffPresent && !result.evidence.markerPresent) {
-      return {
-        kind: 'repair',
-        childId: result.childId,
-        reason: result.errorMessage ?? `Child ${result.childId} wrote signoff evidence without the required marker.`,
-      };
-    }
-  }
-
   if (children.every((child) => childComplete(child, childResults))) {
     return { kind: 'complete' };
   }
@@ -498,6 +507,26 @@ function childResultComplete(result: ChildWorkflowRunResult): boolean {
   }
 
   return result.evidence.gateResults.every((gateResult) => gateResult.passed);
+}
+
+function orderChildResults(
+  children: readonly ChildWorkflowPlan[],
+  childResults: readonly ChildWorkflowRunResult[],
+): readonly ChildWorkflowRunResult[] {
+  const remaining = [...childResults];
+  const ordered: ChildWorkflowRunResult[] = [];
+
+  for (const child of children) {
+    const resultIndex = remaining.findIndex((result) => result.childId === child.id);
+    if (resultIndex === -1) {
+      continue;
+    }
+
+    const [result] = remaining.splice(resultIndex, 1);
+    ordered.push(result);
+  }
+
+  return [...ordered, ...remaining];
 }
 
 function extractMissingNames(text: string): readonly string[] {
