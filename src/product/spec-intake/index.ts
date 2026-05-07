@@ -2,11 +2,13 @@ import { normalizeSpec } from './normalizer.js';
 import { parseSpec } from './parser.js';
 import { routeSpec } from './router.js';
 import type { IntakeResult, RawSpecPayload, ValidationIssue } from './types.js';
+import { analyzeClarificationNeeds } from './clarifications.js';
 
 export function intake(payload: RawSpecPayload): IntakeResult {
   const parsed = parseSpec(payload);
   const { normalized, issues } = normalizeSpec(parsed);
-  const routing = routeSpec(normalized, issues);
+  const clarificationQuestions = analyzeClarificationNeeds(normalized, issues);
+  const routing = routeSpec(normalized, issues, clarificationQuestions);
 
   const allIssues = [...issues];
   if (
@@ -28,12 +30,14 @@ export function intake(payload: RawSpecPayload): IntakeResult {
     routing,
     validationIssues: allIssues,
     parseWarnings: parsed.parseWarnings,
+    clarificationQuestions,
     requestId: payload.requestId ?? `${payload.surface}-${payload.receivedAt}`,
     receivedAt: payload.receivedAt,
     processedAt: new Date().toISOString(),
   };
 }
 
+export { analyzeClarificationNeeds, blockingClarificationQuestions } from './clarifications.js';
 export { normalizeSpec } from './normalizer.js';
 export {
   detectIntent,
@@ -47,6 +51,8 @@ export { detectCurrentRepo, defaultRepoDetector, parseRepoSlugFromGitUrl } from 
 export type { RepoDetector } from './detect-current-repo.js';
 export type {
   DesiredAction,
+  ClarificationQuestion,
+  ClarificationRequest,
   ExecutionPreference,
   InputSurface,
   IntakeResult,

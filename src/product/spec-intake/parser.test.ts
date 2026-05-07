@@ -307,4 +307,51 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.suggestedFollowUp).toContain('generate, debug, coordinate, or execute');
     expect(result.routing?.suggestedFollowUp).toContain('target context');
   });
+
+  it('returns structured clarification questions for explicit open questions in generation specs', () => {
+    const result = intake(
+      natural(
+        [
+          'Generate a workflow for package validation.',
+          '',
+          'Open questions:',
+          '- Should it validate package A or package B?',
+          '- Who signs off the final review?',
+        ].join('\n'),
+      ),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.routing?.target).toBe('clarify');
+    expect(result.clarificationQuestions).toEqual([
+      expect.objectContaining({
+        id: 'open-question-1',
+        question: 'Should it validate package A or package B?',
+        blocking: true,
+      }),
+      expect.objectContaining({
+        id: 'open-question-2',
+        question: 'Who signs off the final review?',
+        blocking: true,
+      }),
+    ]);
+    expect(result.routing?.clarificationQuestions).toHaveLength(2);
+    expect(result.routing?.suggestedFollowUp).toContain('structured clarification questions');
+  });
+
+  it('asks for a side-effect boundary before generating risky workflows', () => {
+    const result = intake(
+      natural('Generate a workflow that deletes obsolete files, commits the cleanup, and pushes the branch.'),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.routing?.target).toBe('clarify');
+    expect(result.clarificationQuestions).toEqual([
+      expect.objectContaining({
+        id: 'side-effect-approval',
+        question: expect.stringContaining('Which side effects'),
+        blocking: true,
+      }),
+    ]);
+  });
 });

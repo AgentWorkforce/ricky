@@ -18,6 +18,7 @@ import { renderWorkflow } from './template-renderer.js';
 import {
   applyPersonaArtifactToRenderedArtifact,
   writeWorkflowWithWorkforcePersona,
+  WorkforcePersonaClarificationError,
   WorkforcePersonaWriterError,
   type WorkforcePersonaPrewriteRepairAttempt,
 } from './workforce-persona-writer.js';
@@ -168,6 +169,27 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       workforcePersona: finalPersonaMetadata,
     };
   } catch (error) {
+    if (error instanceof WorkforcePersonaClarificationError) {
+      const issue = blockingIssue(
+        'rendering',
+        'WORKFORCE_PERSONA_NEEDS_CLARIFICATION',
+        error.message,
+      );
+      const validation = {
+        ...baseResult.validation,
+        valid: false,
+        errors: [...baseResult.validation.errors, issue.message],
+        issues: [...baseResult.validation.issues, issue],
+      };
+      return {
+        ...baseResult,
+        success: false,
+        artifact: null,
+        clarificationQuestions: error.questions,
+        validation,
+        workforcePersona: null,
+      };
+    }
     const writerError = error instanceof WorkforcePersonaWriterError ? error : null;
     const issue = blockingIssue(
       'rendering',

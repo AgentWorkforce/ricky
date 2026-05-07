@@ -115,6 +115,10 @@ export async function repairWorkflowWithWorkforcePersona(
   }
 
   const parsed = parsePersonaWorkflowResponse(result.output, options.artifactPath);
+  if (parsed.clarification || !parsed.content) {
+    throw new WorkforcePersonaWriterError('Workforce persona repair response must include a repaired workflow artifact.');
+  }
+  const responseFormat = parsed.responseFormat as 'structured-json' | 'fenced-artifact';
   return {
     artifact: {
       content: parsed.content,
@@ -130,7 +134,7 @@ export async function repairWorkflowWithWorkforcePersona(
       runId: result.workflowRunId ?? runId,
       source: resolved.source,
       selectedIntent: resolved.intent,
-      responseFormat: parsed.responseFormat,
+      responseFormat,
       outputPath: options.artifactPath,
     },
   };

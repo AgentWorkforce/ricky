@@ -1,7 +1,11 @@
 import type { Confidence } from '../../runtime/failure/types.js';
-import type { NormalizedWorkflowSpec, RouteTarget, RoutingDecision, ValidationIssue } from './types.js';
+import type { ClarificationQuestion, NormalizedWorkflowSpec, RouteTarget, RoutingDecision, ValidationIssue } from './types.js';
 
-export function routeSpec(normalized: NormalizedWorkflowSpec, issues: ValidationIssue[] = []): RoutingDecision {
+export function routeSpec(
+  normalized: NormalizedWorkflowSpec,
+  issues: ValidationIssue[] = [],
+  clarificationQuestions: ClarificationQuestion[] = [],
+): RoutingDecision {
   const blockingIssue = issues.find((issue) => issue.severity === 'error');
   if (blockingIssue) {
     return decision(
@@ -10,12 +14,31 @@ export function routeSpec(normalized: NormalizedWorkflowSpec, issues: Validation
       `Cannot route until ${blockingIssue.field} is resolved: ${blockingIssue.message}`,
       normalized,
       blockingIssue.suggestion,
+      clarificationQuestions,
+    );
+  }
+  const blockingClarification = clarificationQuestions.find((question) => question.blocking);
+  if (blockingClarification) {
+    return decision(
+      'clarify',
+      'high',
+      `Spec has unresolved workflow authoring questions: ${blockingClarification.reason}`,
+      normalized,
+      'Answer the structured clarification questions, then retry workflow generation.',
+      clarificationQuestions,
     );
   }
 
   switch (normalized.intent) {
     case 'generate':
-      return decision('generate', normalized.description ? 'high' : 'low', 'Request asks Ricky to author a new workflow.', normalized);
+      return decision(
+        'generate',
+        normalized.description ? 'high' : 'low',
+        'Request asks Ricky to author a new workflow.',
+        normalized,
+        undefined,
+        clarificationQuestions,
+      );
     case 'debug':
       return routeDebug(normalized);
     case 'coordinate':
@@ -29,6 +52,7 @@ export function routeSpec(normalized: NormalizedWorkflowSpec, issues: Validation
         'Request is ambiguous and needs a targeted follow-up before Ricky can act.',
         normalized,
         'Ask whether Ricky should generate, debug, coordinate, or execute, and collect the missing target context.',
+        clarificationQuestions,
       );
     case 'unknown':
       return decision(
@@ -37,6 +61,7 @@ export function routeSpec(normalized: NormalizedWorkflowSpec, issues: Validation
         'No deterministic intent signal was available.',
         normalized,
         'Ask the user for the desired Ricky action and the workflow target.',
+        clarificationQuestions,
       );
   }
 }
@@ -109,6 +134,7 @@ function decision(
   reason: string,
   normalizedSpec: NormalizedWorkflowSpec,
   suggestedFollowUp?: string,
+  clarificationQuestions: ClarificationQuestion[] = [],
 ): RoutingDecision {
   return {
     target,
@@ -116,5 +142,6 @@ function decision(
     reason,
     normalizedSpec,
     suggestedFollowUp,
+    clarificationQuestions,
   };
 }

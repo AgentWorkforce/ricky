@@ -91,6 +91,36 @@ describe('workforce persona workflow writer', () => {
     expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
   });
 
+  it('parses persona clarification requests without requiring an artifact', () => {
+    const parsed = parsePersonaWorkflowResponse(JSON.stringify({
+      needs_clarification: {
+        status: 'needs_clarification',
+        reason: 'Deployment target is unclear.',
+        questions: [
+          {
+            id: 'deployment-target',
+            question: 'Should the workflow deploy to staging or production?',
+            reason: 'The spec names deployment but not the target environment.',
+            blocking: true,
+            defaultAssumption: 'Pause before deploy.',
+          },
+        ],
+      },
+    }), 'workflows/generated/persona.ts');
+
+    expect(parsed.responseFormat).toBe('needs-clarification');
+    expect(parsed.clarification).toMatchObject({
+      status: 'needs_clarification',
+      questions: [
+        {
+          id: 'deployment-target',
+          question: 'Should the workflow deploy to staging or production?',
+          blocking: true,
+        },
+      ],
+    });
+  });
+
   it('parses fenced TypeScript artifact plus JSON metadata fallback', () => {
     const parsed = parsePersonaWorkflowResponse([
       '```ts',
@@ -260,6 +290,59 @@ describe('workforce persona workflow writer', () => {
     expect(result.success).toBe(false);
     const errorText = result.validation.errors.join(' | ');
     expect(errorText).toMatch(/workflow|persona|fenced|structured/i);
+  });
+
+  it('returns persona clarification questions instead of falling back to deterministic rendering', async () => {
+    const resolver: WorkforcePersonaResolver = async () => ({
+      source: 'package',
+      intent: 'agent-relay-workflow',
+      warnings: [],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          runtime: { harness: 'codex', model: 'codex/test' },
+        },
+        sendMessage() {
+          return execution(JSON.stringify({
+            needs_clarification: {
+              status: 'needs_clarification',
+              reason: 'Approval boundary is missing.',
+              questions: [
+                {
+                  id: 'side-effects',
+                  question: 'Should commits and pushes require approval?',
+                  reason: 'The workflow could otherwise perform irreversible side effects.',
+                  blocking: true,
+                },
+              ],
+            },
+          }));
+        },
+      },
+    });
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({ description: 'Generate a workflow for risky implementation work.' }),
+      artifactPath: 'workflows/generated/clarify.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'clarify',
+        targetMode: 'local',
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.artifact).toBeNull();
+    expect(result.clarificationQuestions).toEqual([
+      expect.objectContaining({
+        id: 'side-effects',
+        question: 'Should commits and pushes require approval?',
+        blocking: true,
+      }),
+    ]);
+    expect(result.validation.errors.join('\n')).toContain('needs clarification');
   });
 
   it('runs pre-write validation and asks the persona to repair invalid workflow syntax before succeeding', async () => {

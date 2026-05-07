@@ -1254,6 +1254,41 @@ describe('runLocal', () => {
     expect(localExecutor.runner.invocations).toHaveLength(0);
   });
 
+  it('returns structured clarification questions instead of generating from unresolved specs', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: [
+          'Generate a workflow for package validation.',
+          'Open questions:',
+          '- Should it validate package A or package B?',
+        ].join('\n'),
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.exitCode).toBe(1);
+    expect(result.generation).toMatchObject({
+      stage: 'generate',
+      status: 'needs_clarification',
+      decisions: {
+        clarification_questions: [
+          expect.objectContaining({
+            id: 'open-question-1',
+            question: 'Should it validate package A or package B?',
+            blocking: true,
+          }),
+        ],
+      },
+    });
+    expect(result.clarificationQuestions).toEqual(result.generation?.decisions?.clarification_questions);
+    expect(result.nextActions).toContain('Clarify: Should it validate package A or package B?');
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(0);
+    expect(localExecutor.runner.invocations).toHaveLength(0);
+  });
+
   it('emits the generation stage contract when generation mode is explicit', async () => {
     const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
     const result = await runLocal(
