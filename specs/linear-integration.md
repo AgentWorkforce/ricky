@@ -18,6 +18,12 @@ The Linear additions in Cloud land as a **follow-up PR after [PR #412](https://g
 
 ### Cloud file layout (mirrors PR #412 Slack)
 
+The Cloud-side implementation is covered in the sibling Cloud spec at
+`../cloud/specs/ricky-linear-agent.md`, especially its architectural alignment,
+schema, file layout, webhook flow, AgentActivity egress, readiness, and rollout
+sections. The tree below is the Ricky OSS contract's expected Cloud shape; the
+actual files land in `AgentWorkforce/cloud`, not this repository.
+
 ```text
 packages/web/app/api/v1/ricky/linear/
   events/route.ts              # Nango-forwarded Linear webhook receiver
@@ -38,7 +44,7 @@ packages/web/lib/ricky/linear/
 packages/web/lib/ricky/linear-agent-v2.ts   # main entry, parallel to slack-agent-v2.ts
 packages/web/drizzle/<next>_ricky_linear_agent_v2.sql   # whichever idx is next when this PR opens
 integrations/linear/ricky-manifest.json     # OAuth Actor app manifest
-```text
+```
 
 ### Ricky OSS additions
 
