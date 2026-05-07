@@ -33,9 +33,7 @@ export function blockingClarificationQuestions(questions: ClarificationQuestion[
 }
 
 function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
-  if (/\b(?:clarification answers|resolved clarifications):/i.test(text)) return [];
-
-  const lower = text.toLowerCase();
+  const lower = textWithoutClarificationAnswerSections(text).toLowerCase();
   const unresolvedMarkers = [
     /\bopen questions?\b/,
     /\btbd\b/,
@@ -48,9 +46,12 @@ function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
   ];
   if (!unresolvedMarkers.some((pattern) => pattern.test(lower))) return [];
 
-  const questionLines = openQuestionLines(text)
+  const answeredQuestions = answeredClarificationQuestions(text);
+  const openLines = openQuestionLines(text)
     .map(questionFromOpenQuestionLine)
-    .filter((line): line is string => Boolean(line))
+    .filter((line): line is string => Boolean(line));
+  const questionLines = openLines
+    .filter((line) => !answeredQuestions.has(normalizeQuestion(line)))
     .slice(0, 3);
 
   if (questionLines.length > 0) {
@@ -62,6 +63,8 @@ function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
     }));
   }
 
+  if (openLines.length > 0 && answeredQuestions.size > 0) return [];
+
   return [{
     id: 'resolve-open-questions',
     question: 'What should Ricky decide for the unresolved or TBD parts of this workflow spec?',
@@ -70,26 +73,65 @@ function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
   }];
 }
 
+function textWithoutClarificationAnswerSections(text: string): string {
+  const retained: string[] = [];
+  let inAnswerSection = false;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripListMarker(rawLine.trim());
+    if (!line) {
+      inAnswerSection = false;
+      retained.push(rawLine);
+      continue;
+    }
+
+    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+      inAnswerSection = true;
+      continue;
+    }
+
+    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+      inAnswerSection = false;
+    }
+
+    if (!inAnswerSection) retained.push(rawLine);
+  }
+
+  return retained.join('\n');
+}
+
 function openQuestionLines(text: string): string[] {
   const lines = text.split(/\r?\n/);
   const questionLines: string[] = [];
   let inOpenQuestionSection = false;
+  let inClarificationAnswerSection = false;
 
   for (const rawLine of lines) {
     const line = stripListMarker(rawLine.trim());
     if (!line) {
       inOpenQuestionSection = false;
+      inClarificationAnswerSection = false;
+      continue;
+    }
+
+    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+      inOpenQuestionSection = false;
+      inClarificationAnswerSection = true;
       continue;
     }
 
     if (/^(#{1,6}\s*)?(open questions?|questions?|clarifications needed|unresolved|tbd)\s*:?\s*$/i.test(line)) {
       inOpenQuestionSection = true;
+      inClarificationAnswerSection = false;
       continue;
     }
 
     if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line) && !/^(tbd|todo|unclear|unspecified|open question)/i.test(line)) {
       inOpenQuestionSection = false;
+      inClarificationAnswerSection = false;
     }
+
+    if (inClarificationAnswerSection) continue;
 
     const explicitQuestion = line.endsWith('?');
     const unresolvedItem = /^(?:tbd|todo|unclear|unspecified|not sure|decide later|open question)\b/i.test(line) ||
@@ -102,10 +144,47 @@ function openQuestionLines(text: string): string[] {
   return questionLines;
 }
 
+function answeredClarificationQuestions(text: string): Set<string> {
+  const answered = new Set<string>();
+  let inAnswerSection = false;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripListMarker(rawLine.trim());
+    if (!line) {
+      inAnswerSection = false;
+      continue;
+    }
+
+    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+      inAnswerSection = true;
+      continue;
+    }
+
+    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+      inAnswerSection = false;
+    }
+
+    if (!inAnswerSection) continue;
+
+    const answeredQuestion = questionFromAnswerLine(line);
+    if (answeredQuestion) answered.add(normalizeQuestion(answeredQuestion));
+  }
+
+  return answered;
+}
+
+function questionFromAnswerLine(line: string): string | null {
+  const questionMatch = line.match(/^(.+\?)\s*[:=-]\s*\S/);
+  if (questionMatch) return questionMatch[1].trim();
+
+  const generatedQuestion = questionFromOpenQuestionLine(line);
+  return generatedQuestion?.endsWith('?') ? generatedQuestion : null;
+}
+
 function questionFromOpenQuestionLine(line: string): string | null {
   const cleaned = stripListMarker(line)
-    .replace(/^(?:open question|question|tbd|todo|unclear|unspecified|not sure|decide later)\s*[:—-]?\s*/i, '')
-    .replace(/^todo:\s*(?:decide|choose|clarify|ask)\s*[:—-]?\s*/i, '')
+    .replace(/^(?:open question|question|tbd|todo|unclear|unspecified|not sure|decide later)\s*[:\u2014-]?\s*/i, '')
+    .replace(/^todo:\s*(?:decide|choose|clarify|ask)\s*[:\u2014-]?\s*/i, '')
     .trim();
   if (!cleaned || /^open questions?$/i.test(cleaned)) return null;
   if (cleaned.endsWith('?')) return cleaned;
@@ -114,10 +193,10 @@ function questionFromOpenQuestionLine(line: string): string | null {
   if (whether) return `Should ${lowercaseFirst(whether[1])}?`;
 
   if (/^(?:decide|choose|clarify|confirm|select)\b/i.test(cleaned)) {
-    return `Please clarify: ${cleaned.replace(/[.。]+$/, '')}?`;
+    return `Please clarify: ${cleaned.replace(/[.\u3002]+$/, '')}?`;
   }
 
-  return `Please clarify: ${cleaned.replace(/[.。]+$/, '')}?`;
+  return `Please clarify: ${cleaned.replace(/[.\u3002]+$/, '')}?`;
 }
 
 function stripListMarker(line: string): string {
@@ -130,6 +209,14 @@ function stripListMarker(line: string): string {
 
 function lowercaseFirst(value: string): string {
   return value.charAt(0).toLowerCase() + value.slice(1);
+}
+
+function normalizeQuestion(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[?!.\u3002]+$/g, '')
+    .trim();
 }
 
 function executionModeConflictQuestion(

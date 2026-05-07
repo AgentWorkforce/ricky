@@ -386,6 +386,32 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.target).toBe('generate');
   });
 
+  it('keeps asking for unresolved questions when clarification answers are partial', () => {
+    const result = intake(
+      natural(
+        [
+          'Generate a workflow for Slack migration.',
+          '',
+          'Open questions:',
+          '- TBD: choose direct Slack OAuth or Nango provider credentials',
+          '- Unclear: who owns final rollout signoff',
+          '',
+          'Clarification answers:',
+          '- Please clarify: choose direct Slack OAuth or Nango provider credentials?: Use Nango provider credentials.',
+        ].join('\n'),
+      ),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.clarificationQuestions).toEqual([
+      expect.objectContaining({
+        id: 'open-question-1',
+        question: 'Please clarify: who owns final rollout signoff?',
+        blocking: true,
+      }),
+    ]);
+  });
+
   it('asks for a side-effect boundary before generating risky workflows', () => {
     const result = intake(
       natural('Generate a workflow that deletes obsolete files, commits the cleanup, and pushes the branch.'),
