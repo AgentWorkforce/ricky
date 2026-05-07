@@ -110,10 +110,12 @@ Significant workflows must include:
 - a fix step that reads the captured validation output
 - a final hard validation gate with `failOnError: true`
 - a scoped change-detection gate for expected file targets
+- a post-fix re-review on the fixed state, not reused pre-fix review artifacts
+- a final signoff artifact under `.workflow-artifacts/` for serious workflows
 
-## Next expected artifacts
+## Current batch plan
 
-The first major Ricky workflow initiative is a meta-workflow that generates a large wave-structured backlog of reliable implementation workflows to serve as the execution layer for building the application.
+The active workflow batch plan is at `.workflow-artifacts/ricky-meta/application-wave-plan.md`. It covers 16 workflows across waves 0-5.
 
 ## Current GitHub Issue Workflows
 

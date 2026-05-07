@@ -17,6 +17,7 @@ Compact execution rules for agents writing Ricky workflows.
 11. End serious workflows with `.run({ cwd: process.cwd() })`.
 12. Keep commit/push boundaries explicit and deterministic.
 13. Load repo-local `.env.local`/`.env` before `.run(...)` without overwriting exported values, and fail fast with `MISSING_ENV_VAR: NAME` for required env vars before long-running agent steps.
+14. For generation tasks, read `workflows/meta/spec/generated-workflow-template.md` before authoring.
 
 ## Must-not
 
@@ -27,6 +28,7 @@ Compact execution rules for agents writing Ricky workflows.
 5. Do not claim generated workflows are ready if dry-run has not passed.
 6. Do not hand-tune generated workflows first when the template/spec/rules should be fixed upstream.
 7. Do not hide environmental blockers; document them explicitly.
+8. Do not sign off using review artifacts produced before the fix loop; re-review must evaluate the post-fix state.
 
 ## Default reliability pattern
 
@@ -36,8 +38,9 @@ Compact execution rules for agents writing Ricky workflows.
 4. Run deterministic gates.
 5. Review.
 6. Fix.
-7. Re-run deterministic gates.
-8. Final sign-off.
+7. Re-review on the fixed state.
+8. Re-run deterministic gates.
+9. Final sign-off.
 
 ## 80-to-100 Validation Ladder
 
@@ -51,8 +54,9 @@ Use this ladder for serious implementation workflows:
 6. Fix failures from the captured output.
 7. Re-run the same validation as a hard gate with `failOnError: true`.
 8. Run regression, build, typecheck, dry-run, or local smoke gates appropriate to the workflow.
-9. Materialize review and signoff artifacts under `.workflow-artifacts/` for significant workflows.
-10. Sign off only after the final deterministic gates pass.
+9. Re-review on the fixed state; do not reuse stale pre-fix review artifacts.
+10. Materialize review and signoff artifacts under `.workflow-artifacts/` for significant workflows.
+11. Sign off only after the final deterministic gates pass.
 
 ## Scoped Change-Detection Gate
 

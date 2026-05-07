@@ -35,7 +35,7 @@ async function main() {
 
     .step('prepare-artifacts', {
       type: 'deterministic',
-      command: 'mkdir -p .workflow-artifacts/wave0-foundation/repo-standards && echo W0_REPO_STANDARDS_ARTIFACTS_READY',
+      command: 'rm -rf .workflow-artifacts/wave0-foundation/repo-standards && mkdir -p .workflow-artifacts/wave0-foundation/repo-standards && echo W0_REPO_STANDARDS_ARTIFACTS_READY',
       captureOutput: true,
       failOnError: true,
     })

@@ -179,6 +179,7 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 1. Read `docs/workflows/WORKFLOW_STANDARDS.md`.
 2. Read `workflows/shared/WORKFLOW_AUTHORING_RULES.md`.
 3. Read the workflow-specific spec or program doc when one exists, including files under `workflows/meta/spec/`.
+4. For workflow generation tasks, also read `workflows/meta/spec/generated-workflow-template.md`.
 
 ## Mandatory Conventions
 
@@ -187,9 +188,11 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 - **Dedicated channel:** Every workflow must use a `wf-ricky-*` channel. Never use `general`.
 - **Deterministic gates:** After any agent step that edits files, add a deterministic verification gate such as `file_exists`, `exit_code`, grep checks, dry-run checks, or scoped `git diff` change detection.
 - **Review stage:** Every significant workflow must include review by an agent distinct from the writer when possible. Review artifacts for significant workflows must be written under `.workflow-artifacts/`.
-- **80-to-100 validation:** Serious implementation workflows must use a soft-gate, fix, hard-gate loop. Passing compile or typecheck alone is not enough.
+- **80-to-100 validation:** Serious implementation workflows must use a soft-gate, fix, hard-gate loop. The fix loop must include a post-fix re-review on the fixed state before final signoff. Passing compile or typecheck alone is not enough.
 - **Commit boundaries:** Do not run `git commit` or `git push` from agent steps unless the workflow explicitly owns that boundary and documents the expected files.
 - **Env loading:** Load `.env.local` and `.env` before `.run(...)` without overwriting exported values. Fail fast with `MISSING_ENV_VAR: <NAME>` before expensive agent steps.
+- **Scoped change detection:** After implementation steps, verify the repo changed in the expected scope using `git diff --name-only` plus `git ls-files --others --exclude-standard`, scoped to declared file targets. Do not use repo-wide `git diff --quiet` when unrelated work may be present.
+- **Signoff artifacts:** Serious implementation workflows must write a final signoff artifact under `.workflow-artifacts/`. Passing tests alone is not sufficient proof of completion.
 
 ## Wave Structure
 
@@ -203,6 +206,8 @@ Use wave folders to express staged delivery:
 - `wave5-scale-and-ops` for failure analysis, analytics, and mass-generation programs.
 
 Later wave folders keep the same rule: a wave must represent a meaningful product or runtime milestone, not arbitrary grouping.
+
+Waves beyond `wave5-scale-and-ops`, including `wave6-proof` through `wave12-simplified-workflow-cli`, exist in the repo and follow the same naming convention. Each later wave must also represent a meaningful product or runtime milestone.
 
 ## Source Of Truth
 
