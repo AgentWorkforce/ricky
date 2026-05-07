@@ -82,6 +82,16 @@ describe('power user parser defaults', () => {
     });
   });
 
+  it('parses ricky run artifact --cloud as Cloud execution shorthand', () => {
+    expect(parsePowerUserArgs(['run', 'workflows/generated/review.ts', '--cloud'])).toMatchObject({
+      command: 'run',
+      surface: 'legacy',
+      mode: 'cloud',
+      artifact: 'workflows/generated/review.ts',
+      runRequested: true,
+    });
+  });
+
   it('treats bare connect --cloud as the standard Cloud targets', () => {
     expect(parsePowerUserArgs(['connect', 'agents', '--cloud'])).toMatchObject({
       command: 'connect',

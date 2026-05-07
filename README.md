@@ -63,6 +63,7 @@ Common commands:
 - `ricky local --spec <text>` — write a local workflow artifact.
 - `ricky local --spec-file <path> --run` — generate from a file, then run locally.
 - `ricky run <artifact>` — execute an existing workflow artifact.
+- `ricky run <artifact> --cloud` — execute an existing workflow artifact in AgentWorkforce Cloud.
 - `ricky run <artifact> --background` — execute in the background and print a Ricky run id.
 - `ricky status --run <run-id>` — check background run progress.
 - `ricky version` — print the package version.
@@ -92,6 +93,7 @@ It can also run an existing artifact attached to the terminal or in the backgrou
 
 ```sh
 ricky run workflows/generated/package-checks.ts
+ricky run workflows/generated/package-checks.ts --cloud
 ricky run workflows/generated/package-checks.ts --background
 ricky status --run <run-id>
 ```
