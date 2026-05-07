@@ -371,10 +371,9 @@ describe('environment error classification', () => {
       'step-1',
     );
     run = gateResult.run;
-    // Manually add stderr to the gate
-    const gateIdx = run.deterministicGates.length - 1;
-    run.deterministicGates[gateIdx] = {
-      ...run.deterministicGates[gateIdx],
+    // Step-scoped gates now live on the step, not run.deterministicGates.
+    run.steps[0].deterministicGates[0] = {
+      ...run.steps[0].deterministicGates[0],
       stderrExcerpt: 'Error: EACCES: permission denied, open /usr/local/lib/node_modules',
     };
     run = completeRun(run);
