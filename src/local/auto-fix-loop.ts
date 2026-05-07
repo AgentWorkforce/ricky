@@ -227,8 +227,26 @@ export async function runWithAutoFix(
           } else if (!retryOfRunId) {
             retryOfRunId = runId;
           }
-          // Retry the workflow as-is — the agent has edited the source files
-          // in place. No workflow artifact was rewritten.
+          // Retry the workflow from the BEGINNING — not from the failed
+          // step. Verify-style workflows have a structure like:
+          //
+          //   verify-* (agent steps)  →  produce *-drift.json
+          //          ↓
+          //   artifact-* (gates)      →  validate report shape
+          //          ↓
+          //   aggregate-drift (gate)  →  fail if any DRIFT (this fails)
+          //
+          // Resuming with `startFromStep: aggregate-drift` after a code
+          // edit would just re-read the SAME stale drift artifacts from
+          // before the fix, fail again, and loop until max attempts. The
+          // verify-* agent steps need to re-run against the patched
+          // source so they regenerate fresh drift reports.
+          //
+          // We pay the cost of re-running successful steps (which is real
+          // — the verify agents re-fetch external docs), but correctness
+          // wins. If a future workflow needs cheaper resumption, it can
+          // declare a resume-anchor step in the drift report; for now,
+          // the safe default is full restart.
           currentRequest = {
             ...retryBaseRequest(currentRequest, response),
             autoFix: undefined,
@@ -236,11 +254,10 @@ export async function runWithAutoFix(
               attempt: attempt + 1,
               maxAttempts,
               ...(runId ? { previousRunId: runId, retryOfRunId: retryOfRunId ?? runId } : {}),
-              ...(failedStep ? { startFromStep: failedStep } : {}),
-              reason: `auto-fix retry after code-drift repair (${driftReports.length} report${driftReports.length === 1 ? '' : 's'})`,
+              reason: `auto-fix retry after code-drift repair (${driftReports.length} report${driftReports.length === 1 ? '' : 's'}); restarting from workflow root so drift-producing steps re-run`,
             },
           };
-          onProgress?.(`Retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
+          onProgress?.('Retrying workflow from the beginning so drift-producing steps re-run against the patched source...');
           continue;
         }
         // codeDriftRepairer returned applied=false: no-op, fall through to workflow repair.

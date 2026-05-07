@@ -387,10 +387,17 @@ function isDriftReportShape(value: unknown): value is {
   if (verdict !== 'PASS' && verdict !== 'DRIFT') return false;
   const findings = (value as { findings?: unknown }).findings;
   if (!Array.isArray(findings)) return false;
+  // Every finding must have a valid severity AND non-empty string axis +
+  // string description. Without the string checks, malformed JSON could
+  // pass schema validation, get cast to DriftFinding[], and surface
+  // `undefined` values in the agent's repair prompt.
   return findings.every((f) => {
     if (!isPlainRecord(f)) return false;
     const sev = (f as { severity?: unknown }).severity;
-    return sev === 'blocker' || sev === 'major' || sev === 'minor';
+    if (sev !== 'blocker' && sev !== 'major' && sev !== 'minor') return false;
+    const axis = (f as { axis?: unknown }).axis;
+    const description = (f as { description?: unknown }).description;
+    return typeof axis === 'string' && axis.length > 0 && typeof description === 'string';
   });
 }
 
