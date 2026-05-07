@@ -83,9 +83,9 @@ describe('workflow summary', () => {
       runRequested: false,
     });
 
-    expect(summary.runCommand).toBe('ricky cloud --workflow workflows/generated/cloud-release.ts --run');
+    expect(summary.runCommand).toBe('ricky run workflows/generated/cloud-release.ts --cloud');
     expect(renderPowerUserWorkflowSummary(summary, { mode: 'cloud', runRequested: false }).join('\n')).toContain(
-      'Run: ricky cloud --workflow workflows/generated/cloud-release.ts --run',
+      'Run: ricky run workflows/generated/cloud-release.ts --cloud',
     );
   });
 });

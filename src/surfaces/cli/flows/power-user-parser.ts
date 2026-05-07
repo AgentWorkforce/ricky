@@ -70,11 +70,12 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const effectiveArgv = surface === 'legacy' ? argv : argv.slice(1);
   const explicitMode = readMode(effectiveArgv);
   const modeFlagPresent = effectiveArgv.includes('--mode');
+  const runCloudShorthand = first === 'run' && hasFlag(effectiveArgv, '--cloud');
   const mode = surface === 'local' || surface === 'cloud'
     ? surface
     : surface === 'workflow'
       ? explicitMode ?? (modeFlagPresent ? undefined : 'local')
-    : explicitMode;
+    : explicitMode ?? (runCloudShorthand ? 'cloud' : undefined);
 
   const parsed = withCommonFlags(
     {

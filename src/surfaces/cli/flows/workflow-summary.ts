@@ -237,7 +237,7 @@ export function cloudPowerUserWorkflowSummary(
     runId: runReceipt?.runId,
     status: runReceipt?.status ?? (cloudResult ? 'generated' : 'blocked'),
     cloudUrl: runReceipt?.receiptUrl,
-    runCommand: workflowPath ? `ricky cloud --workflow ${workflowPath} --run` : undefined,
+    runCommand: workflowPath ? `ricky run ${workflowPath} --cloud` : undefined,
     warnings: warningMessages,
     nextActions: followUpActions.length > 0 ? followUpActions : [
       'ricky connect cloud',

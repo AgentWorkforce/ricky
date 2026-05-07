@@ -95,6 +95,13 @@ describe('parseArgs', () => {
       runRequested: true,
       ...RUN_DEFAULTS,
     });
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--cloud'])).toEqual({
+      command: 'run',
+      mode: 'cloud',
+      artifact: 'workflows/generated/example.ts',
+      runRequested: true,
+      ...RUN_DEFAULTS,
+    });
   });
 
   it('parses --auto-fix attempts and treats zero as disabled', () => {
@@ -367,6 +374,7 @@ describe('renderHelp', () => {
     expect(helpText).toContain('ricky workflow --spec-file <path> --mode cloud');
     expect(helpText).not.toContain('ricky workflow --spec-file <path> --mode cloud --run');
     expect(helpText).toContain('ricky run <path> --background');
+    expect(helpText).toContain('ricky run <path> --cloud');
     expect(helpText).toContain('ricky run <artifact> --start-from <step>');
     expect(helpText).toContain('ricky status --run <run-id>');
     expect(helpText).toContain('Without --run:  artifact path on disk');
@@ -1919,7 +1927,7 @@ describe('cliMain', () => {
       const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ mode: 'cloud' }));
 
       const result = await cliMain({
-        argv: ['run', 'workflows/generated/cloud-release.ts', '--mode', 'cloud', '--json'],
+        argv: ['run', 'workflows/generated/cloud-release.ts', '--cloud', '--json'],
         runInteractive: runner,
         readCloudAuth: vi.fn().mockResolvedValue({
           accessToken: 'stored-token',
@@ -2026,7 +2034,7 @@ describe('cliMain', () => {
     expect(result.exitCode).toBe(0);
     expect(output).toContain('Ricky cloud: cloud-release generated; run when ready.');
     expect(output).toContain('Workflow: workflows/generated/cloud-release.ts');
-    expect(output).toContain('Run: ricky cloud --workflow workflows/generated/cloud-release.ts --run');
+    expect(output).toContain('Run: ricky run workflows/generated/cloud-release.ts --cloud');
   });
 
   it('fails power-user cloud non-interactively with recovery commands when Cloud context is missing', async () => {
