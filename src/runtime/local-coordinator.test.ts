@@ -1055,6 +1055,66 @@ describe('LocalCoordinator', () => {
     });
   });
 
+  it('records injected generated workflow lifecycle evidence from running to failed completion', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-generated-lifecycle-evidence',
+      workflowFile: 'generated/lifecycle-workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      metadata: { workflowId: 'generated-lifecycle-workflow' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'generated/lifecycle-workflow.yaml', '--json'],
+      { cwd: '/repo', env: undefined },
+    );
+    expect(coordinator.getActiveRun('run-generated-lifecycle-evidence')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/lifecycle-workflow.yaml', '--json'],
+        cwd: '/repo',
+      },
+      metadata: { workflowId: 'generated-lifecycle-workflow' },
+    });
+
+    invocations[0].emitStdout('{"event":"step.started","step":"prepare"}');
+    invocations[0].emitStderr('prepare failed');
+    invocations[0].complete(7);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('failed');
+    expect(result.exitCode).toBe(7);
+    expect(result.error).toBe('exited with code 7');
+    expect(result.stdout).toEqual(['{"event":"step.started","step":"prepare"}']);
+    expect(result.stderr).toEqual(['prepare failed']);
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/lifecycle-workflow.yaml', '--json'],
+      cwd: '/repo',
+    });
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'failed',
+      data: { exitCode: 7, error: 'exited with code 7' },
+    });
+    expect(coordinator.getActiveRun('run-generated-lifecycle-evidence')).toBeUndefined();
+  });
+
   it('does not invoke the runner when a lifecycle observer cancels during pre-spawn events', async () => {
     const { runner, run, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
