@@ -397,7 +397,12 @@ function isDriftReportShape(value: unknown): value is {
     if (sev !== 'blocker' && sev !== 'major' && sev !== 'minor') return false;
     const axis = (f as { axis?: unknown }).axis;
     const description = (f as { description?: unknown }).description;
-    return typeof axis === 'string' && axis.length > 0 && typeof description === 'string';
+    return (
+      typeof axis === 'string' &&
+      axis.trim().length > 0 &&
+      typeof description === 'string' &&
+      description.trim().length > 0
+    );
   });
 }
 

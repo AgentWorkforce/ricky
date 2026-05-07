@@ -122,6 +122,13 @@ export async function runWithAutoFix(
   let pendingRepairAttempt: Omit<WorkforcePersonaRepairAttempt, 'outcome'> | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    // Per-attempt timestamp so drift discovery only considers artifacts the
+    // CURRENT attempt produced. Without this, a later unrelated failure
+    // could re-trigger code-drift repair on stale reports from a prior
+    // attempt (e.g. attempt 1 produced reports → repair → attempt 2 fails
+    // for an unrelated reason → discovery sees attempt 1's reports as
+    // "fresh" because runStartTimeMs hasn't moved).
+    const attemptStartTimeMs = Date.now();
     onProgress?.(`Running workflow (attempt ${attempt}/${maxAttempts})...`);
     const response = await options.runSingleAttempt(currentRequest);
     lastResponse = response;
@@ -200,7 +207,12 @@ export async function runWithAutoFix(
     // code (not the workflow itself) is what's wrong. Falls through to
     // workflow repair if no actionable reports are found.
     const codeDriftCwd = response.execution?.execution.cwd ?? request.invocationRoot ?? process.cwd();
-    const driftReports = await discoverDriftReports(codeDriftCwd, runStartTimeMs);
+    // Use the more recent of run-start and attempt-start. attemptStartTimeMs
+    // alone would be ideal, but if the system clock skews backward between
+    // attempts (NTP correction during a long run) we don't want to silently
+    // accept artifacts from before this run began. Math.max guards both.
+    const driftDiscoveryFloor = Math.max(runStartTimeMs, attemptStartTimeMs);
+    const driftReports = await discoverDriftReports(codeDriftCwd, driftDiscoveryFloor);
     if (driftReports) {
       const driftTarget: CodeDriftTarget = { cwd: codeDriftCwd, reports: driftReports };
       try {
