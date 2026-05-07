@@ -468,6 +468,15 @@ append_generated_workflows_to_queue() {
   done
 }
 
+append_repo_workflows_to_queue() {
+  while IFS= read -r workflow_path; do
+    [[ -n "$workflow_path" ]] || continue
+    printf '%s\n' "$workflow_path" >> "$QUEUE_FILE"
+  done < <(find workflows -mindepth 2 -maxdepth 2 -type f -name '*.ts' \
+    ! -path 'workflows/generated/*' \
+    ! -path 'workflows/meta/*' | sort)
+}
+
 write_queue() {
   case "$QUEUE_MODE" in
     minimal)
@@ -487,18 +496,8 @@ workflows/wave12-simplified-workflow-cli/02-prove-no-dead-end-cli.ts
 EOF
       ;;
     expanded|*)
-      cat > "$QUEUE_FILE" <<'EOF'
-workflows/wave10-agent-assistant-adoption/00-execute-agent-assistant-adoption-program.ts
-workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts
-workflows/wave12-simplified-workflow-cli/01-implement-and-prove-simplified-workflow-cli.ts
-workflows/wave12-simplified-workflow-cli/02-prove-no-dead-end-cli.ts
-workflows/wave7-analytics-proof/07-prove-proof-loop-analytics-feedback.ts
-workflows/wave0-foundation/04-initial-architecture-docs.ts
-workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts
-workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts
-workflows/wave2-product/02-workflow-generation-pipeline.ts
-workflows/wave4-local-byoh/08-implement-interactive-cli-entrypoint.ts
-EOF
+      : > "$QUEUE_FILE"
+      append_repo_workflows_to_queue
       append_generated_workflows_to_queue
       ;;
   esac
