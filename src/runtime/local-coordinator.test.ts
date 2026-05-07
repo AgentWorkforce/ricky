@@ -114,6 +114,12 @@ describe('LocalCoordinator', () => {
       'status_change',
       'completed',
     ]);
+    expect(result.events.map((event) => event.status)).toEqual([
+      'pending',
+      'running',
+      'passed',
+      'passed',
+    ]);
     expect(result.events[1]).toMatchObject({
       kind: 'status_change',
       status: 'running',
@@ -154,6 +160,18 @@ describe('LocalCoordinator', () => {
       lines: ['fatal: missing token'],
       totalLines: 1,
       truncated: false,
+    });
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'status_change',
+        status: 'failed',
+        data: { previousStatus: 'running', status: 'failed' },
+      }),
+    );
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'failed',
+      data: { exitCode: 12, error: 'exited with code 12' },
     });
     expect(result.events).toContainEqual(
       expect.objectContaining({
@@ -210,12 +228,18 @@ describe('LocalCoordinator', () => {
     const result = await resultPromise;
 
     expect(invocations[0].killed).toBe(true);
-    expect(result.status).toBe('failed');
+    expect(result.status).toBe('cancelled');
     expect(result.exitCode).toBeNull();
     expect(result.error).toBe('cancelled');
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'status_change',
+      'cancelled',
+    ]);
     expect(result.events.at(-1)).toMatchObject({
       kind: 'cancelled',
-      status: 'failed',
+      status: 'cancelled',
       data: { exitCode: null, error: 'cancelled' },
     });
     expect(coordinator.getActiveRun('run-cancelled')).toBeUndefined();
@@ -396,7 +420,7 @@ describe('LocalCoordinator', () => {
 
     coordinator.cancel('cancel-me');
     const cancelledResult = await second;
-    expect(cancelledResult.status).toBe('failed');
+    expect(cancelledResult.status).toBe('cancelled');
     expect(cancelledResult.error).toBe('cancelled');
 
     // The other run is still active and can complete
@@ -585,5 +609,51 @@ describe('LocalCoordinator', () => {
       cwd: '/repo',
       env: { RELAYCAST_WORKSPACE: 'test' },
     });
+  });
+
+  it('keeps generated workflow launches behind the injected runner boundary', async () => {
+    const invocation = new ManualInvocation();
+    const run = vi.fn(
+      (command: string, args: string[], options: CommandRunnerOptions): CommandInvocation => {
+        expect(command).toBe('agent-relay');
+        expect(args).toEqual(['run', 'generated/workflow.yaml', '--json']);
+        expect(options).toEqual({
+          cwd: '/repo',
+          env: { RELAYCAST_WORKSPACE: 'unit-test' },
+        });
+        return invocation;
+      },
+    );
+    const coordinator = new LocalCoordinator({ run });
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-generated-boundary',
+      workflowFile: 'generated/workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { source: 'generated-workflow' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(coordinator.getActiveRun('run-generated-boundary')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/workflow.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      metadata: { source: 'generated-workflow' },
+    });
+
+    invocation.complete(0);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('passed');
+    expect(result.invocation.command).toBe('agent-relay');
+    expect(result.invocation.args).toEqual(['run', 'generated/workflow.yaml', '--json']);
+    expect(result.metadata).toEqual({ source: 'generated-workflow' });
   });
 });

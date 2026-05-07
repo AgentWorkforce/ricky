@@ -152,7 +152,7 @@ export class LocalCoordinator {
         if (settled) return;
         state.invocation?.kill();
         finish({
-          status: 'failed',
+          status: 'cancelled',
           exitCode: null,
           eventKind: 'cancelled',
           message: 'Run cancelled',
