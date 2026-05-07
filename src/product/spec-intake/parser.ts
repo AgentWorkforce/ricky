@@ -295,6 +295,7 @@ function extractFieldsFromRecord(
 export function extractConstraints(text: string): string[] {
   const constraints: string[] = [];
   const lines = text.split(/\r?\n/).map((line) => line.trim());
+  constraints.push(...extractNonGoalSectionItems(text));
   for (const line of lines) {
     if (/^(constraint|constraints|must|must not|do not|only|avoid|requirement|required)\b/i.test(stripBullet(line))) {
       constraints.push(stripBullet(line));
@@ -310,6 +311,27 @@ export function extractConstraints(text: string): string[] {
     constraints.push(...matchesFor(text, pattern));
   }
   return dedupe(constraints);
+}
+
+function extractNonGoalSectionItems(text: string): string[] {
+  const constraints: string[] = [];
+  const lines = text.split(/\r?\n/);
+  let inNonGoalSection = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const heading = /^#{1,6}\s+(.+?)\s*$/.exec(line)?.[1]?.replace(/#+$/, '').trim() ?? '';
+    if (heading) {
+      inNonGoalSection = /\b(non[- ]?goals?|out[- ]of[- ]scope|not in scope|out of scope)\b/i.test(heading);
+      continue;
+    }
+    if (!inNonGoalSection) continue;
+    if (!line) continue;
+    const item = stripBullet(line);
+    if (item && item !== line) constraints.push(`Non-goal: ${item}`);
+  }
+
+  return constraints;
 }
 
 export function extractEvidenceRequirements(text: string): string[] {

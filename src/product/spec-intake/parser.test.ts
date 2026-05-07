@@ -71,6 +71,35 @@ describe('spec intake parser, normalizer, and router', () => {
     );
   });
 
+  it('preserves out-of-scope sections as non-goal scope constraints', () => {
+    const result = intake(
+      natural(
+        [
+          'Generate a workflow for AgentWorkforce/ricky.',
+          '',
+          '## Out of scope',
+          '',
+          '- Passive Linear comment monitoring',
+          '- Custom per-repo workflow templates',
+        ].join('\n'),
+      ),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.normalizedSpec.constraints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          constraint: 'Non-goal: Passive Linear comment monitoring',
+          category: 'scope',
+        }),
+        expect.objectContaining({
+          constraint: 'Non-goal: Custom per-repo workflow templates',
+          category: 'scope',
+        }),
+      ]),
+    );
+  });
+
   it('preserves MCP-style structured payload source and provider context', () => {
     const payload: RawSpecPayload = {
       kind: 'mcp',

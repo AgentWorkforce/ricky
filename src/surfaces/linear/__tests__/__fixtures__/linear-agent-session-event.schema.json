@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "required": [
+    "id",
+    "webhookId",
+    "type",
+    "sessionId",
+    "organizationId",
+    "trigger",
+    "actor",
+    "issue",
+    "createdAt"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "webhookId": { "type": "string" },
+    "type": { "enum": ["created", "prompted"] },
+    "sessionId": { "type": "string" },
+    "organizationId": { "type": "string" },
+    "trigger": { "enum": ["issue_mention", "comment_mention", "assignment"] },
+    "actor": {
+      "type": "object",
+      "required": ["linearUserId"]
+    },
+    "issue": {
+      "type": "object",
+      "required": ["id", "title"]
+    },
+    "createdAt": { "type": "string" }
+  }
+}
