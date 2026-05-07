@@ -208,6 +208,30 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.normalizedSpec.intent).toBe('coordinate');
   });
 
+  it('routes generate requests about failure/error topics to generate, not debug', () => {
+    const cases = [
+      'Generate a workflow that classifies TypeScript error output and records evidence artifacts.',
+      'Create a workflow for failure analysis reports.',
+      'Build a workflow to collect logs after failed steps.',
+      'Write a new workflow that detects timeout patterns in CI.',
+    ];
+
+    for (const text of cases) {
+      const result = intake(natural(text));
+      expect(result.routing?.target, `Expected generate for: "${text}"`).toBe('generate');
+      expect(result.routing?.normalizedSpec.intent, `Expected generate intent for: "${text}"`).toBe('generate');
+    }
+  });
+
+  it('still routes actual failure debugging to debug even with generate-adjacent vocabulary', () => {
+    const result = intake(
+      natural('Fix the failed workflow run id run-456. Stack trace is in the logs.'),
+    );
+
+    expect(result.routing?.target).toBe('debug');
+    expect(result.routing?.normalizedSpec.intent).toBe('debug');
+  });
+
   it('returns clarify for ambiguous input with actionable missing fields', () => {
     const result = intake(natural('Can you help me figure out the next thing?'));
 

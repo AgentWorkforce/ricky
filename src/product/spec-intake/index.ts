@@ -43,6 +43,8 @@ export {
   parseSpec,
 } from './parser.js';
 export { routeSpec } from './router.js';
+export { detectCurrentRepo, defaultRepoDetector, parseRepoSlugFromGitUrl } from './detect-current-repo.js';
+export type { RepoDetector } from './detect-current-repo.js';
 export type {
   DesiredAction,
   ExecutionPreference,

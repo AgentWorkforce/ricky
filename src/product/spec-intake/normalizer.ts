@@ -45,7 +45,11 @@ function resolveIntent(parsed: ParsedSpec): IntentKind {
 
   const hasFailureEvidence = hasFailedRunEvidence(parsed);
 
-  if (hasFailureEvidence) return 'debug';
+  // Only promote to debug when the parser didn't already resolve to generate.
+  // When the primary intent is generate, failure vocabulary describes the
+  // workflow's subject matter (e.g. "generate a failure-analysis workflow"),
+  // not evidence of an actual failed run.
+  if (hasFailureEvidence && parsed.intent.primary !== 'generate') return 'debug';
 
   if (spansAgents(parsed) && parsed.intent.primary !== 'generate') return 'coordinate';
 

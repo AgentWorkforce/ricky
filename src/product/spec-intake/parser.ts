@@ -232,26 +232,23 @@ export function detectIntent(text: string): IntentSignal {
     return { primary: text.trim() ? 'clarify' : 'unknown', signals: [] };
   }
 
+  const generateSignals = matches.find((match) => match.intent === 'generate')?.signals ?? [];
+  const explicitGenerateWorkflow = isExplicitGenerateWorkflowRequest(haystack, generateSignals);
+
   const failedRunSignals = matches.find((match) => match.intent === 'debug')?.signals ?? [];
-  if (failedRunSignals.some((signal) => /failed|failure|stack trace|run id|timed out|timeout|exit code/i.test(signal))) {
-    // Don't let debug override when the user explicitly wants to generate/create/build a workflow.
-    // Failure vocabulary in a generate request describes the workflow's subject matter, not an actual failure.
-    const generateSignals = matches.find((match) => match.intent === 'generate')?.signals ?? [];
-    const explicitGenerate = generateSignals.some((signal) =>
-      /generate|create|write|build|author|new workflow|new ricky workflow|build a workflow|from spec|workflow spec|scaffold/i.test(signal),
-    );
-    if (!explicitGenerate) {
-      return {
-        primary: 'debug',
-        secondary: matches.find((match) => match.intent !== 'debug')?.intent,
-        signals: failedRunSignals,
-      };
-    }
+  if (
+    !explicitGenerateWorkflow &&
+    failedRunSignals.some((signal) => /failed|failure|stack trace|run id|timed out|timeout|exit code/i.test(signal))
+  ) {
+    return {
+      primary: 'debug',
+      secondary: matches.find((match) => match.intent !== 'debug')?.intent,
+      signals: failedRunSignals,
+    };
   }
 
   const coordinationSignals = matches.find((match) => match.intent === 'coordinate')?.signals ?? [];
   if (coordinationSignals.some((signal) => /agents?|workers|handoff|swarm|parallel|orchestrate|coordinate/i.test(signal))) {
-    const generateSignals = matches.find((match) => match.intent === 'generate')?.signals ?? [];
     const explicitNewWorkflow = generateSignals.some((signal) => /new workflow|build a workflow|workflow spec|scaffold/i.test(signal));
     if (!explicitNewWorkflow) {
       return {
@@ -268,6 +265,15 @@ export function detectIntent(text: string): IntentSignal {
     secondary: second?.intent,
     signals: first.signals,
   };
+}
+
+function isExplicitGenerateWorkflowRequest(haystack: string, generateSignals: string[]): boolean {
+  if (generateSignals.length === 0) return false;
+  if (/\b(?:generate|create|build|author|write|scaffold)\b/.test(haystack) && /\bworkflow\b/.test(haystack)) {
+    return true;
+  }
+
+  return generateSignals.some((signal) => /new workflow|build a workflow|workflow spec|scaffold/i.test(signal));
 }
 
 function normalizeIntent(value: string): IntentKind {
