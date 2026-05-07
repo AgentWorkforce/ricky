@@ -22,7 +22,7 @@ import { runWithAutoFix } from './auto-fix-loop.js';
 import { generate, generateWithWorkforcePersona } from '../product/generation/index.js';
 import type { GenerationInput, GenerationResult, RenderedArtifact } from '../product/generation/index.js';
 import { intake } from '../product/spec-intake/index.js';
-import type { ExecutionPreference, InputSurface, RawSpecPayload, RouteTarget } from '../product/spec-intake/index.js';
+import type { ClarificationQuestion, ExecutionPreference, InputSurface, RawSpecPayload, RouteTarget } from '../product/spec-intake/index.js';
 import { defaultRepoDetector, type RepoDetector } from '../product/spec-intake/detect-current-repo.js';
 import { LocalCoordinator } from '../runtime/local-coordinator.js';
 import { DEFAULT_RUN_TIMEOUT_MS } from '../shared/constants.js';
@@ -58,7 +58,7 @@ export interface LocalResponseArtifact {
   content?: string;
 }
 
-export type LocalGenerationStatus = 'ok' | 'error';
+export type LocalGenerationStatus = 'ok' | 'error' | 'needs_clarification';
 export type LocalExecutionStatus = 'success' | 'blocker' | 'error';
 
 export interface LocalAssistantTurnContextDecision {
@@ -88,6 +88,7 @@ export interface LocalGenerationStageResult {
     tool_selection?: unknown;
     refinement?: unknown;
     workforce_persona?: unknown;
+    clarification_questions?: ClarificationQuestion[];
     assistant_turn_context?: LocalAssistantTurnContextDecision;
   };
 }
@@ -180,6 +181,8 @@ export interface LocalResponse {
   warnings: string[];
   /** Suggested next actions for the user. */
   nextActions: string[];
+  /** Structured questions Ricky needs answered before it can safely continue. */
+  clarificationQuestions?: ClarificationQuestion[];
   /** Stage 1 result: artifact generation or artifact selection. */
   generation?: LocalGenerationStageResult;
   /** Stage 2 result: populated only when run behavior was requested. */
@@ -971,14 +974,23 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
       if (!intakeResult.routing || intakeResult.routing.target === 'clarify' || !intakeResult.success) {
         if (intakeResult.routing?.suggestedFollowUp) nextActions.push(intakeResult.routing.suggestedFollowUp);
+        nextActions.push(...clarificationNextActions(intakeResult.clarificationQuestions));
         nextActions.push('Clarify the local workflow request and retry.');
         generationStage = {
           stage: 'generate',
-          status: 'error',
+          status: intakeResult.clarificationQuestions.length > 0 ? 'needs_clarification' : 'error',
           error: warnings[0] ?? 'Spec intake could not produce an executable workflow artifact.',
-          ...decisionsForAssistantTurnContext(assistantTurnContext),
+          ...decisionsForClarification(intakeResult.clarificationQuestions, assistantTurnContext),
         };
-        return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
+        return {
+          ok: false,
+          artifacts,
+          logs,
+          warnings,
+          nextActions,
+          ...(intakeResult.clarificationQuestions.length > 0 ? { clarificationQuestions: intakeResult.clarificationQuestions } : {}),
+          ...stageResponse(includeStageContract, generationStage, undefined, 1),
+        };
       }
 
       const workflowFile = workflowFileForRoute(
@@ -1029,16 +1041,27 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
         if (!generationResult.success || !artifact) {
           warnings.push(...generationResult.validation.errors);
+          nextActions.push(...clarificationNextActions(generationResult.clarificationQuestions ?? []));
           nextActions.push(nextActionForGenerationFailure(generationResult.validation.errors));
           generationStage = createGenerationStage(
-            'error',
+            (generationResult.clarificationQuestions?.length ?? 0) > 0 ? 'needs_clarification' : 'error',
             artifact,
             specDigest,
             generationResult.validation.errors[0],
             generationResult,
             assistantTurnContext,
           );
-          return { ok: false, artifacts, logs, warnings, nextActions, ...stageResponse(includeStageContract, generationStage, undefined, 1) };
+          return {
+            ok: false,
+            artifacts,
+            logs,
+            warnings,
+            nextActions,
+            ...((generationResult.clarificationQuestions?.length ?? 0) > 0
+              ? { clarificationQuestions: generationResult.clarificationQuestions }
+              : {}),
+            ...stageResponse(includeStageContract, generationStage, undefined, 1),
+          };
         }
 
         onProgress?.(`Writing workflow artifact to ${artifact.artifactPath}...`);
@@ -1555,6 +1578,7 @@ function createGenerationStage(
             tool_selection: generationResult.toolSelection.selections,
             ...(generationResult.refinement ? { refinement: generationResult.refinement } : {}),
             ...(generationResult.workforcePersona ? { workforce_persona: generationResult.workforcePersona } : {}),
+            ...((generationResult.clarificationQuestions?.length ?? 0) > 0 ? { clarification_questions: generationResult.clarificationQuestions } : {}),
             ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
           },
         }
@@ -1563,9 +1587,31 @@ function createGenerationStage(
 }
 
 function nextActionForGenerationFailure(errors: string[]): string {
+  if (errors.some((error) => /needs clarification|WORKFORCE_PERSONA_NEEDS_CLARIFICATION/i.test(error))) {
+    return 'Answer the clarification questions before local workflow generation continues.';
+  }
   return errors.some((error) => /Workforce persona/i.test(error))
     ? 'Fix the Workforce persona response contract before local execution.'
     : 'Fix the generated workflow validation errors before local execution.';
+}
+
+function clarificationNextActions(questions: ClarificationQuestion[]): string[] {
+  return questions
+    .filter((question) => question.blocking)
+    .map((question) => `Clarify: ${question.question}`);
+}
+
+function decisionsForClarification(
+  questions: ClarificationQuestion[],
+  assistantTurnContext: LocalAssistantTurnContextDecision | undefined,
+): Pick<LocalGenerationStageResult, 'decisions'> {
+  if (questions.length === 0) return decisionsForAssistantTurnContext(assistantTurnContext);
+  return {
+    decisions: {
+      clarification_questions: questions,
+      ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
+    },
+  };
 }
 
 async function writeGenerationMetadataArtifacts(

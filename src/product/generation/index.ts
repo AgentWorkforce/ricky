@@ -11,6 +11,7 @@ export {
   loadWorkforcePersonaModule,
   parsePersonaWorkflowResponse,
   writeWorkflowWithWorkforcePersona,
+  WorkforcePersonaClarificationError,
 } from './workforce-persona-writer.js';
 export type {
   DeterministicGate,

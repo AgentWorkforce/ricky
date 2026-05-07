@@ -88,6 +88,20 @@ export interface NormalizedAcceptanceGate {
   kind: 'deterministic' | 'review' | 'proof' | 'custom';
 }
 
+export interface ClarificationQuestion {
+  id: string;
+  question: string;
+  reason: string;
+  blocking: boolean;
+  defaultAssumption?: string;
+}
+
+export interface ClarificationRequest {
+  status: 'needs_clarification';
+  reason: string;
+  questions: ClarificationQuestion[];
+}
+
 export type ExecutionPreference = 'local' | 'cloud' | 'auto';
 
 export interface NormalizedWorkflowSpec {
@@ -115,6 +129,7 @@ export interface RoutingDecision {
   reason: string;
   normalizedSpec: NormalizedWorkflowSpec;
   suggestedFollowUp?: string;
+  clarificationQuestions?: ClarificationQuestion[];
 }
 
 export type ValidationSeverity = 'error' | 'warning' | 'info';
@@ -131,6 +146,7 @@ export interface IntakeResult {
   routing: RoutingDecision | null;
   validationIssues: ValidationIssue[];
   parseWarnings: string[];
+  clarificationQuestions: ClarificationQuestion[];
   requestId: string;
   receivedAt: string;
   processedAt: string;

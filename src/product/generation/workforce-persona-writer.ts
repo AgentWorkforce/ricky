@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
-import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
+import type { ClarificationQuestion, ClarificationRequest, NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { RenderedArtifact, SkillContext, WorkflowExecutionTarget } from './types.js';
 
 export const WORKFORCE_PERSONA_INTENT_CANDIDATES = [
@@ -183,10 +183,24 @@ export class WorkforcePersonaWriterError extends Error {
   }
 }
 
+export class WorkforcePersonaClarificationError extends WorkforcePersonaWriterError {
+  readonly questions: ClarificationQuestion[];
+
+  constructor(questions: ClarificationQuestion[], warnings: string[] = []) {
+    super(
+      `Workforce persona needs clarification before workflow generation: ${questions.map((question) => question.question).join(' | ')}`,
+      warnings,
+    );
+    this.name = 'WorkforcePersonaClarificationError';
+    this.questions = questions;
+  }
+}
+
 interface ParsedPersonaResponse {
-  content: string;
+  content?: string;
   metadata: Record<string, unknown>;
-  responseFormat: WorkforcePersonaWriterMetadata['responseFormat'];
+  responseFormat: WorkforcePersonaWriterMetadata['responseFormat'] | 'needs-clarification';
+  clarification?: ClarificationRequest;
 }
 
 export async function writeWorkflowWithWorkforcePersona(
@@ -244,6 +258,13 @@ export async function writeWorkflowWithWorkforcePersona(
   const parsed = parsePersonaWorkflowResponse(result.output, options.outputPath, {
     repoRoot: options.repoRoot,
   });
+  if (parsed.clarification) {
+    throw new WorkforcePersonaClarificationError(parsed.clarification.questions, resolved.warnings);
+  }
+  if (!parsed.content) {
+    throw new WorkforcePersonaWriterError('Workforce persona response did not include workflow artifact content.');
+  }
+  const responseFormat = parsed.responseFormat as WorkforcePersonaWriterMetadata['responseFormat'];
   return {
     artifact: {
       content: parsed.content,
@@ -259,7 +280,7 @@ export async function writeWorkflowWithWorkforcePersona(
       runId: result.workflowRunId ?? runId,
       source: resolved.source,
       selectedIntent: resolved.intent,
-      responseFormat: parsed.responseFormat,
+      responseFormat,
       outputPath: options.outputPath,
       promptInputs: {
         workflowName,
@@ -472,6 +493,11 @@ export function buildWorkflowPersonaTask(
           language: 'typescript',
           content: 'Complete Agent Relay workflow TypeScript source.',
         },
+        needs_clarification: {
+          status: 'needs_clarification',
+          reason: 'Why the workflow cannot be authored safely from the current spec.',
+          questions: 'Array of { id, question, reason, blocking, defaultAssumption? } items for Ricky to ask the user.',
+        },
         metadata: {
           workflowName: input.workflowName,
           targetMode: input.targetMode,
@@ -488,6 +514,7 @@ export function buildWorkflowPersonaTask(
   return [
     'Write an Agent Relay workflow artifact for Ricky.',
     'Run as a non-interactive one-shot persona invocation. Return only the response contract.',
+    'If the normalized spec has blocking ambiguity or open questions, return needs_clarification with targeted user-facing questions instead of guessing.',
     '',
     'Normalized spec JSON:',
     JSON.stringify(spec, null, 2),
@@ -619,6 +646,8 @@ export function parsePersonaWorkflowResponse(
 ): ParsedPersonaResponse {
   const directJson = parseJsonObject(output);
   if (directJson) {
+    const clarification = parseClarificationResponse(directJson);
+    if (clarification) return { metadata: {}, responseFormat: 'needs-clarification', clarification };
     return validateStructuredResponse(directJson, expectedPath, 'structured-json', options);
   }
 
@@ -626,6 +655,8 @@ export function parsePersonaWorkflowResponse(
   if (jsonFence) {
     const metadataJson = parseJsonObject(jsonFence);
     const tsFence = fencedBlock(output, 'ts') ?? fencedBlock(output, 'typescript');
+    const clarification = metadataJson ? parseClarificationResponse(metadataJson) : null;
+    if (clarification) return { metadata: {}, responseFormat: 'needs-clarification', clarification };
     if (metadataJson && tsFence) {
       return validateFencedResponse(tsFence, metadataJson, expectedPath);
     }
@@ -644,6 +675,52 @@ export function parsePersonaWorkflowResponse(
   throw new WorkforcePersonaWriterError(
     'Workforce persona response must be structured JSON or include fenced TypeScript artifact and JSON metadata blocks.',
   );
+}
+
+function parseClarificationResponse(value: Record<string, unknown>): ClarificationRequest | null {
+  const raw = isRecord(value.needs_clarification)
+    ? value.needs_clarification
+    : value.status === 'needs_clarification'
+      ? value
+      : null;
+  if (!raw) return null;
+
+  const rawQuestions = Array.isArray(raw.questions) ? raw.questions : [];
+  const questions = rawQuestions
+    .map(parseClarificationQuestion)
+    .filter((question): question is ClarificationQuestion => question !== null);
+  if (questions.length === 0) {
+    throw new WorkforcePersonaWriterError('Workforce persona needs_clarification response must include at least one question.');
+  }
+
+  return {
+    status: 'needs_clarification',
+    reason: typeof raw.reason === 'string' && raw.reason.trim()
+      ? raw.reason.trim()
+      : 'The workflow spec has blocking ambiguity.',
+    questions,
+  };
+}
+
+function parseClarificationQuestion(value: unknown): ClarificationQuestion | null {
+  if (!isRecord(value)) return null;
+  const question = typeof value.question === 'string' ? value.question.trim() : '';
+  if (!question) return null;
+  const id = typeof value.id === 'string' && value.id.trim()
+    ? value.id.trim()
+    : question.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'clarification';
+
+  return {
+    id,
+    question,
+    reason: typeof value.reason === 'string' && value.reason.trim()
+      ? value.reason.trim()
+      : 'The persona could not safely author the workflow without this answer.',
+    blocking: typeof value.blocking === 'boolean' ? value.blocking : true,
+    ...(typeof value.defaultAssumption === 'string' && value.defaultAssumption.trim()
+      ? { defaultAssumption: value.defaultAssumption.trim() }
+      : {}),
+  };
 }
 
 export function applyPersonaArtifactToRenderedArtifact(

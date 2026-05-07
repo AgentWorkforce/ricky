@@ -1,4 +1,4 @@
-import type { ExecutionPreference, NormalizedWorkflowSpec } from '../spec-intake/types.js';
+import type { ClarificationQuestion, ExecutionPreference, NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { SwarmPattern } from '../../shared/models/workflow-config.js';
 import type { VerificationType } from '../../shared/models/workflow-evidence.js';
 
@@ -235,6 +235,7 @@ export interface WorkflowExecutionRoute {
 export interface GenerationResult {
   success: boolean;
   artifact: RenderedArtifact | null;
+  clarificationQuestions?: ClarificationQuestion[];
   patternDecision: PatternDecision;
   skillContext: SkillContext;
   toolSelection: ToolSelectionContext;
