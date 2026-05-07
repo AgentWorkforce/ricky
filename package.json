@@ -1,6 +1,6 @@
 {
   "name": "@agentworkforce/ricky",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "license": "Apache-2.0",
   "description": "Workflow reliability, coordination, and authoring product for AgentWorkforce",
   "repository": {
