@@ -5,6 +5,11 @@
  * and recommended next-action hints for deterministic failure triage.
  */
 
+import type {
+  EvidenceSummary,
+  WorkflowRunEvidence,
+} from '../../shared/models/workflow-evidence.js';
+
 // ── Failure Classes ──────────────────────────────────────────────────
 
 export const FailureClass = {
@@ -56,6 +61,11 @@ export type NextAction = (typeof NextAction)[keyof typeof NextAction];
 
 export type PlainValidationSummary = string;
 
+export type FailureClassifierInput =
+  | WorkflowRunEvidence
+  | EvidenceSummary
+  | PlainValidationSummary;
+
 // ── Evidence Signal ──────────────────────────────────────────────────
 
 export interface EvidenceSignal {
@@ -90,4 +100,6 @@ export interface FailureClassification {
   matchedSignals?: EvidenceSignal[];
   /** Secondary failure classes detected (if any) */
   secondaryClasses: FailureClass[];
+  /** True when more than one deterministic failure class matched */
+  isMixedFailure?: boolean;
 }

@@ -89,6 +89,8 @@ function expectClassificationSurface(
     expect(result.confidence).toEqual(expect.any(String));
   }
   expect(result.nextAction).toBe(expected.nextAction);
+  expect(result.suggestedNextAction).toBe(expected.nextAction);
+  expect(result.matchedSignals).toBe(result.signals);
 }
 
 // ── Timeout ──────────────────────────────────────────────────────────
@@ -358,6 +360,45 @@ describe('environment error classification', () => {
     expect(result.secondaryClasses).toContain(FailureClass.VerificationFailure);
   });
 
+  it('classifies environment errors stored only in nested gate verifications', () => {
+    let run = makeRun();
+    let step = makeStep();
+
+    step = {
+      ...step,
+      deterministicGates: [
+        {
+          gateName: 'manual-tooling',
+          passed: false,
+          verifications: [
+            failingVerification({
+              type: 'custom',
+              expected: 'tool output',
+              actual: '',
+              stderrExcerpt: 'manual-tool: command not found',
+            }),
+          ],
+          recordedAt: FIXED_NOW.toISOString(),
+        },
+      ],
+    };
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+    expect(result.failureClass).toBe(FailureClass.EnvironmentError);
+    expect(result.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'step:step-1/gate:manual-tooling/verification:custom',
+          strength: Confidence.Medium,
+        }),
+      ]),
+    );
+    expect(result.secondaryClasses).toContain(FailureClass.VerificationFailure);
+  });
+
   it('classifies permission denied in gate stderr', () => {
     let run = makeRun();
     let step = makeStep();
@@ -587,6 +628,22 @@ describe('unknown and mixed classification', () => {
     expect(result.summary).not.toContain('no failure detected');
   });
 
+  it('does not report no failure for inconsistent passed evidence with active steps', () => {
+    let run = makeRun();
+    let step = makeStep();
+    step = appendStepEvent(step, {
+      kind: 'status_change',
+      status: 'running',
+    });
+    run = addStepToRun(run, step);
+    run = { ...run, status: 'passed' };
+
+    const result = classifyFailure(run);
+    expect(result.failureClass).toBe(FailureClass.Unknown);
+    expect(result.summary).not.toContain('no failure detected');
+    expect(result.confidence).toBe(Confidence.Low);
+  });
+
   it('classifies summary-only passed run status with failed gate as verification_failure', () => {
     let run = makeRun();
     let step = makeStep();
@@ -665,6 +722,9 @@ describe('unknown and mixed classification', () => {
       nextAction: NextAction.InvestigateEnvironment,
     });
     expect(result.secondaryClasses).toEqual([FailureClass.VerificationFailure]);
+    expect(result.isMixedFailure).toBe(true);
+    expect(result.matchedSignals).toBe(result.signals);
+    expect(result.suggestedNextAction).toBe(NextAction.InvestigateEnvironment);
     expect(result.signals).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -708,6 +768,8 @@ describe('unknown and mixed classification', () => {
         strength: Confidence.Medium,
       }),
     ]);
+    expect(result.matchedSignals).toBe(result.signals);
+    expect(result.isMixedFailure).toBe(false);
   });
 
   it('does not classify summary-only failed run with skipped and pending steps as deadlock', () => {

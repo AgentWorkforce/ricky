@@ -16,6 +16,7 @@ import { summarizeEvidence } from '../evidence/capture.js';
 import {
   type FailureClassification,
   type EvidenceSignal,
+  type FailureClassifierInput,
   type PlainValidationSummary,
   FailureClass,
   Severity,
@@ -50,8 +51,6 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
 
 const RETRY_OVERFLOW_THRESHOLD = 5;
 
-type ClassifierInput = WorkflowRunEvidence | EvidenceSummary | PlainValidationSummary;
-
 // ── Public API ───────────────────────────────────────────────────────
 
 /**
@@ -63,7 +62,7 @@ type ClassifierInput = WorkflowRunEvidence | EvidenceSummary | PlainValidationSu
 export function classifyFailure(evidence: WorkflowRunEvidence): FailureClassification;
 export function classifyFailure(summary: EvidenceSummary): FailureClassification;
 export function classifyFailure(summary: PlainValidationSummary): FailureClassification;
-export function classifyFailure(input: ClassifierInput): FailureClassification {
+export function classifyFailure(input: FailureClassifierInput): FailureClassification {
   if (typeof input === 'string') {
     return classifyFromPlainSummary(input);
   }
@@ -548,8 +547,11 @@ function summaryForPlainText(text: string): EvidenceSummary {
 }
 
 function isPlainPass(text: string): boolean {
-  return /\b(pass(?:ed|ing)?|success(?:ful)?|all checks passed|no failure)\b/i.test(text) &&
-    !/\b(fail(?:ed|ure)?|error|timed?\s*out|timeout|deadlock|stuck)\b/i.test(text);
+  const reportsPass = /\b(pass(?:ed|ing)?|success(?:ful)?|all checks passed|no failures? detected|no failures?)\b/i.test(text);
+  if (!reportsPass) return false;
+
+  const withoutNegatedFailure = text.replace(/\bno failures?(?: detected)?\b/gi, '');
+  return !/\b(fail(?:ed|ure)?|error|timed?\s*out|timeout|deadlock|stuck)\b/i.test(withoutNegatedFailure);
 }
 
 function plainSignal(observation: string, strength: Confidence): EvidenceSignal {
@@ -565,6 +567,9 @@ function isCleanPass(summary: EvidenceSummary): boolean {
     summary.runStatus === 'passed' &&
     summary.failedSteps === 0 &&
     summary.timedOutSteps === 0 &&
+    summary.cancelledSteps === 0 &&
+    summary.pendingSteps === 0 &&
+    summary.runningSteps === 0 &&
     summary.allVerificationsPassed &&
     summary.allDeterministicGatesPassed
   );
@@ -577,6 +582,7 @@ function scanGatesForEnvErrors(
 ): boolean {
   let found = false;
   for (const gate of gates) {
+    let foundInGateOutput = false;
     const texts = [gate.stderrExcerpt, gate.stdoutExcerpt, gate.outputExcerpt].filter(Boolean) as string[];
     for (const text of texts) {
       if (matchesEnvironmentPattern(text)) {
@@ -586,7 +592,16 @@ function scanGatesForEnvErrors(
           strength: Confidence.High,
         });
         found = true;
+        foundInGateOutput = true;
       }
+    }
+
+    if (!foundInGateOutput) {
+      found = scanVerificationsForEnvErrors(
+        gate.verifications,
+        `${sourcePrefix}/gate:${gate.gateName}`,
+        signals,
+      ) || found;
     }
   }
   return found;
@@ -654,6 +669,7 @@ function buildClassification(
     signals,
     matchedSignals: signals,
     secondaryClasses: secondary,
+    isMixedFailure: secondary.length > 0,
   };
 }
 
@@ -669,6 +685,7 @@ function noFailure(summary: EvidenceSummary): FailureClassification {
     signals: [],
     matchedSignals: [],
     secondaryClasses: [],
+    isMixedFailure: false,
   };
 }
 
@@ -684,6 +701,7 @@ function stillRunning(summary: EvidenceSummary): FailureClassification {
     signals: [],
     matchedSignals: [],
     secondaryClasses: [],
+    isMixedFailure: false,
   };
 }
 
@@ -702,6 +720,7 @@ function unknownFailure(
     signals,
     matchedSignals: signals,
     secondaryClasses: [],
+    isMixedFailure: false,
   };
 }
 
