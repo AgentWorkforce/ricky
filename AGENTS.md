@@ -195,7 +195,7 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 - **Env loading:** Load `.env.local` and `.env` before `.run(...)` without overwriting exported values. Fail fast with `MISSING_ENV_VAR: <NAME>` before expensive agent steps.
 - **Scoped change detection:** After implementation steps, verify the repo changed in the expected scope using `git diff --name-only` plus `git ls-files --others --exclude-standard`, scoped to declared file targets. Do not use repo-wide `git diff --quiet` when unrelated work may be present.
 - **Signoff artifacts:** Serious implementation workflows must write a final signoff artifact under `.workflow-artifacts/`. Passing tests alone is not sufficient proof of completion.
-- **Workflow-level context reads:** High-value workflows must include deterministic runtime reads of standards and specs, such as `cat docs/workflows/WORKFLOW_STANDARDS.md`, instead of relying only on agent ambient context.
+- **Workflow-level context reads:** High-value workflows must include deterministic runtime reads of standards and specs instead of relying only on agent ambient context. Include `cat docs/workflows/WORKFLOW_STANDARDS.md`, `cat workflows/shared/WORKFLOW_AUTHORING_RULES.md`, the workflow-specific spec or program doc, and `cat workflows/meta/spec/generated-workflow-template.md` when generation is in scope.
 
 ## Repo Boundary For Convention Work
 
@@ -203,7 +203,7 @@ When the task is to update Ricky workflow standards, conventions, or authoring r
 
 For convention-only work, `CLAUDE.md` should remain a symlink to `AGENTS.md`. Update `AGENTS.md` as the shared source of truth and verify Claude-facing behavior through the symlink instead of forking separate Claude instructions.
 
-Convention-only workflows still need deterministic file-existence checks, grep or structural checks for the updated terms, symlink verification for `CLAUDE.md`, and scoped change detection limited to the declared convention files.
+Convention-only workflows still need deterministic file-existence checks, grep or structural checks for the updated terms, symlink verification for `CLAUDE.md`, and scoped change detection limited to the declared convention files. The scoped change-detection gate must include both `git diff --name-only -- <declared-files>` and `git ls-files --others --exclude-standard -- <declared-files>`.
 
 ## Runtime Shape
 

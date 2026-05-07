@@ -47,6 +47,7 @@ workflows/
 - For large programs, prefer meta-workflows over hand-writing dozens of inconsistent files.
 - Use wave folders to express staged system delivery, not arbitrary grouping.
 - Review artifacts for significant workflows must be written to disk under `.workflow-artifacts/`.
+- Serious implementation workflows must use the 80-to-100 validation ladder: soft gate, fix from captured output, hard gate, and post-fix re-review.
 
 For the full policy, see `docs/workflows/WORKFLOW_STANDARDS.md`.
 
@@ -144,6 +145,8 @@ Significant workflows must include:
 - a final signoff artifact under `.workflow-artifacts/` for serious workflows
 
 Meta-workflows should write artifacts under `.workflow-artifacts/<meta-slug>/`, including `plan.md`, `<workflow-id>-review.md`, `<workflow-id>-dryrun.txt`, and `signoff.md`.
+
+Use deterministic gate types in this order: `exit_code`, `file_exists`, deterministic `output_contains`, then `custom`. For generated workflows, include structural sanity checks and `agent-relay run --dry-run` output before sign-off.
 
 ## Commit and PR boundaries
 
