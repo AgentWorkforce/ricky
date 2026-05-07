@@ -40,19 +40,76 @@ workflows/
 
 ## Principles
 
-- Every serious workflow gets a dedicated `wf-ricky-*` channel.
-- Every workflow should have deterministic verification gates.
-- Generated workflows must be dry-run validated before sign-off.
+- Every workflow must use a dedicated `wf-ricky-*` channel. Never use `general`.
+- Every workflow must have deterministic verification gates after agent edits.
+- Generated workflows must pass `agent-relay run --dry-run` before sign-off.
 - For large programs, prefer meta-workflows over hand-writing dozens of inconsistent files.
 - Use wave folders to express staged system delivery, not arbitrary grouping.
+- Review artifacts for significant workflows must be written to disk under `.workflow-artifacts/`.
+
+For the full policy, see `docs/workflows/WORKFLOW_STANDARDS.md`.
+
+## Wave folders
+
+Wave folders use `workflows/wave<N>-<slug>/` and represent staged product or runtime milestones:
+
+- `wave0-foundation` covers repo scaffolding, standards, shared models, and first specs.
+- `wave1-runtime` covers execution substrate and local runner coordination.
+- `wave2-product` covers authoring, repair, debug, and orchestration specialists.
+- `wave3-cloud-api` covers hosted endpoints and coordination APIs.
+- `wave4-local-byoh` covers local invocation and local runtime integration.
+- `wave5-scale-and-ops` covers failure analysis, analytics, and mass-generation programs.
+
+Later waves keep the same convention: the folder name must describe the milestone, not the implementation team.
+
+## Workflow naming
+
+Workflow files use a numeric prefix plus an outcome-based slug:
+
+```text
+01-repo-standards.ts
+02-shared-models-and-config.ts
+10-local-run-coordinator.ts
+```
+
+Rules:
+- numeric prefixes increase monotonically within the wave folder
+- slugs describe the deliverable
+- shared helpers stay under `workflows/shared/`
+- generated specs and templates stay under `workflows/meta/spec/`
+
+## Channel naming
+
+Workflow channels use:
+
+```text
+wf-ricky-<wave>-<short-slug>
+```
+
+Examples:
+- `wf-ricky-wave0-standards`
+- `wf-ricky-wave3-generate-run-api`
+- `wf-ricky-meta-mass-generation`
 
 ## Source of truth
 
 When authoring workflows, read in this order:
 1. `docs/workflows/WORKFLOW_STANDARDS.md`
-2. `workflows/shared/WORKFLOW_AUTHORING_RULES.md`
+2. repo-level `AGENTS.md` and Claude rules
 3. workflow-specific specs in `workflows/meta/spec/` or other local docs
-4. repo-level `AGENTS.md` and Claude rules
+4. `workflows/shared/WORKFLOW_AUTHORING_RULES.md`
+
+## Review and validation
+
+Significant workflows must include:
+
+- a planning step before implementation
+- a review step after implementation, using a reviewer distinct from the writer when possible
+- materialized review output under `.workflow-artifacts/`
+- a soft validation gate that captures failures without stopping the fix loop
+- a fix step that reads the captured validation output
+- a final hard validation gate with `failOnError: true`
+- a scoped change-detection gate for expected file targets
 
 ## Next expected artifacts
 

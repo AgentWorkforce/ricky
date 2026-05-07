@@ -38,3 +38,32 @@ Compact execution rules for agents writing Ricky workflows.
 6. Fix.
 7. Re-run deterministic gates.
 8. Final sign-off.
+
+## 80-to-100 Validation Ladder
+
+Use this ladder for serious implementation workflows:
+
+1. Read context, specs, and standards deterministically.
+2. Plan with explicit deliverables, file targets, non-goals, verification, and commit boundary.
+3. Implement within the declared scope.
+4. Verify files exist and expected scoped changes are present.
+5. Run the first validation gate with `failOnError: false` and capture output.
+6. Fix failures from the captured output.
+7. Re-run the same validation as a hard gate with `failOnError: true`.
+8. Run regression, build, typecheck, dry-run, or local smoke gates appropriate to the workflow.
+9. Materialize review and signoff artifacts under `.workflow-artifacts/` for significant workflows.
+10. Sign off only after the final deterministic gates pass.
+
+## Scoped Change-Detection Gate
+
+After implementation steps that create or edit files, verify the repo actually changed in the expected scope:
+
+```bash
+changed="$(git diff --name-only -- <file-targets>; git ls-files --others --exclude-standard -- <file-targets>)"
+if [ -z "$changed" ]; then
+  echo "NO_CHANGES_DETECTED" && exit 1
+fi
+echo "CHANGES_PRESENT"
+```
+
+Scope the check to the workflow's declared file targets. Do not use a repo-wide `git diff --quiet` when unrelated work may be present.

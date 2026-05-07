@@ -169,3 +169,47 @@ Your trajectory helps others understand:
 
 Future agents can query past trajectories to learn from your decisions.
 <!-- prpm:snippet:end @agent-workforce/trail-snippet@1.1.2 -->
+
+# Ricky Workflow Conventions
+
+Every agent working in this repo must follow these rules when authoring, reviewing, or modifying Ricky workflows.
+
+## Before Writing Any Workflow
+
+1. Read `docs/workflows/WORKFLOW_STANDARDS.md`.
+2. Read `workflows/shared/WORKFLOW_AUTHORING_RULES.md`.
+3. Read the workflow-specific spec or program doc when one exists, including files under `workflows/meta/spec/`.
+
+## Mandatory Conventions
+
+- **Wave placement:** Place each workflow in the correct `workflows/wave<N>-<slug>/` folder. Top-level workflow files are reserved for explicitly shared or meta assets.
+- **Numeric prefix:** Use monotonically increasing numeric prefixes (`01-`, `02-`, ...) within each wave folder.
+- **Dedicated channel:** Every workflow must use a `wf-ricky-*` channel. Never use `general`.
+- **Deterministic gates:** After any agent step that edits files, add a deterministic verification gate such as `file_exists`, `exit_code`, grep checks, dry-run checks, or scoped `git diff` change detection.
+- **Review stage:** Every significant workflow must include review by an agent distinct from the writer when possible. Review artifacts for significant workflows must be written under `.workflow-artifacts/`.
+- **80-to-100 validation:** Serious implementation workflows must use a soft-gate, fix, hard-gate loop. Passing compile or typecheck alone is not enough.
+- **Commit boundaries:** Do not run `git commit` or `git push` from agent steps unless the workflow explicitly owns that boundary and documents the expected files.
+- **Env loading:** Load `.env.local` and `.env` before `.run(...)` without overwriting exported values. Fail fast with `MISSING_ENV_VAR: <NAME>` before expensive agent steps.
+
+## Wave Structure
+
+Use wave folders to express staged delivery:
+
+- `wave0-foundation` for repo scaffolding, standards, shared models, and first specs.
+- `wave1-runtime` for execution substrate and local runner coordination.
+- `wave2-product` for authoring, repair, debug, and orchestration specialists.
+- `wave3-cloud-api` for hosted endpoints and coordination APIs.
+- `wave4-local-byoh` for local invocation and local runtime integration.
+- `wave5-scale-and-ops` for failure analysis, analytics, and mass-generation programs.
+
+Later wave folders keep the same rule: a wave must represent a meaningful product or runtime milestone, not arbitrary grouping.
+
+## Source Of Truth
+
+When sources conflict, use this order unless a lower source would violate a higher-level safety or runtime rule:
+
+1. `docs/workflows/WORKFLOW_STANDARDS.md`
+2. `AGENTS.md` and Claude rules
+3. Workflow-specific spec or program doc
+4. Shared workflow-writing skills and `workflows/shared/WORKFLOW_AUTHORING_RULES.md`
+5. Local code reality
