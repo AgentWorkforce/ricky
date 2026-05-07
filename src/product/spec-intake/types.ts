@@ -38,6 +38,7 @@ export interface IntentSignal {
 
 export interface ProviderContext {
   surface: InputSurface;
+  surfaceLabel?: string;
   toolName?: string;
   provider?: string;
   channel?: string;

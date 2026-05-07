@@ -43,14 +43,17 @@ export function normalizeSpec(parsed: ParsedSpec): { normalized: NormalizedWorkf
 function resolveIntent(parsed: ParsedSpec): IntentKind {
   if (parsed.intent.primary === 'unknown') return parsed.description.trim() ? 'clarify' : 'unknown';
 
-  const hasFailureEvidence =
-    parsed.evidenceRequirements.length > 0 ||
-    parsed.targetFiles.some((file) => /(?:log|evidence|run|failed|failure)/i.test(file)) ||
-    /\b(?:failed|failure|error|stack trace|run id)\b/i.test(parsed.description);
+  const hasFailureEvidence = hasFailedRunEvidence(parsed);
 
-  if (hasFailureEvidence && parsed.intent.primary === 'generate' && parsed.intent.secondary === 'debug') {
-    return 'debug';
+  if (hasFailureEvidence) return 'debug';
+
+  if (spansAgents(parsed) && parsed.intent.primary !== 'generate') return 'coordinate';
+
+  if (hasReadyArtifact(parsed) && (parsed.intent.primary === 'clarify' || parsed.intent.primary === 'execute')) {
+    return 'execute';
   }
+
+  if (spansAgents(parsed) && parsed.intent.primary === 'generate' && parsed.intent.secondary === 'coordinate') return 'coordinate';
 
   return parsed.intent.primary;
 }
@@ -89,7 +92,10 @@ function normalizeAcceptanceGates(raw: string[]): NormalizedAcceptanceGate[] {
 }
 
 function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
-  const text = [parsed.description, parsed.targetContext, ...parsed.constraints].filter(Boolean).join('\n').toLowerCase();
+  const text = [parsed.description, parsed.targetContext, parsed.providerContext.metadata.mode, ...parsed.constraints]
+    .filter((value): value is string => typeof value === 'string')
+    .join('\n')
+    .toLowerCase();
   if (/\b(local|byoh|on this machine)\b/.test(text)) return 'local';
   if (/\b(cloud|hosted|remote)\b/.test(text) || parsed.surface === 'api' || parsed.surface === 'web') return 'cloud';
   return 'auto';
@@ -163,7 +169,7 @@ function classifyAcceptanceGate(gate: string): NormalizedAcceptanceGate['kind'] 
 
 function findWorkflowFileHint(parsed: ParsedSpec): string | undefined {
   return parsed.targetFiles.find((file) =>
-    /(?:^|\/)workflows\/.+\.(?:ts|js)$|\.workflow\.(?:ts|js|yaml|yml)$/i.test(file),
+    /(?:^|\/)workflows\/.+\.(?:ts|js|yaml|yml)$|\.workflow\.(?:ts|js|yaml|yml)$/i.test(file),
   );
 }
 
@@ -171,4 +177,35 @@ function summarizeAction(description: string, intent: IntentKind): string {
   const trimmed = description.trim().replace(/\s+/g, ' ');
   if (trimmed.length > 0) return trimmed.length > 180 ? `${trimmed.slice(0, 177)}...` : trimmed;
   return `No description supplied for ${intent} request.`;
+}
+
+function hasFailedRunEvidence(parsed: ParsedSpec): boolean {
+  const text = [
+    parsed.description,
+    parsed.targetContext,
+    ...parsed.targetFiles,
+    ...parsed.evidenceRequirements,
+    ...parsed.acceptanceGates,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return /\b(?:failed|failure|failing|error|stack trace|traceback|run id|run-|timed out|timeout|verification failed|exit code [1-9])\b/i.test(
+    text,
+  );
+}
+
+function spansAgents(parsed: ParsedSpec): boolean {
+  const text = [parsed.description, parsed.targetContext, ...parsed.constraints, ...parsed.acceptanceGates]
+    .filter(Boolean)
+    .join('\n');
+
+  return /\b(?:multi-agent|multiple agents|agents? across|worker agents?|lead agent|agent handoff|handoff between agents|parallel agents?|swarm|orchestrate agents?|coordinate agents?)\b/i.test(
+    text,
+  );
+}
+
+function hasReadyArtifact(parsed: ParsedSpec): boolean {
+  const text = [parsed.description, ...parsed.targetFiles].filter(Boolean).join('\n');
+  return /\b(?:ready artifact|ready workflow|workflow artifact|artifact path)\b/i.test(text) && Boolean(findWorkflowFileHint(parsed));
 }

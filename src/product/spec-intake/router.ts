@@ -75,7 +75,7 @@ function routeExecute(normalized: NormalizedWorkflowSpec): RoutingDecision {
     return decision(
       'clarify',
       'medium',
-      'Execution requires a recognized workflow artifact (workflows/**/*.ts or *.workflow.ts).',
+      'Execution requires a recognized workflow artifact (workflows/**/*.{ts,js,yaml,yml} or *.workflow.{ts,js,yaml,yml}).',
       normalized,
       'Provide the workflow artifact path (e.g., workflows/my-workflow.ts or my.workflow.ts) to execute.',
     );

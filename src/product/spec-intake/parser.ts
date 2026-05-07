@@ -32,6 +32,8 @@ const INTENT_KEYWORDS: Record<Exclude<IntentKind, 'clarify' | 'unknown'>, string
     'build',
     'author',
     'new workflow',
+    'new ricky workflow',
+    'build a workflow',
     'from spec',
     'workflow spec',
     'scaffold',
@@ -48,6 +50,12 @@ const INTENT_KEYWORDS: Record<Exclude<IntentKind, 'clarify' | 'unknown'>, string
     'investigate',
     'stack trace',
     'run id',
+    'failed run',
+    'failed-run',
+    'timed out',
+    'timeout',
+    'verification failed',
+    'exit code',
   ],
   coordinate: [
     'coordinate',
@@ -57,10 +65,35 @@ const INTENT_KEYWORDS: Record<Exclude<IntentKind, 'clarify' | 'unknown'>, string
     'manage',
     'parallel',
     'agents',
-    'handoff',
+    'multi-agent',
+    'multiple agents',
+    'workers',
+    'lead agent',
+    'agent handoff',
+    'handoff between agents',
     'swarm',
   ],
-  execute: ['run', 'execute', 'launch', 'start', 'kick off', 'rerun', 'restart', 'ready artifact'],
+  execute: [
+    'run',
+    'execute',
+    'launch',
+    'start',
+    'kick off',
+    'rerun',
+    'restart',
+    'ready artifact',
+    'ready workflow',
+    'workflow artifact',
+  ],
+};
+
+const SURFACE_LABELS: Record<InputSurface, string> = {
+  claude_handoff: 'Claude handoff',
+  cli: 'CLI',
+  mcp: 'MCP',
+  slack: 'Slack',
+  web: 'web',
+  api: 'API',
 };
 
 const MCP_TOOL_INTENTS: Record<string, IntentKind> = {
@@ -162,7 +195,27 @@ function detectIntentFromRecord(data: Record<string, unknown>, fallbackText: str
     }
   }
 
-  return detectIntent([fallbackText, stringifySelected(data, ['spec', 'prompt', 'description', 'evidence'])].join('\n'));
+  return detectIntent(
+    [
+      fallbackText,
+      stringifySelected(data, [
+        'spec',
+        'workflowSpec',
+        'workflow_spec',
+        'prompt',
+        'description',
+        'goal',
+        'objective',
+        'evidence',
+        'requiredEvidence',
+        'readyArtifact',
+        'ready_artifact',
+        'artifact',
+        'runId',
+        'failedRunId',
+      ]),
+    ].join('\n'),
+  );
 }
 
 export function detectIntent(text: string): IntentSignal {
@@ -179,6 +232,36 @@ export function detectIntent(text: string): IntentSignal {
     return { primary: text.trim() ? 'clarify' : 'unknown', signals: [] };
   }
 
+  const failedRunSignals = matches.find((match) => match.intent === 'debug')?.signals ?? [];
+  if (failedRunSignals.some((signal) => /failed|failure|stack trace|run id|timed out|timeout|exit code/i.test(signal))) {
+    // Don't let debug override when the user explicitly wants to generate/create/build a workflow.
+    // Failure vocabulary in a generate request describes the workflow's subject matter, not an actual failure.
+    const generateSignals = matches.find((match) => match.intent === 'generate')?.signals ?? [];
+    const explicitGenerate = generateSignals.some((signal) =>
+      /generate|create|write|build|author|new workflow|new ricky workflow|build a workflow|from spec|workflow spec|scaffold/i.test(signal),
+    );
+    if (!explicitGenerate) {
+      return {
+        primary: 'debug',
+        secondary: matches.find((match) => match.intent !== 'debug')?.intent,
+        signals: failedRunSignals,
+      };
+    }
+  }
+
+  const coordinationSignals = matches.find((match) => match.intent === 'coordinate')?.signals ?? [];
+  if (coordinationSignals.some((signal) => /agents?|workers|handoff|swarm|parallel|orchestrate|coordinate/i.test(signal))) {
+    const generateSignals = matches.find((match) => match.intent === 'generate')?.signals ?? [];
+    const explicitNewWorkflow = generateSignals.some((signal) => /new workflow|build a workflow|workflow spec|scaffold/i.test(signal));
+    if (!explicitNewWorkflow) {
+      return {
+        primary: 'coordinate',
+        secondary: matches.find((match) => match.intent !== 'coordinate')?.intent,
+        signals: coordinationSignals,
+      };
+    }
+  }
+
   const [first, second] = matches;
   return {
     primary: first.intent,
@@ -192,7 +275,14 @@ function normalizeIntent(value: string): IntentKind {
   if (normalized.includes('debug') || normalized.includes('fix') || normalized.includes('failure')) return 'debug';
   if (normalized.includes('coordinate') || normalized.includes('orchestrate')) return 'coordinate';
   if (normalized.includes('execute') || normalized.includes('run') || normalized.includes('start')) return 'execute';
-  if (normalized.includes('generate') || normalized.includes('create') || normalized.includes('author')) return 'generate';
+  if (
+    normalized.includes('generate') ||
+    normalized.includes('create') ||
+    normalized.includes('author') ||
+    normalized.includes('new_workflow')
+  ) {
+    return 'generate';
+  }
   if (normalized.includes('clarify')) return 'clarify';
   return 'unknown';
 }
@@ -221,7 +311,7 @@ function extractFieldsFromRecord(
   payload: RawSpecPayload,
   providerContext: ProviderContext,
 ): ExtractedFields {
-  const requestRecord = readRecord(data, ['request', 'body']) ?? data;
+  const requestRecord = readRecord(data, ['request', 'body', 'payload', 'input', 'message', 'event']) ?? data;
   const specRecord =
     readRecord(requestRecord, ['spec', 'workflowSpec', 'workflow_spec', 'body']) ??
     readRecord(data, ['spec', 'workflowSpec', 'workflow_spec']) ??
@@ -243,21 +333,77 @@ function extractFieldsFromRecord(
       'artifact',
       'artifacts',
       'artifactPath',
+      'artifact_path',
       'readyArtifact',
+      'ready_artifact',
+      'path',
+    ]),
+    ...readStringArray(data, [
+      'targetFiles',
+      'target_files',
+      'files',
+      'paths',
+      'workflowFile',
+      'workflowPath',
+      'artifact',
+      'artifacts',
+      'artifactPath',
+      'artifact_path',
+      'readyArtifact',
+      'ready_artifact',
+      'path',
     ]),
     ...extractTargetFiles(description),
   ];
   const constraints = [
-    ...readStringArray(specRecord, ['constraints', 'requirements', 'nonGoals', 'non_goals']),
+    ...readStringArray(specRecord, ['constraints', 'requirements', 'requirementsList', 'nonGoals', 'non_goals']),
+    ...readStringArray(data, ['constraints', 'requirements', 'requirementsList', 'nonGoals', 'non_goals']),
     ...extractConstraints(description),
   ];
   const evidenceRequirements = [
-    ...readStringArray(specRecord, ['evidenceRequirements', 'requiredEvidence', 'evidence', 'verificationCommands']),
+    ...readStringArray(specRecord, [
+      'evidenceRequirements',
+      'requiredEvidence',
+      'required_evidence',
+      'evidence',
+      'logs',
+      'verificationCommands',
+      'verification_commands',
+    ]),
+    ...readStringArray(data, [
+      'evidenceRequirements',
+      'requiredEvidence',
+      'required_evidence',
+      'evidence',
+      'logs',
+      'verificationCommands',
+      'verification_commands',
+    ]),
     ...runEvidenceRequirement(specRecord),
+    ...runEvidenceRequirement(data),
     ...extractEvidenceRequirements(freeText),
   ];
   const acceptanceGates = [
-    ...readStringArray(specRecord, ['acceptanceGates', 'acceptanceCriteria', 'acceptance', 'gates']),
+    ...readStringArray(specRecord, [
+      'acceptanceGates',
+      'acceptance_gates',
+      'acceptanceCriteria',
+      'acceptance_criteria',
+      'acceptance',
+      'gates',
+      'doneWhen',
+      'done_when',
+    ]),
+    ...readStringArray(data, [
+      'acceptanceGates',
+      'acceptance_gates',
+      'acceptanceCriteria',
+      'acceptance_criteria',
+      'acceptance',
+      'gates',
+      'doneWhen',
+      'done_when',
+    ]),
     ...extractAcceptanceGates(freeText),
   ];
 
@@ -266,7 +412,10 @@ function extractFieldsFromRecord(
     warnings.push('Structured payload did not include a recognizable description, prompt, spec, text, or request field.');
   }
 
-  const targetRepo = readString(specRecord, ['targetRepo', 'target_repo', 'repo', 'repository']) ?? extractTargetRepo(freeText);
+  const targetRepo =
+    readString(specRecord, ['targetRepo', 'target_repo', 'repo', 'repository']) ??
+    readString(data, ['targetRepo', 'target_repo', 'repo', 'repository']) ??
+    extractTargetRepo(freeText);
 
   return {
     description,
@@ -281,6 +430,18 @@ function extractFieldsFromRecord(
         'runId',
         'failedRunId',
         'workflowId',
+        'workflowName',
+      ]) ??
+      readString(data, [
+        'targetContext',
+        'target_context',
+        'context',
+        'workspace',
+        'project',
+        'runId',
+        'failedRunId',
+        'workflowId',
+        'workflowName',
       ]) ??
       extractTargetContext(freeText),
     targetFiles: excludeRepoSlug(dedupe(targetFiles), targetRepo),
@@ -341,14 +502,43 @@ export function extractAcceptanceGates(text: string): string[] {
 
 function buildProviderContext(payload: RawSpecPayload): ProviderContext {
   const record = payload.kind === 'structured_json' ? payload.data : payload.kind === 'mcp' ? payload.arguments : {};
+  const nested =
+    readRecord(record, ['request', 'body', 'payload', 'input', 'message', 'event']) ??
+    readRecord(record, ['spec', 'workflowSpec', 'workflow_spec']) ??
+    {};
   return {
     surface: payload.surface,
+    surfaceLabel: SURFACE_LABELS[payload.surface],
     toolName: payload.kind === 'mcp' ? payload.toolName : undefined,
-    provider: readString(record, ['provider', 'providerName', 'modelProvider']) ?? stringMetadata(payload, 'provider'),
-    channel: readString(record, ['channel', 'channelId']) ?? stringMetadata(payload, 'channel'),
-    threadId: readString(record, ['threadId', 'thread_ts', 'messageId']) ?? stringMetadata(payload, 'threadId'),
-    userId: readString(record, ['userId', 'user', 'actor']) ?? stringMetadata(payload, 'userId'),
-    workspaceId: readString(record, ['workspaceId', 'workspace']) ?? stringMetadata(payload, 'workspaceId'),
+    provider:
+      readString(record, ['provider', 'providerName', 'modelProvider', 'provider_name', 'model_provider']) ??
+      readString(nested, ['provider', 'providerName', 'modelProvider', 'provider_name', 'model_provider']) ??
+      stringMetadata(payload, 'provider'),
+    channel:
+      readString(record, ['channel', 'channelId', 'channel_id']) ??
+      readString(nested, ['channel', 'channelId', 'channel_id']) ??
+      stringMetadata(payload, 'channel') ??
+      stringMetadata(payload, 'channelId') ??
+      stringMetadata(payload, 'channel_id'),
+    threadId:
+      readString(record, ['threadId', 'thread_ts', 'threadTs', 'messageId', 'message_ts']) ??
+      readString(nested, ['threadId', 'thread_ts', 'threadTs', 'messageId', 'message_ts']) ??
+      stringMetadata(payload, 'threadId') ??
+      stringMetadata(payload, 'thread_ts') ??
+      stringMetadata(payload, 'messageId'),
+    userId:
+      readString(record, ['userId', 'user_id', 'user', 'actor', 'actorId', 'actor_id']) ??
+      readString(nested, ['userId', 'user_id', 'user', 'actor', 'actorId', 'actor_id']) ??
+      stringMetadata(payload, 'userId') ??
+      stringMetadata(payload, 'user_id') ??
+      stringMetadata(payload, 'actor'),
+    workspaceId:
+      readString(record, ['workspaceId', 'workspace_id', 'workspace', 'teamId', 'team_id']) ??
+      readString(nested, ['workspaceId', 'workspace_id', 'workspace', 'teamId', 'team_id']) ??
+      stringMetadata(payload, 'workspaceId') ??
+      stringMetadata(payload, 'workspace_id') ??
+      stringMetadata(payload, 'teamId') ??
+      stringMetadata(payload, 'team_id'),
     requestId: payload.requestId,
     metadata: payload.metadata ?? {},
   };
@@ -429,13 +619,37 @@ function readStringArray(data: Record<string, unknown>, keys: string[]): string[
           typeof item === 'string'
             ? item
             : isRecord(item)
-              ? readString(item, ['path', 'file', 'workflowFile', 'artifactPath', 'description', 'name'])
+              ? readString(item, [
+                  'path',
+                  'file',
+                  'workflowFile',
+                  'workflowPath',
+                  'artifactPath',
+                  'artifact_path',
+                  'command',
+                  'expected',
+                  'description',
+                  'summary',
+                  'name',
+                ])
               : undefined,
         )
         .filter((item): item is string => Boolean(item));
     }
     if (isRecord(value)) {
-      const nested = readString(value, ['path', 'file', 'workflowFile', 'artifactPath', 'description', 'name']);
+      const nested = readString(value, [
+        'path',
+        'file',
+        'workflowFile',
+        'workflowPath',
+        'artifactPath',
+        'artifact_path',
+        'command',
+        'expected',
+        'description',
+        'summary',
+        'name',
+      ]);
       if (nested) return [nested];
     }
     if (typeof value === 'string' && value.trim()) return [value.trim()];

@@ -34,6 +34,8 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.normalizedSpec.desiredAction.specText).toContain('create a new workflow spec');
     expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBeUndefined();
     expect(result.routing?.normalizedSpec.targetFiles).toEqual([]);
+    expect(result.routing?.normalizedSpec.providerContext.surface).toBe('claude_handoff');
+    expect(result.routing?.normalizedSpec.sourceSpec.rawPayload.kind).toBe('natural_language');
   });
 
   it('normalizes CLI natural-language constraints and acceptance gates', () => {
@@ -69,6 +71,7 @@ describe('spec intake parser, normalizer, and router', () => {
         expect.objectContaining({ gate: 'deterministic routing proof is recorded.', kind: 'deterministic' }),
       ]),
     );
+    expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBeUndefined();
   });
 
   it('preserves MCP-style structured payload source and provider context', () => {
@@ -112,6 +115,8 @@ describe('spec intake parser, normalizer, and router', () => {
       metadata: { origin: 'relaycast' },
     });
     expect(normalized?.sourceSpec.rawPayload).toBe(payload);
+    expect(normalized?.sourceSpec.surface).toBe('mcp');
+    expect(normalized?.sourceSpec.providerContext.requestId).toBe('mcp-request');
     expect(normalized?.targetContext).toBe('product spec intake');
   });
 
