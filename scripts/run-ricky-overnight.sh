@@ -473,8 +473,7 @@ append_repo_workflows_to_queue() {
     [[ -n "$workflow_path" ]] || continue
     printf '%s\n' "$workflow_path" >> "$QUEUE_FILE"
   done < <(find workflows -mindepth 2 -maxdepth 2 -type f -name '*.ts' \
-    ! -path 'workflows/generated/*' \
-    ! -path 'workflows/meta/*' | sort)
+    -path 'workflows/wave*/*' | sort)
 }
 
 write_queue() {
