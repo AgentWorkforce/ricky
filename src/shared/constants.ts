@@ -17,7 +17,7 @@ export const DEFAULT_MAX_CONCURRENCY = 4;
 // exceed the longest sequential path of per-step budgets below so that the
 // outer process killer never fires before per-step timeouts can do their job.
 // Per-step timeouts are the meaningful constraint; this is a safety net.
-export const DEFAULT_RUN_TIMEOUT_MS = 2_700_000; // 45 min
+export const DEFAULT_RUN_TIMEOUT_MS = 14_400_000; // 4 h
 
 export const DEFAULT_TIMEOUT_MS = DEFAULT_RUN_TIMEOUT_MS;
 
