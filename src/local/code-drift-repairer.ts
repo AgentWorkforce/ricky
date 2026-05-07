@@ -55,6 +55,14 @@ export interface DriftReport {
   expected?: Record<string, unknown>;
   actual?: Record<string, unknown>;
   sources?: Record<string, string>;
+  /**
+   * Per-report opt-out for auto-fix. Auto-fix is ON by default — when a
+   * workflow emits a drift report with `"autofix": false`, ricky records
+   * the drift but does NOT dispatch a code-fix agent. Useful for
+   * monitoring/audit workflows that want findings surfaced for human
+   * triage rather than automated source edits.
+   */
+  autofix: boolean;
   /** Full parsed JSON for the agent prompt. */
   raw: Record<string, unknown>;
 }
@@ -301,10 +309,17 @@ export async function discoverDriftReports(
       if (!isDriftReportShape(parsed)) continue;
 
       const parsedRecord = parsed as unknown as Record<string, unknown>;
+      // Auto-fix is ON by default. The workflow can opt out by emitting
+      // `"autofix": false` in the drift report. Any value other than the
+      // exact boolean `false` is treated as "use the default" (ON), which
+      // matches "fail-safe to the most useful behavior" — a workflow that
+      // accidentally emits e.g. autofix:"no" still gets repaired.
+      const autofixOptOut = parsedRecord.autofix === false;
       const report: DriftReport = {
         filePath,
         verdict: parsed.verdict,
         findings: Array.isArray(parsed.findings) ? (parsed.findings as DriftFinding[]) : [],
+        autofix: !autofixOptOut,
         raw: parsedRecord,
       };
       const slugValue = parsedRecord.slug;
@@ -325,7 +340,9 @@ export async function discoverDriftReports(
       }
 
       const actionable = actionableFindings(report.findings);
-      if (report.verdict === 'DRIFT' && actionable.length > 0) {
+      // Skip reports the workflow opted out of, but only after parsing them
+      // so that future telemetry/observability can still see the opt-out.
+      if (report.verdict === 'DRIFT' && actionable.length > 0 && report.autofix) {
         reports.push(report);
       }
     } catch {
