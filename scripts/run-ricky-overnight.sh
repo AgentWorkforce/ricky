@@ -1166,14 +1166,19 @@ resume_remaining_queue_from_checkpoint() {
 
   local start_line="$((restored_index + 1))"
   local resumed_queue="$ARTIFACT_DIR/queue.resumed.tmp"
+  local merged_queue="$ARTIFACT_DIR/queue.merged.tmp"
+  local current_queue_snapshot="$ARTIFACT_DIR/queue.current.tmp"
+  cp "$QUEUE_FILE" "$current_queue_snapshot"
   tail -n +"$start_line" "$RESTORED_QUEUE_FILE" > "$resumed_queue"
-  mv "$resumed_queue" "$QUEUE_FILE"
+  cat "$resumed_queue" "$current_queue_snapshot" | awk 'NF && !seen[$0]++' > "$merged_queue"
+  mv "$merged_queue" "$QUEUE_FILE"
+  rm -f "$resumed_queue" "$current_queue_snapshot"
   filter_queue_for_repo_state
 
   CURRENT_PASS="${RESTORED_CURRENT_PASS:-1}"
   CURRENT_INDEX=0
 
-  log "resumed remaining queue from prior artifact: $RESTORED_QUEUE_FILE (starting at saved index $restored_index)"
+  log "resumed remaining queue from prior artifact and merged with freshly prepared queue: $RESTORED_QUEUE_FILE (starting at saved index $restored_index)"
 }
 
 write_summary() {
