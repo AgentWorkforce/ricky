@@ -1,4 +1,5 @@
 import type { ClarificationQuestion, ExecutionPreference, NormalizedWorkflowSpec } from '../spec-intake/types.js';
+import type { MasterExecutionPlan } from '../orchestration/index.js';
 import type { SwarmPattern } from '../../shared/models/workflow-config.js';
 import type { VerificationType } from '../../shared/models/workflow-evidence.js';
 
@@ -235,6 +236,7 @@ export interface WorkflowExecutionRoute {
 export interface GenerationResult {
   success: boolean;
   artifact: RenderedArtifact | null;
+  masterExecutionPlan?: MasterExecutionPlan;
   clarificationQuestions?: ClarificationQuestion[];
   patternDecision: PatternDecision;
   skillContext: SkillContext;

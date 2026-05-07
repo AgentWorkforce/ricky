@@ -86,6 +86,7 @@ export interface LocalGenerationStageResult {
   decisions?: {
     skill_matches?: unknown;
     tool_selection?: unknown;
+    master_execution?: unknown;
     refinement?: unknown;
     workforce_persona?: unknown;
     clarification_questions?: ClarificationQuestion[];
@@ -1026,6 +1027,12 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
         logs.push(`[local] workflow generation: ${generationResult.success ? 'passed' : 'failed'}`);
         logs.push(`[local] selected pattern: ${generationResult.patternDecision.pattern}`);
+        if (generationResult.masterExecutionPlan) {
+          logs.push(
+            `[local] master plan: ${generationResult.masterExecutionPlan.children.length} child workflows across ` +
+              `${new Set(generationResult.masterExecutionPlan.children.map((child) => child.wave)).size} waves`,
+          );
+        }
         if (generationResult.workforcePersona) {
           logs.push(`[local] workforce persona writer: ${generationResult.workforcePersona.personaId}@${generationResult.workforcePersona.tier}`);
         }
@@ -1576,6 +1583,22 @@ function createGenerationStage(
           decisions: {
             skill_matches: generationResult.skillContext.matches,
             tool_selection: generationResult.toolSelection.selections,
+            ...(generationResult.masterExecutionPlan
+              ? {
+                  master_execution: {
+                    child_count: generationResult.masterExecutionPlan.children.length,
+                    wave_count: new Set(generationResult.masterExecutionPlan.children.map((child) => child.wave)).size,
+                    children: generationResult.masterExecutionPlan.children.map((child) => ({
+                      id: child.id,
+                      title: child.title,
+                      workflow_file: child.workflowFilePath,
+                      wave: child.wave,
+                      parallelizable: child.parallelizable,
+                      depends_on: child.dependsOn,
+                    })),
+                  },
+                }
+              : {}),
             ...(generationResult.refinement ? { refinement: generationResult.refinement } : {}),
             ...(generationResult.workforcePersona ? { workforce_persona: generationResult.workforcePersona } : {}),
             ...((generationResult.clarificationQuestions?.length ?? 0) > 0 ? { clarification_questions: generationResult.clarificationQuestions } : {}),

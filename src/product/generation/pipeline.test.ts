@@ -17,6 +17,72 @@ interface SpecFixtureOverrides {
 }
 
 describe('workflow generation pipeline', () => {
+  it('routes broad implementation specs through a master workflow without changing the CLI artifact contract', () => {
+    const result = generate({
+      spec: spec({
+        description:
+          'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['npm test'],
+      }),
+      artifactPath: 'workflows/generated/runtime-master.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.masterExecutionPlan).toBeDefined();
+    expect(result.masterExecutionPlan?.children.map((child) => child.id)).toEqual([
+      'nested-runner',
+      'runtime-policy',
+      'telemetry',
+      'evals',
+      'insights',
+    ]);
+    expect(result.executionRoute).toMatchObject({
+      artifactDelivery: 'write_local_file',
+      runnerCommand: 'npx agent-relay run --dry-run workflows/generated/runtime-master.ts',
+    });
+
+    const rendered = artifact(result);
+    expect(rendered.artifactPath).toBe('workflows/generated/runtime-master.ts');
+    expect(rendered.content).toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+    expect(rendered.content).toContain('Master plan: 5 child workflows');
+    expect(rendered.content).toContain('ricky run \'workflows/generated/runtime-master-children/01-nested-runner.ts\' --foreground --no-auto-fix');
+    expect(rendered.content).toContain('MASTER_EXECUTOR_RESULT_READY');
+    expect(rendered.content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
+    expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
+  });
+
+  it('uses a master workflow for broad target-file specs and leaves narrow specs on the existing renderer', () => {
+    const broad = generate({
+      spec: spec({
+        description: 'Implement a broad runtime update with deterministic validation.',
+        targetFiles: [
+          'src/runtime/nested-runner.ts',
+          'src/runtime/policy.ts',
+          'src/runtime/telemetry.ts',
+          'src/product/evals.ts',
+        ],
+      }),
+      artifactPath: 'workflows/generated/broad-runtime.ts',
+    });
+    const narrow = generate({
+      spec: spec({
+        description: 'Implement one focused runtime policy update.',
+        targetFiles: ['src/runtime/policy.ts'],
+      }),
+      artifactPath: 'workflows/generated/narrow-runtime.ts',
+    });
+
+    expect(broad.masterExecutionPlan?.children.map((child) => child.workflowFilePath)).toEqual([
+      'workflows/generated/broad-runtime-children/01-update-nested-runner.ts',
+      'workflows/generated/broad-runtime-children/02-update-policy.ts',
+      'workflows/generated/broad-runtime-children/03-update-telemetry.ts',
+      'workflows/generated/broad-runtime-children/04-update-evals.ts',
+    ]);
+    expect(narrow.masterExecutionPlan).toBeUndefined();
+    expect(artifact(narrow).content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+  });
+
   it('turns a code-writing spec into an implementation team workflow with 80-to-100 validation', () => {
     const result = generate({
       spec: spec({

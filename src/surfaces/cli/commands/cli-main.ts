@@ -1861,10 +1861,12 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     if (localResult.execution?.status === 'success') {
       lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
       if (workflowName) lines.push(`Workflow name: ${workflowName}`);
+      lines.push(...masterExecutionSummaryLines(localResult));
       lines.push(`Execution: success${localResult.execution.execution.run_id ? ` — run ${localResult.execution.execution.run_id}` : ''}`);
     } else if (localResult.generation) {
       lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
       if (workflowName) lines.push(`Workflow name: ${workflowName}`);
+      lines.push(...masterExecutionSummaryLines(localResult));
       if (localResult.generation.next) {
         lines.push(`Run: ${localResult.generation.next.run_command}`);
         lines.push(`Background: ${localResult.generation.next.run_command} --background`);
@@ -1879,6 +1881,7 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     if (localResult.execution) {
       lines.push(`Generation: ok${artifactPath ? ` — ${artifactPath}` : ''}`);
       if (workflowName) lines.push(`Workflow name: ${workflowName}`);
+      lines.push(...masterExecutionSummaryLines(localResult));
       lines.push(executionFailureSummary(localResult));
       const resume = resumeCommandFor(localResult);
       if (resume) lines.push(`Resume: ${resume}`);
@@ -1949,6 +1952,16 @@ function renderLocalHuman(localResult: NonNullable<InteractiveCliResult['localRe
     }
   }
   return lines;
+}
+
+function masterExecutionSummaryLines(localResult: NonNullable<InteractiveCliResult['localResult']>): string[] {
+  const masterExecution = localResult.generation?.decisions?.master_execution;
+  if (!masterExecution || typeof masterExecution !== 'object') return [];
+  const record = masterExecution as Record<string, unknown>;
+  const childCount = typeof record.child_count === 'number' ? record.child_count : undefined;
+  const waveCount = typeof record.wave_count === 'number' ? record.wave_count : undefined;
+  if (childCount === undefined) return [];
+  return [`Master plan: ${childCount} child workflows${waveCount !== undefined ? ` across ${waveCount} waves` : ''}`];
 }
 
 function createLocalProgressReporter(
