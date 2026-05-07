@@ -100,6 +100,35 @@ describe('spec intake parser, normalizer, and router', () => {
     );
   });
 
+  it('preserves plain non-goal headings as scope constraints', () => {
+    const result = intake(
+      natural(
+        [
+          'Generate a workflow for AgentWorkforce/ricky.',
+          '',
+          'Non-goals:',
+          '',
+          '- Broad dashboard changes',
+          '- Passive Linear monitoring',
+        ].join('\n'),
+      ),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.normalizedSpec.constraints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          constraint: 'Non-goal: Broad dashboard changes',
+          category: 'scope',
+        }),
+        expect.objectContaining({
+          constraint: 'Non-goal: Passive Linear monitoring',
+          category: 'scope',
+        }),
+      ]),
+    );
+  });
+
   it('preserves MCP-style structured payload source and provider context', () => {
     const payload: RawSpecPayload = {
       kind: 'mcp',

@@ -1,4 +1,9 @@
-export type SessionEndReason = 'completed' | 'completed_no_changes' | 'failed';
+export type SessionEndReason =
+  | 'completed'
+  | 'completed_no_changes'
+  | 'failed'
+  | 'awaiting_github_install'
+  | 'awaiting_agent_connect';
 
 export type AgentSessionEventType = 'created' | 'prompted';
 

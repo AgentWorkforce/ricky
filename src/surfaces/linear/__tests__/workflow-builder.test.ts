@@ -5,6 +5,7 @@ import { buildLinearWorkflow } from '../workflow-builder.js';
 function baseInput(agentCount: number) {
   return {
     issue: {
+      id: 'LIN-123',
       title: 'Fix flaky import path handling',
       description: 'The generated workflow should normalize imports before running tests.',
       labels: ['bug', 'backend'],
@@ -37,5 +38,19 @@ describe('buildLinearWorkflow', () => {
 
   it('throws when repoTarget is missing', () => {
     expect(() => buildLinearWorkflow({ ...baseInput(1), repoTarget: null })).toThrow(/repoTarget/);
+  });
+
+  it('includes a stable issue id in the generated artifact path', () => {
+    const first = buildLinearWorkflow(baseInput(1));
+    const second = buildLinearWorkflow({
+      ...baseInput(1),
+      issue: {
+        ...baseInput(1).issue,
+        id: 'LIN-456',
+      },
+    });
+
+    expect(first.artifactPath).toBe('workflows/generated/linear-lin-123-fix-flaky-import-path-handling.ts');
+    expect(second.artifactPath).toBe('workflows/generated/linear-lin-456-fix-flaky-import-path-handling.ts');
   });
 });

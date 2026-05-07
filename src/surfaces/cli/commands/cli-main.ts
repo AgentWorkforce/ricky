@@ -44,7 +44,7 @@ import { defaultArtifactPathForWorkflowName } from '../flows/spec-intake-flow.js
 import { CLOUD_IMPLEMENTATION_AGENTS, CLOUD_OPTIONAL_INTEGRATIONS } from '../flows/cloud-workflow-flow.js';
 import { resolvePreferWorkforcePersonaWorkflowWriter } from '../flows/workforce-persona-cli-preference.js';
 import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
-import { renderLinearConnectGuidance } from '../../linear/connect.js';
+import { getLinearConnectGuidance } from '../../linear/connect.js';
 import { linearStatusSummary, renderLinearStatus } from '../../linear/status.js';
 
 // ---------------------------------------------------------------------------
@@ -1244,13 +1244,16 @@ function connectExitCode(payload: ConnectPayload): number {
 
 async function connectPayload(parsed: ParsedArgs, deps: CliMainDeps): Promise<ConnectPayload> {
   if (parsed.connectTarget === 'linear') {
-    const guidance = renderLinearConnectGuidance();
+    const guidance = getLinearConnectGuidance();
     return {
       target: 'linear',
       status: 'manual-dashboard',
-      message: guidance.join('\n'),
+      message: [
+        'Linear uses the Cloud dashboard to install the Ricky OAuth Actor app.',
+        `Dashboard: ${guidance.dashboardUrl}`,
+      ].join('\n'),
       warnings: [],
-      nextActions: ['ricky status linear'],
+      nextActions: [...guidance.instructions, 'ricky status linear'],
     };
   }
 

@@ -60,8 +60,7 @@ export interface LinearMentionHandleResult {
 export interface LinearMentionDeps {
   signatureVerifier: (input: LinearMentionHandleInput) => boolean | Promise<boolean>;
   dedupStore: {
-    has: (webhookId: string) => boolean | Promise<boolean>;
-    mark: (webhookId: string) => void | Promise<void>;
+    markIfAbsent: (webhookId: string) => boolean | Promise<boolean>;
   };
   githubInstallProbe: (event: AgentSessionEvent) => boolean | Promise<boolean>;
   agentRegistry: {
@@ -92,40 +91,53 @@ export async function handleLinearMention(
     return { status: 'failed', reason: 'failed' };
   }
 
-  if (!isAgentSessionEvent(input.payload)) {
-    deps.logger?.warn?.('Ignoring non-AgentSessionEvent Linear payload.');
-    return { status: 'ignored', reason: 'completed_no_changes' };
-  }
-
-  const event = input.payload;
-  const duplicate = await deps.dedupStore.has(event.webhookId);
-  if (duplicate) {
-    return { status: 'ignored', sessionId: event.sessionId, reason: 'completed_no_changes' };
-  }
-  await deps.dedupStore.mark(event.webhookId);
-
-  classifyLinearMentionEvent(event);
-
-  const githubReady = await deps.githubInstallProbe(event);
-  if (!githubReady) {
-    await writeActivity(deps, event, 'response', 'Install the GitHub App before Ricky can open a pull request from Linear.');
-    await deps.activityWriter.endSession({ sessionId: event.sessionId, reason: 'failed' });
-    return { status: 'failed', sessionId: event.sessionId, reason: 'failed' };
-  }
-
-  const connectedAgents = await deps.agentRegistry.list({
-    scope: event.workspaceId ?? event.organizationId,
-    actor: event.actor,
-  });
-  if (connectedAgents.length === 0) {
-    await writeActivity(deps, event, 'response', `No connected Cloud implementation agents were found for ${event.actor.name ?? event.actor.linearUserId}.`);
-    await deps.activityWriter.endSession({ sessionId: event.sessionId, reason: 'failed' });
-    return { status: 'failed', sessionId: event.sessionId, reason: 'failed' };
-  }
-
+  let event: AgentSessionEvent | undefined;
   try {
+    if (!isAgentSessionEvent(input.payload)) {
+      deps.logger?.warn?.('Ignoring non-AgentSessionEvent Linear payload.');
+      return { status: 'ignored', reason: 'completed_no_changes' };
+    }
+
+    event = input.payload;
+    const accepted = await deps.dedupStore.markIfAbsent(event.webhookId);
+    if (!accepted) {
+      return { status: 'ignored', sessionId: event.sessionId, reason: 'completed_no_changes' };
+    }
+
+    if (event.type === 'prompted') {
+      await writeActivity(
+        deps,
+        event,
+        'response',
+        'Prompt received for an existing Linear Agent Session. Cloud should route it to the active session instead of starting a new workflow.',
+      );
+      return { status: 'ignored', sessionId: event.sessionId, reason: 'completed_no_changes' };
+    }
+
+    classifyLinearMentionEvent(event);
+
+    const githubReady = await deps.githubInstallProbe(event);
+    if (!githubReady) {
+      const reason: SessionEndReason = 'awaiting_github_install';
+      await writeActivity(deps, event, 'response', 'Install the GitHub App before Ricky can open a pull request from Linear.');
+      await deps.activityWriter.endSession({ sessionId: event.sessionId, reason });
+      return { status: 'failed', sessionId: event.sessionId, reason };
+    }
+
+    const connectedAgents = await deps.agentRegistry.list({
+      scope: event.workspaceId ?? event.organizationId,
+      actor: event.actor,
+    });
+    if (connectedAgents.length === 0) {
+      const reason: SessionEndReason = 'awaiting_agent_connect';
+      await writeActivity(deps, event, 'response', `No connected Cloud implementation agents were found for ${event.actor.name ?? event.actor.linearUserId}.`);
+      await deps.activityWriter.endSession({ sessionId: event.sessionId, reason });
+      return { status: 'failed', sessionId: event.sessionId, reason };
+    }
+
     const workflow = buildLinearWorkflow({
       issue: {
+        id: event.issue.id,
         title: event.issue.title,
         description: event.issue.description ?? '',
         labels: event.issue.labels ?? [],
@@ -156,9 +168,11 @@ export async function handleLinearMention(
     await deps.activityWriter.endSession({ sessionId: event.sessionId, reason });
     return { status: run.status, sessionId: event.sessionId, reason };
   } catch (error) {
-    await writeActivity(deps, event, 'error', error instanceof Error ? error.message : String(error));
-    await deps.activityWriter.endSession({ sessionId: event.sessionId, reason: 'failed' });
-    return { status: 'failed', sessionId: event.sessionId, reason: 'failed' };
+    if (event) {
+      await writeActivity(deps, event, 'error', error instanceof Error ? error.message : String(error));
+      await deps.activityWriter.endSession({ sessionId: event.sessionId, reason: 'failed' });
+    }
+    return { status: 'failed', ...(event ? { sessionId: event.sessionId } : {}), reason: 'failed' };
   }
 }
 

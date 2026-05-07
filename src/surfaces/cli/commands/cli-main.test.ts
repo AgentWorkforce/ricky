@@ -328,6 +328,12 @@ describe('parseArgs', () => {
       statusTarget: 'linear',
       json: true,
     });
+    expect(parseArgs(['status', 'foo', '--json'])).toEqual({
+      command: 'status',
+      surface: 'status',
+      json: true,
+      errors: ['unknown status target: foo'],
+    });
     expect(parseArgs(['connect', 'agents', '--cloud', 'claude,codex'])).toMatchObject({
       command: 'connect',
       surface: 'connect',
@@ -2531,7 +2537,14 @@ describe('cliMain', () => {
     expect(JSON.parse(result.output.join('\n'))).toMatchObject({
       target: 'linear',
       status: 'manual-dashboard',
-      nextActions: ['ricky status linear'],
+      message: expect.not.stringContaining('Ricky connect linear'),
+      nextActions: [
+        'Open the Cloud dashboard Linear integration page.',
+        'Click "Connect Linear" to install the Ricky OAuth Actor app.',
+        'Choose the Linear workspace where Ricky should receive AgentSession events.',
+        'Linear connection is managed through the Cloud dashboard, not the CLI.',
+        'ricky status linear',
+      ],
     });
   });
 

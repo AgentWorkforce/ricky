@@ -20,11 +20,18 @@
     "trigger": { "enum": ["issue_mention", "comment_mention", "assignment"] },
     "actor": {
       "type": "object",
-      "required": ["linearUserId"]
+      "required": ["linearUserId"],
+      "properties": {
+        "linearUserId": { "type": "string", "minLength": 1 }
+      }
     },
     "issue": {
       "type": "object",
-      "required": ["id", "title"]
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 }
+      }
     },
     "createdAt": { "type": "string" }
   }

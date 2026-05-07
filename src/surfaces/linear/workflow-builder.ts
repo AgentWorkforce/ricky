@@ -4,6 +4,7 @@ import type { SwarmPattern } from '../../shared/models/workflow-config.js';
 
 export interface BuildLinearWorkflowInput {
   issue: {
+    id: string;
     title: string;
     description: string;
     labels: string[];
@@ -37,7 +38,7 @@ export function buildLinearWorkflow(input: BuildLinearWorkflowInput): BuildLinea
   ].join(' ');
 
   return {
-    artifactPath: `workflows/generated/linear-${slugify(input.issue.title)}.ts`,
+    artifactPath: `workflows/generated/linear-${slugify(`${input.issue.id}-${input.issue.title}`)}.ts`,
     artifactContent: renderWorkflowArtifact({
       input,
       repoTarget,
@@ -167,6 +168,7 @@ export default {
   selectedAgents: ${JSON.stringify(params.selectedAgents)},
   rationale: ${JSON.stringify(params.rationale)},
   issue: {
+    id: ${JSON.stringify(params.input.issue.id)},
     title: ${JSON.stringify(params.input.issue.title)},
     description: ${JSON.stringify(params.input.issue.description)},
     labels: ${JSON.stringify(params.input.issue.labels)},

@@ -55,15 +55,24 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
 
   if (first === 'status') {
     const statusArgv = argv.slice(1);
+    const statusCandidate = statusArgv[0]?.trim().toLowerCase();
     const statusTarget = readStatusTarget(statusArgv);
-    const parsed = withCommonFlags({ command: 'status', surface: 'status' }, statusTarget ? statusArgv.slice(1) : statusArgv);
     const effectiveStatusArgv = statusTarget ? statusArgv.slice(1) : statusArgv;
+    const parsed = withCommonFlags({ command: 'status', surface: 'status' }, effectiveStatusArgv);
     const runId = readFlagValue(effectiveStatusArgv, '--run');
+    const errors: string[] = [...(parsed.errors ?? [])];
+    if (statusCandidate && !statusCandidate.startsWith('-') && !statusTarget) {
+      errors.push(`unknown status target: ${statusCandidate}`);
+    }
+    if (effectiveStatusArgv.includes('--run') && !runId) {
+      errors.push('--run requires a value.');
+    }
+
     return {
       ...parsed,
       ...(statusTarget ? { statusTarget } : {}),
       ...(runId ? { runId } : {}),
-      ...(effectiveStatusArgv.includes('--run') && !runId ? { errors: [...(parsed.errors ?? []), '--run requires a value.'] } : {}),
+      ...(errors.length > 0 ? { errors } : {}),
     };
   }
 

@@ -18,7 +18,7 @@ The Linear additions in Cloud land as a **follow-up PR after [PR #412](https://g
 
 ### Cloud file layout (mirrors PR #412 Slack)
 
-```
+```text
 packages/web/app/api/v1/ricky/linear/
   events/route.ts              # Nango-forwarded Linear webhook receiver
   oauth/start/route.ts         # Linear OAuth Actor app start
@@ -38,7 +38,7 @@ packages/web/lib/ricky/linear/
 packages/web/lib/ricky/linear-agent-v2.ts   # main entry, parallel to slack-agent-v2.ts
 packages/web/drizzle/<next>_ricky_linear_agent_v2.sql   # whichever idx is next when this PR opens
 integrations/linear/ricky-manifest.json     # OAuth Actor app manifest
-```
+```text
 
 ### Ricky OSS additions
 
@@ -141,7 +141,7 @@ Re-export Linear's `AgentSessionEvent` and `AgentActivity` shapes typed so Cloud
 
 ```ts
 export interface BuildLinearWorkflowInput {
-  issue: { title: string; description: string; labels: string[]; comments: string[]; project?: string };
+  issue: { id: string; title: string; description: string; labels: string[]; comments: string[]; project?: string };
   repoTarget: { owner: string; repo: string; defaultBranch: string };
   connectedAgents: ReadonlyArray<{ id: string; name: string; capabilities: string[] }>;
   actor: { linearUserId: string; cloudUserId: string };
@@ -164,7 +164,7 @@ Implementation reuses `src/product/generation/pattern-selector.ts` and the exist
 
 The HTTP shapes Cloud uses for `/api/v1/ricky/linear/events` requests and the AgentActivity post payload, exported so Cloud can typecheck imports from this repo.
 
-The exported wire types are `LinearMentionRequest`, `LinearMentionResponse`, `RickyLinearSession`, and `SessionEndReason`. The `SessionEndReason` values are exactly `completed`, `completed_no_changes`, and `failed`.
+The exported wire types are `LinearMentionRequest`, `LinearMentionResponse`, `RickyLinearSession`, and `SessionEndReason`. The `SessionEndReason` values are exactly `completed`, `completed_no_changes`, `failed`, `awaiting_github_install`, and `awaiting_agent_connect`.
 
 ## CLI additions (Ricky OSS)
 

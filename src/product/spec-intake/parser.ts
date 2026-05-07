@@ -320,7 +320,9 @@ function extractNonGoalSectionItems(text: string): string[] {
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    const heading = /^#{1,6}\s+(.+?)\s*$/.exec(line)?.[1]?.replace(/#+$/, '').trim() ?? '';
+    const markdownHeading = /^#{1,6}\s+(.+?)\s*$/.exec(line)?.[1]?.replace(/#+$/, '').trim();
+    const plainHeading = /^[A-Za-z][A-Za-z0-9 /_-]*:\s*$/.exec(line)?.[0]?.replace(/:\s*$/, '').trim();
+    const heading = markdownHeading ?? plainHeading ?? '';
     if (heading) {
       inNonGoalSection = /\b(non[- ]?goals?|out[- ]of[- ]scope|not in scope|out of scope)\b/i.test(heading);
       continue;

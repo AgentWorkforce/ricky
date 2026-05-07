@@ -30,14 +30,13 @@ function deps(overrides: Partial<LinearMentionDeps> = {}): LinearMentionDeps & {
 } {
   const activities: AgentActivity[] = [];
   const ended: Array<{ sessionId: string; reason: string }> = [];
-  return {
-    activities,
-    ended,
-    signatureVerifier: vi.fn().mockResolvedValue(true),
-    dedupStore: {
-      has: vi.fn().mockResolvedValue(false),
-      mark: vi.fn().mockResolvedValue(undefined),
-    },
+    return {
+      activities,
+      ended,
+      signatureVerifier: vi.fn().mockResolvedValue(true),
+      dedupStore: {
+        markIfAbsent: vi.fn().mockResolvedValue(true),
+      },
     githubInstallProbe: vi.fn().mockResolvedValue(true),
     agentRegistry: {
       list: vi.fn().mockResolvedValue([{ id: 'codex', name: 'Codex', capabilities: ['implementation'] }]),
@@ -67,21 +66,38 @@ describe('handleLinearMention', () => {
     const result = await handleLinearMention({ payload: event }, d);
 
     expect(result).toEqual({ status: 'failed', reason: 'failed' });
-    expect(d.dedupStore.has).not.toHaveBeenCalled();
+    expect(d.dedupStore.markIfAbsent).not.toHaveBeenCalled();
   });
 
   it('returns no-change ignored result on dedup hits', async () => {
     const d = deps({
       dedupStore: {
-        has: vi.fn().mockResolvedValue(true),
-        mark: vi.fn(),
+        markIfAbsent: vi.fn().mockResolvedValue(false),
       },
     });
 
     const result = await handleLinearMention({ payload: event }, d);
 
     expect(result).toEqual({ status: 'ignored', sessionId: 'session-1', reason: 'completed_no_changes' });
-    expect(d.dedupStore.mark).not.toHaveBeenCalled();
+    expect(d.workflowRunner).not.toHaveBeenCalled();
+  });
+
+  it('does not start a fresh workflow for prompted session follow-ups', async () => {
+    const d = deps();
+
+    const result = await handleLinearMention({ payload: { ...event, type: 'prompted', prompt: 'Can you also update tests?' } }, d);
+
+    expect(result).toEqual({ status: 'ignored', sessionId: 'session-1', reason: 'completed_no_changes' });
+    expect(d.githubInstallProbe).not.toHaveBeenCalled();
+    expect(d.agentRegistry.list).not.toHaveBeenCalled();
+    expect(d.workflowRunner).not.toHaveBeenCalled();
+    expect(d.ended).toEqual([]);
+    expect(d.activities).toEqual([
+      expect.objectContaining({
+        kind: 'response',
+        body: expect.stringContaining('existing Linear Agent Session'),
+      }),
+    ]);
   });
 
   it('checks GitHub readiness before connected agents', async () => {
@@ -89,10 +105,11 @@ describe('handleLinearMention', () => {
 
     const result = await handleLinearMention({ payload: event }, d);
 
-    expect(result.reason).toBe('failed');
+    expect(result.reason).toBe('awaiting_github_install');
     expect(d.githubInstallProbe).toHaveBeenCalledTimes(1);
     expect(d.agentRegistry.list).not.toHaveBeenCalled();
     expect(d.activities[0]).toMatchObject({ kind: 'response' });
+    expect(d.ended).toEqual([{ sessionId: 'session-1', reason: 'awaiting_github_install' }]);
   });
 
   it('fails readiness after GitHub when no capable Cloud agents are connected', async () => {
@@ -104,7 +121,7 @@ describe('handleLinearMention', () => {
 
     const result = await handleLinearMention({ payload: event }, d);
 
-    expect(result).toEqual({ status: 'failed', sessionId: 'session-1', reason: 'failed' });
+    expect(result).toEqual({ status: 'failed', sessionId: 'session-1', reason: 'awaiting_agent_connect' });
     expect(d.githubInstallProbe).toHaveBeenCalledTimes(1);
     expect(d.agentRegistry.list).toHaveBeenCalledWith({
       scope: 'workspace-1',
@@ -115,6 +132,24 @@ describe('handleLinearMention', () => {
       expect.objectContaining({
         kind: 'response',
         body: 'No connected Cloud implementation agents were found for A User.',
+      }),
+    ]);
+    expect(d.ended).toEqual([{ sessionId: 'session-1', reason: 'awaiting_agent_connect' }]);
+  });
+
+  it('ends the session when pre-workflow readiness steps throw', async () => {
+    const d = deps({
+      githubInstallProbe: vi.fn().mockRejectedValue(new Error('readiness exploded')),
+    });
+
+    const result = await handleLinearMention({ payload: event }, d);
+
+    expect(result).toEqual({ status: 'failed', sessionId: 'session-1', reason: 'failed' });
+    expect(d.workflowRunner).not.toHaveBeenCalled();
+    expect(d.activities).toEqual([
+      expect.objectContaining({
+        kind: 'error',
+        body: 'readiness exploded',
       }),
     ]);
     expect(d.ended).toEqual([{ sessionId: 'session-1', reason: 'failed' }]);
