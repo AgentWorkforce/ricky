@@ -720,6 +720,17 @@ workflow_is_already_satisfied() {
   local workflow_path="$1"
 
   case "$workflow_path" in
+    workflows/wave1-runtime/02-workflow-evidence-model.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-evidence-model/signoff.md \
+        'WORKFLOW_EVIDENCE_MODEL_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-evidence-model/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-evidence-model/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS'
+      ;;
     workflows/wave1-runtime/04-implement-failure-diagnosis-engine.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave1-runtime/implement-failure-diagnosis-engine/signoff.md \
