@@ -37,13 +37,15 @@ Slack is a surface, not the product identity.
 
 ## Install and Run
 
-Ricky publishes the `ricky` bin from `dist/ricky.js`.
+Ricky is an npm package: `@agentworkforce/ricky`. It publishes the `ricky` bin from `dist/ricky.js`.
+
+For local development from the repo:
 
 ```sh
-npm install
-npm run build
+npm install            # or `npm ci` for a reproducible install from package-lock.json
+npm run build          # bundle the CLI to dist/ricky.js
 node dist/ricky.js --help
-npm start -- --help
+npm start -- --help    # run the CLI from source via tsx
 ```
 
 For package consumers, the intended command form is:
@@ -147,7 +149,7 @@ The provided runner mark is used as the Ricky project logo and should be used as
 
 ## Bootstrap
 
-Ricky is a single-package repo with a flat `src/` tree. The product surfaces live under `src/surfaces/`, with shared inner layers under `src/{shared,runtime,product,cloud,local}`.
+Ricky is a single-package npm repo with a flat `src/` tree. npm is the only supported package and script surface. The product surfaces live under `src/surfaces/`, with shared inner layers under `src/{shared,runtime,product,cloud,local}`.
 
 ```sh
 npm install          # install dependencies for the single root package
@@ -156,23 +158,28 @@ npm test             # bundle the CLI and run the repo test suite + proof tests
 npm start            # launch the CLI from src/surfaces/cli/commands/cli-main.ts
 ```
 
-npm scripts:
-- `npm start` — launch the interactive CLI from `src/surfaces/cli/commands/cli-main.ts`
-- `npm run build` — bundle the CLI to `dist/ricky.js`
-- `npm run bundle` — run the esbuild bundler directly
+npm scripts (canonical ordering matches `package.json`):
 - `npm run clean` — remove `dist/`
-- `npm test` — bundle the CLI, then run the full test suite and proof tests
+- `npm run bundle` — run the esbuild bundler directly
+- `npm run build` — alias for `bundle`; produces `dist/ricky.js`
 - `npm run typecheck` — typecheck the flat `src/` tree plus workflows/proofs/scripts
+- `npm test` — bundle the CLI, then run the full test suite and proof tests
+- `npm start` — launch the interactive CLI from `src/surfaces/cli/commands/cli-main.ts`
+- `npm run dev` — alias for `npm start`
 - `npm run batch` — run workflow batches via `scripts/run-ricky-batch.sh`
 - `npm run overnight` — run the overnight workflow queue via `scripts/run-ricky-overnight.sh`
   - default queue mode is now `flight-safe`, which only runs the workflows currently classified as unattended-safe
   - default behavior checkpoints after a small bounded chunk (`RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION`, default `4`) and can resume with `bash scripts/run-ricky-overnight.sh --resume`
   - checkpoint state lives under `.workflow-artifacts/overnight-state/<queue-mode>/checkpoint.env`
-- `npm run prepack` — build before package packing
+- `npm run prepack` — build before package packing (runs automatically on `npm pack` and `npm publish`)
+
+Node and npm versions are pinned: `engines.node = ">=20"`, `packageManager = "npm@11.11.0"`, `engine-strict=true` in `.npmrc`, and `.nvmrc = 20`. There is no Yarn, pnpm, or other package-manager surface — npm is the default and only path.
+
+Note: `prpm.lock` at the repo root is **not** an npm artifact. It tracks AI-agent skills installed under `.agents/skills/` via the `prpm` skill registry, and it is referenced by `test/flat-layout-proof/` to verify that legacy Claude skill mirrors stay removed. Treat it as orthogonal to npm.
 
 ## Package shape
 
-Ricky is a private single-package repo.
+Ricky is a single-package npm repo published as `@agentworkforce/ricky`. It is intentionally not a workspaces monorepo; if multi-package boundaries are introduced later, that change must be deliberate and scoped, not implicit drift.
 
 Source layout:
 - `src/shared` — shared constants, workflow config models, and workflow evidence models

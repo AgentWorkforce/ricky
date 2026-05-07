@@ -31,6 +31,8 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('generate');
     expect(result.routing?.normalizedSpec.intent).toBe('generate');
+    expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
+    expect(result.routing?.normalizedSpec.desiredAction.kind).toBe('generate');
     expect(result.routing?.reason).toContain('author a new workflow');
     expect(result.routing?.normalizedSpec.desiredAction.specText).toContain('create a new workflow spec');
     expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBeUndefined();
@@ -55,6 +57,7 @@ describe('spec intake parser, normalizer, and router', () => {
 
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('generate');
+    expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
     expect(result.routing?.normalizedSpec.targetRepo).toBe('AgentWorkforce/ricky');
     expect(result.routing?.normalizedSpec.constraints).toEqual(
       expect.arrayContaining([
@@ -167,6 +170,7 @@ describe('spec intake parser, normalizer, and router', () => {
 
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('generate');
+    expect(normalized?.sourceSpec.intent.signals).toContain('tool:ricky.workflow.generate');
     expect(normalized?.providerContext).toMatchObject({
       surface: 'mcp',
       toolName: 'ricky.workflow.generate',
@@ -215,6 +219,7 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('debug');
     expect(result.routing?.normalizedSpec.intent).toBe('debug');
+    expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('debug');
     expect(result.routing?.normalizedSpec.targetFiles).toEqual(
       expect.arrayContaining(['workflows/release.workflow.ts', 'artifacts/run-123.log']),
     );
@@ -236,6 +241,7 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('execute');
     expect(result.routing?.normalizedSpec.intent).toBe('execute');
+    expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('execute');
     expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBe('workflows/release.workflow.ts');
     expect(result.routing?.reason).toContain('executable workflow artifact');
   });
@@ -319,6 +325,8 @@ describe('spec intake parser, normalizer, and router', () => {
 
     expect(result.success).toBe(false);
     expect(result.routing?.target).toBe('clarify');
+    expect(result.routing?.normalizedSpec.intent).toBe('clarify');
+    expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('clarify');
     expect(result.routing?.reason).toContain('ambiguous');
     expect(result.validationIssues).toEqual(
       expect.arrayContaining([

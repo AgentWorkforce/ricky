@@ -8,9 +8,9 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "allowSyntheticDefaultImports": true,
     "types": ["node", "vitest/globals"],
     "noEmit": true
   },
-  "include": ["src", "test", "workflows", "scripts"]
+  "include": ["src", "test", "workflows", "scripts"],
+  "exclude": ["node_modules", "dist", ".workflow-artifacts", ".agent-relay", ".agent-relay.stale.*", "tmp"]
 }

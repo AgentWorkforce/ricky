@@ -3,6 +3,19 @@
   "version": "0.1.34",
   "license": "Apache-2.0",
   "description": "Workflow reliability, coordination, and authoring product for AgentWorkforce",
+  "keywords": [
+    "agentworkforce",
+    "ricky",
+    "workflow",
+    "agent-relay",
+    "cli",
+    "byoh",
+    "cloud"
+  ],
+  "homepage": "https://github.com/AgentWorkforce/ricky#readme",
+  "bugs": {
+    "url": "https://github.com/AgentWorkforce/ricky/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AgentWorkforce/ricky.git"
@@ -20,13 +33,17 @@
     ".agents/skills",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "start": "tsx src/surfaces/cli/commands/cli-main.ts",
     "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\"",
-    "build": "npm run bundle",
     "bundle": "node scripts/bundle-cli.mjs",
+    "build": "npm run bundle",
     "typecheck": "tsc --noEmit",
     "test": "npm run bundle && vitest run",
+    "start": "tsx src/surfaces/cli/commands/cli-main.ts",
+    "dev": "npm start",
     "batch": "bash scripts/run-ricky-batch.sh",
     "overnight": "bash scripts/run-ricky-overnight.sh",
     "prepack": "npm run build"

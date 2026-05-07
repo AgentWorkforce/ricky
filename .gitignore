@@ -1,9 +1,20 @@
 # npm
 node_modules/
+npm-debug.log*
+.npm/
+*.tgz
 
 # build artifacts
 dist/
 *.tsbuildinfo
+
+# test / coverage
+coverage/
+
+# env files
+.env
+.env.local
+.env.*.local
 
 # runtime / relay
 .agent-relay/
@@ -17,6 +28,7 @@ dist/
 
 # scratch / temp
 tmp/
+*.log
 
 # OS
 .DS_Store
