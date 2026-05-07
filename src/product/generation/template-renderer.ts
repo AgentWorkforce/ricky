@@ -148,7 +148,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!),
     '',
-    renderLeadPlanStep(input.artifactsDir),
+    renderLeadPlanStep(input.artifactsDir, Boolean(input.spec.targetContext)),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'lead-plan-gate')!),
     '',
@@ -158,7 +158,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'initial-soft-validation')!),
     '',
-    renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.artifactsDir, selectionFor(input.toolSelection, 'review-claude')),
+    renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-claude')),
     '',
     renderSecondaryReviewStep('review-codex', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-codex'), input.isCodeWorkflow),
     '',
@@ -174,7 +174,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-validation')!),
     '',
-    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.artifactsDir, selectionFor(input.toolSelection, 'final-review-claude'), true),
+    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude'), true),
     '',
     renderSecondaryReviewStep('final-review-codex', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-codex'), input.isCodeWorkflow, true),
     '',
@@ -778,7 +778,7 @@ function buildGeneratedContextPackage(
   ];
 }
 
-function renderLeadPlanStep(artifactsDir: string): string {
+function renderLeadPlanStep(artifactsDir: string, hasTargetContext: boolean): string {
   return `    .step('lead-plan', {
       agent: 'lead-claude',
       dependsOn: ['skill-boundary-metadata-gate'],
@@ -793,6 +793,7 @@ Read these files in order:
 - ${artifactsDir}/deliverables.md
 - ${artifactsDir}/verification-plan.md
 - ${artifactsDir}/skill-application-boundary.json
+${hasTargetContext ? `- ${artifactsDir}/target-context.txt` : ''}
 
 Write ${artifactsDir}/lead-plan.md.
 Required headings: Non-goals, Routing contract, Implementation contract.
@@ -840,6 +841,7 @@ function renderReviewStep(
   agent: string,
   dependsOn: string[],
   artifactsDir: string,
+  hasTargetContext: boolean,
   selection?: ToolSelection,
   final = false,
 ): string {
@@ -859,6 +861,7 @@ Read:
 - ${artifactsDir}/acceptance-contract.json
 - ${artifactsDir}/lead-plan.md
 - ${artifactsDir}/verification-plan.md
+${hasTargetContext ? `- ${artifactsDir}/target-context.txt` : ''}
 ${renderToolSelectionSummary(selection)}
 
 Write ${reviewPath} ending with ${marker}.`)},
@@ -876,7 +879,7 @@ function renderSecondaryReviewStep(
   final = false,
 ): string {
   if (isCodeWorkflow) {
-    return renderReviewStep(stepName, 'reviewer-codex', dependsOn, artifactsDir, selection, final);
+    return renderReviewStep(stepName, 'reviewer-codex', dependsOn, artifactsDir, Boolean(spec.targetContext), selection, final);
   }
 
   const marker = final ? 'FINAL_REVIEW_CODEX_PASS' : 'REVIEW_COMPLETE';
