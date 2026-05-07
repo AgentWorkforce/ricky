@@ -173,23 +173,30 @@ export function appendStepEvent(
  *  run.deterministicGates and step.deterministicGates. */
 export function recordDeterministicGate(
   run: WorkflowRunEvidence,
-  gateName: string,
-  verifications: VerificationResult[],
+  gateOrName: GateParams | string,
+  verifications?: VerificationResult[],
   stepId?: string,
 ): { gate: DeterministicGateResult; run: WorkflowRunEvidence } {
-  const gate = createDeterministicGate({ gateName, verifications });
+  const gateParams: GateParams =
+    typeof gateOrName === 'string'
+      ? { gateName: gateOrName, verifications: verifications ?? [] }
+      : gateOrName;
+  const gate = createDeterministicGate(gateParams);
 
   if (stepId) {
-    // Step-scoped: attach only to the step, not to run.deterministicGates.
-    return {
-      gate,
-      run: {
-        ...run,
-        steps: run.steps.map((step) =>
-          step.stepId === stepId ? attachGateToStep(step, gate) : step,
-        ),
-      },
-    };
+    const matchedStep = run.steps.some((step) => step.stepId === stepId);
+    if (matchedStep) {
+      // Step-scoped: attach only to the step, not to run.deterministicGates.
+      return {
+        gate,
+        run: {
+          ...run,
+          steps: run.steps.map((step) =>
+            step.stepId === stepId ? attachGateToStep(step, gate) : step,
+          ),
+        },
+      };
+    }
   }
 
   // Run-scoped: attach to run.deterministicGates only.
@@ -409,6 +416,7 @@ export function buildEvidenceOutcome(run: WorkflowRunEvidence): EvidenceOutcome 
     failedStepIds: summary.failedStepIds,
     timedOutStepIds: stepIdsWithStatus(run, 'timed_out'),
     cancelledStepIds: stepIdsWithStatus(run, 'cancelled'),
+    skippedStepIds: stepIdsWithStatus(run, 'skipped'),
     retryExhaustedStepIds: retryExhaustedStepIds(run),
     pendingStepIds: stepIdsWithStatus(run, 'pending'),
     runningStepIds: stepIdsWithStatus(run, 'running'),
@@ -615,7 +623,6 @@ function classifyEvidenceFailureKind(
   gates: DeterministicGateAudit[],
 ): EvidenceFailureKind {
   if (run.status === 'passed') return 'none';
-  if (run.status === 'pending' || run.status === 'running') return 'unknown';
   if (run.status === 'timed_out' || summary.timedOutSteps > 0) return 'timeout';
   if (run.status === 'cancelled' || summary.cancelledSteps > 0) return 'cancelled';
   if (hasFailedRoutingAssertion(run)) return 'routing';
@@ -623,6 +630,7 @@ function classifyEvidenceFailureKind(
   if (!summary.allVerificationsPassed) return 'verification';
   if (retryExhaustedStepIds(run).length > 0) return 'retry_exhaustion';
   if (summary.failedSteps > 0) return 'step_failed';
+  if (run.status === 'pending' || run.status === 'running') return 'unknown';
   return 'unknown';
 }
 
@@ -684,11 +692,14 @@ function attachGateToStep(
   step: WorkflowStepEvidence,
   gate: DeterministicGateResult,
 ): WorkflowStepEvidence {
+  // Gate verifications are promoted to step-level for backward compatibility,
+  // but gate artifacts are NOT copied to step.artifacts to avoid duplication
+  // in collectArtifactPaths which traverses both step.artifacts and
+  // step.deterministicGates[].artifacts independently.
   return {
     ...step,
     deterministicGates: [...step.deterministicGates, gate],
     verifications: [...step.verifications, ...gate.verifications],
-    artifacts: [...step.artifacts, ...(gate.artifacts ?? [])],
   };
 }
 
@@ -1042,7 +1053,10 @@ function stampNarrative(
 }
 
 function allVerificationsPassed(run: WorkflowRunEvidence): boolean {
-  return run.steps.every((step) => step.verifications.every((verification) => verification.passed));
+  return [
+    ...run.deterministicGates.flatMap((gate) => gate.verifications),
+    ...run.steps.flatMap((step) => step.verifications),
+  ].every((verification) => verification.passed);
 }
 
 function allDeterministicGatesPassed(run: WorkflowRunEvidence): boolean {

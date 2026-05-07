@@ -291,6 +291,33 @@ describe('recordDeterministicGate', () => {
     expect(updatedRun.steps[0].deterministicGates).toHaveLength(0);
   });
 
+  it('falls back to run scope when the requested step is missing', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const step = createStepEvidence({ stepId: 's-1', stepName: 'gate-step' });
+    const runWithStep = { ...run, steps: [step] };
+
+    const { gate, run: updatedRun } = recordDeterministicGate(
+      runWithStep,
+      'missing-step-gate',
+      [{ type: 'exit_code', passed: false, expected: '0', actual: '1' }],
+      'missing-step-id',
+    );
+
+    expect(gate.passed).toBe(false);
+    expect(updatedRun.deterministicGates).toHaveLength(1);
+    expect(updatedRun.deterministicGates[0].gateName).toBe('missing-step-gate');
+    expect(updatedRun.steps[0].deterministicGates).toHaveLength(0);
+
+    const done = completeRun({
+      ...updatedRun,
+      steps: updatedRun.steps.map((currentStep) => completeStep(currentStep, 'passed')),
+    });
+    const outcome = buildEvidenceOutcome(done);
+
+    expect(done.status).toBe('failed');
+    expect(outcome.failureKind).toBe('deterministic_gate');
+  });
+
   it('produces exactly one audit entry per step-scoped gate in buildEvidenceOutcome', () => {
     const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
     const step = createStepEvidence({ stepId: 's-1', stepName: 'gate-step' });

@@ -178,6 +178,7 @@ export interface EvidenceOutcome {
   failedStepIds: string[];
   timedOutStepIds: string[];
   cancelledStepIds: string[];
+  skippedStepIds: string[];
   retryExhaustedStepIds: string[];
   pendingStepIds: string[];
   runningStepIds: string[];
