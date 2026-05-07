@@ -167,14 +167,37 @@ export interface FixLoopAttemptEvidence {
   artifacts: EvidenceArtifactPath[];
 }
 
+export type EvidenceStatusClass =
+  | 'queued'
+  | 'active'
+  | 'success'
+  | 'failure'
+  | 'neutral'
+  | 'cancelled'
+  | 'timeout';
+
+export interface EvidenceStatusBreakdown {
+  run: {
+    status: RunStatus;
+    class: EvidenceStatusClass;
+    terminal: boolean;
+  };
+  byStepStatus: Record<StepStatus, string[]>;
+  terminalStepIds: string[];
+  activeStepIds: string[];
+  incompleteStepIds: string[];
+}
+
 export interface EvidenceOutcome {
   runId: string;
   workflowName: string;
   status: RunStatus;
+  statusClass: EvidenceStatusClass;
   terminal: boolean;
   passed: boolean;
   failureKind: EvidenceFailureKind;
   failureMessage?: string;
+  statusBreakdown: EvidenceStatusBreakdown;
   failedStepIds: string[];
   timedOutStepIds: string[];
   cancelledStepIds: string[];

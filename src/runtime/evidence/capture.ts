@@ -7,6 +7,8 @@ import type {
   EvidenceFailureKind,
   EvidenceOutputSnippet,
   EvidenceOutcome,
+  EvidenceStatusBreakdown,
+  EvidenceStatusClass,
   EvidenceSummary,
   FixLoopAttemptEvidence,
   NarrativeAuditRecord,
@@ -304,7 +306,13 @@ export function completeStep(
   };
 }
 
-/** Derive run status from step statuses and deterministic gates, then mark the run as complete. */
+/** Derive run status from step statuses and deterministic gates, then mark the run as complete.
+ *
+ *  When `params.status` is provided it overrides step-derived status. The
+ *  caller assumes authority — a failed step can be masked by `status: 'passed'`
+ *  if all deterministic gates also pass. This is intentional: the coordinator
+ *  may have external knowledge (e.g. manual override) that justifies the
+ *  upgrade. Deterministic gate downgrade still applies after the override. */
 export function completeRun(
   run: WorkflowRunEvidence,
   params: CompleteRunParams = {},
@@ -398,6 +406,7 @@ export function summarizeEvidence(run: WorkflowRunEvidence): EvidenceSummary {
 export function buildEvidenceOutcome(run: WorkflowRunEvidence): EvidenceOutcome {
   const summary = summarizeEvidence(run);
   const deterministicGates = auditDeterministicGates(run);
+  const statusBreakdown = buildStatusBreakdown(run);
   const commands = collectEvidenceCommands(run);
   const outputSnippets = collectOutputSnippets(run);
   const artifacts = collectArtifactPaths(run);
@@ -409,10 +418,12 @@ export function buildEvidenceOutcome(run: WorkflowRunEvidence): EvidenceOutcome 
     runId: run.runId,
     workflowName: run.workflowName,
     status: run.status,
+    statusClass: classifyStatus(run.status),
     terminal: isTerminalRunStatus(run.status),
     passed: run.status === 'passed',
     failureKind: classifyEvidenceFailureKind(run, summary, deterministicGates),
     failureMessage: firstFailureMessage(run, deterministicGates),
+    statusBreakdown,
     failedStepIds: summary.failedStepIds,
     timedOutStepIds: stepIdsWithStatus(run, 'timed_out'),
     cancelledStepIds: stepIdsWithStatus(run, 'cancelled'),
@@ -428,6 +439,41 @@ export function buildEvidenceOutcome(run: WorkflowRunEvidence): EvidenceOutcome 
     routing,
     narrative,
     summary,
+  };
+}
+
+/** Bucket explicit run and step statuses for reports and fix-loop routing. */
+export function buildStatusBreakdown(run: WorkflowRunEvidence): EvidenceStatusBreakdown {
+  const byStepStatus: Record<StepStatus, string[]> = {
+    pending: [],
+    running: [],
+    passed: [],
+    failed: [],
+    skipped: [],
+    cancelled: [],
+    timed_out: [],
+  };
+
+  for (const step of run.steps) {
+    byStepStatus[step.status].push(step.stepId);
+  }
+
+  return {
+    run: {
+      status: run.status,
+      class: classifyStatus(run.status),
+      terminal: isTerminalRunStatus(run.status),
+    },
+    byStepStatus,
+    terminalStepIds: [
+      ...byStepStatus.passed,
+      ...byStepStatus.failed,
+      ...byStepStatus.skipped,
+      ...byStepStatus.cancelled,
+      ...byStepStatus.timed_out,
+    ],
+    activeStepIds: byStepStatus.running,
+    incompleteStepIds: [...byStepStatus.pending, ...byStepStatus.running],
   };
 }
 
@@ -688,13 +734,38 @@ function isTerminalRunStatus(status: RunStatus): boolean {
   return status !== 'pending' && status !== 'running';
 }
 
+function classifyStatus(status: StepStatus | RunStatus): EvidenceStatusClass {
+  switch (status) {
+    case 'pending':
+      return 'queued';
+    case 'running':
+      return 'active';
+    case 'passed':
+      return 'success';
+    case 'failed':
+      return 'failure';
+    case 'skipped':
+      return 'neutral';
+    case 'cancelled':
+      return 'cancelled';
+    case 'timed_out':
+      return 'timeout';
+  }
+}
+
 function attachGateToStep(
   step: WorkflowStepEvidence,
   gate: DeterministicGateResult,
 ): WorkflowStepEvidence {
   // Gate verifications are promoted to step-level for backward compatibility,
-  // but gate artifacts are NOT copied to step.artifacts to avoid duplication
-  // in collectArtifactPaths which traverses both step.artifacts and
+  // so one gate command can appear as both a 'verification' and a
+  // 'deterministic_gate_verification' in collected commands. This semantic
+  // duplication is intentional — consumers that need only gate evidence should
+  // filter by source; consumers that need all step verifications get a flat
+  // list without extra traversal.
+  //
+  // Gate artifacts are NOT copied to step.artifacts to avoid duplication in
+  // collectArtifactPaths which traverses both step.artifacts and
   // step.deterministicGates[].artifacts independently.
   return {
     ...step,
@@ -866,6 +937,10 @@ function commandFromRetry(
   };
 }
 
+/** Map an artifact reference to a lightweight path record for outcome reports.
+ *  Intentionally drops `artifact.metadata` to keep report payloads small.
+ *  Consumers that need rich metadata should use the original run/step/gate
+ *  artifact arrays instead of the derived `EvidenceArtifactPath` list. */
 function artifactPath(
   artifact: WorkflowArtifactReference,
   step?: WorkflowStepEvidence,

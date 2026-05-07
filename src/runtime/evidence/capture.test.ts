@@ -490,6 +490,27 @@ describe('completeRun — deterministic gate authority', () => {
     expect(done.status).toBe('failed');
   });
 
+  it('classifies routing failure kind when a routing_assertion verification fails', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    let step = createStepEvidence({ stepId: 's-1', stepName: 'route-check' });
+    step = appendStepEvent(step, {
+      kind: 'verification',
+      result: {
+        type: 'routing_assertion',
+        passed: false,
+        expected: 'blue-green',
+        actual: 'canary',
+        message: 'unexpected routing decision',
+      },
+    });
+    step = completeStep(step, 'failed');
+    const done = completeRun({ ...run, steps: [step] });
+    const outcome = buildEvidenceOutcome(done);
+
+    expect(outcome.failureKind).toBe('routing');
+    expect(outcome.failureMessage).toBe('unexpected routing decision');
+  });
+
   it('remains passed when all gates pass', () => {
     const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
     const s1 = completeStep(createStepEvidence({ stepId: 's-1', stepName: 'a' }), 'passed');
@@ -821,6 +842,25 @@ describe('workflow evidence capture scenarios', () => {
       routeCount: 0,
     });
     expect(outcome.terminal).toBe(false);
+    expect(outcome.statusBreakdown).toEqual({
+      run: {
+        status: 'pending',
+        class: 'queued',
+        terminal: false,
+      },
+      byStepStatus: {
+        pending: [],
+        running: [],
+        passed: [],
+        failed: [],
+        skipped: [],
+        cancelled: [],
+        timed_out: [],
+      },
+      terminalStepIds: [],
+      activeStepIds: [],
+      incompleteStepIds: [],
+    });
     expect(outcome.commands).toEqual([]);
     expect(outcome.outputSnippets).toEqual([]);
   });
@@ -1087,6 +1127,10 @@ describe('workflow evidence capture scenarios', () => {
 
     const outcome = buildEvidenceOutcome(completeRun({ ...run, steps: [step] }));
 
+    expect(run.artifacts[0].path).toBe('.workflow-artifacts/signoff.md');
+    expect(run.logs[0].path).toBe('.workflow-artifacts/runner.log');
+    expect(step.artifacts[0].path).toBe('src/runtime/evidence/capture.test.ts');
+    expect(step.logs[0].path).toBe('.workflow-artifacts/vitest.log');
     expect(outcome.artifacts).toEqual([
       {
         path: '.workflow-artifacts/signoff.md',
@@ -1116,6 +1160,9 @@ describe('workflow evidence capture scenarios', () => {
     ]);
     expect(outcome.outputSnippets.map((snippet) => snippet.text)).not.toContain(
       '.workflow-artifacts/vitest.log',
+    );
+    expect(outcome.outputSnippets.map((snippet) => snippet.text)).not.toContain(
+      '.workflow-artifacts/runner.log',
     );
   });
 
@@ -1158,8 +1205,23 @@ describe('workflow evidence capture scenarios', () => {
       allDeterministicGatesPassed: false,
     });
     expect(outcome.terminal).toBe(false);
+    expect(outcome.failureKind).toBe('deterministic_gate');
+    expect(outcome.failureMessage).toBe('missing review artifact');
     expect(outcome.pendingStepIds).toEqual(['step-review']);
     expect(outcome.runningStepIds).toEqual(['step-fix']);
+    expect(outcome.statusBreakdown).toMatchObject({
+      run: {
+        status: 'running',
+        class: 'active',
+        terminal: false,
+      },
+      byStepStatus: {
+        pending: ['step-review'],
+        running: ['step-fix'],
+      },
+      activeStepIds: ['step-fix'],
+      incompleteStepIds: ['step-review', 'step-fix'],
+    });
     expect(outcome.deterministicGates).toEqual([
       expect.objectContaining({
         scope: 'run',
