@@ -4,6 +4,8 @@ export { runMasterExecution, DEFAULT_MASTER_EXECUTOR_OPTIONS } from './master-ex
 export type {
   ChildRunner,
   ChildWorkflowGate,
+  ChildWorkflowGateKind,
+  ChildWorkflowGateResult,
   ChildWorkflowPlan,
   ChildWorkflowRunResult,
   MasterChildStatus,
@@ -12,5 +14,7 @@ export type {
   MasterExecutorClassification,
   MasterExecutorDecision,
   MasterExecutorOptions,
+  PlannerConstraints,
+  PlannerDesiredSlice,
   PlannerInput,
 } from './types.js';

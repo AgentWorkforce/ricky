@@ -14,6 +14,7 @@ import type {
 import { selectPattern } from './pattern-selector.js';
 import { refineWithLlm } from './refine-with-llm.js';
 import { loadSkills } from './skill-loader.js';
+import { renderMasterExecutionWorkflow, shouldUseMasterExecutionWorkflow } from './master-workflow-renderer.js';
 import { renderWorkflow } from './template-renderer.js';
 import {
   applyPersonaArtifactToRenderedArtifact,
@@ -29,7 +30,15 @@ const MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 8;
 export function generate(input: GenerationInput): GenerationResult {
   const skillContext = loadSkills(input.spec, input.skillOverrides, input.templateOverride);
   const patternDecision = selectPattern(input.spec, input.patternOverride, skillContext);
-  const artifact = renderWorkflow({
+  const masterWorkflow = shouldUseMasterExecutionWorkflow(input.spec)
+    ? renderMasterExecutionWorkflow({
+        spec: input.spec,
+        pattern: patternDecision,
+        skills: skillContext,
+        artifactPath: input.artifactPath,
+      })
+    : null;
+  const artifact = masterWorkflow?.artifact ?? renderWorkflow({
     spec: input.spec,
     pattern: patternDecision,
     skills: skillContext,
@@ -37,7 +46,7 @@ export function generate(input: GenerationInput): GenerationResult {
   });
   let finalArtifact = artifact;
   let refinement = null;
-  if (input.refine) {
+  if (input.refine && !masterWorkflow) {
     const refined = refineWithLlm(input.spec, artifact, {
       model: input.refine.model,
       validate: (candidate) => validateGeneratedArtifact(candidate, patternDecision, skillContext, input.spec),
@@ -51,6 +60,7 @@ export function generate(input: GenerationInput): GenerationResult {
   return {
     success: validation.valid,
     artifact: finalArtifact,
+    ...(masterWorkflow ? { masterExecutionPlan: masterWorkflow.plan } : {}),
     patternDecision,
     skillContext,
     toolSelection: {
@@ -73,6 +83,9 @@ export function generate(input: GenerationInput): GenerationResult {
 
 export async function generateWithWorkforcePersona(input: GenerationInput): Promise<GenerationResult> {
   const baseResult = generate({ ...input, workforcePersonaWriter: false });
+  if (baseResult.masterExecutionPlan) {
+    return baseResult;
+  }
   if (input.workforcePersonaWriter === false || !baseResult.artifact || !baseResult.success) {
     return baseResult;
   }

@@ -42,8 +42,9 @@ export async function runMasterExecution(
       break;
     }
 
-    const readyChildren = wave.filter((child) => dependenciesSatisfied(child, finishedByChildId));
-    const blockedByDependency = wave.filter((child) => !dependenciesSatisfied(child, finishedByChildId));
+    const unfinishedWave = wave.filter((child) => !finishedByChildId.has(child.id));
+    const readyChildren = unfinishedWave.filter((child) => dependenciesSatisfied(child, finishedByChildId));
+    const blockedByDependency = unfinishedWave.filter((child) => !dependenciesSatisfied(child, finishedByChildId));
     for (const child of blockedByDependency) {
       const cancelled = cancelledRun(child, resolvedOptions, 'A dependency did not complete successfully.');
       childResults.push(cancelled);
@@ -55,15 +56,15 @@ export async function runMasterExecution(
         return;
       }
 
-      const resumeSkip = await maybeResumeSkip(child, resolvedOptions);
-      if (resumeSkip) {
-        childResults.push(resumeSkip);
-        finishedByChildId.set(child.id, resumeSkip);
-        return;
-      }
-
       const pending = startChild(child, resolvedOptions, activeControllers);
       try {
+        const resumeSkip = await maybeResumeSkip(child, resolvedOptions);
+        if (resumeSkip) {
+          childResults.push(resumeSkip);
+          finishedByChildId.set(child.id, resumeSkip);
+          return;
+        }
+
         const result = normalizeRunResult(await runner(child, {
           attempt: 1,
           resume: resolvedOptions.resume,
@@ -124,8 +125,15 @@ function resolveOptions(options: Partial<MasterExecutorOptions>): RuntimeOptions
 
   return {
     ...merged,
-    maxConcurrency: Math.max(1, Math.floor(merged.maxConcurrency)),
+    maxConcurrency: boundedConcurrency(merged.maxConcurrency),
   };
+}
+
+function boundedConcurrency(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_MASTER_EXECUTOR_OPTIONS.maxConcurrency;
+  }
+  return Math.max(1, Math.floor(value));
 }
 
 function executionWaves(children: readonly ChildWorkflowPlan[]): ChildWorkflowPlan[][] {
@@ -306,7 +314,7 @@ function failedRunFromError(
 
   return {
     childId: child.id,
-    status: 'failed',
+    status: hasEnvBlockHint(message) ? 'blocked' : 'failed',
     attempt: 1,
     startedAt: completedAtDate.toISOString(),
     completedAt: completedAtDate.toISOString(),
@@ -319,7 +327,7 @@ function failedRunFromError(
         .filter((gate) => gate.required)
         .map((gate) => ({ gateId: gate.id, kind: gate.kind, passed: false, detail: message })),
     },
-    errorMessage: message,
+    ...(hasEnvBlockHint(message) ? { blockedReason: message } : { errorMessage: message }),
   };
 }
 

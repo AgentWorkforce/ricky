@@ -58,7 +58,10 @@ describe('planMasterExecution', () => {
     expect(apiChild).toMatchObject({
       title: 'Implement billing API',
       targetFiles: ['src/product/billing/api.ts'],
-      allowedDirtyScope: ['src/product/billing/api.ts'],
+      allowedDirtyScope: [
+        'src/product/billing/api.ts',
+        '.workflow-artifacts/wave99-billing/implement-billing-api/signoff.md',
+      ],
       dependsOn: [],
       parallelizable: true,
       wave: 0,
@@ -126,6 +129,24 @@ describe('planMasterExecution', () => {
       ['telemetry', 1],
       ['insights', 2],
     ]);
+  });
+
+  it('promotes child-level ambiguities to the top-level plan', () => {
+    const plan = planMasterExecution({
+      title: 'Ambiguous dependency plan',
+      description: 'A child references an unknown dependency.',
+      desiredSlices: [
+        {
+          id: 'needs-missing',
+          title: 'Needs missing dependency',
+          targetFiles: ['src/needs.ts'],
+          dependsOn: ['missing-child'],
+        },
+      ],
+    });
+
+    expect(children(plan)[0].ambiguous?.reason).toContain('Unknown dependency: missing-child.');
+    expect(plan.ambiguous?.reason).toContain('Unknown dependency: missing-child.');
   });
 });
 
@@ -263,6 +284,111 @@ describe('runMasterExecution', () => {
       childId: target.id,
       missing: ['GITHUB_TOKEN'],
     });
+  });
+
+  it('classifies thrown missing environment errors as blocked', async () => {
+    const plan = singleChildPlan('Publish cloud workflow');
+    const target = children(plan)[0];
+
+    const result = await runMasterExecution(plan, async () => {
+      throw new Error('MISSING_ENV_VAR: GITHUB_TOKEN');
+    });
+
+    expect(result.decision).toEqual({
+      kind: 'blocked',
+      childId: target.id,
+      missing: ['GITHUB_TOKEN'],
+    });
+    expect(runFor(result, target.id)).toMatchObject({
+      status: 'blocked',
+      blockedReason: 'MISSING_ENV_VAR: GITHUB_TOKEN',
+    });
+  });
+
+  it('converts resume signoff reader failures into a child result', async () => {
+    const plan = singleChildPlan('Resume with unreadable signoff');
+    const target = children(plan)[0];
+
+    const result = await runMasterExecution(
+      plan,
+      async (plannedChild: ChildWorkflowPlan, ctx: RunnerContext) => passedRun(plannedChild, ctx.attempt),
+      {
+        resume: true,
+        signoffArtifactReader: async () => {
+          throw new Error('cannot read signoff');
+        },
+      },
+    );
+
+    expect(result.childResults).toHaveLength(1);
+    expect(runFor(result, target.id)).toMatchObject({
+      status: 'failed',
+      errorMessage: 'cannot read signoff',
+    });
+  });
+
+  it('does not duplicate cancelled children in continue mode', async () => {
+    const plan = planMasterExecution({
+      title: 'Continue after dependency failure',
+      description: 'A failed upstream cancels downstream once.',
+      desiredSlices: [
+        { id: 'upstream', title: 'Upstream', targetFiles: ['src/up.ts'] },
+        {
+          id: 'downstream',
+          title: 'Downstream',
+          targetFiles: ['src/down.ts'],
+          dependsOn: ['upstream'],
+        },
+      ],
+    });
+    const upstream = child(plan, 'upstream');
+
+    const result = await runMasterExecution(
+      plan,
+      async () => failedRun(upstream, {
+        signoffPresent: false,
+        errorMessage: 'unit test failed',
+      }),
+      { failurePolicy: 'continue' },
+    );
+
+    expect(result.childResults.filter((run) => run.childId === 'downstream')).toHaveLength(1);
+    expect(runFor(result, 'downstream').status).toBe('cancelled');
+  });
+
+  it('falls back to default bounded concurrency for non-finite maxConcurrency values', async () => {
+    const plan = planMasterExecution({
+      title: 'Non-finite concurrency',
+      description: 'Concurrency should stay bounded.',
+      desiredSlices: [
+        { id: 'one', title: 'One', targetFiles: ['src/one.ts'] },
+        { id: 'two', title: 'Two', targetFiles: ['src/two.ts'] },
+        { id: 'three', title: 'Three', targetFiles: ['src/three.ts'] },
+      ],
+    });
+    const controls = new Map<string, Deferred<void>>();
+    const starts: string[] = [];
+
+    const execution = runMasterExecution(
+      plan,
+      async (plannedChild: ChildWorkflowPlan, ctx: RunnerContext) => {
+        starts.push(plannedChild.id);
+        const control = deferred<void>();
+        controls.set(plannedChild.id, control);
+        await control.promise;
+        return passedRun(plannedChild, ctx.attempt);
+      },
+      { maxConcurrency: Number.POSITIVE_INFINITY },
+    );
+
+    await waitUntil(() => expect(starts).toHaveLength(2));
+    controls.get('one')?.resolve();
+    controls.get('two')?.resolve();
+    await waitUntil(() => expect(starts).toHaveLength(3));
+    controls.get('three')?.resolve();
+
+    const result = await execution;
+    expect(result.decision).toEqual({ kind: 'complete' });
   });
 
   it('only completes when every required gate for every required child passes', async () => {

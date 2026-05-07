@@ -64,6 +64,11 @@ export function planMasterExecution(input: PlannerInput): MasterExecutionPlan {
       forceSequential: sharedFileLaterIds.has(slice.id),
     }),
   );
+  planAmbiguities.push(
+    ...children
+      .map((child) => child.ambiguous?.reason)
+      .filter((reason): reason is string => Boolean(reason)),
+  );
 
   return {
     title: input.title,
@@ -192,7 +197,7 @@ function buildChildPlan(input: {
     ...(input.slice.input.summary ? { summary: input.slice.input.summary } : {}),
     workflowFilePath: `workflows/${input.wavePrefix}/${String(input.planIndex).padStart(2, '0')}-${input.slice.id}.ts`,
     targetFiles: input.slice.targetFiles,
-    allowedDirtyScope: input.slice.targetFiles,
+    allowedDirtyScope: [...input.slice.targetFiles, signoffArtifactPath],
     dependsOn: input.slice.dependsOn,
     parallelizable: input.slice.input.parallelizable === false ? false : !input.forceSequential,
     wave: input.slice.wave,
