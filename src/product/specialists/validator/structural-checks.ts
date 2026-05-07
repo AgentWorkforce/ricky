@@ -204,9 +204,11 @@ function checkVerificationLanguage(text: string, context: StructuralContext): St
 }
 
 function checkInitialSoftGate(text: string, context: StructuralContext): StructuralFinding {
-  const softLine = indexOfLine(context.lines, /failOnError\s*:\s*false|initial-soft|soft-validation|soft run|dry-run/i);
+  const softLine = indexOfLine(context.lines, /failOnError\s*:\s*false/);
+  const softBlock = stepBlockAtOrBefore(context.lines, softLine);
+  const softGateLooksInitial = /initial|soft|dry-run|dry run|validation/i.test(softBlock);
   const hardLine = indexOfLine(context.lines, /failOnError\s*:\s*true|final-hard|hard-gate/i);
-  const passed = softLine >= 0 && (hardLine < 0 || softLine <= hardLine);
+  const passed = softLine >= 0 && softGateLooksInitial && (hardLine < 0 || softLine <= hardLine);
   return finding({
     check: 'initial_soft_gate',
     passed,
@@ -220,12 +222,11 @@ function checkInitialSoftGate(text: string, context: StructuralContext): Structu
 }
 
 function checkFinalHardGate(text: string, context: StructuralContext): StructuralFinding {
-  const finalGateLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`][^'"`]*(final-hard|hard-gate|final[- ]validation|final[- ]validate|final-gate)[^'"`]*['"`]/i);
-  const finalPassLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]final-review-pass-gate['"`]|FINAL_REVIEW_[A-Z_]+_PASS/i);
-  const hardFailLine = indexOfLineAfter(context.lines, Math.max(finalGateLine, finalPassLine), /failOnError\s*:\s*true/);
-  const hasFinalHardName = finalGateLine >= 0;
-  const hasHardFailureSemantics = hardFailLine >= 0 || (finalGateLine >= 0 && context.lines.slice(finalGateLine, finalGateLine + 12).some((line) => /failOnError\s*:\s*true/.test(line)));
-  const passed = hasFinalHardName && hasHardFailureSemantics && (finalPassLine < 0 || finalGateLine > finalPassLine);
+  const finalPassLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]final-review-pass-gate['"`]/i);
+  const finalGateLine = indexOfLineAfter(context.lines, finalPassLine, /\.step\s*\(\s*['"`][^'"`]*(final-hard|hard-gate|final[- ]validation|final[- ]validate|final-gate)[^'"`]*['"`]/i);
+  const finalGateBlock = stepBlockFrom(context.lines, finalGateLine);
+  const hasHardFailureSemantics = /failOnError\s*:\s*true/.test(finalGateBlock);
+  const passed = finalPassLine >= 0 && finalGateLine > finalPassLine && hasHardFailureSemantics;
   return finding({
     check: 'final_hard_gate',
     passed,
@@ -239,11 +240,21 @@ function checkFinalHardGate(text: string, context: StructuralContext): Structura
 }
 
 function checkEightyToHundredLoop(text: string, context: StructuralContext): StructuralFinding {
-  const hasSoft = /failOnError\s*:\s*false|initial-soft|soft-validation|dry-run/i.test(text);
-  const hasFix = /fix-loop|post-fix|fixes|bounded fixes/i.test(text);
-  const hasFinalReview = /final-review|re-review|final re-review/i.test(text);
-  const hasHard = /failOnError\s*:\s*true|final-hard|hard-gate/i.test(text);
-  const passed = hasSoft && hasFix && hasFinalReview && hasHard;
+  const softLine = indexOfLine(context.lines, /failOnError\s*:\s*false/);
+  const fixLine = indexOfLineAfter(context.lines, softLine, /\.step\s*\(\s*['"`][^'"`]*(fix-loop|fixes|bounded-fix)[^'"`]*['"`]/i);
+  const postFixLine = indexOfLineAfter(context.lines, fixLine, /\.step\s*\(\s*['"`][^'"`]*post-fix[^'"`]*(validation|gate)?[^'"`]*['"`]/i);
+  const finalReviewLine = indexOfLineAfter(context.lines, postFixLine, /\.step\s*\(\s*['"`]final-review[^'"`]*['"`]/i);
+  const finalPassLine = indexOfLineAfter(context.lines, finalReviewLine, /\.step\s*\(\s*['"`]final-review-pass-gate['"`]/i);
+  const hardLine = indexOfLineAfter(context.lines, finalPassLine, /\.step\s*\(\s*['"`][^'"`]*(final-hard|hard-gate|final[- ]validation|final-gate)[^'"`]*['"`]/i);
+  const hardBlock = stepBlockFrom(context.lines, hardLine);
+  const passed =
+    /initial|soft|dry-run|dry run|validation/i.test(stepBlockAtOrBefore(context.lines, softLine)) &&
+    fixLine > softLine &&
+    postFixLine > fixLine &&
+    finalReviewLine > postFixLine &&
+    finalPassLine > finalReviewLine &&
+    hardLine > finalPassLine &&
+    /failOnError\s*:\s*true/.test(hardBlock);
   return finding({
     check: 'eighty_to_hundred_loop',
     passed,
@@ -415,6 +426,26 @@ function withWorkflowPath(finding: StructuralFinding, workflowPath: string | und
         }
       : undefined,
   };
+}
+
+function stepBlockAtOrBefore(lines: string[], lineIndex: number): string {
+  if (lineIndex < 0) return '';
+  const stepStart = findStepStartAtOrBefore(lines, lineIndex);
+  return stepBlockFrom(lines, stepStart);
+}
+
+function stepBlockFrom(lines: string[], startLine: number): string {
+  if (startLine < 0) return '';
+  const nextStep = indexOfLineAfter(lines, startLine, /\.step\s*\(/);
+  const endLine = nextStep >= 0 ? nextStep : Math.min(lines.length, startLine + 40);
+  return lines.slice(startLine, endLine).join('\n');
+}
+
+function findStepStartAtOrBefore(lines: string[], lineIndex: number): number {
+  for (let index = lineIndex; index >= 0; index -= 1) {
+    if (/\.step\s*\(/.test(lines[index] ?? '')) return index;
+  }
+  return lineIndex;
 }
 
 function firstLocation(lines: string[], pattern: RegExp): FindingLocation | undefined {

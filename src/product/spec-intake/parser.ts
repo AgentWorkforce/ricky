@@ -31,6 +31,11 @@ const INTENT_KEYWORDS: Record<Exclude<IntentKind, 'clarify' | 'unknown'>, string
     'write',
     'build',
     'author',
+    'make',
+    'workflow for',
+    'workflow to',
+    'workflow that',
+    'need a workflow',
     'new workflow',
     'new ricky workflow',
     'build a workflow',
@@ -79,6 +84,8 @@ const INTENT_KEYWORDS: Record<Exclude<IntentKind, 'clarify' | 'unknown'>, string
     'launch',
     'start',
     'kick off',
+    'invoke',
+    'ready to run',
     'rerun',
     'restart',
     'ready artifact',
@@ -108,9 +115,35 @@ const MCP_TOOL_INTENTS: Record<string, IntentKind> = {
 };
 
 const PATH_PATTERN = /(?:^|\s)([./~]?[\w@.-]+(?:\/[\w@.-]+)+(?:\.[A-Za-z0-9]+)?)/g;
+const DESCRIPTION_KEYS = [
+  'description',
+  'prompt',
+  'spec',
+  'text',
+  'message',
+  'input',
+  'request',
+  'summary',
+  'title',
+  'name',
+  'goal',
+  'objective',
+  'instructions',
+  'instruction',
+  'handoff',
+  'claudeHandoff',
+  'claude_handoff',
+  'cliInput',
+  'cli_input',
+  'commandText',
+  'command_text',
+  'task',
+];
 const STRUCTURED_TEXT_KEYS = [
   'path',
   'file',
+  'text',
+  'title',
   'workflowFile',
   'workflowPath',
   'artifactPath',
@@ -120,6 +153,11 @@ const STRUCTURED_TEXT_KEYS = [
   'description',
   'summary',
   'name',
+  'goal',
+  'objective',
+  'instructions',
+  'handoff',
+  'task',
   'constraint',
   'requirement',
   'gate',
@@ -223,6 +261,12 @@ function detectIntentFromRecord(data: Record<string, unknown>, fallbackText: str
         'workflow_spec',
         'prompt',
         'description',
+        'title',
+        'text',
+        'message',
+        'input',
+        'handoff',
+        'claudeHandoff',
         'goal',
         'objective',
         'evidence',
@@ -263,6 +307,19 @@ export function detectIntent(text: string): IntentSignal {
       primary: 'debug',
       secondary: matches.find((match) => match.intent !== 'debug')?.intent,
       signals: failedRunSignals,
+    };
+  }
+
+  const executeSignals = matches.find((match) => match.intent === 'execute')?.signals ?? [];
+  if (
+    executeSignals.length > 0 &&
+    !explicitGenerateWorkflow &&
+    !/\b(?:generate|create|build|author|write|scaffold|make)\b/.test(haystack)
+  ) {
+    return {
+      primary: 'execute',
+      secondary: matches.find((match) => match.intent !== 'execute')?.intent,
+      signals: executeSignals,
     };
   }
 
@@ -341,9 +398,9 @@ function extractFieldsFromRecord(
     readRecord(requestRecord, ['spec', 'workflowSpec', 'workflow_spec', 'body']) ??
     readRecord(data, ['spec', 'workflowSpec', 'workflow_spec']) ??
     requestRecord;
-  const description =
-    readString(specRecord, ['description', 'prompt', 'spec', 'text', 'request', 'summary', 'goal', 'objective']) ??
-    readString(data, ['description', 'prompt', 'spec', 'text', 'request', 'summary', 'goal', 'objective']) ??
+  let description =
+    readString(specRecord, DESCRIPTION_KEYS) ??
+    readString(data, DESCRIPTION_KEYS) ??
     '';
   const freeText = [description, JSON.stringify(data)].join('\n');
   const targetFiles = [
@@ -378,6 +435,8 @@ function extractFieldsFromRecord(
       'ready_artifact',
       'path',
     ]),
+    ...readStringArray(specRecord, ['readyWorkflow', 'ready_workflow', 'providedArtifact', 'provided_artifact']),
+    ...readStringArray(data, ['readyWorkflow', 'ready_workflow', 'providedArtifact', 'provided_artifact']),
     ...extractTargetFiles(description),
   ];
   const constraints = [
@@ -418,6 +477,10 @@ function extractFieldsFromRecord(
       'gates',
       'doneWhen',
       'done_when',
+      'successCriteria',
+      'success_criteria',
+      'definitionOfDone',
+      'definition_of_done',
     ]),
     ...readStringArray(data, [
       'acceptanceGates',
@@ -428,47 +491,66 @@ function extractFieldsFromRecord(
       'gates',
       'doneWhen',
       'done_when',
+      'successCriteria',
+      'success_criteria',
+      'definitionOfDone',
+      'definition_of_done',
     ]),
     ...extractAcceptanceGates(freeText),
   ];
-
-  const warnings: string[] = [];
-  if (!description) {
-    warnings.push('Structured payload did not include a recognizable description, prompt, spec, text, or request field.');
-  }
 
   const targetRepo =
     readString(specRecord, ['targetRepo', 'target_repo', 'repo', 'repository']) ??
     readString(data, ['targetRepo', 'target_repo', 'repo', 'repository']) ??
     extractTargetRepo(freeText);
 
+  const targetContext =
+    readString(specRecord, [
+      'targetContext',
+      'target_context',
+      'context',
+      'workspace',
+      'project',
+      'runId',
+      'failedRunId',
+      'workflowRunId',
+      'workflowId',
+      'workflowName',
+    ]) ??
+    readString(data, [
+      'targetContext',
+      'target_context',
+      'context',
+      'workspace',
+      'project',
+      'runId',
+      'failedRunId',
+      'workflowRunId',
+      'workflowId',
+      'workflowName',
+    ]) ??
+    extractTargetContext(freeText);
+
+  if (!description) {
+    description = synthesizeDescription(data, specRecord, {
+      targetRepo,
+      targetContext,
+      targetFiles,
+      constraints,
+      evidenceRequirements,
+      acceptanceGates,
+    });
+  }
+
+  const warnings: string[] = [];
+  if (!description) {
+    warnings.push('Structured payload did not include a recognizable description, prompt, spec, text, request, artifact, or run field.');
+  }
+
   return {
     description,
     targetRepo,
-    targetContext:
-      readString(specRecord, [
-        'targetContext',
-        'target_context',
-        'context',
-        'workspace',
-        'project',
-        'runId',
-        'failedRunId',
-        'workflowId',
-        'workflowName',
-      ]) ??
-      readString(data, [
-        'targetContext',
-        'target_context',
-        'context',
-        'workspace',
-        'project',
-        'runId',
-        'failedRunId',
-        'workflowId',
-        'workflowName',
-      ]) ??
-      extractTargetContext(freeText),
+    targetContext,
     targetFiles: excludeRepoSlug(dedupe(targetFiles), targetRepo),
     constraints: dedupe(constraints),
     evidenceRequirements: dedupe(evidenceRequirements),
@@ -594,13 +676,18 @@ function buildProviderContext(payload: RawSpecPayload): ProviderContext {
 }
 
 function extractTargetRepo(text: string): string | undefined {
-  const repoMatch = text.match(/\b(?:repo|repository)\s*[:=]?\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
+  const repoMatch =
+    text.match(/\b(?:repo|repository)\s*[:=]?\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i) ??
+    text.match(/\bgithub\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
   return repoMatch?.[1];
 }
 
 function extractTargetContext(text: string): string | undefined {
   const contextMatch = text.match(/\b(?:context|project|workspace)\s*[:=]\s*([^\n.;]+)/i);
-  return contextMatch?.[1]?.trim();
+  if (contextMatch?.[1]) return contextMatch[1].trim();
+
+  const runMatch = text.match(/\b(?:failed\s+)?(?:workflow\s+)?run(?:\s+id)?\s*[:=]?\s*([A-Za-z0-9_.:-]+)/i);
+  return runMatch?.[1] ? `run:${runMatch[1]}` : undefined;
 }
 
 function extractTargetFiles(text: string): string[] {
@@ -655,36 +742,55 @@ function readString(data: Record<string, unknown>, keys: string[]): string | und
     const value = data[key];
     if (typeof value === 'string' && value.trim()) return value.trim();
     if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (Array.isArray(value)) {
+      const text = value
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (isRecord(item)) return readString(item, STRUCTURED_TEXT_KEYS);
+          return undefined;
+        })
+        .filter((item): item is string => Boolean(item))
+        .join('\n');
+      if (text.trim()) return text.trim();
+    }
   }
   return undefined;
 }
 
 function readStringArray(data: Record<string, unknown>, keys: string[]): string[] {
+  const values: string[] = [];
   for (const key of keys) {
     const value = data[key];
     if (Array.isArray(value)) {
-      return value
-        .map((item) =>
+      values.push(
+        ...value.map((item) =>
           typeof item === 'string'
             ? item
             : isRecord(item)
               ? readString(item, STRUCTURED_TEXT_KEYS)
               : undefined,
         )
-        .filter((item): item is string => Boolean(item));
+          .filter((item): item is string => Boolean(item)),
+      );
+      continue;
     }
     if (isRecord(value)) {
       const nested = readString(value, STRUCTURED_TEXT_KEYS);
-      if (nested) return [nested];
+      if (nested) values.push(nested);
+      continue;
     }
-    if (typeof value === 'string' && value.trim()) return [value.trim()];
+    if (typeof value === 'string' && value.trim()) values.push(value.trim());
   }
-  return [];
+  return dedupe(values);
 }
 
 function runEvidenceRequirement(data: Record<string, unknown>): string[] {
-  const runId = readString(data, ['failedRunId', 'runId', 'workflowRunId']);
-  return runId ? [`Failed run evidence must be available for run ${runId}.`] : [];
+  const runId = readString(data, ['failedRunId', 'failed_run_id', 'runId', 'run_id', 'workflowRunId', 'workflow_run_id']);
+  const logPath = readString(data, ['logPath', 'log_path', 'logsPath', 'logs_path', 'evidencePath', 'evidence_path']);
+  return [
+    runId ? `Failed run evidence must be available for run ${runId}.` : undefined,
+    logPath ? `Failure evidence is available at ${logPath}.` : undefined,
+  ].filter((requirement): requirement is string => Boolean(requirement));
 }
 
 function stringifySelected(data: Record<string, unknown>, keys: string[]): string {
@@ -710,6 +816,55 @@ function dedupe(values: string[]): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function synthesizeDescription(
+  data: Record<string, unknown>,
+  specRecord: Record<string, unknown>,
+  fields: {
+    targetRepo?: string;
+    targetContext?: string;
+    targetFiles: string[];
+    constraints: string[];
+    evidenceRequirements: string[];
+    acceptanceGates: string[];
+  },
+): string {
+  const explicitIntent = readString(data, ['intent', 'action', 'route', 'target']) ??
+    readString(specRecord, ['intent', 'action', 'route', 'target']);
+  const runId = readString(data, ['failedRunId', 'failed_run_id', 'runId', 'run_id', 'workflowRunId', 'workflow_run_id']) ??
+    readString(specRecord, ['failedRunId', 'failed_run_id', 'runId', 'run_id', 'workflowRunId', 'workflow_run_id']);
+  const artifact = fields.targetFiles.find((file) => isWorkflowArtifact(file)) ?? fields.targetFiles[0];
+  const evidenceRequirements = dedupe(fields.evidenceRequirements);
+  const acceptanceGates = dedupe(fields.acceptanceGates);
+  const constraints = dedupe(fields.constraints);
+  const parts: string[] = [];
+
+  const normalizedIntent = explicitIntent ? normalizeIntent(explicitIntent) : 'unknown';
+  if (normalizedIntent !== 'unknown') parts.push(`${capitalize(normalizedIntent)} Ricky workflow request.`);
+  if (artifact) parts.push(`Target artifact: ${artifact}.`);
+  if (runId) parts.push(`Failed run ID: ${runId}.`);
+  if (fields.targetRepo) parts.push(`Target repo: ${fields.targetRepo}.`);
+  if (fields.targetContext) parts.push(`Target context: ${fields.targetContext}.`);
+  if (evidenceRequirements.length > 0) {
+    parts.push(`Required evidence: ${evidenceRequirements.join('; ')}`);
+  }
+  if (acceptanceGates.length > 0) {
+    parts.push(`Acceptance criteria: ${acceptanceGates.join('; ')}`);
+  }
+  if (constraints.length > 0) {
+    parts.push(`Constraints: ${constraints.join('; ')}`);
+  }
+
+  return parts.join(' ').trim();
+}
+
+function isWorkflowArtifact(value: string): boolean {
+  return /(?:^|\/)workflows\/.+\.(?:ts|js|yaml|yml)$|\.workflow\.(?:ts|js|yaml|yml)$/i.test(value);
+}
+
+function capitalize(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
 function excludeRepoSlug(files: string[], targetRepo: string | undefined): string[] {
