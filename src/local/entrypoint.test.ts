@@ -2206,6 +2206,32 @@ describe('runLocal', () => {
     expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
   });
 
+  it('routes a non-executable CLI specFile to generate even when the spec body mentions a workflow path', async () => {
+    const localExecutor = memoryLocalExecutorOptions();
+    const designDoc = [
+      '# Relay-backed review runtime',
+      '',
+      'The durable deep-review path in `workflows/runtime/deep-review-pr.ts` is the foundation we want to extend.',
+      'Run, launch, and start references are scattered through the runtime narrative below.',
+      'Author a workflow that wires the new runtime end-to-end.',
+    ].join('\n');
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: designDoc,
+        specFile: '/specs/relay-backed-review-runtime-spec.md',
+        stageMode: 'generate',
+        cliMetadata: { argv: ['ricky', '--mode', 'local', '--spec-file', '/specs/relay-backed-review-runtime-spec.md'] },
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.logs.some((l) => l.includes('[local] spec intake route: generate'))).toBe(true);
+    expect(result.logs.some((l) => l.includes('[local] spec intake route: clarify'))).toBe(false);
+    expect(result.logs.some((l) => l.includes('[local] workflow generation: passed'))).toBe(true);
+  });
+
   it('returns local artifact and runtime log shape for an injected runtime adapter', async () => {
     const localExecutor = memoryLocalExecutorOptions({
       stdout: ['local workflow completed'],

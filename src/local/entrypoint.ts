@@ -1375,13 +1375,19 @@ function toRawSpecPayload(
     };
   }
 
-  // Explicit CLI description handoff — the user handed over prose, not a
-  // workflow path. Bypass the keyword-based intent classifier (which
+  // Explicit CLI description handoff — the user handed Ricky prose (or a
+  // spec file) rather than an executable workflow path, so the request is
+  // to author one. Bypass the keyword-based intent classifier, which
   // over-fires on words like "run" / "execute" that appear naturally in
-  // feature specs) and route straight to generate. Only applies when the
-  // spec text contains no workflow file reference; otherwise the spec is
-  // a "run X" request and the natural-language classifier handles it.
-  if (request.source === 'cli' && !mentionsWorkflowFile(request.spec)) {
+  // feature specs.
+  //
+  // When --spec-file points at a non-executable path, force generate
+  // regardless of what the file mentions: a workflow path inside a design
+  // doc is context, not an invocation target (executable specPaths are
+  // already handled above). For inline --spec prose, keep the older guard
+  // so "run workflows/foo.ts" still flows to the natural-language
+  // classifier.
+  if (request.source === 'cli' && (request.specPath || !mentionsWorkflowFile(request.spec))) {
     return {
       ...base,
       kind: 'structured_json',
