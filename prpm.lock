@@ -17,9 +17,9 @@
       }
     },
     "@agent-relay/writing-agent-relay-workflows#codex": {
-      "version": "1.6.1",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.1.tar.gz",
-      "integrity": "sha256-50db14f2519fa24013e49a91652ec692956b96a1cf1705edb5fa1398048d6524",
+      "version": "1.6.2",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.2.tar.gz",
+      "integrity": "sha256-2394f6b0cd6ef65e871720646d23b9406a2193a314bd82e1f9a6eb0416c672ed",
       "format": "codex",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -83,9 +83,9 @@
       }
     },
     "@agent-relay/writing-agent-relay-workflows#claude": {
-      "version": "1.6.1",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.1.tar.gz",
-      "integrity": "sha256-50db14f2519fa24013e49a91652ec692956b96a1cf1705edb5fa1398048d6524",
+      "version": "1.6.2",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.2.tar.gz",
+      "integrity": "sha256-2394f6b0cd6ef65e871720646d23b9406a2193a314bd82e1f9a6eb0416c672ed",
       "format": "claude",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -93,7 +93,7 @@
       "installedPath": ".claude/skills/writing-agent-relay-workflows/SKILL.md"
     }
   },
-  "generated": "2026-05-05T19:19:21.631Z",
+  "generated": "2026-05-07T12:22:44.425Z",
   "collections": {
     "agent-relay-starter": {
       "name_slug": "agent-relay-starter",
