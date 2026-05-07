@@ -933,6 +933,59 @@ describe('LocalCoordinator', () => {
     );
   });
 
+  it('records generated workflow active and terminal evidence through only the injected runner', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-generated-injected-evidence',
+      workflowFile: 'generated/evidence-workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { workflowId: 'generated-evidence-workflow' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(invocations).toHaveLength(1);
+    expect(coordinator.getActiveRun('run-generated-injected-evidence')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/evidence-workflow.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      metadata: { workflowId: 'generated-evidence-workflow' },
+    });
+
+    invocations[0].emitStdout('{"event":"started"}');
+    invocations[0].emitStderr('debug warning');
+    invocations[0].complete(0);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('passed');
+    expect(result.exitCode).toBe(0);
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/evidence-workflow.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+    expect(result.stdout).toEqual(['{"event":"started"}']);
+    expect(result.stderr).toEqual(['debug warning']);
+    expect(result.metadata).toEqual({ workflowId: 'generated-evidence-workflow' });
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+  });
+
   it('returns failed generated workflow evidence through the injected runner for debugger analysis', async () => {
     const { runner, run, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
