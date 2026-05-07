@@ -49,7 +49,7 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
 
 // ── Step overflow threshold ──────────────────────────────────────────
 
-const RETRY_OVERFLOW_THRESHOLD = 5;
+export const RETRY_OVERFLOW_THRESHOLD = 5;
 
 // ── Public API ───────────────────────────────────────────────────────
 
@@ -177,6 +177,16 @@ function classifyFromSummaryOnly(summary: EvidenceSummary): FailureClassificatio
       strength: Confidence.High,
     });
     detected.push(FailureClass.Timeout);
+  }
+
+  // Environment errors from summary-only evidence
+  if (summary.firstError && matchesEnvironmentPattern(summary.firstError)) {
+    signals.push({
+      observation: `First error matches environment pattern: ${truncate(summary.firstError, 120)}`,
+      source: 'run-summary',
+      strength: Confidence.High,
+    });
+    detected.push(FailureClass.EnvironmentError);
   }
 
   // Deadlock from summary (all non-terminal)
@@ -338,6 +348,7 @@ function detectEnvironmentError(
     // Scan gate and verification stderr/stdout excerpts
     found = scanGatesForEnvErrors(step.deterministicGates, `step:${step.stepId}`, signals) || found;
     found = scanVerificationsForEnvErrors(step.verifications, `step:${step.stepId}`, signals) || found;
+    found = scanRetriesForEnvErrors(step, signals) || found;
   }
 
   // Scan step log excerpts
@@ -448,12 +459,27 @@ function detectAgentDrift(
     // but verifications still failed
     const hasPassingExecution = stepHasPassingExecution(step);
     const hasFailingVerification = step.verifications.some((v) => !v.passed);
+    const hasVerificationSuccess = step.verifications.some((v) => v.passed);
+    const hasGateSuccess = step.deterministicGates.some((gate) => gate.passed || gate.exitCode === 0);
+    const hasRepeatedNarrativeWithoutProof =
+      step.narrative.length >= 2 &&
+      step.artifacts.length === 0 &&
+      step.logs.length === 0 &&
+      !hasVerificationSuccess &&
+      !hasGateSuccess;
 
     if (hasPassingExecution && hasFailingVerification) {
       signals.push({
         observation: `Step "${step.stepName}" had successful execution but failed verification — agent produced output that didn't meet the step contract`,
         source: `step:${step.stepId}`,
         strength: Confidence.High,
+      });
+      found = true;
+    } else if (hasRepeatedNarrativeWithoutProof) {
+      signals.push({
+        observation: `Step "${step.stepName}" repeated agent narrative without artifacts, logs, or verification success — likely step contract drift`,
+        source: `step:${step.stepId}`,
+        strength: Confidence.Medium,
       });
       found = true;
     }
@@ -625,6 +651,33 @@ function scanVerificationsForEnvErrors(
         found = true;
       }
     }
+  }
+  return found;
+}
+
+function scanRetriesForEnvErrors(
+  step: WorkflowStepEvidence,
+  signals: EvidenceSignal[],
+): boolean {
+  let found = false;
+  for (const retry of step.retries) {
+    const texts = [retry.error, retry.stderrExcerpt, retry.stdoutExcerpt, retry.outputExcerpt].filter(Boolean) as string[];
+    for (const text of texts) {
+      if (matchesEnvironmentPattern(text)) {
+        signals.push({
+          observation: `Retry ${retry.attempt} for step "${step.stepName}" matches environment error: ${truncate(text, 120)}`,
+          source: `step:${step.stepId}/retry:${retry.attempt}`,
+          strength: Confidence.High,
+        });
+        found = true;
+      }
+    }
+
+    found = scanVerificationsForEnvErrors(
+      retry.verifications ?? [],
+      `step:${step.stepId}/retry:${retry.attempt}`,
+      signals,
+    ) || found;
   }
   return found;
 }

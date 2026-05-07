@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { classifyFailure, classifyFromSummary } from './classifier.js';
+import { classifyFailure, classifyFromSummary, RETRY_OVERFLOW_THRESHOLD } from './classifier.js';
 import {
   createRunEvidence,
   createStepEvidence,
@@ -506,12 +506,11 @@ describe('deadlock classification', () => {
 // ── Step Overflow ────────────────────────────────────────────────────
 
 describe('step overflow classification', () => {
-  it('classifies when retries exceed threshold', () => {
+  it('classifies when retries reach the overflow threshold', () => {
     let run = makeRun();
     let step = makeStep();
 
-    // Add many retries
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 1; i <= RETRY_OVERFLOW_THRESHOLD; i++) {
       step = appendStepEvent(step, {
         kind: 'retry',
         retry: {
@@ -572,6 +571,12 @@ describe('step overflow classification', () => {
 
     const result = classifyFailure(run);
     expect(result.failureClass).toBe(FailureClass.StepOverflow);
+    expect(result.signals).toContainEqual(
+      expect.objectContaining({
+        source: 'step-overflow:run-summary',
+        observation: expect.stringContaining(`threshold of ${RETRY_OVERFLOW_THRESHOLD}`),
+      }),
+    );
   });
 });
 
