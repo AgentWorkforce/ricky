@@ -33,6 +33,8 @@ export function blockingClarificationQuestions(questions: ClarificationQuestion[
 }
 
 function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
+  if (/\b(?:clarification answers|resolved clarifications):/i.test(text)) return [];
+
   const lower = text.toLowerCase();
   const unresolvedMarkers = [
     /\bopen questions?\b/,
@@ -46,10 +48,9 @@ function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
   ];
   if (!unresolvedMarkers.some((pattern) => pattern.test(lower))) return [];
 
-  const questionLines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim().replace(/^[-*]\s*/, ''))
-    .filter((line) => line.endsWith('?'))
+  const questionLines = openQuestionLines(text)
+    .map(questionFromOpenQuestionLine)
+    .filter((line): line is string => Boolean(line))
     .slice(0, 3);
 
   if (questionLines.length > 0) {
@@ -67,6 +68,68 @@ function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
     reason: 'The spec contains explicit unresolved markers such as open questions, TBD, or unclear requirements.',
     blocking: true,
   }];
+}
+
+function openQuestionLines(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  const questionLines: string[] = [];
+  let inOpenQuestionSection = false;
+
+  for (const rawLine of lines) {
+    const line = stripListMarker(rawLine.trim());
+    if (!line) {
+      inOpenQuestionSection = false;
+      continue;
+    }
+
+    if (/^(#{1,6}\s*)?(open questions?|questions?|clarifications needed|unresolved|tbd)\s*:?\s*$/i.test(line)) {
+      inOpenQuestionSection = true;
+      continue;
+    }
+
+    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line) && !/^(tbd|todo|unclear|unspecified|open question)/i.test(line)) {
+      inOpenQuestionSection = false;
+    }
+
+    const explicitQuestion = line.endsWith('?');
+    const unresolvedItem = /^(?:tbd|todo|unclear|unspecified|not sure|decide later|open question)\b/i.test(line) ||
+      /\b(?:tbd|unclear|unspecified|not sure|decide later|\?\?\?)\b/i.test(line);
+    if (explicitQuestion || inOpenQuestionSection || unresolvedItem) {
+      questionLines.push(line);
+    }
+  }
+
+  return questionLines;
+}
+
+function questionFromOpenQuestionLine(line: string): string | null {
+  const cleaned = stripListMarker(line)
+    .replace(/^(?:open question|question|tbd|todo|unclear|unspecified|not sure|decide later)\s*[:—-]?\s*/i, '')
+    .replace(/^todo:\s*(?:decide|choose|clarify|ask)\s*[:—-]?\s*/i, '')
+    .trim();
+  if (!cleaned || /^open questions?$/i.test(cleaned)) return null;
+  if (cleaned.endsWith('?')) return cleaned;
+
+  const whether = cleaned.match(/^whether\s+(.+)$/i);
+  if (whether) return `Should ${lowercaseFirst(whether[1])}?`;
+
+  if (/^(?:decide|choose|clarify|confirm|select)\b/i.test(cleaned)) {
+    return `Please clarify: ${cleaned.replace(/[.。]+$/, '')}?`;
+  }
+
+  return `Please clarify: ${cleaned.replace(/[.。]+$/, '')}?`;
+}
+
+function stripListMarker(line: string): string {
+  return line
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\d+[.)]\s+/, '')
+    .replace(/^\[[ xX]\]\s+/, '')
+    .trim();
+}
+
+function lowercaseFirst(value: string): string {
+  return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function executionModeConflictQuestion(

@@ -339,6 +339,53 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.suggestedFollowUp).toContain('structured clarification questions');
   });
 
+  it('turns unresolved open-question bullets into concrete clarification questions', () => {
+    const result = intake(
+      natural(
+        [
+          'Generate a workflow for Slack migration.',
+          '',
+          'Open questions:',
+          '- TBD: choose direct Slack OAuth or Nango provider credentials',
+          '- Unclear: who owns final rollout signoff',
+        ].join('\n'),
+      ),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.clarificationQuestions).toEqual([
+      expect.objectContaining({
+        id: 'open-question-1',
+        question: 'Please clarify: choose direct Slack OAuth or Nango provider credentials?',
+        blocking: true,
+      }),
+      expect.objectContaining({
+        id: 'open-question-2',
+        question: 'Please clarify: who owns final rollout signoff?',
+        blocking: true,
+      }),
+    ]);
+  });
+
+  it('treats appended clarification answers as resolving explicit open-question markers', () => {
+    const result = intake(
+      natural(
+        [
+          'Generate a workflow for Slack migration.',
+          '',
+          'Open questions:',
+          '- TBD: choose direct Slack OAuth or Nango provider credentials',
+          '',
+          'Clarification answers:',
+          '- Please clarify: choose direct Slack OAuth or Nango provider credentials?: Use Nango provider credentials.',
+        ].join('\n'),
+      ),
+    );
+
+    expect(result.clarificationQuestions).toEqual([]);
+    expect(result.routing?.target).toBe('generate');
+  });
+
   it('asks for a side-effect boundary before generating risky workflows', () => {
     const result = intake(
       natural('Generate a workflow that deletes obsolete files, commits the cleanup, and pushes the branch.'),

@@ -29,7 +29,7 @@ import type {
 import type { CloudWorkflowSummary } from '../flows/workflow-summary.js';
 import type { LocalWorkflowFlowDeps, LocalWorkflowFlowResult } from '../flows/local-workflow-flow.js';
 import type { LocalExecutor, LocalEntrypointOptions, LocalExecutorOptions, LocalResponse } from '../../../local/entrypoint.js';
-import type { RawHandoff } from '../../../local/request-normalizer.js';
+import type { RawHandoff, SpecInput, StructuredSpec } from '../../../local/request-normalizer.js';
 import type { Diagnosis, DiagnosticSignal } from '../../../runtime/diagnostics/failure-diagnosis.js';
 import type { ConnectProviderOptions, ConnectProviderResult, StoredAuth, WhoAmIResponse } from '@agent-relay/cloud';
 
@@ -53,11 +53,14 @@ import { runSpecIntakeFlow, type CapturedWorkflowSpec, type SpecIntakePrompts } 
 import {
   createInquirerPromptKit,
   isPromptCancellation,
+  PromptCancelledError,
   type PromptKit,
 } from '../prompts/index.js';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
+import { input as inquirerInput } from '@inquirer/prompts';
+import type { ClarificationQuestion } from '../../../product/spec-intake/index.js';
 
 // ---------------------------------------------------------------------------
 // Interactive CLI result contract
@@ -137,6 +140,16 @@ export interface InteractiveCliDeps extends CloudWorkflowFlowDeps {
 
   /** The raw handoff to execute (spec, source, mode). */
   handoff?: RawHandoff;
+
+  /** Whether a direct local handoff may ask dynamic clarification questions before retrying generation. */
+  allowClarificationPrompts?: boolean;
+
+  /** Optional injected clarification answer prompt for deterministic tests and alternate shells. */
+  inputClarificationAnswer?: (input: {
+    question: ClarificationQuestion;
+    index: number;
+    total: number;
+  }) => Promise<string>;
 
   /** Cloud request context — required when mode is 'cloud'. */
   cloudRequest?: CloudGenerateRequest;
@@ -282,8 +295,7 @@ async function executeLocalPath(
 
   const invocationRoot = resolveLocalInvocationRoot(deps);
   const handoff = withInvocationRoot(deps.handoff, invocationRoot);
-
-  const localResult = await runLocal(handoff, {
+  const localOptions = {
     executor: deps.localExecutor,
     ...(deps.localProgress ? { onProgress: deps.localProgress } : {}),
     ...(deps.localRuntimeOutput ? { onRuntimeOutput: deps.localRuntimeOutput } : {}),
@@ -293,7 +305,16 @@ async function executeLocalPath(
           cwd: invocationRoot,
           returnGeneratedArtifactOnly: handoff.stageMode !== 'run',
         }),
-  });
+  };
+
+  let localResult = await runLocal(handoff, localOptions);
+  if (canPromptForClarification(deps, localResult)) {
+    const answers = await collectClarificationAnswers(deps, localResult.clarificationQuestions ?? []);
+    if (answers.length > 0) {
+      const clarifiedHandoff = appendClarificationAnswers(handoff, answers);
+      localResult = await runLocal(clarifiedHandoff, localOptions);
+    }
+  }
 
   const diagnoses: Diagnosis[] = [];
   const guidance: string[] = [];
@@ -322,6 +343,115 @@ async function executeLocalPath(
   }
 
   return { localResult, diagnoses, guidance, awaitingInput: false };
+}
+
+interface ClarificationAnswer {
+  question: ClarificationQuestion;
+  answer: string;
+}
+
+function canPromptForClarification(deps: InteractiveCliDeps, localResult: LocalResponse): boolean {
+  if (deps.allowClarificationPrompts === false) return false;
+  if (localResult.generation?.status !== 'needs_clarification') return false;
+  if ((localResult.clarificationQuestions?.length ?? 0) === 0) return false;
+  if (deps.inputClarificationAnswer) return true;
+
+  const input = deps.input ?? process.stdin;
+  const output = deps.output ?? process.stdout;
+  return ownsInteractiveTerminal(deps, input, output);
+}
+
+async function collectClarificationAnswers(
+  deps: InteractiveCliDeps,
+  questions: ClarificationQuestion[],
+): Promise<ClarificationAnswer[]> {
+  const answers: ClarificationAnswer[] = [];
+  for (const [index, question] of questions.entries()) {
+    const answer = deps.inputClarificationAnswer
+      ? await deps.inputClarificationAnswer({ question, index: index + 1, total: questions.length })
+      : await inputClarificationAnswer(deps, question, index + 1, questions.length);
+    if (answer.trim()) {
+      answers.push({ question, answer: answer.trim() });
+    }
+  }
+  return answers;
+}
+
+async function inputClarificationAnswer(
+  deps: InteractiveCliDeps,
+  question: ClarificationQuestion,
+  index: number,
+  total: number,
+): Promise<string> {
+  try {
+    return await inquirerInput({
+      message: total > 1 ? `Clarification ${index}/${total}: ${question.question}` : question.question,
+      required: true,
+    }, {
+      input: deps.input,
+      output: deps.output,
+      signal: deps.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === 'AbortPromptError' || error.name === 'ExitPromptError')) {
+      throw new PromptCancelledError(error.name === 'AbortPromptError' ? 'abort' : 'exit');
+    }
+    if (deps.signal?.aborted === true) {
+      throw new PromptCancelledError('abort');
+    }
+    throw error;
+  }
+}
+
+function appendClarificationAnswers(handoff: RawHandoff, answers: ClarificationAnswer[]): RawHandoff {
+  switch (handoff.source) {
+    case 'free-form':
+      return { ...handoff, spec: appendClarificationAnswersToText(handoff.spec, answers) };
+    case 'structured':
+      return { ...handoff, spec: appendClarificationAnswersToStructuredSpec(handoff.spec, answers) };
+    case 'cli':
+    case 'claude':
+      return { ...handoff, spec: appendClarificationAnswersToSpec(handoff.spec, answers) };
+    case 'mcp':
+      if (handoff.spec !== undefined) {
+        return { ...handoff, spec: appendClarificationAnswersToSpec(handoff.spec, answers) };
+      }
+      return { ...handoff, arguments: appendClarificationAnswersToStructuredSpec(handoff.arguments ?? {}, answers) };
+    case 'workflow-artifact':
+      return handoff;
+  }
+}
+
+function appendClarificationAnswersToSpec(spec: SpecInput, answers: ClarificationAnswer[]): SpecInput {
+  if (typeof spec === 'string') return appendClarificationAnswersToText(spec, answers);
+  return appendClarificationAnswersToStructuredSpec(spec, answers);
+}
+
+function appendClarificationAnswersToStructuredSpec(spec: StructuredSpec, answers: ClarificationAnswer[]): StructuredSpec {
+  const description = typeof spec.description === 'string'
+    ? spec.description
+    : typeof spec.prompt === 'string'
+      ? spec.prompt
+      : typeof spec.spec === 'string'
+        ? spec.spec
+        : JSON.stringify(spec, null, 2);
+  return {
+    ...spec,
+    description: appendClarificationAnswersToText(description, answers),
+    clarificationAnswers: answers.map(({ question, answer }) => ({
+      question: question.question,
+      answer,
+    })),
+  };
+}
+
+function appendClarificationAnswersToText(text: string, answers: ClarificationAnswer[]): string {
+  return [
+    text.trimEnd(),
+    '',
+    'Clarification answers:',
+    ...answers.map(({ question, answer }) => `- ${question.question}: ${answer}`),
+  ].join('\n');
 }
 
 function collectLocalDiagnosticSignals(localResult: LocalResponse): DiagnosticSignal[] {
