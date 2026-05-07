@@ -78,7 +78,7 @@ describe('LocalCoordinator', () => {
   });
 
   it('records running then completed status for a successful workflow launch', async () => {
-    const { runner, invocations } = createRunner();
+    const { runner, run, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
 
     const resultPromise = coordinator.launch({
@@ -101,6 +101,11 @@ describe('LocalCoordinator', () => {
       retry: { attempt: 1 },
     });
     expect(coordinator.listActiveRuns()).toHaveLength(1);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith('agent-relay', ['run', 'workflow.yaml'], {
+      cwd: '/repo',
+      env: undefined,
+    });
 
     invocations[0].complete(0);
     const result = await resultPromise;
@@ -135,6 +140,8 @@ describe('LocalCoordinator', () => {
       args: ['run', 'workflow.yaml'],
       cwd: '/repo',
     });
+    expect(result.stdout).toEqual([]);
+    expect(result.stderr).toEqual([]);
   });
 
   it('records failed status, exit code, and stderr for a failed command', async () => {
