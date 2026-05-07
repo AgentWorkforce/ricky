@@ -100,8 +100,13 @@ function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
     .filter((value): value is string => typeof value === 'string')
     .join('\n')
     .toLowerCase();
-  if (/\b(local|byoh|on this machine)\b/.test(text)) return 'local';
-  if (/\b(cloud|hosted|remote)\b/.test(text) || parsed.surface === 'api' || parsed.surface === 'web') return 'cloud';
+
+  const mentionsLocal = /\b(local|byoh|on this machine)\b/.test(text);
+  const mentionsCloud = /\b(cloud|hosted|remote)\b/.test(text) || parsed.surface === 'api' || parsed.surface === 'web';
+
+  if (mentionsLocal && mentionsCloud) return 'auto';
+  if (mentionsLocal) return 'local';
+  if (mentionsCloud) return 'cloud';
   return 'auto';
 }
 

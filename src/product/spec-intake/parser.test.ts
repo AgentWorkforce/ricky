@@ -412,6 +412,23 @@ describe('spec intake parser, normalizer, and router', () => {
     ]);
   });
 
+  it('asks for execution clarification when a generation spec mixes local and cloud execution', () => {
+    const result = intake(
+      natural('Generate a workflow for repo AgentWorkforce/ricky that supports local BYOH and cloud hosted execution.'),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.routing?.target).toBe('clarify');
+    expect(result.routing?.normalizedSpec.executionPreference).toBe('auto');
+    expect(result.clarificationQuestions).toEqual([
+      expect.objectContaining({
+        id: 'execution-mode-conflict',
+        question: expect.stringContaining('run locally/BYOH, in Cloud, or generate artifacts for both paths'),
+        blocking: true,
+      }),
+    ]);
+  });
+
   it('asks for a side-effect boundary before generating risky workflows', () => {
     const result = intake(
       natural('Generate a workflow that deletes obsolete files, commits the cleanup, and pushes the branch.'),
