@@ -118,6 +118,7 @@ function renderSource(input: {
   toolSelection: ToolSelectionContext;
 }): string {
   const onError = input.pattern.riskLevel === 'low' ? "'fail-fast'" : `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS} }`;
+  const contextSetup = buildGeneratedContextSetup(input.spec, input.artifactsDir, input.pattern, input.skills, input.skillApplicationEvidence, input.toolSelection);
   const lines: string[] = [
     "import { workflow } from '@agent-relay/sdk/workflows';",
     "import * as rickyWorkflowFs from 'node:fs';",
@@ -128,8 +129,11 @@ function renderSource(input: {
     '',
     renderWorkflowEnvLoaderHelper(),
     '',
+    renderGeneratedContextWriterHelper(),
+    '',
     'async function main() {',
     '  loadRickyWorkflowEnv();',
+    renderGeneratedContextWriterCall(contextSetup),
     `  const result = await workflow(${literal(input.workflowId)})`,
     `    .description(${literal(input.spec.description)})`,
     `    .pattern(${literal(input.pattern.pattern)})`,
@@ -140,7 +144,7 @@ function renderSource(input: {
     '',
     ...input.team.map(renderAgentLine),
     '',
-    renderPrepareContextStep(input.spec, input.artifactsDir, input.pattern, input.skills, input.skillApplicationEvidence, input.toolSelection),
+    renderPrepareContextStep(input.artifactsDir, contextSetup),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!),
     '',
@@ -533,14 +537,22 @@ function renderAgentLine(member: TeamMemberSpec): string {
   return `    .agent(${literal(member.name)}, { ${options.join(', ')} })`;
 }
 
-function renderPrepareContextStep(
+interface GeneratedContextSetup {
+  files: GeneratedContextFile[];
+  targetContext?: {
+    value: string;
+    outputPath: string;
+  };
+}
+
+function buildGeneratedContextSetup(
   spec: NormalizedWorkflowSpec,
   artifactsDir: string,
   pattern: PatternDecision,
   skills: SkillContext,
   skillApplicationEvidence: SkillApplicationEvidence[],
   toolSelection: ToolSelectionContext,
-): string {
+): GeneratedContextSetup {
   const skillBoundary = {
     behavior: 'generation_time_only',
     runtimeEmbodiment: false,
@@ -555,38 +567,43 @@ function renderPrepareContextStep(
       }).join('\n')
     : 'No skills matched the normalized spec.';
   const contextPackage = buildGeneratedContextPackage(spec, artifactsDir, pattern, loadedSkillsReport);
-  const skillContextCommands = skills.matches
+  const matchedSkillsContent = skills.matches
     .filter((match) => match.path)
-    .flatMap((match) => {
+    .map((match) => {
       const skillContent = safeReadText(match.path);
-      return [
-        `printf '%s\\n' ${shellQuote(`\n# ${match.id}\nreason=${match.reason}\n`)} >> ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
-        `printf '%s\\n' ${shellQuote(skillContent)} >> ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
-      ];
-    });
+      return `\n# ${match.id}\nreason=${match.reason}\n${skillContent}`;
+    })
+    .join('\n');
+  const files = [
+    { path: `${artifactsDir}/normalized-spec.txt`, content: spec.description },
+    ...contextPackage,
+    { path: `${artifactsDir}/pattern-decision.txt`, content: `pattern=${pattern.pattern}; reason=${pattern.reason}` },
+    { path: `${artifactsDir}/loaded-skills.txt`, content: loadedSkillsReport },
+    { path: `${artifactsDir}/skill-matches.json`, content: JSON.stringify(normalizeSkillMatchesForArtifact(skills.matches)) },
+    { path: `${artifactsDir}/tool-selection.json`, content: JSON.stringify(toolSelection.selections) },
+    { path: `${artifactsDir}/skill-application-boundary.json`, content: JSON.stringify(skillBoundary) },
+    { path: `${artifactsDir}/skill-runtime-boundary.txt`, content: skillBoundary.boundary },
+    { path: `${artifactsDir}/matched-skills.md`, content: matchedSkillsContent },
+  ];
+
+  return {
+    files,
+    ...(spec.targetContext ? { targetContext: { value: spec.targetContext, outputPath: `${artifactsDir}/target-context.txt` } } : {}),
+  };
+}
+
+function renderPrepareContextStep(artifactsDir: string, contextSetup: GeneratedContextSetup): string {
+  const expectedFiles = [
+    ...contextSetup.files.map((file) => file.path),
+    ...(contextSetup.targetContext ? [contextSetup.targetContext.outputPath] : []),
+  ];
   const commands = [
     `mkdir -p ${shellQuote(artifactsDir)}`,
-    `printf '%s\\n' ${shellQuote(spec.description)} > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
-    ...contextPackage.map((file) => `printf '%s\\n' ${shellQuote(file.content)} > ${shellQuote(file.path)}`),
-    `printf '%s\\n' ${shellQuote(`pattern=${pattern.pattern}; reason=${pattern.reason}`)} > ${shellQuote(`${artifactsDir}/pattern-decision.txt`)}`,
-    `printf '%s\\n' ${shellQuote(loadedSkillsReport)} > ${shellQuote(`${artifactsDir}/loaded-skills.txt`)}`,
-    `printf '%s\\n' ${shellQuote(JSON.stringify(normalizeSkillMatchesForArtifact(skills.matches)))} > ${shellQuote(`${artifactsDir}/skill-matches.json`)}`,
-    `printf '%s\\n' ${shellQuote(JSON.stringify(toolSelection.selections))} > ${shellQuote(`${artifactsDir}/tool-selection.json`)}`,
-    `printf '%s\\n' ${shellQuote(JSON.stringify(skillBoundary))} > ${shellQuote(`${artifactsDir}/skill-application-boundary.json`)}`,
-    `printf '%s\\n' ${shellQuote(skillBoundary.boundary)} > ${shellQuote(`${artifactsDir}/skill-runtime-boundary.txt`)}`,
-    `: > ${shellQuote(`${artifactsDir}/matched-skills.md`)}`,
-    ...skillContextCommands,
-    ...(spec.targetContext ? [renderTargetContextCommand(spec.targetContext, `${artifactsDir}/target-context.txt`)] : []),
+    ...expectedFiles.map((file) => `test -f ${shellQuote(file)}`),
     'echo GENERATED_WORKFLOW_CONTEXT_READY',
   ];
 
   return renderDeterministicStep('prepare-context', [], commands.join(' && '), true);
-}
-
-function renderTargetContextCommand(targetContext: string, outputPath: string): string {
-  const quotedContext = shellQuote(targetContext);
-  const quotedOutput = shellQuote(outputPath);
-  return `if test -f ${quotedContext}; then cat ${quotedContext} > ${quotedOutput}; else printf '%s\\n' ${quotedContext} > ${quotedOutput}; fi`;
 }
 
 interface GeneratedContextFile {
@@ -1014,6 +1031,55 @@ function assertRickyWorkflowEnv(names: string[]): void {
     throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
   }
 }`;
+}
+
+function renderGeneratedContextWriterHelper(): string {
+  return `interface RickyGeneratedContextFile {
+  path: string;
+  content: string;
+}
+
+interface RickyGeneratedTargetContext {
+  value: string;
+  outputPath: string;
+}
+
+function writeRickyGeneratedContextFiles(files: RickyGeneratedContextFile[], targetContext?: RickyGeneratedTargetContext): void {
+  for (const file of files) {
+    rickyWorkflowFs.mkdirSync(rickyWorkflowPath.dirname(file.path), { recursive: true });
+    rickyWorkflowFs.writeFileSync(file.path, ensureTrailingNewline(file.content));
+  }
+
+  if (!targetContext) return;
+
+  rickyWorkflowFs.mkdirSync(rickyWorkflowPath.dirname(targetContext.outputPath), { recursive: true });
+  if (rickyWorkflowFs.existsSync(targetContext.value) && rickyWorkflowFs.statSync(targetContext.value).isFile()) {
+    rickyWorkflowFs.copyFileSync(targetContext.value, targetContext.outputPath);
+    return;
+  }
+
+  rickyWorkflowFs.writeFileSync(targetContext.outputPath, ensureTrailingNewline(targetContext.value));
+}
+
+function ensureTrailingNewline(value: string): string {
+  return value.endsWith('\\n') ? value : \`\${value}\\n\`;
+}`;
+}
+
+function renderGeneratedContextWriterCall(contextSetup: GeneratedContextSetup): string {
+  const targetContext = contextSetup.targetContext
+    ? `, ${contextTargetLiteral(contextSetup.targetContext)}`
+    : '';
+  return `  writeRickyGeneratedContextFiles(${contextFilesLiteral(contextSetup.files)}${targetContext});`;
+}
+
+function contextFilesLiteral(files: GeneratedContextFile[]): string {
+  if (files.length === 0) return '[]';
+  return `[\n${files.map((file) => `    { path: ${literal(file.path)}, content: ${literal(file.content)} }`).join(',\n')}\n  ]`;
+}
+
+function contextTargetLiteral(targetContext: NonNullable<GeneratedContextSetup['targetContext']>): string {
+  return `{ value: ${literal(targetContext.value)}, outputPath: ${literal(targetContext.outputPath)} }`;
 }
 
 function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string {

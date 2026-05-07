@@ -1362,6 +1362,12 @@ describe('workflow generation pipeline', () => {
     expect(content).toContain(longSpecSentinel);
     expect(content).toContain('.workflow-artifacts/generated/packaged-context/normalized-spec.md');
     expect(content).toContain('.workflow-artifacts/generated/packaged-context/acceptance-contract.json');
+    expect(content).toContain('writeRickyGeneratedContextFiles([');
+
+    const prepareContextCommand = renderedStepCommand(content, 'prepare-context');
+    expect(prepareContextCommand).not.toContain(longSpecSentinel);
+    expect(prepareContextCommand).not.toContain('printf');
+    expect(prepareContextCommand.length).toBeLessThan(2000);
 
     const taskBodies = renderedTaskBodies(content);
     expect(taskBodies.length).toBeGreaterThan(0);
@@ -1376,7 +1382,15 @@ function artifact(result: ReturnType<typeof generate>): NonNullable<ReturnType<t
 }
 
 function renderedTaskBodies(content: string): string[] {
-  return [...content.matchAll(/task:\s*`([\s\S]*?)`/g)].map((match) => match[1]);
+  return [...content.matchAll(/task:\s*`((?:[^`\\]|\\[\s\S])*)`/g)].map((match) => match[1].replace(/\\`/g, '`'));
+}
+
+function renderedStepCommand(content: string, stepName: string): string {
+  const stepIndex = content.search(new RegExp(`\\.step\\(${JSON.stringify(stepName)},`));
+  expect(stepIndex).toBeGreaterThanOrEqual(0);
+  const commandMatch = /command:\s*("(?:(?:\\[\s\S])|[^"\\])*")/.exec(content.slice(stepIndex));
+  expect(commandMatch).not.toBeNull();
+  return JSON.parse(commandMatch![1]) as string;
 }
 
 function gate(
