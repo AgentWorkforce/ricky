@@ -268,6 +268,55 @@ describe('LocalCoordinator', () => {
     expect(result.error).toBe('cancelled');
   });
 
+  it('preserves pre-cancel output and lifecycle evidence when a run is aborted', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-cancel-evidence',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+    });
+
+    invocations[0].emitStdout('step started');
+    invocations[0].emitStderr('waiting for reviewer');
+    coordinator.cancel('run-cancel-evidence');
+    const result = await resultPromise;
+
+    expect(result.status).toBe('cancelled');
+    expect(result.exitCode).toBeNull();
+    expect(result.stdout).toEqual(['step started']);
+    expect(result.stderr).toEqual(['waiting for reviewer']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'cancelled',
+    ]);
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stdout',
+        status: 'running',
+        message: 'step started',
+      }),
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stderr',
+        status: 'running',
+        message: 'waiting for reviewer',
+      }),
+    );
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'cancelled',
+      status: 'cancelled',
+      data: { exitCode: null, error: 'cancelled' },
+    });
+  });
+
   it('captures stdout, stderr, lifecycle events, snippets, and metadata as evidence', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
@@ -770,5 +819,95 @@ describe('LocalCoordinator', () => {
         message: 'generated workflow warning',
       }),
     );
+  });
+
+  it('returns failed generated workflow evidence through the injected runner for debugger analysis', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-generated-debug-failure',
+      workflowFile: 'generated/debug-target.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { workflowId: 'generated-debug-target', source: 'generated-workflow' },
+    });
+
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'generated/debug-target.yaml', '--json'],
+      { cwd: '/repo', env: { RELAYCAST_WORKSPACE: 'unit-test' } },
+    );
+
+    invocations[0].emitStdout('{"step":"prepare","status":"running"}');
+    invocations[0].emitStderr('MISSING_ENV_VAR: RELAYCAST_WORKSPACE');
+    invocations[0].complete(2);
+    const result = await resultPromise;
+
+    expect(lifecycleEvents).toEqual(result.events);
+    expect(result.status).toBe('failed');
+    expect(result.exitCode).toBe(2);
+    expect(result.error).toBe('exited with code 2');
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/debug-target.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+    expect(result.metadata).toEqual({
+      workflowId: 'generated-debug-target',
+      source: 'generated-workflow',
+    });
+    expect(result.stdout).toEqual(['{"step":"prepare","status":"running"}']);
+    expect(result.stderr).toEqual(['MISSING_ENV_VAR: RELAYCAST_WORKSPACE']);
+    expect(result.stderrSnippet).toMatchObject({
+      lines: ['MISSING_ENV_VAR: RELAYCAST_WORKSPACE'],
+      totalLines: 1,
+      truncated: false,
+    });
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stdout',
+        status: 'running',
+        message: '{"step":"prepare","status":"running"}',
+      }),
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stderr',
+        status: 'running',
+        message: 'MISSING_ENV_VAR: RELAYCAST_WORKSPACE',
+      }),
+    );
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'failed',
+      data: { exitCode: 2, error: 'exited with code 2' },
+    });
+  });
+
+  it('normalizes invalid timeoutMs values to the default timeout', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    // NaN should not cause an immediate timeout — it should fall back to the default
+    const resultPromise = coordinator.launch({
+      runId: 'run-nan-timeout',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: NaN,
+    });
+
+    // If NaN were used directly, setTimeout(fn, NaN) fires immediately.
+    // With normalization, the run should still be active after launch.
+    expect(coordinator.getActiveRun('run-nan-timeout')?.status).toBe('running');
+
+    invocations[0].complete(0);
+    const result = await resultPromise;
+    expect(result.status).toBe('passed');
   });
 });

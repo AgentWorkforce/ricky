@@ -63,7 +63,7 @@ export class LocalCoordinator {
     const retry = normalizeRetry(request.retry);
     const invocationSummary = buildInvocationSummary(request);
     const snippetLimit = request.logSnippetLineLimit ?? DEFAULT_SNIPPET_LINE_LIMIT;
-    const timeoutMs = request.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    const timeoutMs = normalizeTimeout(request.timeoutMs);
     let status: RunStatus = 'pending';
     let settled = false;
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -324,6 +324,11 @@ function retryResumeArgs(retry: RunRequest['retry']): string[] {
   if (retry?.startFromStep) args.push('--start-from', retry.startFromStep);
   if (retry?.previousRunId) args.push('--previous-run-id', retry.previousRunId);
   return args;
+}
+
+function normalizeTimeout(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return DEFAULT_RUN_TIMEOUT_MS;
+  return Math.floor(value);
 }
 
 function normalizeRetry(retry: RunRequest['retry']): RunRetryMetadata {
