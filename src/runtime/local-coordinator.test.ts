@@ -11,14 +11,14 @@ import type {
 class ManualInvocation implements CommandInvocation {
   readonly stdoutHandlers: Array<(line: string) => void> = [];
   readonly stderrHandlers: Array<(line: string) => void> = [];
-  readonly exitPromise: Promise<number>;
+  readonly exitPromise: Promise<number | null>;
   killed = false;
 
-  private resolveExit!: (code: number) => void;
+  private resolveExit!: (code: number | null) => void;
   private rejectExit!: (err: unknown) => void;
 
   constructor() {
-    this.exitPromise = new Promise<number>((resolve, reject) => {
+    this.exitPromise = new Promise<number | null>((resolve, reject) => {
       this.resolveExit = resolve;
       this.rejectExit = reject;
     });
@@ -44,7 +44,7 @@ class ManualInvocation implements CommandInvocation {
     this.stderrHandlers.forEach((cb) => cb(line));
   }
 
-  complete(exitCode: number): void {
+  complete(exitCode: number | null): void {
     this.resolveExit(exitCode);
   }
 
@@ -194,6 +194,8 @@ describe('LocalCoordinator', () => {
       timeoutMs: 25,
     });
 
+    invocations[0].emitStdout('still working');
+    invocations[0].emitStderr('waiting on worker');
     await vi.advanceTimersByTimeAsync(25);
     const result = await resultPromise;
 
@@ -201,6 +203,23 @@ describe('LocalCoordinator', () => {
     expect(result.status).toBe('timed_out');
     expect(result.exitCode).toBeNull();
     expect(result.error).toBe('timed out after 25ms');
+    expect(result.stdout).toEqual(['still working']);
+    expect(result.stderr).toEqual(['waiting on worker']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'timeout',
+    ]);
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'status_change',
+        status: 'timed_out',
+        data: { previousStatus: 'running', status: 'timed_out' },
+      }),
+    );
     expect(result.events.at(-1)).toMatchObject({
       kind: 'timeout',
       status: 'timed_out',
@@ -611,6 +630,84 @@ describe('LocalCoordinator', () => {
     });
   });
 
+  it('handles exitPromise resolving to null (signal termination)', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-null-exit',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+    });
+
+    invocations[0].complete(null);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('failed');
+    expect(result.exitCode).toBeNull();
+    expect(result.error).toBe('exited without an exit code');
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'failed',
+      message: 'Run completed without an exit code',
+    });
+  });
+
+  it('captures kill error during cancellation without throwing', async () => {
+    const invocation = new ManualInvocation();
+    invocation.kill = () => {
+      throw new Error('ESRCH: process already exited');
+    };
+    const run = vi.fn((): CommandInvocation => invocation);
+    const coordinator = new LocalCoordinator({ run });
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-kill-error',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+    });
+
+    coordinator.cancel('run-kill-error');
+    const result = await resultPromise;
+
+    expect(result.status).toBe('cancelled');
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'cancelled',
+      data: expect.objectContaining({
+        killError: 'ESRCH: process already exited',
+      }),
+    });
+  });
+
+  it('captures kill error during timeout without throwing', async () => {
+    const invocation = new ManualInvocation();
+    invocation.kill = () => {
+      throw new Error('EPERM: operation not permitted');
+    };
+    const run = vi.fn((): CommandInvocation => invocation);
+    const coordinator = new LocalCoordinator({ run });
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-kill-timeout-error',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 25,
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('timed_out');
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'timeout',
+      data: expect.objectContaining({
+        killError: 'EPERM: operation not permitted',
+      }),
+    });
+  });
+
   it('keeps generated workflow launches behind the injected runner boundary', async () => {
     const invocation = new ManualInvocation();
     const run = vi.fn(
@@ -648,6 +745,8 @@ describe('LocalCoordinator', () => {
       metadata: { source: 'generated-workflow' },
     });
 
+    invocation.emitStdout('generated workflow started');
+    invocation.emitStderr('generated workflow warning');
     invocation.complete(0);
     const result = await resultPromise;
 
@@ -655,5 +754,21 @@ describe('LocalCoordinator', () => {
     expect(result.invocation.command).toBe('agent-relay');
     expect(result.invocation.args).toEqual(['run', 'generated/workflow.yaml', '--json']);
     expect(result.metadata).toEqual({ source: 'generated-workflow' });
+    expect(result.stdout).toEqual(['generated workflow started']);
+    expect(result.stderr).toEqual(['generated workflow warning']);
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stdout',
+        status: 'running',
+        message: 'generated workflow started',
+      }),
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stderr',
+        status: 'running',
+        message: 'generated workflow warning',
+      }),
+    );
   });
 });

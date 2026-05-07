@@ -150,13 +150,14 @@ export class LocalCoordinator {
       metadata: request.metadata,
       cancel: () => {
         if (settled) return;
-        state.invocation?.kill();
+        const killError = state.invocation ? killInvocation(state.invocation) : undefined;
         finish({
           status: 'cancelled',
           exitCode: null,
           eventKind: 'cancelled',
           message: 'Run cancelled',
           error: 'cancelled',
+          data: killError ? { killError } : undefined,
         });
       },
     };
@@ -193,14 +194,14 @@ export class LocalCoordinator {
 
       timeoutHandle = setTimeout(() => {
         if (settled) return;
-        invocation.kill();
+        const killError = killInvocation(invocation);
         finish({
           status: 'timed_out',
           exitCode: null,
           eventKind: 'timeout',
           message: `Run timed out after ${timeoutMs}ms`,
           error: `timed out after ${timeoutMs}ms`,
-          data: { timeoutMs },
+          data: { timeoutMs, ...(killError ? { killError } : {}) },
         });
       }, timeoutMs);
 
@@ -213,8 +214,10 @@ export class LocalCoordinator {
             message:
               exitCode === 0
                 ? 'Run completed successfully'
-                : `Run completed with exit code ${exitCode}`,
-            error: exitCode === 0 ? undefined : `exited with code ${exitCode}`,
+                : exitCode === null
+                  ? 'Run completed without an exit code'
+                  : `Run completed with exit code ${exitCode}`,
+            error: exitCode === 0 ? undefined : exitErrorMessage(exitCode),
           });
         },
         (err: unknown) => {
@@ -336,7 +339,7 @@ function normalizeRetry(retry: RunRequest['retry']): RunRetryMetadata {
 }
 
 function buildSnippet(lines: string[], maxLines: number): LogSnippet {
-  const normalizedMax = Math.max(0, maxLines);
+  const normalizedMax = Number.isFinite(maxLines) ? Math.max(0, Math.floor(maxLines)) : DEFAULT_SNIPPET_LINE_LIMIT;
   return {
     lines: normalizedMax === 0 ? [] : lines.slice(-normalizedMax),
     totalLines: lines.length,
@@ -369,4 +372,17 @@ function snapshot(state: ActiveRunState): ActiveRunSnapshot {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function exitErrorMessage(exitCode: number | null): string {
+  return exitCode === null ? 'exited without an exit code' : `exited with code ${exitCode}`;
+}
+
+function killInvocation(invocation: CommandInvocation): string | undefined {
+  try {
+    invocation.kill();
+    return undefined;
+  } catch (err) {
+    return errorMessage(err);
+  }
 }
