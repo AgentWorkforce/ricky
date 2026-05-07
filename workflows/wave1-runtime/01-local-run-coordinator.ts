@@ -9,9 +9,8 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 1, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', {
-      cli: 'claude',
-      interactive: false,
+    .agent('lead-codex', {
+      cli: 'codex',
       role: 'Runtime lead responsible for scope control, product alignment, and final implementation signoff.',
       retries: 1,
     })
@@ -37,8 +36,8 @@ async function main() {
       role: 'Reviews implementation practicality, TypeScript contracts, tests, and deterministic validation coverage.',
       retries: 1,
     })
-    .agent('validator-claude', {
-      cli: 'claude',
+    .agent('validator-codex', {
+      cli: 'codex',
       preset: 'worker',
       role: 'Runs validation, diagnoses failures, and applies bounded fixes until the coordinator meets the 80-to-100 bar.',
       retries: 2,
@@ -60,7 +59,7 @@ async function main() {
     })
 
     .step('lead-plan', {
-      agent: 'lead-claude',
+      agent: 'lead-codex',
       dependsOn: ['prepare-context'],
       task: `Plan the local run coordinator implementation.
 
@@ -254,7 +253,7 @@ Do not broaden scope beyond the coordinator files.`,
     })
 
     .step('fix-loop', {
-      agent: 'validator-claude',
+      agent: 'validator-codex',
       dependsOn: ['review-claude', 'review-codex'],
       task: `Run the 80-to-100 fix loop for the local run coordinator.
 
@@ -433,7 +432,7 @@ Write .workflow-artifacts/wave1-runtime/local-run-coordinator/fix-loop.md with c
       failOnError: true,
     })
     .step('final-signoff', {
-      agent: 'validator-claude',
+      agent: 'validator-codex',
       dependsOn: ['regression-gate'],
       task: `Write .workflow-artifacts/wave1-runtime/local-run-coordinator/signoff.md.
 
