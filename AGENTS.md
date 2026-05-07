@@ -180,6 +180,7 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 2. Read `workflows/shared/WORKFLOW_AUTHORING_RULES.md`.
 3. Read the workflow-specific spec or program doc when one exists, including files under `workflows/meta/spec/`.
 4. For workflow generation tasks, also read `workflows/meta/spec/generated-workflow-template.md`.
+5. For convention-update workflows, read the operator plan artifact when one is provided before editing the declared convention files.
 
 ## Mandatory Conventions
 
@@ -202,6 +203,8 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 When the task is to update Ricky workflow standards, conventions, or authoring rules, keep the change inside the declared convention files unless the workflow contract explicitly expands scope. Do not edit package metadata, runtime configuration, product source, generated wave workflows, or product specs for a convention-only update.
 
 For convention-only work, `CLAUDE.md` should remain a symlink to `AGENTS.md`. Update `AGENTS.md` as the shared source of truth and verify Claude-facing behavior through the symlink instead of forking separate Claude instructions.
+
+`CLAUDE.md` must exist and mirror repo-level workflow behavior through that symlink. Do not replace it with a standalone file or add Claude-only workflow rules that conflict with `AGENTS.md`.
 
 Convention-only workflows still need deterministic file-existence checks, grep or structural checks for the updated terms, symlink verification for `CLAUDE.md`, and scoped change detection limited to the declared convention files. The scoped change-detection gate must include both `git diff --name-only -- <declared-files>` and `git ls-files --others --exclude-standard -- <declared-files>`.
 

@@ -66,6 +66,8 @@ Wave folders use `workflows/wave<N>-<slug>/` and represent staged product or run
 
 Later waves keep the same convention: the folder name must describe the milestone, not the implementation team.
 
+Workflow authors should place ordinary workflow files inside the correct wave folder, not at the top level. Top-level files are reserved for shared or meta assets that intentionally apply across waves.
+
 ## Workflow naming
 
 Workflow files use a numeric prefix plus an outcome-based slug:
@@ -95,6 +97,8 @@ Examples:
 - `wf-ricky-wave0-standards`
 - `wf-ricky-wave3-generate-run-api`
 - `wf-ricky-meta-mass-generation`
+
+Each workflow gets its own `wf-ricky-*` channel so planning, review, validation output, and blocker reporting stay auditable for that workflow. Do not route workflow execution through `general`.
 
 ## Runtime shape
 
@@ -157,6 +161,8 @@ For convention-only updates, the normal file boundary is `AGENTS.md`, symlinked 
 Convention-only workflow commits should stay inside that boundary unless the workflow contract explicitly expands scope. `CLAUDE.md` should remain a symlink to `AGENTS.md`, so Claude-facing behavior is verified through the symlink rather than forked into separate instructions.
 
 Convention-only verification should check each declared file exists, grep for the required standard terms, verify the `CLAUDE.md -> AGENTS.md` symlink when in scope, and run scoped change detection using both `git diff --name-only -- <declared-files>` and `git ls-files --others --exclude-standard -- <declared-files>`.
+
+Reviewers should reject convention-only changes that edit package metadata, runtime configuration, product source, generated wave workflows, or product specs unless the workflow contract explicitly expands the file targets.
 
 ## Reliability traps
 
