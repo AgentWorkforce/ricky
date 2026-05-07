@@ -80,7 +80,7 @@ Workflow files use a numeric prefix plus an outcome-based slug:
 
 Rules:
 - numeric prefixes increase monotonically within the wave folder
-- slugs describe the deliverable
+- slugs describe the deliverable or observable outcome, not a vague improvement theme
 - top-level workflow files are reserved for shared or meta assets, not ordinary wave work
 - shared helpers stay under `workflows/shared/`
 - generated specs and templates stay under `workflows/meta/spec/`
@@ -154,7 +154,7 @@ Use deterministic gate types in this order: `exit_code`, `file_exists`, determin
 
 ## Commit and PR boundaries
 
-Every workflow must state the expected branch naming pattern, file targets, verification commands, and whether commit or PR creation is in scope. Agent steps must not run `git commit` or `git push` unless the workflow explicitly owns that boundary and documents the exact files expected in the change.
+Every workflow must state the expected branch naming pattern, file targets, verification commands, and whether commit or PR creation is in scope. Use `ricky/<wave-or-meta>-<workflow-slug>` as the default branch naming pattern unless a workflow-specific spec declares a narrower pattern. Agent steps must not run `git commit` or `git push` unless the workflow explicitly owns that boundary and documents the exact files expected in the change.
 
 For convention-only updates, the normal file boundary is `AGENTS.md`, symlinked `CLAUDE.md`, `workflows/README.md`, and `workflows/shared/WORKFLOW_AUTHORING_RULES.md`, plus optional preserved review artifacts under `.workflow-artifacts/`.
 

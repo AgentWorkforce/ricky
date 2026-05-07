@@ -5,7 +5,7 @@ Compact execution rules for agents writing Ricky workflows.
 ## Must-do
 
 1. Use explicit wave/folder placement.
-2. Use numeric prefixes and concise outcome-based slugs.
+2. Use numeric prefixes and concise outcome-based slugs that name the deliverable.
 3. Use a dedicated `wf-ricky-*` channel.
 4. Choose swarm pattern deliberately, do not default blindly.
 5. State the workflow contract: context inputs, deliverables, file targets, non-goals, verification commands, review expectations, branch naming pattern, and commit/PR boundary.
@@ -21,7 +21,7 @@ Compact execution rules for agents writing Ricky workflows.
 15. For generation tasks, read `workflows/meta/spec/generated-workflow-template.md` before authoring.
 16. Set `.channel()`, `.pattern()`, `.maxConcurrency()`, and `.timeout()` explicitly; add `.onError()` for long-running or multi-agent workflows.
 17. Prefer named roles over generic numbering. Default implementation team shape is `lead-claude`, `impl-primary-codex`, `impl-tests-codex`, `reviewer-claude`, `reviewer-codex`, and `validator-claude`; doc/spec workflows may use `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer.
-18. State the expected branch naming pattern and whether PR creation is in or out of scope.
+18. State the expected branch naming pattern and whether PR creation is in or out of scope; use `ricky/<wave-or-meta>-<workflow-slug>` by default unless a local spec narrows it.
 19. Use scoped change detection after implementation steps with `git diff --name-only` and `git ls-files --others --exclude-standard` limited to declared file targets.
 20. Write final signoff artifacts under `.workflow-artifacts/` for significant implementation or generation workflows.
 21. In 80-to-100 validation loops, run the same validation first as a soft gate, fix from captured output, then rerun it as a hard gate before final signoff.
