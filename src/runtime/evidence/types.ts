@@ -190,6 +190,7 @@ export interface EvidenceStatusBreakdown {
 
 export interface EvidenceOutcome {
   runId: string;
+  workflowId: string;
   workflowName: string;
   status: RunStatus;
   statusClass: EvidenceStatusClass;

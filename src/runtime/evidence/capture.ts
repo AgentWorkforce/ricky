@@ -416,6 +416,7 @@ export function buildEvidenceOutcome(run: WorkflowRunEvidence): EvidenceOutcome 
 
   return {
     runId: run.runId,
+    workflowId: run.workflowId,
     workflowName: run.workflowName,
     status: run.status,
     statusClass: classifyStatus(run.status),

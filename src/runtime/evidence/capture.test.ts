@@ -832,6 +832,12 @@ describe('workflow evidence capture scenarios', () => {
       narrative: [],
       routing: [],
     });
+    expect(outcome).toMatchObject({
+      runId: 'run-empty',
+      workflowId: 'wf-evidence',
+      workflowName: 'evidence-model',
+      status: 'pending',
+    });
     expect(outcome.summary).toMatchObject({
       runId: 'run-empty',
       workflowName: 'evidence-model',
