@@ -540,6 +540,13 @@ prune_tracked_workflow_file_for_repo_state() {
   mv "$filtered_file" "$workflow_file"
 }
 
+refresh_state_paths() {
+  STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
+  STATE_FILE="$STATE_ROOT/checkpoint.env"
+  STATE_LOG="$STATE_ROOT/latest-run.txt"
+  mkdir -p "$STATE_ROOT"
+}
+
 filter_queue_for_repo_state() {
   local filtered_queue="$ARTIFACT_DIR/queue.filtered.tmp"
   local removed_count=0
@@ -602,6 +609,7 @@ fallback_to_expanded_queue_when_flight_safe_exhausted() {
 
   log "flight-safe queue is exhausted; probing expanded queue for remaining actionable workflows"
   QUEUE_MODE="expanded"
+  refresh_state_paths
   write_queue
   filter_queue_for_repo_state
   expanded_queue_count="$(queue_count)"
@@ -612,6 +620,7 @@ fallback_to_expanded_queue_when_flight_safe_exhausted() {
   fi
 
   QUEUE_MODE="$original_queue_mode"
+  refresh_state_paths
   write_queue
   filter_queue_for_repo_state
   log "expanded queue is also exhausted; keeping queue mode at $QUEUE_MODE"
@@ -974,11 +983,13 @@ resolve_resume_checkpoint_file() {
   local candidate=""
   local newest_file=""
   local newest_epoch="0"
+  local fallback_queue_mode=""
   local candidate_epoch="0"
 
   if [[ -f "$fallback_state_file" ]]; then
-    printf '%s\n' "$fallback_state_file"
-    return 0
+    fallback_queue_mode="$(awk -F= '/^queue_mode=/{print $2; exit}' "$fallback_state_file" 2>/dev/null || true)"
+    fallback_queue_mode="${fallback_queue_mode//\'/}"
+    fallback_queue_mode="${fallback_queue_mode//\"/}"
   fi
 
   for candidate in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*/checkpoint.env; do
@@ -993,9 +1004,32 @@ resolve_resume_checkpoint_file() {
     fi
   done
 
-  if [[ -n "$newest_file" ]]; then
-    log "resume requested with no $QUEUE_MODE checkpoint; using latest checkpoint $newest_file" >&2
+  if [[ -f "$fallback_state_file" && "$fallback_queue_mode" == "$QUEUE_MODE" && "$fallback_state_file" == "$newest_file" ]]; then
+    printf '%s\n' "$fallback_state_file"
+    return 0
+  fi
+
+  if [[ -f "$fallback_state_file" && "$fallback_queue_mode" == "$QUEUE_MODE" && -z "$newest_file" ]]; then
+    printf '%s\n' "$fallback_state_file"
+    return 0
+  fi
+
+  if [[ -n "$newest_file" && "$newest_file" != "$fallback_state_file" ]]; then
+    if [[ -f "$fallback_state_file" ]]; then
+      if [[ -n "$fallback_queue_mode" && "$fallback_queue_mode" != "$QUEUE_MODE" ]]; then
+        log "resume requested for $QUEUE_MODE but checkpoint state has migrated to $fallback_queue_mode; using latest checkpoint $newest_file instead of mismatched $fallback_state_file" >&2
+      else
+        log "resume requested for $QUEUE_MODE but a newer checkpoint exists; using latest checkpoint $newest_file instead of stale $fallback_state_file" >&2
+      fi
+    else
+      log "resume requested with no $QUEUE_MODE checkpoint; using latest checkpoint $newest_file" >&2
+    fi
     printf '%s\n' "$newest_file"
+    return 0
+  fi
+
+  if [[ -f "$fallback_state_file" ]]; then
+    printf '%s\n' "$fallback_state_file"
     return 0
   fi
 
@@ -1065,6 +1099,7 @@ restore_checkpoint() {
 
   if [[ -n "$restored_queue_mode" ]]; then
     QUEUE_MODE="$restored_queue_mode"
+    refresh_state_paths
   fi
   CURRENT_PASS="${restored_current_pass:-1}"
   CURRENT_INDEX="${restored_current_index:-0}"
