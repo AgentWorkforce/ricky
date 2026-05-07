@@ -116,6 +116,45 @@ describe('workforce persona workflow repairer', () => {
     expect(resolverOptions).toEqual([{ tier: 'best-value', installRoot: '/state/ricky/persona-repair-skills' }]);
   });
 
+  it('rejects repaired artifacts that do not run with explicit cwd', async () => {
+    const resolver: WorkforcePersonaResolver = async () => ({
+      source: 'package',
+      intent: 'agent-relay-workflow',
+      warnings: [],
+      context: {
+        selection: {
+          personaId: 'agent-relay-workflow',
+          tier: 'best',
+          runtime: { harness: 'codex', model: 'codex/test' },
+        },
+        sendMessage() {
+          return execution(JSON.stringify({
+            artifact: {
+              path: 'workflows/generated/failing.ts',
+              content: workflowSource('after').replace('.run({ cwd: process.cwd() });', '.run();'),
+            },
+            metadata: { summary: 'repaired without cwd' },
+          }));
+        },
+      },
+    });
+
+    await expect(repairWorkflowWithWorkforcePersona({
+      repoRoot: '/repo',
+      artifactPath: 'workflows/generated/failing.ts',
+      artifactContent: workflowSource('before'),
+      evidence: { runId: 'relay-run-1', status: 'failed' },
+      classification: { failureClass: 'environment_error' },
+      debuggerResult: { repairMode: 'guided', summary: 'missing setup' },
+      attempt: 1,
+      maxAttempts: 3,
+      resolver,
+    })).rejects.toMatchObject({
+      name: 'WorkforcePersonaWriterError',
+      message: expect.stringContaining('explicit cwd'),
+    });
+  });
+
   it('upgrades repair persona resolution to best after the third failed retry', async () => {
     const resolverOptions: Array<Record<string, unknown>> = [];
     const resolver: WorkforcePersonaResolver = async (_intents, options) => {

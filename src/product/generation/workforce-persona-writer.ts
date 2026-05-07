@@ -817,13 +817,75 @@ function validateArtifactContent(content: string): void {
   if (!/\bworkflow\(/.test(content)) {
     throw new WorkforcePersonaWriterError('Workforce persona artifact does not call workflow().');
   }
-  if (!hasExplicitRunCwd(content)) {
-    throw new WorkforcePersonaWriterError('Workforce persona artifact must run with explicit cwd.');
-  }
 }
 
-function hasExplicitRunCwd(content: string): boolean {
-  return /\.run\s*\(\s*\{[\s\S]*?\bcwd\s*:\s*process\.cwd\s*\(\s*\)[\s\S]*?\}\s*\)/.test(content);
+export function hasExplicitWorkflowRunCwd(content: string): boolean {
+  const executableCode = maskTypeScriptStringsAndComments(content);
+  return /\.run\s*\(\s*\{[\s\S]*?\bcwd\s*:\s*process\.cwd\s*\(\s*\)[\s\S]*?\}\s*\)/.test(executableCode);
+}
+
+function maskTypeScriptStringsAndComments(content: string): string {
+  let masked = '';
+  let index = 0;
+
+  while (index < content.length) {
+    const char = content[index];
+    const next = content[index + 1];
+
+    if (char === '"' || char === "'" || char === '`') {
+      const quote = char;
+      masked += ' ';
+      index += 1;
+      let escaped = false;
+      while (index < content.length) {
+        const current = content[index];
+        masked += current === '\n' || current === '\r' ? current : ' ';
+        index += 1;
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (current === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (current === quote) break;
+      }
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      masked += '  ';
+      index += 2;
+      while (index < content.length && content[index] !== '\n') {
+        masked += ' ';
+        index += 1;
+      }
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      masked += '  ';
+      index += 2;
+      while (index < content.length) {
+        const current = content[index];
+        const following = content[index + 1];
+        masked += current === '\n' || current === '\r' ? current : ' ';
+        index += 1;
+        if (current === '*' && following === '/') {
+          masked += ' ';
+          index += 1;
+          break;
+        }
+      }
+      continue;
+    }
+
+    masked += char;
+    index += 1;
+  }
+
+  return masked;
 }
 
 function validateMetadata(metadata: Record<string, unknown>): void {
