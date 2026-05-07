@@ -844,6 +844,18 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/signoff.md \
         'CLI_ONBOARDING_WORKFLOW_COMPLETE'
       ;;
+    workflows/wave0-foundation/02-toolchain-and-validation-foundation.ts)
+      test -f package.json \
+        && test -f tsconfig.json \
+        && test -f vitest.config.ts \
+        && test -f test/setup.ts \
+        && grep -q '"typecheck"' package.json \
+        && grep -q '"test"' package.json \
+        && grep -q 'typescript' package.json \
+        && grep -q 'vitest' package.json \
+        && npm run typecheck >/dev/null \
+        && npm test >/dev/null
+      ;;
     workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave4-local-byoh/implement-cli-onboarding-from-ux-spec/signoff.md \
