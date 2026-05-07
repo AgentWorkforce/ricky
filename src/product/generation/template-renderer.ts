@@ -144,7 +144,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!),
     '',
-    renderLeadPlanStep(input.spec, input.artifactsDir),
+    renderLeadPlanStep(input.artifactsDir),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'lead-plan-gate')!),
     '',
@@ -154,7 +154,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'initial-soft-validation')!),
     '',
-    renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-claude')),
+    renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.artifactsDir, selectionFor(input.toolSelection, 'review-claude')),
     '',
     renderSecondaryReviewStep('review-codex', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-codex'), input.isCodeWorkflow),
     '',
@@ -170,7 +170,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-validation')!),
     '',
-    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-claude'), true),
+    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.artifactsDir, selectionFor(input.toolSelection, 'final-review-claude'), true),
     '',
     renderSecondaryReviewStep('final-review-codex', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-codex'), input.isCodeWorkflow, true),
     '',
@@ -554,6 +554,7 @@ function renderPrepareContextStep(
         return `${match.id} confidence=${match.confidence} reason=${match.reason} evidence=${evidence}`;
       }).join('\n')
     : 'No skills matched the normalized spec.';
+  const contextPackage = buildGeneratedContextPackage(spec, artifactsDir, pattern, loadedSkillsReport);
   const skillContextCommands = skills.matches
     .filter((match) => match.path)
     .flatMap((match) => {
@@ -566,6 +567,7 @@ function renderPrepareContextStep(
   const commands = [
     `mkdir -p ${shellQuote(artifactsDir)}`,
     `printf '%s\\n' ${shellQuote(spec.description)} > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
+    ...contextPackage.map((file) => `printf '%s\\n' ${shellQuote(file.content)} > ${shellQuote(file.path)}`),
     `printf '%s\\n' ${shellQuote(`pattern=${pattern.pattern}; reason=${pattern.reason}`)} > ${shellQuote(`${artifactsDir}/pattern-decision.txt`)}`,
     `printf '%s\\n' ${shellQuote(loadedSkillsReport)} > ${shellQuote(`${artifactsDir}/loaded-skills.txt`)}`,
     `printf '%s\\n' ${shellQuote(JSON.stringify(normalizeSkillMatchesForArtifact(skills.matches)))} > ${shellQuote(`${artifactsDir}/skill-matches.json`)}`,
@@ -587,41 +589,197 @@ function renderTargetContextCommand(targetContext: string, outputPath: string): 
   return `if test -f ${quotedContext}; then cat ${quotedContext} > ${quotedOutput}; else printf '%s\\n' ${quotedContext} > ${quotedOutput}; fi`;
 }
 
-function renderLeadPlanStep(spec: NormalizedWorkflowSpec, artifactsDir: string): string {
+interface GeneratedContextFile {
+  path: string;
+  content: string;
+}
+
+function buildGeneratedContextPackage(
+  spec: NormalizedWorkflowSpec,
+  artifactsDir: string,
+  pattern: PatternDecision,
+  loadedSkillsReport: string,
+): GeneratedContextFile[] {
   const nonGoals = defaultNonGoals(spec);
+  const deliverables = spec.targetFiles.length > 0
+    ? spec.targetFiles
+    : ['A generated workflow artifact and any requested output files'];
+  const verificationCommands = [
+    'file_exists gate for declared targets',
+    'deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion',
+    'active-reference gate for deleted manifest paths',
+    'npx tsc --noEmit',
+    deriveTestCommand(spec),
+    'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff',
+    'PR URL or explicit result summary',
+  ];
+  const acceptanceContract = {
+    description: spec.description,
+    desiredAction: spec.desiredAction,
+    targetFiles: spec.targetFiles,
+    constraints: spec.constraints,
+    evidenceRequirements: spec.evidenceRequirements,
+    acceptanceGates: spec.acceptanceGates,
+    executionPreference: spec.executionPreference,
+    pattern: {
+      selected: pattern.pattern,
+      reason: pattern.reason,
+      riskLevel: pattern.riskLevel,
+      specSignals: pattern.specSignals,
+    },
+    generatedArtifactsDir: artifactsDir,
+    requiredLeadPlanHeadings: ['Non-goals', 'Routing contract', 'Implementation contract'],
+    requiredLeadPlanSentinel: 'GENERATION_LEAD_PLAN_READY',
+    implementationContract: {
+      sourceChangesRequired: isCodeWritingWorkflow(spec),
+      requireNonEmptyDiffEvidence: true,
+      requireResultOrPrReporting: true,
+    },
+    routingContract: {
+      local: 'Run through Agent Relay using the generated workflow artifact.',
+      cloud: 'Cloud callers receive the same generated artifact contract unless the normalized spec explicitly requests a separate cloud path.',
+      mcp: 'Generated runtime agents must not use Relaycast management or messaging tools.',
+    },
+  };
+
+  return [
+    {
+      path: `${artifactsDir}/normalized-spec.md`,
+      content: [
+        '# Normalized Spec',
+        '',
+        spec.description,
+        '',
+        '## Target Context',
+        '',
+        spec.targetContext ? `See ${artifactsDir}/target-context.txt.` : 'None declared.',
+      ].join('\n'),
+    },
+    {
+      path: `${artifactsDir}/acceptance-contract.json`,
+      content: JSON.stringify(acceptanceContract, null, 2),
+    },
+    {
+      path: `${artifactsDir}/non-goals.md`,
+      content: [
+        '# Non-goals',
+        '',
+        ...formatList(nonGoals).split('\n'),
+      ].join('\n'),
+    },
+    {
+      path: `${artifactsDir}/deliverables.md`,
+      content: [
+        '# Deliverables',
+        '',
+        '## Declared File Targets',
+        '',
+        ...formatList(deliverables).split('\n'),
+        '',
+        '## Output Manifest',
+        '',
+        spec.targetFiles.length === 0
+          ? `Write every changed path to ${artifactsDir}/output-manifest.txt using status-prefixed entries such as "A path", "M path", or "D path".`
+          : 'Declared target files define the expected source-change boundary.',
+      ].join('\n'),
+    },
+    {
+      path: `${artifactsDir}/verification-plan.md`,
+      content: [
+        '# Verification Plan',
+        '',
+        'Run or satisfy these verification requirements before signoff:',
+        '',
+        ...formatList(verificationCommands).split('\n'),
+        '',
+        'Generated workflow quality:',
+        '',
+        '- Include a real deterministic sanity gate over produced files, not just prose saying one exists.',
+        '- Prefer POSIX grep, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.',
+        '- If using rg, guard it with command -v rg and provide a grep or git grep fallback.',
+        '- For cleanup or deletion work, persist a changed-files inventory with statuses, active-reference evidence for deleted paths, and command summaries for final signoff.',
+        `- For cleanup or deletion work, start from ${artifactsDir}/cleanup-candidate-prescan.txt and cite that exact path in ${artifactsDir}/cleanup-report.md so the evidence trail names its prescan input.`,
+        '- Keep each agent step bounded to one coherent slice. Split broad implementation or test-writing work into sequential/fan-out steps with deterministic gates between them instead of relying on a single long agent timeout.',
+      ].join('\n'),
+    },
+    {
+      path: `${artifactsDir}/lead-plan-instructions.md`,
+      content: [
+        '# Lead Plan Instructions',
+        '',
+        'Plan the workflow execution from the packaged context files, not from the short task prompt.',
+        '',
+        'Required sections:',
+        '',
+        '- Non-goals',
+        '- Routing contract',
+        '- Implementation contract',
+        '- Deliverables',
+        '- Verification gates',
+        '',
+        `Write ${artifactsDir}/lead-plan.md and end it with GENERATION_LEAD_PLAN_READY.`,
+        '',
+        'Generation-time skill boundary:',
+        '',
+        `- Read ${artifactsDir}/skill-application-boundary.json and treat it as generator metadata only.`,
+        '- Skills are applied by Ricky during selection, loading, and template rendering.',
+        '- Do not claim generated agents load, retain, or embody skill files at runtime unless a future runtime test proves that path.',
+        '',
+        'Loaded skills summary:',
+        '',
+        loadedSkillsReport,
+      ].join('\n'),
+    },
+    {
+      path: `${artifactsDir}/implementation-instructions.md`,
+      content: [
+        '# Implementation Instructions',
+        '',
+        'IMPLEMENTATION_WORKFLOW_CONTRACT:',
+        '',
+        '- For implementation specs, edit source files and produce code changes, not just plan.md, mapping.json, or analysis artifacts.',
+        '- Keep a non-empty implementation diff outside transient artifact directories.',
+        '- Add or update tests that prove the changed behavior.',
+        '- Keep execution routing explicit for local, cloud, and MCP callers.',
+        '- Materialize outputs to disk, then stop for deterministic gates.',
+      ].join('\n'),
+    },
+    {
+      path: `${artifactsDir}/review-checklist.md`,
+      content: [
+        '# Review Checklist',
+        '',
+        'Assess:',
+        '',
+        '- Declared file targets and non-goals.',
+        '- Deterministic gates and evidence quality.',
+        '- Review/fix/final-review 80-to-100 loop shape.',
+        '- Local/cloud/MCP routing clarity.',
+        '- Whether source changes, tests, non-empty diff evidence, and PR/result reporting satisfy the implementation contract.',
+      ].join('\n'),
+    },
+  ];
+}
+
+function renderLeadPlanStep(artifactsDir: string): string {
   return `    .step('lead-plan', {
       agent: 'lead-claude',
       dependsOn: ['skill-boundary-metadata-gate'],
       timeoutMs: ${DEFAULT_LEAD_PLAN_TIMEOUT_MS},
-      task: ${templateLiteral(`Plan the workflow execution from the normalized spec.
+      task: ${templateLiteral(`Plan the workflow execution from the packaged context files.
 
-Generation-time skill boundary:
-- Read ${artifactsDir}/skill-application-boundary.json and treat it as generator metadata only.
-- Skills are applied by Ricky during selection, loading, and template rendering.
-- Do not claim generated agents load, retain, or embody skill files at runtime unless a future runtime test proves that path.
+Read these files in order:
+- ${artifactsDir}/lead-plan-instructions.md
+- ${artifactsDir}/normalized-spec.md
+- ${artifactsDir}/acceptance-contract.json
+- ${artifactsDir}/non-goals.md
+- ${artifactsDir}/deliverables.md
+- ${artifactsDir}/verification-plan.md
+- ${artifactsDir}/skill-application-boundary.json
 
-Description:
-${spec.description}
-
-Implementation contract:
-- If this is an implementation spec, agents must make source changes in the target repository rather than stopping at planning artifacts.
-- Final success requires code/source changes, tests, non-empty diff evidence, and PR/result reporting unless the spec explicitly says planning-only.
-
-Deliverables:
-${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : ['A generated workflow artifact and any requested output files'])}
-
-Non-goals:
-${formatList(nonGoals)}
-
-Routing contract:
-- Local: run through Agent Relay using the generated workflow artifact and persist artifacts under ${artifactsDir}.
-- Cloud: no separate cloud execution path is implied unless the normalized spec explicitly requests cloud; cloud callers receive the same generated artifact contract.
-- MCP: generated runtime agents must not use Relaycast management or messaging tools; MCP callers receive artifacts without a separate runtime management path.
-
-Verification commands:
-${formatList(['file_exists gate for declared targets', 'deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion', 'active-reference gate for deleted manifest paths', 'npx tsc --noEmit', deriveTestCommand(spec), 'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff', 'PR URL or explicit result summary'])}
-
-Write ${artifactsDir}/lead-plan.md ending with GENERATION_LEAD_PLAN_READY.`)},
+Write ${artifactsDir}/lead-plan.md.
+Required headings: Non-goals, Routing contract, Implementation contract.
+End the file with GENERATION_LEAD_PLAN_READY.`)},
       verification: { type: 'output_contains', value: 'GENERATION_LEAD_PLAN_READY' },
     })`;
 }
@@ -642,32 +800,21 @@ ${selectionLines}
       timeoutMs: ${DEFAULT_IMPLEMENT_TIMEOUT_MS},
       task: ${templateLiteral(`${isCodeWorkflow ? 'Implement the requested code-writing workflow slice.' : 'Author the requested workflow artifact.'}
 
-IMPLEMENTATION_WORKFLOW_CONTRACT:
-- For implementation specs, edit source files and produce code changes, not just plan.md, mapping.json, or analysis artifacts.
-- Keep a non-empty implementation diff outside transient artifact directories.
-- Add or update tests that prove the changed behavior.
+Read these packaged context files before editing:
+- ${artifactsDir}/implementation-instructions.md
+- ${artifactsDir}/normalized-spec.md
+- ${artifactsDir}/acceptance-contract.json
+- ${artifactsDir}/deliverables.md
+- ${artifactsDir}/verification-plan.md
+- ${artifactsDir}/lead-plan.md
+- ${artifactsDir}/matched-skills.md
+${spec.targetContext ? `- ${artifactsDir}/target-context.txt` : ''}
 
-Scope:
-${spec.description}
-
-Own only declared targets unless review feedback explicitly narrows a required fix:
-${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : [noTargetInstructions])}
-
-Acceptance gates:
-${formatList(spec.acceptanceGates.map((gate) => gate.gate))}
+Own only the declared targets from ${artifactsDir}/acceptance-contract.json unless review feedback narrows a required fix.
+${spec.targetFiles.length === 0 ? noTargetInstructions : `Declared target files are listed in ${artifactsDir}/deliverables.md.`}
 ${renderToolSelectionSummary(selection)}
 
-Before editing, read ${artifactsDir}/matched-skills.md when it exists and use it only as generation-time context for this task.
-
-Keep execution routing explicit for local, cloud, and MCP callers. Materialize outputs to disk, then stop for deterministic gates.
-
-Generated workflow quality:
-- Include a real deterministic sanity gate over produced files, not just prose saying one exists.
-- Prefer POSIX grep, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.
-- If using rg, guard it with command -v rg and provide a grep or git grep fallback.
-- For cleanup or deletion work, persist a changed-files inventory with statuses, active-reference evidence for deleted paths, and command summaries for final signoff.
-- For cleanup or deletion work, start from ${artifactsDir}/cleanup-candidate-prescan.txt and cite that exact path in ${artifactsDir}/cleanup-report.md so the evidence trail names its prescan input.
-- Keep each agent step bounded to one coherent slice. Split broad implementation or test-writing work into sequential/fan-out steps with deterministic gates between them instead of relying on a single long agent timeout.`)},
+Keep execution routing explicit for local, cloud, and MCP callers. Materialize outputs to disk, then stop for deterministic gates.`)},
     })`;
 }
 
@@ -675,7 +822,6 @@ function renderReviewStep(
   stepName: string,
   agent: string,
   dependsOn: string[],
-  spec: NormalizedWorkflowSpec,
   artifactsDir: string,
   selection?: ToolSelection,
   final = false,
@@ -690,14 +836,12 @@ ${selectionLines}
       timeoutMs: ${DEFAULT_REVIEW_TIMEOUT_MS},
       task: ${templateLiteral(`${final ? 'Re-review the fixed state only.' : 'Review the generated work.'}
 
-Assess:
-- declared file targets and non-goals
-- deterministic gates and evidence quality
-- review/fix/final-review 80-to-100 loop shape
-- local/cloud/MCP routing clarity
-
-Spec:
-${spec.description}
+Read:
+- ${artifactsDir}/review-checklist.md
+- ${artifactsDir}/normalized-spec.md
+- ${artifactsDir}/acceptance-contract.json
+- ${artifactsDir}/lead-plan.md
+- ${artifactsDir}/verification-plan.md
 ${renderToolSelectionSummary(selection)}
 
 Write ${reviewPath} ending with ${marker}.`)},
@@ -715,7 +859,7 @@ function renderSecondaryReviewStep(
   final = false,
 ): string {
   if (isCodeWorkflow) {
-    return renderReviewStep(stepName, 'reviewer-codex', dependsOn, spec, artifactsDir, selection, final);
+    return renderReviewStep(stepName, 'reviewer-codex', dependsOn, artifactsDir, selection, final);
   }
 
   const marker = final ? 'FINAL_REVIEW_CODEX_PASS' : 'REVIEW_COMPLETE';

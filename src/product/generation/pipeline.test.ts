@@ -1334,12 +1334,49 @@ describe('workflow generation pipeline', () => {
     expect(content).toContain(`${artifactsDir}/skill-application-boundary.json`);
     expect(content).toContain(`${artifactsDir}/skill-runtime-boundary.txt`);
     expect(content).toContain(`${artifactsDir}/signoff.md`);
+    expect(content).toContain(`${artifactsDir}/normalized-spec.md`);
+    expect(content).toContain(`${artifactsDir}/acceptance-contract.json`);
+    expect(content).toContain(`${artifactsDir}/lead-plan-instructions.md`);
+    expect(content).toContain(`${artifactsDir}/implementation-instructions.md`);
+    expect(content).toContain(`${artifactsDir}/review-checklist.md`);
+  });
+
+  it('packages long spec context into sidecar files instead of agent task bodies', () => {
+    const longSpecSentinel = 'VERY_LONG_INLINE_SENTINEL_SHOULD_ONLY_LIVE_IN_CONTEXT_PACKAGE';
+    const longDescription = [
+      'Implement prompt packaging for generated workflow context.',
+      longSpecSentinel,
+      'This paragraph is intentionally repeated so generated agent tasks must point at sidecar files instead of carrying the entire normalized spec.',
+    ].join(' ').repeat(80);
+    const result = generate({
+      spec: spec({
+        description: longDescription,
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+        acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/packaged-context.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const content = artifact(result).content;
+    expect(content).toContain(longSpecSentinel);
+    expect(content).toContain('.workflow-artifacts/generated/packaged-context/normalized-spec.md');
+    expect(content).toContain('.workflow-artifacts/generated/packaged-context/acceptance-contract.json');
+
+    const taskBodies = renderedTaskBodies(content);
+    expect(taskBodies.length).toBeGreaterThan(0);
+    expect(taskBodies.join('\n')).not.toContain(longSpecSentinel);
+    expect(Math.max(...taskBodies.map((body) => body.length))).toBeLessThan(2500);
   });
 });
 
 function artifact(result: ReturnType<typeof generate>): NonNullable<ReturnType<typeof generate>['artifact']> {
   expect(result.artifact).not.toBeNull();
   return result.artifact!;
+}
+
+function renderedTaskBodies(content: string): string[] {
+  return [...content.matchAll(/task:\s*`([\s\S]*?)`/g)].map((match) => match[1]);
 }
 
 function gate(
