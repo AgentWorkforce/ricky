@@ -278,12 +278,21 @@ export function completeStep(
   };
 }
 
-/** Derive run status from step statuses and mark the run as complete. */
+/** Derive run status from step statuses and deterministic gates, then mark the run as complete. */
 export function completeRun(
   run: WorkflowRunEvidence,
   params: CompleteRunParams = {},
 ): WorkflowRunEvidence {
-  const derivedStatus = params.status ?? deriveRunStatus(run.steps);
+  const stepDerivedStatus = params.status ?? deriveRunStatus(run.steps);
+
+  // A run that would otherwise be 'passed' must be downgraded to 'failed'
+  // when any deterministic gate (run-level or step-level) has failed.
+  // Deterministic gates are authoritative evidence — a passed step set does
+  // not override a failed gate.
+  const derivedStatus =
+    stepDerivedStatus === 'passed' && !allDeterministicGatesPassed(run)
+      ? 'failed'
+      : stepDerivedStatus;
 
   // Only stamp completion metadata when the derived status is terminal.
   // A run with pending/running steps should not carry completedAt/durationMs
@@ -381,6 +390,7 @@ export function buildEvidenceOutcome(run: WorkflowRunEvidence): EvidenceOutcome 
     failedStepIds: summary.failedStepIds,
     timedOutStepIds: stepIdsWithStatus(run, 'timed_out'),
     cancelledStepIds: stepIdsWithStatus(run, 'cancelled'),
+    retryExhaustedStepIds: retryExhaustedStepIds(run),
     pendingStepIds: stepIdsWithStatus(run, 'pending'),
     runningStepIds: stepIdsWithStatus(run, 'running'),
     commands,
@@ -402,6 +412,7 @@ export function collectEvidenceCommands(run: WorkflowRunEvidence): EvidenceComma
     if (hasCommandEvidence(gate)) {
       commands.push(commandFromGate(gate));
     }
+    commands.push(...commandsFromGateVerifications(gate));
   }
 
   for (const step of run.steps) {
@@ -415,6 +426,7 @@ export function collectEvidenceCommands(run: WorkflowRunEvidence): EvidenceComma
       if (hasCommandEvidence(gate)) {
         commands.push(commandFromGate(gate, step));
       }
+      commands.push(...commandsFromGateVerifications(gate, step));
     }
 
     for (const retry of step.retries) {
@@ -424,7 +436,7 @@ export function collectEvidenceCommands(run: WorkflowRunEvidence): EvidenceComma
     }
   }
 
-  return commands;
+  return uniqueCommands(commands);
 }
 
 /** Collect produced artifact paths from run, step, and deterministic gate evidence. */
@@ -506,10 +518,19 @@ export function auditNarrativeEvidence(run: WorkflowRunEvidence): NarrativeAudit
 
 /** Collect relevant command, log, and step error snippets for reporting. */
 export function collectOutputSnippets(run: WorkflowRunEvidence): EvidenceOutputSnippet[] {
-  return [
+  return uniqueOutputSnippets([
     ...snippetsFromLogs(run.logs),
     ...run.deterministicGates.flatMap((gate) =>
-      snippetsFromCommand(gate, { source: 'deterministic_gate', gateName: gate.gateName }),
+      [
+        ...snippetsFromCommand(gate, { source: 'deterministic_gate', gateName: gate.gateName }),
+        ...gate.verifications.flatMap((verification) =>
+          snippetsFromCommand(verification, {
+            source: 'deterministic_gate_verification',
+            gateName: gate.gateName,
+            recordedAt: verification.recordedAt,
+          }),
+        ),
+      ],
     ),
     ...run.steps.flatMap((step) => [
       ...(step.error ? [{
@@ -528,13 +549,24 @@ export function collectOutputSnippets(run: WorkflowRunEvidence): EvidenceOutputS
         }),
       ),
       ...step.deterministicGates.flatMap((gate) =>
-        snippetsFromCommand(gate, {
-          source: 'deterministic_gate',
-          stepId: step.stepId,
-          stepName: step.stepName,
-          gateName: gate.gateName,
-          recordedAt: gate.recordedAt,
-        }),
+        [
+          ...snippetsFromCommand(gate, {
+            source: 'deterministic_gate',
+            stepId: step.stepId,
+            stepName: step.stepName,
+            gateName: gate.gateName,
+            recordedAt: gate.recordedAt,
+          }),
+          ...gate.verifications.flatMap((verification) =>
+            snippetsFromCommand(verification, {
+              source: 'deterministic_gate_verification',
+              stepId: step.stepId,
+              stepName: step.stepName,
+              gateName: gate.gateName,
+              recordedAt: verification.recordedAt,
+            }),
+          ),
+        ],
       ),
       ...step.retries.flatMap((retry) =>
         snippetsFromCommand(retry, {
@@ -545,7 +577,7 @@ export function collectOutputSnippets(run: WorkflowRunEvidence): EvidenceOutputS
         }),
       ),
     ]),
-  ];
+  ]);
 }
 
 function appendStepNarrative(
@@ -570,7 +602,7 @@ function classifyEvidenceFailureKind(
   if (hasFailedRoutingAssertion(run)) return 'routing';
   if (gates.some((gate) => !gate.passed)) return 'deterministic_gate';
   if (!summary.allVerificationsPassed) return 'verification';
-  if (summary.retryCount >= 5) return 'retry_exhaustion';
+  if (retryExhaustedStepIds(run).length > 0) return 'retry_exhaustion';
   if (summary.failedSteps > 0) return 'step_failed';
   return 'unknown';
 }
@@ -614,6 +646,15 @@ function hasFailedRoutingAssertion(run: WorkflowRunEvidence): boolean {
 
 function stepIdsWithStatus(run: WorkflowRunEvidence, status: StepStatus): string[] {
   return run.steps.filter((step) => step.status === status).map((step) => step.stepId);
+}
+
+function retryExhaustedStepIds(run: WorkflowRunEvidence): string[] {
+  return run.steps
+    .filter((step) =>
+      step.retries.length > 0 &&
+      (step.status === 'failed' || step.status === 'timed_out' || step.status === 'cancelled'),
+    )
+    .map((step) => step.stepId);
 }
 
 function isTerminalRunStatus(status: RunStatus): boolean {
@@ -719,13 +760,16 @@ function hasCommandEvidence(
 
 function commandFromVerification(
   verification: VerificationResult,
-  step: WorkflowStepEvidence,
+  step?: WorkflowStepEvidence,
   attempt?: number,
+  gateName?: string,
+  source: EvidenceCommandReference['source'] = 'verification',
 ): EvidenceCommandReference {
   return {
-    source: 'verification',
-    stepId: step.stepId,
-    stepName: step.stepName,
+    source,
+    stepId: step?.stepId,
+    stepName: step?.stepName,
+    gateName,
     verificationType: verification.type,
     attempt,
     passed: verification.passed,
@@ -736,6 +780,23 @@ function commandFromVerification(
     stderrExcerpt: verification.stderrExcerpt,
     outputExcerpt: verification.outputExcerpt,
   };
+}
+
+function commandsFromGateVerifications(
+  gate: DeterministicGateResult,
+  step?: WorkflowStepEvidence,
+): EvidenceCommandReference[] {
+  return gate.verifications
+    .filter(hasCommandEvidence)
+    .map((verification) =>
+      commandFromVerification(
+        verification,
+        step,
+        undefined,
+        gate.gateName,
+        'deterministic_gate_verification',
+      ),
+    );
 }
 
 function commandFromGate(
@@ -890,6 +951,48 @@ function snippetsFromCommand(
       ? { ...base, text: command.outputExcerpt }
       : undefined,
   ].filter((snippet): snippet is EvidenceOutputSnippet => Boolean(snippet));
+}
+
+function uniqueCommands(commands: EvidenceCommandReference[]): EvidenceCommandReference[] {
+  const seen = new Set<string>();
+  return commands.filter((command) => {
+    const key = [
+      command.source,
+      command.stepId ?? '',
+      command.gateName ?? '',
+      command.verificationType ?? '',
+      command.attempt ?? '',
+      command.command ?? '',
+      command.exitCode ?? '',
+      command.stdoutExcerpt ?? '',
+      command.stderrExcerpt ?? '',
+      command.outputExcerpt ?? '',
+      command.recordedAt ?? '',
+    ].join('\0');
+
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueOutputSnippets(snippets: EvidenceOutputSnippet[]): EvidenceOutputSnippet[] {
+  const seen = new Set<string>();
+  return snippets.filter((snippet) => {
+    const key = [
+      snippet.source,
+      snippet.stepId ?? '',
+      snippet.gateName ?? '',
+      snippet.attempt ?? '',
+      snippet.stream ?? '',
+      snippet.text,
+      snippet.recordedAt ?? '',
+    ].join('\0');
+
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function stampVerification(result: VerificationResult, recordedAt: string): VerificationResult {

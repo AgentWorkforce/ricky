@@ -83,7 +83,7 @@ export type EvidenceFailureKind =
   | 'unknown';
 
 export interface EvidenceCommandReference extends Partial<CommandEvidence> {
-  source: 'verification' | 'deterministic_gate' | 'retry';
+  source: 'verification' | 'deterministic_gate' | 'deterministic_gate_verification' | 'retry';
   stepId?: string;
   stepName?: string;
   gateName?: string;
@@ -178,6 +178,7 @@ export interface EvidenceOutcome {
   failedStepIds: string[];
   timedOutStepIds: string[];
   cancelledStepIds: string[];
+  retryExhaustedStepIds: string[];
   pendingStepIds: string[];
   runningStepIds: string[];
   commands: EvidenceCommandReference[];

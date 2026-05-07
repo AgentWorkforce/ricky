@@ -6,12 +6,14 @@ import {
   recordDeterministicGate,
   createDeterministicGate,
   attachArtifact,
+  attachRunArtifact,
   attachRunLog,
   recordRoutingDecision,
   appendRunNarrative,
   completeStep,
   completeRun,
   summarizeEvidence,
+  buildEvidenceOutcome,
 } from './capture.js';
 import type { VerificationResult, WorkflowStepEvidence } from './types.js';
 
@@ -320,6 +322,73 @@ describe('completeRun', () => {
   });
 });
 
+describe('completeRun — deterministic gate authority', () => {
+  it('downgrades to failed when run-level gate failed on empty step list', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const { run: gated } = recordDeterministicGate(run, 'gate', [
+      { type: 'exit_code', passed: false, expected: '0', actual: '1', command: 'cmd', exitCode: 1 },
+    ]);
+    const done = completeRun(gated);
+    expect(done.status).toBe('failed');
+    expect(done.completedAt).toBeDefined();
+    expect(done.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('downgrades to failed when run-level gate failed despite all steps passed', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const s1 = completeStep(createStepEvidence({ stepId: 's-1', stepName: 'a' }), 'passed');
+    const { run: gated } = recordDeterministicGate(
+      { ...run, steps: [s1] }, 'tsc-gate',
+      [{ type: 'exit_code', passed: false, expected: '0', actual: '2', command: 'tsc', exitCode: 2 }],
+    );
+    const done = completeRun(gated);
+    expect(done.status).toBe('failed');
+  });
+
+  it('buildEvidenceOutcome reports failed and deterministic_gate failureKind for failed gate on passed steps', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const s1 = completeStep(createStepEvidence({ stepId: 's-1', stepName: 'a' }), 'passed');
+    const { run: gated } = recordDeterministicGate(
+      { ...run, steps: [s1] }, 'gate',
+      [{ type: 'exit_code', passed: false, expected: '0', actual: '1', command: 'cmd', exitCode: 1, message: 'gate failed' }],
+    );
+    const done = completeRun(gated);
+    const outcome = buildEvidenceOutcome(done);
+
+    expect(outcome.status).toBe('failed');
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failureKind).toBe('deterministic_gate');
+    expect(outcome.failureMessage).toBe('gate failed');
+    expect(outcome.summary.allDeterministicGatesPassed).toBe(false);
+  });
+
+  it('downgrades to failed when step-level gate failed but step status is passed', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    let step = createStepEvidence({ stepId: 's-1', stepName: 'a' });
+    step = appendStepEvent(step, {
+      kind: 'deterministic_gate',
+      gate: createDeterministicGate({
+        gateName: 'step-gate',
+        verifications: [{ type: 'exit_code', passed: false, expected: '0', actual: '1' }],
+      }),
+    });
+    step = completeStep(step, 'passed');
+    const done = completeRun({ ...run, steps: [step] });
+    expect(done.status).toBe('failed');
+  });
+
+  it('remains passed when all gates pass', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const s1 = completeStep(createStepEvidence({ stepId: 's-1', stepName: 'a' }), 'passed');
+    const { run: gated } = recordDeterministicGate(
+      { ...run, steps: [s1] }, 'pass-gate',
+      [{ type: 'exit_code', passed: true, expected: '0', actual: '0' }],
+    );
+    const done = completeRun(gated);
+    expect(done.status).toBe('passed');
+  });
+});
+
 describe('summarizeEvidence', () => {
   it('produces correct counts and metadata', () => {
     const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
@@ -604,5 +673,398 @@ describe('createStepEvidence — with routing', () => {
     expect(step.routing).toBeDefined();
     expect(step.routing!.resolvedRoute).toBe('parallel');
     expect(step.routing!.recordedAt).toBeDefined();
+  });
+});
+
+describe('workflow evidence capture scenarios', () => {
+  it('creates an empty run evidence record with debugger-facing collections initialized', () => {
+    const run = createRunEvidence({
+      runId: 'run-empty',
+      workflowId: 'wf-evidence',
+      workflowName: 'evidence-model',
+    });
+    const outcome = buildEvidenceOutcome(run);
+
+    expect(run).toMatchObject({
+      runId: 'run-empty',
+      workflowId: 'wf-evidence',
+      workflowName: 'evidence-model',
+      status: 'pending',
+      startedAt: FIXED_NOW.toISOString(),
+      steps: [],
+      deterministicGates: [],
+      artifacts: [],
+      logs: [],
+      narrative: [],
+      routing: [],
+    });
+    expect(outcome.summary).toMatchObject({
+      runId: 'run-empty',
+      workflowName: 'evidence-model',
+      runStatus: 'pending',
+      totalSteps: 0,
+      retryCount: 0,
+      artifactCount: 0,
+      routeCount: 0,
+    });
+    expect(outcome.terminal).toBe(false);
+    expect(outcome.commands).toEqual([]);
+    expect(outcome.outputSnippets).toEqual([]);
+  });
+
+  it('appends step lifecycle events and deterministic gate evidence with structured failure details', () => {
+    let step = createStepEvidence({
+      stepId: 'step-typecheck',
+      stepName: 'typecheck',
+      agentRole: 'validator',
+    });
+
+    step = appendStepEvent(step, {
+      kind: 'status_change',
+      status: 'running',
+      message: 'validator started',
+    });
+    vi.advanceTimersByTime(1000);
+    step = appendStepEvent(step, {
+      kind: 'deterministic_gate',
+      gate: createDeterministicGate({
+        gateName: 'typecheck-gate',
+        command: 'npm run typecheck',
+        exitCode: 2,
+        stderrExcerpt: 'src/runtime/evidence/capture.ts(10,1): error TS2305',
+        verifications: [
+          {
+            type: 'exit_code',
+            passed: false,
+            expected: '0',
+            actual: '2',
+            message: 'typecheck failed',
+            command: 'npm run typecheck',
+            exitCode: 2,
+            stderrExcerpt: 'error TS2305',
+          },
+        ],
+        artifacts: [
+          {
+            path: '.workflow-artifacts/typecheck.log',
+            kind: 'log',
+            description: 'captured typecheck stderr',
+          },
+        ],
+      }),
+    });
+    step = completeStep(step, 'failed');
+
+    const run = completeRun({
+      ...createRunEvidence({
+        runId: 'run-gate',
+        workflowId: 'wf-evidence',
+        workflowName: 'evidence-model',
+      }),
+      steps: [step],
+    });
+    const outcome = buildEvidenceOutcome(run);
+
+    expect(step.history.map((entry) => [entry.status, entry.message])).toEqual([
+      ['running', 'validator started'],
+      ['failed', undefined],
+    ]);
+    expect(step.deterministicGates).toHaveLength(1);
+    expect(step.verifications).toHaveLength(1);
+    expect(outcome.deterministicGates).toHaveLength(1);
+    expect(outcome.deterministicGates[0]).toMatchObject({
+      scope: 'step',
+      stepId: 'step-typecheck',
+      stepName: 'typecheck',
+      gateName: 'typecheck-gate',
+      passed: false,
+      command: 'npm run typecheck',
+      exitCode: 2,
+      verificationCount: 1,
+      failedVerificationMessages: ['typecheck failed'],
+    });
+    expect(outcome.commands).toEqual([
+      expect.objectContaining({
+        source: 'verification',
+        stepId: 'step-typecheck',
+        verificationType: 'exit_code',
+        command: 'npm run typecheck',
+        exitCode: 2,
+        passed: false,
+      }),
+      expect.objectContaining({
+        source: 'deterministic_gate',
+        stepId: 'step-typecheck',
+        gateName: 'typecheck-gate',
+        command: 'npm run typecheck',
+        exitCode: 2,
+        passed: false,
+      }),
+      expect.objectContaining({
+        source: 'deterministic_gate_verification',
+        stepId: 'step-typecheck',
+        gateName: 'typecheck-gate',
+        verificationType: 'exit_code',
+        command: 'npm run typecheck',
+        exitCode: 2,
+        passed: false,
+      }),
+    ]);
+    expect(outcome.outputSnippets).toEqual([
+      expect.objectContaining({
+        source: 'verification',
+        stepId: 'step-typecheck',
+        stream: 'stderr',
+        text: 'error TS2305',
+      }),
+      expect.objectContaining({
+        source: 'deterministic_gate',
+        stepId: 'step-typecheck',
+        gateName: 'typecheck-gate',
+        stream: 'stderr',
+        text: 'src/runtime/evidence/capture.ts(10,1): error TS2305',
+      }),
+      expect.objectContaining({
+        source: 'deterministic_gate_verification',
+        stepId: 'step-typecheck',
+        gateName: 'typecheck-gate',
+        stream: 'stderr',
+        text: 'error TS2305',
+      }),
+    ]);
+    expect(outcome.summary.allDeterministicGatesPassed).toBe(false);
+    expect(outcome.failureKind).toBe('deterministic_gate');
+  });
+
+  it('records retry attempts and preserves attempt order for fix-loop debugging', () => {
+    let step = appendStepEvent(
+      createStepEvidence({ stepId: 'step-test', stepName: 'scoped tests' }),
+      { kind: 'status_change', status: 'running' },
+    );
+
+    step = appendStepEvent(step, {
+      kind: 'retry',
+      attempt: 1,
+      status: 'failed',
+      error: 'vitest assertion failed',
+      command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+      exitCode: 1,
+      stdoutExcerpt: '1 failed, 39 passed',
+      verifications: [
+        {
+          type: 'exit_code',
+          passed: false,
+          expected: '0',
+          actual: '1',
+          command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+          exitCode: 1,
+          stdoutExcerpt: '1 failed, 39 passed',
+        },
+      ],
+      artifacts: [{ path: '.workflow-artifacts/retry-1.log', kind: 'log' }],
+    });
+    vi.advanceTimersByTime(1000);
+    step = appendStepEvent(step, {
+      kind: 'retry',
+      attempt: 2,
+      status: 'passed',
+      command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+      exitCode: 0,
+      stdoutExcerpt: '40 passed',
+    });
+    step = completeStep(step, 'passed');
+
+    const run = completeRun({
+      ...createRunEvidence({
+        runId: 'run-retries',
+        workflowId: 'wf-evidence',
+        workflowName: 'evidence-model',
+      }),
+      steps: [step],
+    });
+    const outcome = buildEvidenceOutcome(run);
+
+    expect(step.retries.map((retry) => retry.attempt)).toEqual([1, 2]);
+    expect(step.retries.map((retry) => retry.status)).toEqual(['failed', 'passed']);
+    expect(outcome.summary.retryCount).toBe(2);
+    expect(outcome.fixLoopAttempts).toEqual([
+      expect.objectContaining({
+        stepId: 'step-test',
+        stepName: 'scoped tests',
+        attempt: 1,
+        status: 'failed',
+        error: 'vitest assertion failed',
+        command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+        exitCode: 1,
+        outputSnippets: [
+          expect.objectContaining({
+            source: 'retry',
+            attempt: 1,
+            stream: 'stdout',
+            text: '1 failed, 39 passed',
+          }),
+        ],
+        verificationCommands: [
+          expect.objectContaining({
+            source: 'verification',
+            attempt: 1,
+            command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+            exitCode: 1,
+            passed: false,
+          }),
+        ],
+        artifacts: [
+          expect.objectContaining({
+            path: '.workflow-artifacts/retry-1.log',
+            kind: 'log',
+            stepId: 'step-test',
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        stepId: 'step-test',
+        attempt: 2,
+        status: 'passed',
+        command: 'npx vitest run src/runtime/evidence/capture.test.ts',
+        exitCode: 0,
+        outputSnippets: [
+          expect.objectContaining({
+            source: 'retry',
+            attempt: 2,
+            stream: 'stdout',
+            text: '40 passed',
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('attaches artifact and log references as metadata without external file contents', () => {
+    let run = createRunEvidence({
+      runId: 'run-refs',
+      workflowId: 'wf-evidence',
+      workflowName: 'evidence-model',
+    });
+    run = attachRunArtifact(run, {
+      path: '.workflow-artifacts/signoff.md',
+      kind: 'report',
+      description: 'review signoff path',
+    });
+    run = attachRunLog(run, {
+      path: '.workflow-artifacts/runner.log',
+      stream: 'system',
+      excerpt: 'WORKFLOW_EVIDENCE_MODEL_VERIFIED',
+    });
+
+    let step = createStepEvidence({ stepId: 'step-artifacts', stepName: 'materialize evidence' });
+    step = attachArtifact(step, {
+      path: 'src/runtime/evidence/capture.test.ts',
+      kind: 'file',
+      description: 'scoped test file',
+    });
+    step = appendStepEvent(step, {
+      kind: 'log',
+      ref: {
+        path: '.workflow-artifacts/vitest.log',
+        stream: 'stdout',
+        excerpt: '40 passed',
+      },
+    });
+    step = completeStep(step, 'passed');
+
+    const outcome = buildEvidenceOutcome(completeRun({ ...run, steps: [step] }));
+
+    expect(outcome.artifacts).toEqual([
+      {
+        path: '.workflow-artifacts/signoff.md',
+        kind: 'report',
+        description: 'review signoff path',
+      },
+      {
+        path: 'src/runtime/evidence/capture.test.ts',
+        kind: 'file',
+        description: 'scoped test file',
+        stepId: 'step-artifacts',
+        stepName: 'materialize evidence',
+      },
+    ]);
+    expect(outcome.outputSnippets).toEqual([
+      expect.objectContaining({
+        source: 'log',
+        stream: 'system',
+        text: 'WORKFLOW_EVIDENCE_MODEL_VERIFIED',
+      }),
+      expect.objectContaining({
+        source: 'log',
+        stepId: 'step-artifacts',
+        stream: 'stdout',
+        text: '40 passed',
+      }),
+    ]);
+    expect(outcome.outputSnippets.map((snippet) => snippet.text)).not.toContain(
+      '.workflow-artifacts/vitest.log',
+    );
+  });
+
+  it('produces summaries and outcomes that expose failed gates and incomplete steps', () => {
+    const pending = createStepEvidence({ stepId: 'step-review', stepName: 'review evidence' });
+    const running = appendStepEvent(
+      createStepEvidence({ stepId: 'step-fix', stepName: 'fix loop' }),
+      { kind: 'status_change', status: 'running' },
+    );
+    const run = {
+      ...createRunEvidence({
+        runId: 'run-incomplete',
+        workflowId: 'wf-evidence',
+        workflowName: 'evidence-model',
+      }),
+      steps: [pending, running],
+    };
+    const { run: gatedRun } = recordDeterministicGate(run, 'review-artifact-gate', [
+      {
+        type: 'artifact_exists',
+        passed: false,
+        expected: '.workflow-artifacts/review.md',
+        actual: '',
+        message: 'missing review artifact',
+        command: 'test -f .workflow-artifacts/review.md',
+        exitCode: 1,
+        stderrExcerpt: 'missing review artifact',
+      },
+    ]);
+
+    const activeRun = completeRun(gatedRun);
+    const summary = summarizeEvidence(activeRun);
+    const outcome = buildEvidenceOutcome(activeRun);
+
+    expect(summary).toMatchObject({
+      runStatus: 'running',
+      totalSteps: 2,
+      pendingSteps: 1,
+      runningSteps: 1,
+      allDeterministicGatesPassed: false,
+    });
+    expect(outcome.terminal).toBe(false);
+    expect(outcome.pendingStepIds).toEqual(['step-review']);
+    expect(outcome.runningStepIds).toEqual(['step-fix']);
+    expect(outcome.deterministicGates).toEqual([
+      expect.objectContaining({
+        scope: 'run',
+        gateName: 'review-artifact-gate',
+        passed: false,
+        verificationCount: 1,
+        failedVerificationMessages: ['missing review artifact'],
+      }),
+    ]);
+    expect(outcome.commands).toEqual([
+      expect.objectContaining({
+        source: 'deterministic_gate_verification',
+        gateName: 'review-artifact-gate',
+        verificationType: 'artifact_exists',
+        command: 'test -f .workflow-artifacts/review.md',
+        exitCode: 1,
+        passed: false,
+      }),
+    ]);
   });
 });

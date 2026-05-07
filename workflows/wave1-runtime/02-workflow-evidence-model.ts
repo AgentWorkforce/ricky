@@ -277,13 +277,19 @@ Write .workflow-artifacts/wave1-runtime/workflow-evidence-model/final-review-cod
       failOnError: true,
     })
     .step('final-signoff', {
-      agent: 'validator-claude',
+      type: 'deterministic',
       dependsOn: ['regression-gate'],
-      task: `Write .workflow-artifacts/wave1-runtime/workflow-evidence-model/signoff.md.
-
-Include files changed, validation commands run, review verdicts, and remaining risks.
-End with WORKFLOW_EVIDENCE_MODEL_COMPLETE.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave1-runtime/workflow-evidence-model/signoff.md' },
+      command: [
+        'ARTIFACT_DIR=.workflow-artifacts/wave1-runtime/workflow-evidence-model',
+        'SIGNOFF="$ARTIFACT_DIR/signoff.md"',
+        'CHANGED="$(git diff --name-only -- src/runtime/evidence/types.ts src/runtime/evidence/capture.ts src/runtime/evidence/capture.test.ts src/runtime/evidence/index.ts)"',
+        'CLAUDE_VERDICT="$(tail -n 1 "$ARTIFACT_DIR/final-review-claude.md")"',
+        'CODEX_VERDICT="$(tail -n 1 "$ARTIFACT_DIR/final-review-codex.md")"',
+        'cat > "$SIGNOFF" <<EOF\n# Workflow Evidence Model Signoff\n\n## Files Changed\n$CHANGED\n\n## Validation Commands Run\n- npx vitest run src/runtime/evidence/capture.test.ts\n- npx tsc --noEmit\n- npx vitest run\n\n## Review Verdicts\n- $CLAUDE_VERDICT\n- $CODEX_VERDICT\n\n## Remaining Risks\n- Signoff is synthesized from deterministic workflow artifacts and current repo diff; if broader evidence surfaces expand later, this workflow should update the changed-file inventory accordingly.\n\nWORKFLOW_EVIDENCE_MODEL_COMPLETE\nEOF',
+        'test -f "$SIGNOFF"',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .run({ cwd: process.cwd() });
