@@ -25,6 +25,7 @@ Compact execution rules for agents writing Ricky workflows.
 19. Write final signoff artifacts under `.workflow-artifacts/` for significant implementation or generation workflows.
 20. In 80-to-100 validation loops, run the same validation first as a soft gate, fix from captured output, then rerun it as a hard gate before final signoff.
 21. For convention-only workflows, keep edits inside declared convention files and preserve `CLAUDE.md` as a symlink to `AGENTS.md` unless the contract explicitly says otherwise.
+22. For convention-only workflows, run file existence checks, grep or structural checks for the required terms, symlink checks when `CLAUDE.md` is in scope, and scoped change detection limited to declared convention files.
 
 ## Must-not
 
@@ -68,7 +69,7 @@ Use this ladder for serious implementation workflows:
 10. Materialize review and signoff artifacts under `.workflow-artifacts/` for significant workflows.
 11. Sign off only after the final deterministic gates pass.
 
-The ladder is mandatory when the workflow changes runtime behavior, generated workflows, user-visible behavior, or shared execution contracts. Documentation-only and convention-only workflows may use a lighter version, but they still need file existence checks, grep or structural checks, scoped change detection, and independent review when significant.
+The ladder is mandatory when the workflow changes runtime behavior, generated workflows, user-visible behavior, or shared execution contracts. Documentation-only and convention-only workflows may use a lighter version, but they still need file existence checks, grep or structural checks, symlink checks when `CLAUDE.md` is in scope, scoped change detection, and independent review when significant.
 
 ## Scoped Change-Detection Gate
 

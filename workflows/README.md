@@ -41,6 +41,7 @@ workflows/
 ## Principles
 
 - Every workflow must use a dedicated `wf-ricky-*` channel. Never use `general`.
+- Every non-trivial workflow must state its context inputs, deliverables, file targets, non-goals, verification commands, review expectations, branch naming pattern, and commit/PR boundary.
 - Every workflow must have deterministic verification gates after agent edits.
 - Generated workflows must pass `agent-relay run --dry-run` before sign-off.
 - For large programs, prefer meta-workflows over hand-writing dozens of inconsistent files.
@@ -149,6 +150,8 @@ Meta-workflows should write artifacts under `.workflow-artifacts/<meta-slug>/`, 
 Every workflow must state the expected branch naming pattern, file targets, verification commands, and whether commit or PR creation is in scope. Agent steps must not run `git commit` or `git push` unless the workflow explicitly owns that boundary and documents the exact files expected in the change.
 
 For convention-only updates, the normal file boundary is `AGENTS.md`, symlinked `CLAUDE.md`, `workflows/README.md`, and `workflows/shared/WORKFLOW_AUTHORING_RULES.md`, plus optional preserved review artifacts under `.workflow-artifacts/`.
+
+Convention-only workflow commits should stay inside that boundary unless the workflow contract explicitly expands scope. `CLAUDE.md` should remain a symlink to `AGENTS.md`, so Claude-facing behavior is verified through the symlink rather than forked into separate instructions.
 
 ## Reliability traps
 

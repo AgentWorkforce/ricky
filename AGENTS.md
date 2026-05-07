@@ -191,6 +191,7 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 - **Review stage:** Every significant workflow must include review by an agent distinct from the writer when possible. Prefer `writer=codex` with `reviewer=claude`, `writer=claude` with `reviewer=codex`, and both reviewers for critical workflows. Review artifacts for significant workflows must be written under `.workflow-artifacts/`.
 - **80-to-100 validation:** Serious implementation workflows must use a soft-gate, fix, hard-gate loop. The fix loop must include a post-fix re-review on the fixed state before final signoff. Passing compile or typecheck alone is not enough.
 - **Commit boundaries:** Do not run `git commit` or `git push` from agent steps unless the workflow explicitly owns that boundary and documents the expected files. Each workflow must state the expected branch naming pattern and whether PR creation is in or out of scope.
+- **Reviewable wording:** Workflow requirements must be specific enough for grep checks, structural checks, dry-run output, review artifacts, or scoped diff review. Avoid broad prose that cannot be verified by deterministic gates or reviewer inspection.
 - **Env loading:** Load `.env.local` and `.env` before `.run(...)` without overwriting exported values. Fail fast with `MISSING_ENV_VAR: <NAME>` before expensive agent steps.
 - **Scoped change detection:** After implementation steps, verify the repo changed in the expected scope using `git diff --name-only` plus `git ls-files --others --exclude-standard`, scoped to declared file targets. Do not use repo-wide `git diff --quiet` when unrelated work may be present.
 - **Signoff artifacts:** Serious implementation workflows must write a final signoff artifact under `.workflow-artifacts/`. Passing tests alone is not sufficient proof of completion.
@@ -201,6 +202,8 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 When the task is to update Ricky workflow standards, conventions, or authoring rules, keep the change inside the declared convention files unless the workflow contract explicitly expands scope. Do not edit package metadata, runtime configuration, product source, generated wave workflows, or product specs for a convention-only update.
 
 For convention-only work, `CLAUDE.md` should remain a symlink to `AGENTS.md`. Update `AGENTS.md` as the shared source of truth and verify Claude-facing behavior through the symlink instead of forking separate Claude instructions.
+
+Convention-only workflows still need deterministic file-existence checks, grep or structural checks for the updated terms, symlink verification for `CLAUDE.md`, and scoped change detection limited to the declared convention files.
 
 ## Runtime Shape
 
