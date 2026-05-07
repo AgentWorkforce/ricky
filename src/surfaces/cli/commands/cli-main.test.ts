@@ -95,6 +95,13 @@ describe('parseArgs', () => {
       runRequested: true,
       ...RUN_DEFAULTS,
     });
+    expect(parseArgs(['run', 'workflows/generated/example.ts', '--cloud'])).toEqual({
+      command: 'run',
+      mode: 'cloud',
+      artifact: 'workflows/generated/example.ts',
+      runRequested: true,
+      ...RUN_DEFAULTS,
+    });
   });
 
   it('parses --auto-fix attempts and treats zero as disabled', () => {
@@ -322,11 +329,28 @@ describe('parseArgs', () => {
       runId: 'ricky-local-123',
       json: true,
     });
+    expect(parseArgs(['status', 'linear', '--json'])).toEqual({
+      command: 'status',
+      surface: 'status',
+      statusTarget: 'linear',
+      json: true,
+    });
+    expect(parseArgs(['status', 'foo', '--json'])).toEqual({
+      command: 'status',
+      surface: 'status',
+      json: true,
+      errors: ['unknown status target: foo'],
+    });
     expect(parseArgs(['connect', 'agents', '--cloud', 'claude,codex'])).toMatchObject({
       command: 'connect',
       surface: 'connect',
       connectTarget: 'agents',
       cloudTargets: ['claude', 'codex'],
+    });
+    expect(parseArgs(['connect', 'linear'])).toMatchObject({
+      command: 'connect',
+      surface: 'connect',
+      connectTarget: 'linear',
     });
   });
 });
@@ -367,6 +391,7 @@ describe('renderHelp', () => {
     expect(helpText).toContain('ricky workflow --spec-file <path> --mode cloud');
     expect(helpText).not.toContain('ricky workflow --spec-file <path> --mode cloud --run');
     expect(helpText).toContain('ricky run <path> --background');
+    expect(helpText).toContain('ricky run <path> --cloud');
     expect(helpText).toContain('ricky run <artifact> --start-from <step>');
     expect(helpText).toContain('ricky status --run <run-id>');
     expect(helpText).toContain('Without --run:  artifact path on disk');
@@ -1919,7 +1944,7 @@ describe('cliMain', () => {
       const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ mode: 'cloud' }));
 
       const result = await cliMain({
-        argv: ['run', 'workflows/generated/cloud-release.ts', '--mode', 'cloud', '--json'],
+        argv: ['run', 'workflows/generated/cloud-release.ts', '--cloud', '--json'],
         runInteractive: runner,
         readCloudAuth: vi.fn().mockResolvedValue({
           accessToken: 'stored-token',
@@ -2026,7 +2051,7 @@ describe('cliMain', () => {
     expect(result.exitCode).toBe(0);
     expect(output).toContain('Ricky cloud: cloud-release generated; run when ready.');
     expect(output).toContain('Workflow: workflows/generated/cloud-release.ts');
-    expect(output).toContain('Run: ricky cloud --workflow workflows/generated/cloud-release.ts --run');
+    expect(output).toContain('Run: ricky run workflows/generated/cloud-release.ts --cloud');
   });
 
   it('fails power-user cloud non-interactively with recovery commands when Cloud context is missing', async () => {
@@ -2166,6 +2191,39 @@ describe('cliMain', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('ricky status linear renders readiness in GitHub-first order', async () => {
+    const result = await cliMain({
+      argv: ['status', 'linear', '--json'],
+      checkCloudReadiness: vi.fn().mockResolvedValue({
+        account: { connected: true },
+        credentials: { connected: true },
+        workspace: { connected: true, label: 'workspace-1' },
+        agents: {
+          claude: { connected: false, capable: false },
+          codex: { connected: true, capable: true },
+          opencode: { connected: false, capable: false },
+          gemini: { connected: false, capable: false },
+        },
+        integrations: {
+          slack: { connected: false },
+          github: { connected: false },
+          notion: { connected: false },
+          linear: { connected: true, label: 'linear-ricky' },
+        },
+      }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.output.join('\n'));
+    expect(parsed.target).toBe('linear');
+    expect(parsed.rows.map((row: { label: string }) => row.label)).toEqual([
+      'GitHub App',
+      'Connected agents',
+      'Linear Actor app',
+    ]);
+    expect(parsed.rows[1]).toMatchObject({ status: 'blocked' });
   });
 
   it('ricky status treats rejected stored Cloud auth as not authenticated', async () => {
@@ -2465,6 +2523,36 @@ describe('cliMain', () => {
       status: 'connected',
       connectedProviders: ['slack', 'github'],
       nextActions: ['ricky status'],
+    });
+  });
+
+  it('ricky connect linear returns Cloud dashboard guidance without invoking connector flows', async () => {
+    const connectProvider = vi.fn();
+    const ensureCloudAuthenticated = vi.fn();
+    const connectCloudIntegrations = vi.fn();
+
+    const result = await cliMain({
+      argv: ['connect', 'linear', '--json'],
+      connectProvider,
+      ensureCloudAuthenticated,
+      connectCloudIntegrations,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(connectProvider).not.toHaveBeenCalled();
+    expect(ensureCloudAuthenticated).not.toHaveBeenCalled();
+    expect(connectCloudIntegrations).not.toHaveBeenCalled();
+    expect(JSON.parse(result.output.join('\n'))).toMatchObject({
+      target: 'linear',
+      status: 'manual-dashboard',
+      message: expect.not.stringContaining('Ricky connect linear'),
+      nextActions: [
+        'Open the Cloud dashboard Linear integration page.',
+        'Click "Connect Linear" to install the Ricky OAuth Actor app.',
+        'Choose the Linear workspace where Ricky should receive AgentSession events.',
+        'Linear connection is managed through the Cloud dashboard, not the CLI.',
+        'ricky status linear',
+      ],
     });
   });
 

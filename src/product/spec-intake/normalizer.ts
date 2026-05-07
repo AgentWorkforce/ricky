@@ -145,10 +145,12 @@ function validateNormalized(spec: NormalizedWorkflowSpec): ValidationIssue[] {
 }
 
 function categorizeConstraint(constraint: string): NormalizedConstraint['category'] {
+  if (/\b(non[- ]?goal|out[- ]of[- ]scope|not in scope|only|own|scope|do not modify|do not touch|exclude)\b/i.test(constraint)) {
+    return 'scope';
+  }
   if (/\b(file|repo|typescript|node|api|mcp|slack|cli|network|llm|dependency|package)\b/i.test(constraint)) {
     return 'technical';
   }
-  if (/\b(only|own|scope|do not modify|do not touch|non-goal|exclude)\b/i.test(constraint)) return 'scope';
   if (/\b(timeout|deadline|minutes?|hours?|today|tomorrow|before|after)\b/i.test(constraint)) return 'timeline';
   if (/\b(test|typecheck|review|evidence|acceptance|quality|deterministic)\b/i.test(constraint)) return 'quality';
   return 'other';

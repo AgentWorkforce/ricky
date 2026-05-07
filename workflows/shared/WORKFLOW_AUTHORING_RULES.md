@@ -8,15 +8,19 @@ Compact execution rules for agents writing Ricky workflows.
 2. Use numeric prefixes and concise outcome-based slugs.
 3. Use a dedicated `wf-ricky-*` channel.
 4. Choose swarm pattern deliberately, do not default blindly.
-5. Read standards/spec inputs deterministically at runtime.
+5. Read standards/spec inputs deterministically at runtime, including `cat docs/workflows/WORKFLOW_STANDARDS.md`, `cat workflows/shared/WORKFLOW_AUTHORING_RULES.md`, and `cat workflows/meta/spec/generated-workflow-template.md` when generation is in scope.
 6. Materialize files to disk, do not rely on stdout.
 7. Add deterministic post-edit gates.
 8. Include a review stage for significant workflows.
 9. Use 80→100 validation loops for serious implementation workflows.
 10. If generating workflows in bulk, run structural sanity checks and `agent-relay run --dry-run` before sign-off.
-11. End serious workflows with `.run({ cwd: process.cwd() })`.
+11. Import from `@agent-relay/sdk/workflows`, wrap serious workflows in `async function main()`, end with `main().catch(...)`, and call `.run({ cwd: process.cwd() })`.
 12. Keep commit/push boundaries explicit and deterministic.
 13. Load repo-local `.env.local`/`.env` before `.run(...)` without overwriting exported values, and fail fast with `MISSING_ENV_VAR: NAME` for required env vars before long-running agent steps.
+14. For generation tasks, read `workflows/meta/spec/generated-workflow-template.md` before authoring.
+15. Set `.channel()`, `.pattern()`, `.maxConcurrency()`, and `.timeout()` explicitly; add `.onError()` for long-running or multi-agent workflows.
+16. Prefer named roles over generic numbering. Default implementation team shape is `lead-claude`, `impl-primary-codex`, `impl-tests-codex`, `reviewer-claude`, `reviewer-codex`, and `validator-claude`; doc/spec workflows may use `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer.
+17. State the expected branch naming pattern and whether PR creation is in or out of scope.
 
 ## Must-not
 
@@ -27,6 +31,7 @@ Compact execution rules for agents writing Ricky workflows.
 5. Do not claim generated workflows are ready if dry-run has not passed.
 6. Do not hand-tune generated workflows first when the template/spec/rules should be fixed upstream.
 7. Do not hide environmental blockers; document them explicitly.
+8. Do not sign off using review artifacts produced before the fix loop; re-review must evaluate the post-fix state.
 
 ## Default reliability pattern
 
@@ -36,8 +41,9 @@ Compact execution rules for agents writing Ricky workflows.
 4. Run deterministic gates.
 5. Review.
 6. Fix.
-7. Re-run deterministic gates.
-8. Final sign-off.
+7. Re-review on the fixed state.
+8. Re-run deterministic gates.
+9. Final sign-off.
 
 ## 80-to-100 Validation Ladder
 
@@ -51,8 +57,9 @@ Use this ladder for serious implementation workflows:
 6. Fix failures from the captured output.
 7. Re-run the same validation as a hard gate with `failOnError: true`.
 8. Run regression, build, typecheck, dry-run, or local smoke gates appropriate to the workflow.
-9. Materialize review and signoff artifacts under `.workflow-artifacts/` for significant workflows.
-10. Sign off only after the final deterministic gates pass.
+9. Re-review on the fixed state; do not reuse stale pre-fix review artifacts.
+10. Materialize review and signoff artifacts under `.workflow-artifacts/` for significant workflows.
+11. Sign off only after the final deterministic gates pass.
 
 ## Scoped Change-Detection Gate
 
@@ -67,3 +74,35 @@ echo "CHANGES_PRESENT"
 ```
 
 Scope the check to the workflow's declared file targets. Do not use a repo-wide `git diff --quiet` when unrelated work may be present.
+
+## Preferred Gate Types
+
+Prefer deterministic gate types in this order:
+
+1. `exit_code`
+2. `file_exists`
+3. `output_contains` only when the sentinel is deterministic and not agent-echoed
+4. `custom` only when simpler gates cannot express the check
+
+## Reviewer Independence
+
+Use a reviewer distinct from the writer when possible:
+
+- writer = codex, reviewer = claude
+- writer = claude, reviewer = codex
+- critical workflows = both reviewers
+
+## Meta-Workflow Artifact Layout
+
+Meta-workflows and significant generation workflows should write artifacts under:
+
+```text
+.workflow-artifacts/<meta-slug>/
+```
+
+Expected files include:
+
+- `plan.md`
+- `<workflow-id>-review.md`
+- `<workflow-id>-dryrun.txt`
+- `signoff.md`

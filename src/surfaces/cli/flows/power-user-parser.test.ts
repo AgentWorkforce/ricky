@@ -82,6 +82,16 @@ describe('power user parser defaults', () => {
     });
   });
 
+  it('parses ricky run artifact --cloud as Cloud execution shorthand', () => {
+    expect(parsePowerUserArgs(['run', 'workflows/generated/review.ts', '--cloud'])).toMatchObject({
+      command: 'run',
+      surface: 'legacy',
+      mode: 'cloud',
+      artifact: 'workflows/generated/review.ts',
+      runRequested: true,
+    });
+  });
+
   it('treats bare connect --cloud as the standard Cloud targets', () => {
     expect(parsePowerUserArgs(['connect', 'agents', '--cloud'])).toMatchObject({
       command: 'connect',
@@ -101,6 +111,15 @@ describe('power user parser defaults', () => {
   it('parses inline --cloud target lists for connect commands', () => {
     expect(parsePowerUserArgs(['connect', 'agents', '--cloud=claude,codex'])).toMatchObject({
       cloudTargets: ['claude', 'codex'],
+    });
+  });
+
+  it('rejects unknown status targets', () => {
+    expect(parsePowerUserArgs(['status', 'foo', '--json'])).toMatchObject({
+      command: 'status',
+      surface: 'status',
+      json: true,
+      errors: ['unknown status target: foo'],
     });
   });
 

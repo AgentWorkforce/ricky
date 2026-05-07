@@ -205,6 +205,59 @@ describe('runWithAutoFix', () => {
     });
   });
 
+  it('deterministically repairs generated lead-plan marker gates and resumes from the failed gate', async () => {
+    const firstFailure = leadPlanMarkerBlockerResponse();
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(firstFailure)
+      .mockResolvedValueOnce(successResponse('run-2'));
+    const artifactWriter = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 2,
+      runSingleAttempt,
+      artifactWriter,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(artifactWriter).toHaveBeenCalledWith(
+      'workflows/generated/lead-plan-marker.ts',
+      expect.stringContaining("appendLeadPlanSection('Non-goals'"),
+      '/repo',
+    );
+    expect(artifactWriter).toHaveBeenCalledWith(
+      'workflows/generated/lead-plan-marker.ts',
+      expect.stringContaining('Local execution must run through Agent Relay using the generated workflow artifact.'),
+      '/repo',
+    );
+    const repairedContent = artifactWriter.mock.calls.find(([path]) => path === 'workflows/generated/lead-plan-marker.ts')?.[1] as string;
+    expect(repairedContent).toContain('readyMarkerIndex = body.lastIndexOf(readyMarker)');
+    expect(repairedContent).toContain("body.slice(0, readyMarkerIndex).trimEnd() + section + '\\n\\n' + body.slice(readyMarkerIndex)");
+    expect(repairedContent).not.toContain("body.replace(/\\n*GENERATION_LEAD_PLAN_READY\\s*$");
+    expect(runSingleAttempt.mock.calls[1][0]).toMatchObject({
+      source: 'workflow-artifact',
+      specPath: 'workflows/generated/lead-plan-marker.ts',
+      stageMode: 'run',
+      retry: {
+        attempt: 2,
+        maxAttempts: 2,
+        previousRunId: 'lead-plan-run-1',
+        retryOfRunId: 'lead-plan-run-1',
+        startFromStep: 'lead-plan-gate',
+      },
+    });
+    expect(result.auto_fix?.attempts[0]).toMatchObject({
+      status: 'blocker',
+      blocker_code: 'INVALID_ARTIFACT',
+      failed_step: 'lead-plan-gate',
+      applied_fix: {
+        mode: 'deterministic',
+        artifact_path: 'workflows/generated/lead-plan-marker.ts',
+        summary: expect.stringContaining('lead-plan-gate append missing required plan markers'),
+      },
+    });
+  });
+
   it('deterministically repairs bounded workflow artifact mismatches when persona repair is unavailable', async () => {
     const response = sdkRuntimeBlockerResponse();
     const runSingleAttempt = vi.fn().mockResolvedValueOnce(response);
@@ -727,6 +780,68 @@ function sdkRuntimeBlockerResponse(): LocalResponse {
   };
 }
 
+function leadPlanMarkerBlockerResponse(): LocalResponse {
+  const artifactPath = 'workflows/generated/lead-plan-marker.ts';
+  const blocker: LocalClassifiedBlocker = {
+    code: 'INVALID_ARTIFACT',
+    category: 'workflow_invalid',
+    message: 'Workflow reported a failed run: lead plan missing required marker: Non-goals.',
+    detected_at: '2026-04-28T00:00:00.000Z',
+    detected_during: 'launch',
+    recovery: {
+      actionable: true,
+      steps: ['Inspect the captured workflow logs.'],
+    },
+    context: {
+      missing: ['Non-goals'],
+      found: ['lead-plan.md', 'GENERATION_LEAD_PLAN_READY'],
+    },
+  };
+  return {
+    ok: false,
+    artifacts: [{ path: artifactPath, content: leadPlanMarkerWorkflowContent() }],
+    logs: [],
+    warnings: [blocker.message],
+    nextActions: [...blocker.recovery.steps],
+    generation: {
+      stage: 'generate',
+      status: 'ok',
+      artifact: { path: artifactPath, workflow_id: 'wf-lead-plan-marker', spec_digest: 'lead-plan-marker' },
+    },
+    execution: {
+      stage: 'execute',
+      status: 'blocker',
+      execution: {
+        ...execution('lead-plan-run-1'),
+        artifact_path: artifactPath,
+        workflow_file: artifactPath,
+      },
+      blocker,
+      evidence: {
+        outcome_summary: blocker.message,
+        logs: {
+          tail: [
+            '[workflow 00:00] Starting workflow "ricky-lead-plan-marker-workflow" (3 steps)',
+            '[workflow] run lead-plan-run-1',
+            '  ● lead-plan — started',
+            '  ✓ lead-plan — completed',
+            '  ● lead-plan-gate — started',
+            "[workflow 00:00] [lead-plan-gate] Running: node <<'NODE'",
+            '[workflow 00:00] [lead-plan-gate] Command failed (exit code 1)',
+            "Error: lead plan missing required marker: Non-goals",
+            '  ✗ lead-plan-gate — FAILED: Command failed with exit code 1',
+            '[workflow] FAILED: Step "lead-plan-gate" failed: Command failed with exit code 1',
+          ],
+          truncated: false,
+        },
+        side_effects: { files_written: [], commands_invoked: [] },
+        assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
+      },
+    },
+    exitCode: 2,
+  };
+}
+
 function semanticContractBlockerResponse(artifactPath: string, artifactContent: string): LocalResponse {
   const blocker: LocalClassifiedBlocker = {
     code: 'INVALID_ARTIFACT',
@@ -964,6 +1079,27 @@ function workflowRepair(content: string) {
 
 function workflowContent(): string {
   return 'import { workflow } from "@agent-relay/sdk/workflows";\nworkflow("foo").run({ cwd: process.cwd() });\n';
+}
+
+function leadPlanMarkerWorkflowContent(): string {
+  return [
+    "import { workflow } from '@agent-relay/sdk/workflows';",
+    '',
+    "workflow('lead-plan-marker')",
+    "  .step('lead-plan', {",
+    "    agent: 'lead-claude',",
+    "    task: 'Write the lead plan.',",
+    '  })',
+    '  .step("lead-plan-gate", {',
+    "    type: 'deterministic',",
+    '    dependsOn: ["lead-plan"],',
+    '    command: "node <<\'NODE\'\\nconst fs = require(\'node:fs\');\\nconst leadPlanPath = \\".workflow-artifacts/generated/lead-plan-marker/lead-plan.md\\";\\nconst body = fs.readFileSync(leadPlanPath, \'utf8\');\\nif (!body.includes(\'GENERATION_LEAD_PLAN_READY\')) throw new Error(\'lead plan missing required marker: GENERATION_LEAD_PLAN_READY\');\\nif (!/non-goals?/i.test(body)) throw new Error(\'lead plan missing required marker: Non-goals\');\\nconst hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body) || /Run local execution through the generated Agent Relay workflow artifact/i.test(body) || /routes local execution through the generated Agent Relay artifact/i.test(body) || /Use the generated Agent Relay workflow artifact/i.test(body);\\nif (!hasRoutingContract) throw new Error(\'lead plan missing required marker: Routing contract\');\\nconst hasImplementationContract = /Implementation contract/i.test(body) || /This is an implementation spec/i.test(body);\\nif (!hasImplementationContract) throw new Error(\'lead plan missing required marker: Implementation contract\');\\nconsole.log(\'LEAD_PLAN_GATE_OK\');\\nNODE",',
+    '    captureOutput: true,',
+    '    failOnError: true,',
+    '  })',
+    '  .run({ cwd: process.cwd() });',
+    '',
+  ].join('\n');
 }
 
 function missingEnvEvidence(): WorkflowRunEvidence {

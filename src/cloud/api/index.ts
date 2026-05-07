@@ -33,3 +33,11 @@ export type {
   CloudValidationStatus,
   CloudWarning,
 } from './response-types.js';
+
+export type {
+  LinearAgentActivityPostPayload,
+  LinearMentionRequest,
+  LinearMentionResponse,
+  RickyLinearSession,
+  SessionEndReason,
+} from './linear-agent-types.js';

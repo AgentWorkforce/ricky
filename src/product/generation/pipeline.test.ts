@@ -1071,7 +1071,7 @@ describe('workflow generation pipeline', () => {
     const postImplementationGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
 
     expect(leadPlanGate.command).toContain('GENERATION_LEAD_PLAN_READY');
-    expect(leadPlanGate.command).toContain('/non-goals?/i');
+    expect(leadPlanGate.command).toContain('out[- ]of[- ]scope');
     expect(leadPlanGate.command).toContain('Routing contract');
     expect(artifact.content).toContain('write .workflow-artifacts/generated/no-target-evidence-gates/fix-loop-report.md');
     expect(fixLoopReportGate.command).toContain('FIX_LOOP_COMPLETE');
@@ -1080,6 +1080,23 @@ describe('workflow generation pipeline', () => {
     expect(postImplementationGate.command).toContain('cleanup-report.md');
     expect(postImplementationGate.command).toContain('cleanup-diff-inventory.txt');
     expect(postImplementationGate.command).toContain('validation-evidence.md');
+  });
+
+  it('renders out-of-scope constraints as lead-plan non-goals', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement Linear integration surface.',
+        targetFiles: ['src/surfaces/linear/index.ts'],
+        constraints: ['Non-goal: Passive Linear comment monitoring', 'Non-goal: Custom per-repo workflow templates'],
+      }),
+      artifactPath: 'workflows/generated/linear-scope.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact?.content).toContain('.workflow-artifacts/generated/linear-scope/non-goals.md');
+    expect(result.artifact?.content).toContain('# Non-goals');
+    expect(result.artifact?.content).toContain('- Non-goal: Passive Linear comment monitoring');
+    expect(result.artifact?.content).toContain('Use this exact section heading in the lead plan.');
   });
 
   it('explicit target git diff gate includes untracked files for newly created outputs', () => {
@@ -1392,6 +1409,29 @@ describe('workflow generation pipeline', () => {
     expect(taskBodies.some((body) => body.includes('lead-plan-instructions.md') && body.includes('target-context.txt'))).toBe(true);
     expect(taskBodies.some((body) => body.includes('review-checklist.md') && body.includes('target-context.txt'))).toBe(true);
   });
+
+  it('restricts generated target context file reads to repo-relative workspace paths', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement a workflow using a target context path.',
+        targetContext: '../outside-workspace.md',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+      }),
+      artifactPath: 'workflows/generated/target-context-path-guard.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const content = artifact(result).content;
+
+    expect(content).toContain('function resolveRickyGeneratedTargetContextPath(value: string): string | null');
+    expect(content).toContain('if (rickyWorkflowPath.isAbsolute(value)) return null;');
+    expect(content).toContain('const workspaceRoot = rickyWorkflowFs.realpathSync(process.cwd());');
+    expect(content).toContain('const candidatePath = rickyWorkflowPath.resolve(workspaceRoot, value);');
+    expect(content).toContain('realCandidatePath.startsWith(`${workspaceRoot}${rickyWorkflowPath.sep}`)');
+    expect(content).toContain('rickyWorkflowFs.writeFileSync(targetContext.outputPath, ensureTrailingNewline(targetContext.value));');
+    expect(content).not.toContain('existsSync(targetContext.value)');
+    expect(content).not.toContain('copyFileSync(targetContext.value');
+  });
 });
 
 function artifact(result: ReturnType<typeof generate>): NonNullable<ReturnType<typeof generate>['artifact']> {
@@ -1458,7 +1498,7 @@ function spec(overrides: SpecFixtureOverrides = {}): NormalizedWorkflowSpec {
     },
     constraints: constraints.map((constraint) => ({
       constraint,
-      category: /\bonly\b|\bmust\b/i.test(constraint) ? 'scope' : 'quality',
+      category: /\b(only|must|non[- ]?goal|out[- ]of[- ]scope)\b/i.test(constraint) ? 'scope' : 'quality',
     })),
     evidenceRequirements: evidenceRequirements.map((requirement) => ({
       requirement,

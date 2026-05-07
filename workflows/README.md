@@ -91,6 +91,32 @@ Examples:
 - `wf-ricky-wave3-generate-run-api`
 - `wf-ricky-meta-mass-generation`
 
+## Runtime shape
+
+Serious workflows use the runtime shape defined in `AGENTS.md`: import from `@agent-relay/sdk/workflows`, wrap execution in `async function main()`, end with `main().catch(...)`, and run with `.run({ cwd: process.cwd() })`.
+
+Set runtime configuration explicitly instead of relying on defaults:
+
+- `.channel("wf-ricky-...")`
+- `.pattern(...)`
+- `.maxConcurrency(...)`
+- `.timeout(...)`
+- `.onError(...)` for long-running or multi-agent workflows
+
+## Swarm patterns
+
+Choose the workflow pattern from the work shape:
+
+| Work shape | Preferred pattern |
+| --- | --- |
+| Spec, program, or meta planning | `supervisor` or `dag` |
+| Many independent artifacts | `dag` |
+| Interactive lead plus implementers | `dag` or `supervisor` |
+| Validation, fix, and rerun loops | `dag` |
+| Simple linear repo tightening | `supervisor` or `pipeline` |
+
+Use named roles such as `lead-claude`, `author-codex`, `author-claude`, `impl-primary-codex`, `impl-tests-codex`, `reviewer-claude`, `reviewer-codex`, and `validator-claude`.
+
 ## Source of truth
 
 When authoring workflows, read in this order:
@@ -104,16 +130,33 @@ When authoring workflows, read in this order:
 Significant workflows must include:
 
 - a planning step before implementation
-- a review step after implementation, using a reviewer distinct from the writer when possible
+- a review step after implementation, using `writer=codex` with `reviewer=claude`, `writer=claude` with `reviewer=codex`, or both reviewers for critical workflows when possible
 - materialized review output under `.workflow-artifacts/`
 - a soft validation gate that captures failures without stopping the fix loop
 - a fix step that reads the captured validation output
 - a final hard validation gate with `failOnError: true`
 - a scoped change-detection gate for expected file targets
+- a post-fix re-review on the fixed state, not reused pre-fix review artifacts
+- a final signoff artifact under `.workflow-artifacts/` for serious workflows
 
-## Next expected artifacts
+Meta-workflows should write artifacts under `.workflow-artifacts/<meta-slug>/`, including `plan.md`, `<workflow-id>-review.md`, `<workflow-id>-dryrun.txt`, and `signoff.md`.
 
-The first major Ricky workflow initiative is a meta-workflow that generates a large wave-structured backlog of reliable implementation workflows to serve as the execution layer for building the application.
+## Reliability traps
+
+Avoid these recurring failure modes:
+
+1. No wave or program structure.
+2. No standards inputs read at runtime.
+3. No deterministic gates after edits.
+4. No review artifacts on disk.
+5. No dry-run validation for generated workflows.
+6. Overly broad agent tasks.
+7. Blind swarm pattern choice.
+8. No honest blocker reporting.
+
+## Current batch plan
+
+The active workflow batch plan is at `.workflow-artifacts/ricky-meta/application-wave-plan.md`. It covers 16 workflows across waves 0-5.
 
 ## Current GitHub Issue Workflows
 

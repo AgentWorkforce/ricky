@@ -371,7 +371,7 @@ function buildLeadPlanGateCommand(leadPlanPath: string): string {
     `const leadPlanPath = ${literal(leadPlanPath)};`,
     "const body = fs.readFileSync(leadPlanPath, 'utf8');",
     "if (!body.includes('GENERATION_LEAD_PLAN_READY')) throw new Error('lead plan missing required marker: GENERATION_LEAD_PLAN_READY');",
-    "if (!/non-goals?/i.test(body)) throw new Error('lead plan missing required marker: Non-goals');",
+    "if (!/\\b(non-goals?|out[- ]of[- ]scope|not in scope)\\b/i.test(body)) throw new Error('lead plan missing required marker: Non-goals or Out of scope');",
     "const hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body) || /Run local execution through the generated Agent Relay workflow artifact/i.test(body) || /routes local execution through the generated Agent Relay artifact/i.test(body) || /Use the generated Agent Relay workflow artifact/i.test(body);",
     "if (!hasRoutingContract) throw new Error('lead plan missing required marker: Routing contract');",
     "const hasImplementationContract = /Implementation contract/i.test(body) || /This is an implementation spec/i.test(body);",
@@ -734,6 +734,8 @@ function buildGeneratedContextPackage(
         '- Deliverables',
         '- Verification gates',
         '',
+        'Use this exact section heading in the lead plan. Do not rename "Non-goals" to "Out of scope" or another synonym.',
+        '',
         `Write ${artifactsDir}/lead-plan.md and end it with GENERATION_LEAD_PLAN_READY.`,
         '',
         'Generation-time skill boundary:',
@@ -1056,12 +1058,33 @@ function writeRickyGeneratedContextFiles(files: RickyGeneratedContextFile[], tar
   if (!targetContext) return;
 
   rickyWorkflowFs.mkdirSync(rickyWorkflowPath.dirname(targetContext.outputPath), { recursive: true });
-  if (rickyWorkflowFs.existsSync(targetContext.value) && rickyWorkflowFs.statSync(targetContext.value).isFile()) {
-    rickyWorkflowFs.copyFileSync(targetContext.value, targetContext.outputPath);
+  const targetContextSourcePath = resolveRickyGeneratedTargetContextPath(targetContext.value);
+  if (targetContextSourcePath) {
+    rickyWorkflowFs.copyFileSync(targetContextSourcePath, targetContext.outputPath);
     return;
   }
 
   rickyWorkflowFs.writeFileSync(targetContext.outputPath, ensureTrailingNewline(targetContext.value));
+}
+
+function resolveRickyGeneratedTargetContextPath(value: string): string | null {
+  if (rickyWorkflowPath.isAbsolute(value)) return null;
+
+  const workspaceRoot = rickyWorkflowFs.realpathSync(process.cwd());
+  const candidatePath = rickyWorkflowPath.resolve(workspaceRoot, value);
+
+  try {
+    if (!rickyWorkflowFs.existsSync(candidatePath) || !rickyWorkflowFs.statSync(candidatePath).isFile()) {
+      return null;
+    }
+
+    const realCandidatePath = rickyWorkflowFs.realpathSync(candidatePath);
+    if (realCandidatePath === workspaceRoot) return null;
+    if (!realCandidatePath.startsWith(\`\${workspaceRoot}\${rickyWorkflowPath.sep}\`)) return null;
+    return realCandidatePath;
+  } catch {
+    return null;
+  }
 }
 
 function ensureTrailingNewline(value: string): string {

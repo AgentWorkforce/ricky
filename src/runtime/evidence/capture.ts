@@ -167,7 +167,10 @@ export function appendStepEvent(
   }
 }
 
-/** Record a deterministic verification gate against the run, optionally against a step. */
+/** Record a deterministic verification gate against the run, optionally against a step.
+ *  When stepId is provided, the gate is stored only on the matching step to
+ *  avoid duplicate evidence in downstream collectors that traverse both
+ *  run.deterministicGates and step.deterministicGates. */
 export function recordDeterministicGate(
   run: WorkflowRunEvidence,
   gateName: string,
@@ -175,15 +178,25 @@ export function recordDeterministicGate(
   stepId?: string,
 ): { gate: DeterministicGateResult; run: WorkflowRunEvidence } {
   const gate = createDeterministicGate({ gateName, verifications });
-  const updatedSteps = stepId
-    ? run.steps.map((step) => (step.stepId === stepId ? attachGateToStep(step, gate) : step))
-    : run.steps;
 
+  if (stepId) {
+    // Step-scoped: attach only to the step, not to run.deterministicGates.
+    return {
+      gate,
+      run: {
+        ...run,
+        steps: run.steps.map((step) =>
+          step.stepId === stepId ? attachGateToStep(step, gate) : step,
+        ),
+      },
+    };
+  }
+
+  // Run-scoped: attach to run.deterministicGates only.
   return {
     gate,
     run: {
       ...run,
-      steps: updatedSteps,
       deterministicGates: [...run.deterministicGates, gate],
     },
   };
@@ -261,11 +274,17 @@ export function appendRunNarrative(
   };
 }
 
-/** Mark a step as complete with a terminal status. */
+/** Mark a step as complete with a terminal status. Rejects non-terminal statuses. */
 export function completeStep(
   step: WorkflowStepEvidence,
   status: StepStatus,
 ): WorkflowStepEvidence {
+  if (status === 'running' || status === 'pending') {
+    throw new Error(
+      `completeStep requires a terminal status, got '${status}'`,
+    );
+  }
+
   const completedAt = nowIso();
   const startedAt = step.startedAt ?? completedAt;
   const durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();

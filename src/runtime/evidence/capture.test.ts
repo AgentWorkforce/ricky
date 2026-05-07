@@ -250,6 +250,78 @@ describe('recordDeterministicGate', () => {
     const { gate } = recordDeterministicGate(run, 'empty-gate', []);
     expect(gate.passed).toBe(false);
   });
+
+  it('stores step-scoped gate only on the step, not on run.deterministicGates', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const step = createStepEvidence({ stepId: 's-1', stepName: 'gate-step' });
+    const runWithStep = { ...run, steps: [step] };
+
+    const verifications: VerificationResult[] = [
+      { type: 'exit_code', passed: true, expected: '0', actual: '0', command: 'tsc', exitCode: 0 },
+    ];
+
+    const { run: updatedRun } = recordDeterministicGate(
+      runWithStep, 'step-gate', verifications, 's-1',
+    );
+
+    // Gate must NOT appear on run.deterministicGates
+    expect(updatedRun.deterministicGates).toHaveLength(0);
+    // Gate must appear on the step
+    expect(updatedRun.steps[0].deterministicGates).toHaveLength(1);
+    expect(updatedRun.steps[0].deterministicGates[0].gateName).toBe('step-gate');
+  });
+
+  it('stores run-scoped gate only on run.deterministicGates, not on steps', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const step = createStepEvidence({ stepId: 's-1', stepName: 'gate-step' });
+    const runWithStep = { ...run, steps: [step] };
+
+    const verifications: VerificationResult[] = [
+      { type: 'exit_code', passed: true, expected: '0', actual: '0' },
+    ];
+
+    const { run: updatedRun } = recordDeterministicGate(
+      runWithStep, 'run-gate', verifications,
+    );
+
+    // Gate must appear on run.deterministicGates
+    expect(updatedRun.deterministicGates).toHaveLength(1);
+    expect(updatedRun.deterministicGates[0].gateName).toBe('run-gate');
+    // Gate must NOT appear on any step
+    expect(updatedRun.steps[0].deterministicGates).toHaveLength(0);
+  });
+
+  it('produces exactly one audit entry per step-scoped gate in buildEvidenceOutcome', () => {
+    const run = createRunEvidence({ runId: 'r-1', workflowId: 'wf-1', workflowName: 'test' });
+    const step = createStepEvidence({ stepId: 's-1', stepName: 'gate-step' });
+    const runWithStep = { ...run, steps: [step] };
+
+    const verifications: VerificationResult[] = [
+      {
+        type: 'exit_code', passed: true, expected: '0', actual: '0',
+        command: 'npx tsc --noEmit', exitCode: 0, stdoutExcerpt: 'ok',
+      },
+    ];
+
+    const { run: gated } = recordDeterministicGate(
+      runWithStep, 'tsc-gate', verifications, 's-1',
+    );
+    const done = completeRun({
+      ...gated,
+      steps: gated.steps.map((s) => completeStep(s, 'passed')),
+    });
+    const outcome = buildEvidenceOutcome(done);
+
+    // Exactly one gate audit entry, not two
+    expect(outcome.deterministicGates).toHaveLength(1);
+    expect(outcome.deterministicGates[0].scope).toBe('step');
+    expect(outcome.deterministicGates[0].gateName).toBe('tsc-gate');
+
+    // Commands should not have duplicates from run + step traversal
+    const gateCommands = outcome.commands.filter((c) => c.gateName === 'tsc-gate');
+    expect(gateCommands).toHaveLength(1);
+    expect(gateCommands[0].source).toBe('deterministic_gate_verification');
+  });
 });
 
 describe('completeStep', () => {
@@ -272,6 +344,20 @@ describe('completeStep', () => {
     const completed = completeStep(step, 'failed');
     expect(completed.status).toBe('failed');
     expect(completed.completedAt).toBeDefined();
+  });
+
+  it('rejects non-terminal status running', () => {
+    const step = createStepEvidence({ stepId: 's-1', stepName: 'test' });
+    expect(() => completeStep(step, 'running')).toThrow(
+      "completeStep requires a terminal status, got 'running'",
+    );
+  });
+
+  it('rejects non-terminal status pending', () => {
+    const step = createStepEvidence({ stepId: 's-1', stepName: 'test' });
+    expect(() => completeStep(step, 'pending')).toThrow(
+      "completeStep requires a terminal status, got 'pending'",
+    );
   });
 });
 

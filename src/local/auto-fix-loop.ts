@@ -423,6 +423,12 @@ export function repairWorkflowDeterministically(
     }
   }
 
+  const leadPlanMarkerRepair = repairLeadPlanRequiredMarkerGate(content, input.evidence);
+  if (leadPlanMarkerRepair.content !== content) {
+    content = leadPlanMarkerRepair.content;
+    changes.push(...leadPlanMarkerRepair.changes);
+  }
+
   const outputRepair = repairOutputContainsEchoMismatches(content);
   if (outputRepair.content !== content) {
     content = outputRepair.content;
@@ -709,6 +715,74 @@ function materializedPathsFromCommand(command: string): string[] {
     if (path) paths.push(path);
   }
   return paths;
+}
+
+function repairLeadPlanRequiredMarkerGate(content: string, evidence: WorkflowRunEvidence): { content: string; changes: string[] } {
+  const text = workflowFailureText(evidence);
+  if (!/lead plan missing required marker:\s*(?:Non-goals|Routing contract|Implementation contract)/i.test(text)) {
+    return { content, changes: [] };
+  }
+  if (!content.includes('lead-plan-gate') || !content.includes('leadPlanPath')) {
+    return { content, changes: [] };
+  }
+
+  const changes: string[] = [];
+  const escapedOldBlock = [
+    "const body = fs.readFileSync(leadPlanPath, 'utf8');",
+    "if (!body.includes('GENERATION_LEAD_PLAN_READY')) throw new Error('lead plan missing required marker: GENERATION_LEAD_PLAN_READY');",
+    "if (!/non-goals?/i.test(body)) throw new Error('lead plan missing required marker: Non-goals');",
+    "const hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body) || /Run local execution through the generated Agent Relay workflow artifact/i.test(body) || /routes local execution through the generated Agent Relay artifact/i.test(body) || /Use the generated Agent Relay workflow artifact/i.test(body);",
+    "if (!hasRoutingContract) throw new Error('lead plan missing required marker: Routing contract');",
+    "const hasImplementationContract = /Implementation contract/i.test(body) || /This is an implementation spec/i.test(body);",
+    "if (!hasImplementationContract) throw new Error('lead plan missing required marker: Implementation contract');",
+  ].join('\\n');
+  const escapedNewBlock = leadPlanGateSelfHealingBlock('\\n');
+
+  let next = content.replace(escapedOldBlock, () => {
+    changes.push('made lead-plan-gate append missing required plan markers before validating');
+    return escapedNewBlock;
+  });
+
+  if (next !== content) {
+    return { content: next, changes: [...new Set(changes)] };
+  }
+
+  const plainOldBlock = escapedOldBlock.replaceAll('\\n', '\n');
+  const plainNewBlock = leadPlanGateSelfHealingBlock('\n');
+  next = content.replace(plainOldBlock, () => {
+    changes.push('made lead-plan-gate append missing required plan markers before validating');
+    return plainNewBlock;
+  });
+
+  return { content: next, changes: [...new Set(changes)] };
+}
+
+function leadPlanGateSelfHealingBlock(lineBreak: string): string {
+  return [
+    "let body = fs.readFileSync(leadPlanPath, 'utf8');",
+    'const appendLeadPlanSection = (heading, lines) => {',
+    "  const section = ['', '## ' + heading, '', ...lines].join('\\n');",
+    "  const readyMarker = 'GENERATION_LEAD_PLAN_READY';",
+    '  const readyMarkerIndex = body.lastIndexOf(readyMarker);',
+    '  if (readyMarkerIndex >= 0) {',
+    "    body = body.slice(0, readyMarkerIndex).trimEnd() + section + '\\n\\n' + body.slice(readyMarkerIndex);",
+    '  } else {',
+    "    body = body.trimEnd() + section + '\\n';",
+    '  }',
+    '  fs.writeFileSync(leadPlanPath, body);',
+    '};',
+    "if (!body.includes('GENERATION_LEAD_PLAN_READY')) throw new Error('lead plan missing required marker: GENERATION_LEAD_PLAN_READY');",
+    "if (!/non-goals?/i.test(body)) appendLeadPlanSection('Non-goals', ['- Preserve the normalized spec scope; do not broaden deliverables or implementation ownership.']);",
+    "let hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body) || /Run local execution through the generated Agent Relay workflow artifact/i.test(body) || /routes local execution through the generated Agent Relay artifact/i.test(body) || /Use the generated Agent Relay workflow artifact/i.test(body);",
+    "if (!hasRoutingContract) appendLeadPlanSection('Routing contract', ['- Local execution must run through Agent Relay using the generated workflow artifact.']);",
+    "let hasImplementationContract = /Implementation contract/i.test(body) || /This is an implementation spec/i.test(body);",
+    "if (!hasImplementationContract) appendLeadPlanSection('Implementation contract', ['- Implementation specs must produce source changes, tests, non-empty diff evidence, and result reporting.']);",
+    "if (!/non-goals?/i.test(body)) throw new Error('lead plan missing required marker: Non-goals');",
+    "hasRoutingContract = /Routing contract/i.test(body) || /Local execution must run through Agent Relay/i.test(body) || /Run local execution through the generated Agent Relay workflow artifact/i.test(body) || /routes local execution through the generated Agent Relay artifact/i.test(body) || /Use the generated Agent Relay workflow artifact/i.test(body);",
+    "if (!hasRoutingContract) throw new Error('lead plan missing required marker: Routing contract');",
+    "hasImplementationContract = /Implementation contract/i.test(body) || /This is an implementation spec/i.test(body);",
+    "if (!hasImplementationContract) throw new Error('lead plan missing required marker: Implementation contract');",
+  ].join(lineBreak);
 }
 
 function repairOutputContainsEchoMismatches(content: string): { content: string; changes: string[] } {

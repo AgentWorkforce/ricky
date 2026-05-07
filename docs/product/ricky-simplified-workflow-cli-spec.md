@@ -374,7 +374,7 @@ ricky local --workflow workflows/generated/release-health.ts --run
 ricky cloud --spec-file ./spec.md --name release-health --run
 ricky cloud --spec "verify package publishing readiness" --name package-readiness --run
 ricky cloud --stdin --name typed-spec --run
-ricky cloud --workflow workflows/generated/release-health.ts --run
+ricky run workflows/generated/release-health.ts --cloud
 
 ricky status
 ricky connect cloud

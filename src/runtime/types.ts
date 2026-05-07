@@ -74,8 +74,8 @@ export interface CommandRunnerOptions {
 }
 
 export interface CommandInvocation {
-  /** Resolves with the process exit code when the runtime exits. */
-  exitPromise: Promise<number>;
+  /** Resolves with the process exit code when the runtime exits; null represents signal termination. */
+  exitPromise: Promise<number | null>;
   /** Subscribe to stdout lines from the runtime. */
   onStdout: (cb: (line: string) => void) => void;
   /** Subscribe to stderr lines from the runtime. */
