@@ -1391,6 +1391,67 @@ resolve_runner_pgid() {
   fi
 }
 
+extract_declared_workflow_name() {
+  local workflow_path="$1"
+  python3 - "$workflow_path" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as fh:
+    text = fh.read()
+match = re.search(r"workflow\(\s*['\"]([^'\"]+)['\"]\s*\)", text)
+if match:
+    print(match.group(1))
+PY
+}
+
+latest_runtime_workflow_name() {
+  local runs_file=".agent-relay/workflow-runs.jsonl"
+  [[ -f "$runs_file" ]] || return 0
+  python3 - "$runs_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+latest = ''
+with open(path, 'r', encoding='utf-8') as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get('kind') != 'run':
+            continue
+        workflow_name = ((row.get('row') or {}).get('workflowName')) or ''
+        if workflow_name:
+            latest = workflow_name
+if latest:
+    print(latest)
+PY
+}
+
+runner_executed_unexpected_workflow() {
+  local workflow_path="$1"
+  local expected_workflow_name=""
+  local actual_workflow_name=""
+
+  expected_workflow_name="$(extract_declared_workflow_name "$workflow_path")"
+  actual_workflow_name="$(latest_runtime_workflow_name)"
+
+  [[ -n "$expected_workflow_name" ]] || return 1
+  [[ -n "$actual_workflow_name" ]] || return 1
+  if [[ "$expected_workflow_name" == "$actual_workflow_name" || "$actual_workflow_name" == "$expected_workflow_name-workflow" ]]; then
+    return 1
+  fi
+
+  log "runner workflow identity mismatch: expected $expected_workflow_name but runtime executed $actual_workflow_name"
+  return 0
+}
+
 run_one() {
   local workflow_path="$1"
   local runner_output=""
@@ -1510,6 +1571,15 @@ run_one() {
   RUN_PID="$$"
   RUN_PGID=""
   persist_checkpoint
+
+  if runner_executed_unexpected_workflow "$workflow_path"; then
+    echo "$workflow_path" >> "$FAILED_FILE"
+    inspect_repo_changes
+    mark_status "blocked" "runner workflow identity mismatch: $workflow_path"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
+    return 1
+  fi
 
   if workflow_hit_claude_rate_limit "$runner_output"; then
     log "workflow blocked by Claude rate limit prompt after runner exit: $workflow_path"
