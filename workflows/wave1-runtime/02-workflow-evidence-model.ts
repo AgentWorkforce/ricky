@@ -9,12 +9,12 @@ async function main() {
     .timeout(3_600_000)
     .onError('retry', { maxRetries: 1, retryDelayMs: 10_000 })
 
-    .agent('lead-claude', { cli: 'claude', role: 'Runtime evidence lead who owns scope, contracts, and final signoff.', retries: 1 })
+    .agent('lead-claude', { cli: 'codex', role: 'Runtime evidence lead who owns scope, contracts, and final signoff.', retries: 1 })
     .agent('impl-primary-codex', { cli: 'codex', role: 'Primary implementer for evidence types, capture utilities, and index exports.', retries: 2 })
     .agent('impl-tests-codex', { cli: 'codex', role: 'Test implementer for deterministic evidence capture coverage.', retries: 2 })
-    .agent('reviewer-claude', { cli: 'claude', preset: 'reviewer', role: 'Reviews evidence completeness for Ricky debugging, reporting, and fix loops.', retries: 1 })
+    .agent('reviewer-claude', { cli: 'codex', preset: 'reviewer', role: 'Reviews evidence completeness for Ricky debugging, reporting, and fix loops.', retries: 1 })
     .agent('reviewer-codex', { cli: 'codex', preset: 'reviewer', role: 'Reviews TypeScript shape, utility behavior, and test quality.', retries: 1 })
-    .agent('validator-claude', { cli: 'claude', preset: 'worker', role: 'Applies review and validation fixes until evidence capture reaches the 80-to-100 bar.', retries: 2 })
+    .agent('validator-claude', { cli: 'codex', preset: 'worker', role: 'Applies review and validation fixes until evidence capture reaches the 80-to-100 bar.', retries: 2 })
 
     .step('prepare-context', {
       type: 'deterministic',
