@@ -180,8 +180,16 @@ export class LocalCoordinator {
       retry,
       metadata: request.metadata,
     });
+
+    // A lifecycle observer may have cancelled the run during the started
+    // notification above. If the run is already settled, skip spawning.
+    if (settled) return resultPromise;
+
     transition('running', 'Run entered running state');
     state.status = status;
+
+    // Re-check after the running transition — an observer may cancel here too.
+    if (settled) return resultPromise;
 
     try {
       const invocation = this.runner.run(invocationSummary.command, invocationSummary.args, {

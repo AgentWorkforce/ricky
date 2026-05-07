@@ -734,6 +734,56 @@ describe('LocalCoordinator', () => {
     });
   });
 
+  it('does not require a real agent-relay process when the runner is injected', async () => {
+    const invocation = new ManualInvocation();
+    const run = vi.fn(
+      (command: string, args: string[], options: CommandRunnerOptions): CommandInvocation => {
+        expect(command).toBe('agent-relay');
+        expect(args).toEqual(['run', 'generated/no-real-process.yaml']);
+        expect(options).toEqual({ cwd: '/repo', env: undefined });
+        return invocation;
+      },
+    );
+    const coordinator = new LocalCoordinator({ run });
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-without-real-agent-relay',
+      workflowFile: 'generated/no-real-process.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+
+    invocation.emitStdout('unit runner captured stdout');
+    invocation.emitStderr('unit runner captured stderr');
+    invocation.complete(0);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('passed');
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/no-real-process.yaml'],
+      cwd: '/repo',
+    });
+    expect(result.stdout).toEqual(['unit runner captured stdout']);
+    expect(result.stderr).toEqual(['unit runner captured stderr']);
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stdout',
+        status: 'running',
+        message: 'unit runner captured stdout',
+      }),
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stderr',
+        status: 'running',
+        message: 'unit runner captured stderr',
+      }),
+    );
+  });
+
   it('handles exitPromise resolving to null (signal termination)', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
@@ -943,6 +993,57 @@ describe('LocalCoordinator', () => {
       status: 'failed',
       data: { exitCode: 2, error: 'exited with code 2' },
     });
+  });
+
+  it('does not invoke the runner when a lifecycle observer cancels during pre-spawn events', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    // Observer cancels the run as soon as the 'started' event fires — before runner.run().
+    coordinator.on('lifecycle', (event) => {
+      if (event.kind === 'started') {
+        coordinator.cancel(event.runId);
+      }
+    });
+
+    const result = await coordinator.launch({
+      runId: 'run-pre-spawn-cancel',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+    });
+
+    // The runner must never have been called.
+    expect(run).not.toHaveBeenCalled();
+    expect(invocations).toHaveLength(0);
+
+    // Result is cancelled with no post-terminal events.
+    expect(result.status).toBe('cancelled');
+    expect(result.exitCode).toBeNull();
+    expect(result.error).toBe('cancelled');
+    expect(coordinator.getActiveRun('run-pre-spawn-cancel')).toBeUndefined();
+
+    // Event sequence: started (pending), status_change (pending→cancelled), cancelled.
+    // No 'running' transition should appear because cancel happened before transition('running').
+    expect(result.events.map((e) => e.kind)).toEqual([
+      'started',
+      'status_change',
+      'cancelled',
+    ]);
+    expect(result.events[1]).toMatchObject({
+      kind: 'status_change',
+      data: { previousStatus: 'pending', status: 'cancelled' },
+    });
+
+    // The last event must be the terminal cancelled event.
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'cancelled',
+      status: 'cancelled',
+    });
+
+    // Verify no timer is left pending by advancing time — should not change result.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(result.status).toBe('cancelled');
   });
 
   it('normalizes invalid timeoutMs values to the default timeout', async () => {

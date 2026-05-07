@@ -1406,17 +1406,30 @@ if match:
 PY
 }
 
-latest_runtime_workflow_name() {
+workflow_runs_line_count() {
+  local runs_file=".agent-relay/workflow-runs.jsonl"
+  [[ -f "$runs_file" ]] || {
+    printf '0\n'
+    return 0
+  }
+  wc -l < "$runs_file" | tr -d '[:space:]'
+}
+
+latest_runtime_workflow_name_after_line() {
+  local start_line="${1:-0}"
   local runs_file=".agent-relay/workflow-runs.jsonl"
   [[ -f "$runs_file" ]] || return 0
-  python3 - "$runs_file" <<'PY'
+  python3 - "$runs_file" "$start_line" <<'PY'
 import json
 import sys
 
 path = sys.argv[1]
+start_line = int(sys.argv[2])
 latest = ''
 with open(path, 'r', encoding='utf-8') as fh:
-    for line in fh:
+    for line_number, line in enumerate(fh, start=1):
+        if line_number <= start_line:
+            continue
         line = line.strip()
         if not line:
             continue
@@ -1436,11 +1449,12 @@ PY
 
 runner_executed_unexpected_workflow() {
   local workflow_path="$1"
+  local runs_start_line="${2:-0}"
   local expected_workflow_name=""
   local actual_workflow_name=""
 
   expected_workflow_name="$(extract_declared_workflow_name "$workflow_path")"
-  actual_workflow_name="$(latest_runtime_workflow_name)"
+  actual_workflow_name="$(latest_runtime_workflow_name_after_line "$runs_start_line")"
 
   [[ -n "$expected_workflow_name" ]] || return 1
   [[ -n "$actual_workflow_name" ]] || return 1
@@ -1461,6 +1475,7 @@ run_one() {
   local last_output_epoch="$last_progress_epoch"
   local last_observed_size="0"
   local current_output_size="0"
+  local workflow_runs_start_line="0"
   RUN_RESULT="ran"
   CURRENT_WORKFLOW="$workflow_path"
   persist_checkpoint
@@ -1495,6 +1510,7 @@ run_one() {
 
   runner_output="$ARTIFACT_DIR/runner-$(basename "$workflow_path" .ts).log"
   : > "$runner_output"
+  workflow_runs_start_line="$(workflow_runs_line_count)"
 
   start_runner "$workflow_path" "$runner_output"
   runner_pid="$RUNNER_START_PID"
@@ -1572,7 +1588,7 @@ run_one() {
   RUN_PGID=""
   persist_checkpoint
 
-  if runner_executed_unexpected_workflow "$workflow_path"; then
+  if runner_executed_unexpected_workflow "$workflow_path" "$workflow_runs_start_line"; then
     echo "$workflow_path" >> "$FAILED_FILE"
     inspect_repo_changes
     mark_status "blocked" "runner workflow identity mismatch: $workflow_path"
