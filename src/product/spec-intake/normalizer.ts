@@ -96,6 +96,12 @@ function normalizeAcceptanceGates(raw: string[]): NormalizedAcceptanceGate[] {
 }
 
 function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
+  const explicitPreference = explicitExecutionPreference(parsed);
+  if (explicitPreference) return explicitPreference;
+
+  const answeredPreference = executionPreferenceFromClarificationAnswers(parsed.description);
+  if (answeredPreference) return answeredPreference;
+
   const text = [parsed.description, parsed.targetContext, parsed.providerContext.metadata.mode, ...parsed.constraints]
     .filter((value): value is string => typeof value === 'string')
     .join('\n')
@@ -108,6 +114,51 @@ function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
   if (mentionsLocal) return 'local';
   if (mentionsCloud) return 'cloud';
   return 'auto';
+}
+
+function explicitExecutionPreference(parsed: ParsedSpec): ExecutionPreference | undefined {
+  const metadata = parsed.providerContext.metadata;
+  const raw =
+    stringMetadata(metadata, 'executionPreference') ??
+    stringMetadata(metadata, 'execution_preference') ??
+    stringMetadata(metadata, 'mode');
+  if (raw === undefined) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'local' || normalized === 'byoh') return 'local';
+  if (normalized === 'cloud' || normalized === 'hosted' || normalized === 'remote') return 'cloud';
+  if (normalized === 'both' || normalized === 'auto') return 'auto';
+  return undefined;
+}
+
+function executionPreferenceFromClarificationAnswers(description: string): ExecutionPreference | undefined {
+  let inAnswerSection = false;
+  for (const rawLine of description.split(/\r?\n/)) {
+    const line = rawLine.trim().replace(/^[-*+]\s+/, '');
+    if (!line) {
+      inAnswerSection = false;
+      continue;
+    }
+    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+      inAnswerSection = true;
+      continue;
+    }
+    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+      inAnswerSection = false;
+    }
+    if (!inAnswerSection || !/should this workflow run locally\/byoh, in cloud, or generate artifacts for both paths\?/i.test(line)) {
+      continue;
+    }
+    const answer = line.split(/:\s*/).slice(1).join(': ').toLowerCase();
+    if (/\b(local|locally|byoh|on this machine)\b/.test(answer)) return 'local';
+    if (/\b(cloud|hosted|remote)\b/.test(answer) && !/\bboth\b/.test(answer)) return 'cloud';
+    if (/\b(both|auto|both paths)\b/.test(answer)) return 'auto';
+  }
+  return undefined;
+}
+
+function stringMetadata(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function validateNormalized(spec: NormalizedWorkflowSpec): ValidationIssue[] {

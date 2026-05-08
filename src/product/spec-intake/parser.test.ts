@@ -618,6 +618,42 @@ describe('spec intake parser, normalizer, and router', () => {
     ]);
   });
 
+  it('lets explicit CLI local mode override mixed local and cloud spec text', () => {
+    const result = intake({
+      kind: 'structured_json',
+      surface: 'cli',
+      receivedAt: new Date().toISOString(),
+      metadata: { mode: 'local' },
+      data: {
+        intent: 'generate',
+        description: 'Generate a workflow for a primitive that supports local BYOH and Cloud hosted execution.',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('generate');
+    expect(result.routing?.normalizedSpec.executionPreference).toBe('local');
+    expect(result.clarificationQuestions).toEqual([]);
+  });
+
+  it('treats interactive execution-mode answers as resolving the conflict', () => {
+    const result = intake(
+      natural(
+        [
+          'Generate a workflow for a primitive that supports local BYOH and Cloud hosted execution.',
+          '',
+          'Clarification answers:',
+          '- Should this workflow run locally/BYOH, in Cloud, or generate artifacts for both paths?: locally',
+        ].join('\n'),
+      ),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('generate');
+    expect(result.routing?.normalizedSpec.executionPreference).toBe('local');
+    expect(result.clarificationQuestions).toEqual([]);
+  });
+
   it('asks for a side-effect boundary before generating risky workflows', () => {
     const result = intake(
       natural('Generate a workflow that deletes obsolete files, commits the cleanup, and pushes the branch.'),

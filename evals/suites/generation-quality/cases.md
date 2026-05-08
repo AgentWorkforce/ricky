@@ -227,3 +227,39 @@ maxToolCalls: 1
 ### Must Not
 - Pretend the user supplied the answer.
 - Drop the original question from the assumption record.
+
+## generation-quality.mode-local-overrides-runtime-wording
+Executor: ricky-cli
+Kind: regression
+Tags: generation, clarification, local, issue-76
+Human Review: false
+
+### Message
+Ricky receives a spec that legitimately discusses both local and Cloud execution while the CLI selected local mode.
+
+### Mock
+cwd: temp
+specFileContent: Generate a workflow for a primitive whose API supports local BYOH execution and Cloud hosted execution. The generated workflow should implement the primitive docs and validation gates.
+argv: --mode local --spec-file {{specFile}} --no-workforce-persona
+
+### Deterministic Checks
+ok: true
+contentIncludes:
+- Generation: ok
+- Run: ricky run workflows/generated/
+forbidPhrases:
+- execution-mode-conflict
+- needs_clarification
+- Should this workflow run locally/BYOH
+- TypeError
+- ReferenceError
+maxToolCalls: 1
+
+### Must
+- Treat the explicit local CLI mode as the execution preference.
+- Generate a workflow even when the design spec mentions both local and Cloud runtime support.
+- Avoid re-asking the local-vs-Cloud clarification after mode has already been chosen.
+
+### Must Not
+- Infer `auto` solely from runtime keywords when an explicit CLI mode is present.
+- Force the user to rewrite a design spec to remove one runtime keyword.

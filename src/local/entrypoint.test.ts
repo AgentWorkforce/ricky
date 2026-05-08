@@ -1289,6 +1289,29 @@ describe('runLocal', () => {
     expect(localExecutor.runner.invocations).toHaveLength(0);
   });
 
+  it('does not ask execution-mode clarification when CLI mode already chose local', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        mode: 'local',
+        spec: 'Generate a workflow for a primitive that supports local BYOH and Cloud hosted execution.',
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.clarificationQuestions).toBeUndefined();
+    expect(result.logs).toEqual(expect.arrayContaining([
+      '[local] mode: local',
+      '[local] spec intake route: generate',
+    ]));
+    expect(result.nextActions.some((action) => action.includes('Should this workflow run locally/BYOH'))).toBe(false);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
+    expect(localExecutor.runner.invocations).toHaveLength(0);
+  });
+
   it('uses --best-judgement to answer unresolved spec questions before generation', async () => {
     const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
     const result = await runLocal(

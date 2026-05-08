@@ -225,6 +225,7 @@ function executionModeConflictQuestion(
 ): ClarificationQuestion | null {
   const mentionsLocal = /\b(local|byoh|on this machine)\b/i.test(text);
   const mentionsCloud = /\b(cloud|hosted|remote)\b/i.test(text);
+  if (hasExplicitExecutionModeChoice(spec) || hasAnsweredExecutionModeConflict(text)) return null;
   if (!mentionsLocal || !mentionsCloud || spec.executionPreference !== 'auto') return null;
 
   return {
@@ -234,6 +235,48 @@ function executionModeConflictQuestion(
     blocking: true,
     defaultAssumption: 'Generate for local/BYOH first and keep Cloud promotion as a follow-up.',
   };
+}
+
+function hasExplicitExecutionModeChoice(spec: NormalizedWorkflowSpec): boolean {
+  const mode = metadataString(spec.providerContext.metadata, 'mode');
+  const preference =
+    metadataString(spec.providerContext.metadata, 'executionPreference') ??
+    metadataString(spec.providerContext.metadata, 'execution_preference');
+  return [mode, preference].some((value) => (
+    value !== undefined &&
+    /^(local|byoh|cloud|hosted|remote|both)$/i.test(value.trim())
+  ));
+}
+
+function hasAnsweredExecutionModeConflict(text: string): boolean {
+  let inAnswerSection = false;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripListMarker(rawLine.trim());
+    if (!line) {
+      inAnswerSection = false;
+      continue;
+    }
+    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+      inAnswerSection = true;
+      continue;
+    }
+    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+      inAnswerSection = false;
+    }
+    if (
+      inAnswerSection &&
+      /should this workflow run locally\/byoh, in cloud, or generate artifacts for both paths\?/i.test(line) &&
+      /:\s*\S/.test(line)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function riskySideEffectQuestion(text: string): ClarificationQuestion | null {
