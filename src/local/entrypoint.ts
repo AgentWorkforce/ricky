@@ -923,7 +923,12 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
   ].join('\n');
   await mkdir(dirname(loaderPath), { recursive: true });
   await writeFile(loaderPath, loaderSource, 'utf8');
-  return `--experimental-loader=${pathToFileURL(loaderPath).href}`;
+  const registerSource = [
+    'import{register}from"node:module";',
+    'import{pathToFileURL}from"node:url";',
+    `register(${JSON.stringify(pathToFileURL(loaderPath).href)},pathToFileURL("./"));`,
+  ].join('');
+  return `--import=data:text/javascript,${encodeURIComponent(registerSource)}`;
 }
 
 export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalExecutor {
