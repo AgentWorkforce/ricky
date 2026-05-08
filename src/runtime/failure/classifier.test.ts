@@ -1496,6 +1496,109 @@ describe('environment error false-positive guard', () => {
       nextAction: NextAction.FixAndRetry,
     });
   });
+
+  it('does not classify deterministic gate command text as observed environment evidence', () => {
+    let run = makeRun({ runId: 'run-gate-command-env-text', workflowId: 'wf-gate-command-env-text' });
+    let step = makeStep({ stepId: 'step-gate-command-env-text', stepName: 'grep-output' });
+
+    step = appendStepEvent(step, {
+      kind: 'deterministic_gate',
+      gate: {
+        gateName: 'grep-command-not-found',
+        passed: false,
+        verifications: [
+          failingVerification({
+            type: 'output_contains',
+            expected: 'READY',
+            actual: 'missing',
+            message: 'required sentinel was not present',
+          }),
+        ],
+        command: 'grep -q "command not found" output.log',
+        stdoutExcerpt: 'READY sentinel missing',
+        stderrExcerpt: '',
+        recordedAt: FIXED_NOW.toISOString(),
+      },
+    });
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+    expectClassificationSurface(result, {
+      category: FailureClass.VerificationFailure,
+      severity: Severity.High,
+      confidence: Confidence.High,
+      nextAction: NextAction.FixAndRetry,
+    });
+    expect(result.failureClass).not.toBe(FailureClass.EnvironmentError);
+  });
+
+  it('does not classify verification command text as observed environment evidence', () => {
+    let run = makeRun({ runId: 'run-verification-command-env-text', workflowId: 'wf-verification-command-env-text' });
+    let step = makeStep({ stepId: 'step-verification-command-env-text', stepName: 'verify-env-output' });
+
+    step = appendStepEvent(step, {
+      kind: 'verification',
+      result: failingVerification({
+        type: 'output_contains',
+        expected: 'READY',
+        actual: 'missing',
+        command: 'grep -q "MISSING_ENV_VAR" output.log',
+        message: 'required sentinel was not present',
+      }),
+    });
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+    expectClassificationSurface(result, {
+      category: FailureClass.VerificationFailure,
+      severity: Severity.High,
+      confidence: Confidence.Medium,
+      nextAction: NextAction.FixAndRetry,
+    });
+    expect(result.failureClass).not.toBe(FailureClass.EnvironmentError);
+  });
+
+  it('does not classify retry command text as observed environment evidence', () => {
+    let run = makeRun({ runId: 'run-retry-command-env-text', workflowId: 'wf-retry-command-env-text' });
+    let step = makeStep({ stepId: 'step-retry-command-env-text', stepName: 'retry-verify' });
+
+    step = appendStepEvent(step, {
+      kind: 'verification',
+      result: failingVerification({
+        type: 'output_contains',
+        expected: 'READY',
+        actual: 'missing',
+        message: 'required sentinel was not present',
+      }),
+    });
+    step = appendStepEvent(step, {
+      kind: 'retry',
+      retry: {
+        attempt: 1,
+        stepId: 'step-retry-command-env-text',
+        status: 'failed',
+        command: 'grep -q "ENOENT" output.log',
+        stdoutExcerpt: 'READY sentinel missing',
+        stderrExcerpt: '',
+      },
+    });
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+    expectClassificationSurface(result, {
+      category: FailureClass.VerificationFailure,
+      severity: Severity.High,
+      confidence: Confidence.Medium,
+      nextAction: NextAction.FixAndRetry,
+    });
+    expect(result.failureClass).not.toBe(FailureClass.EnvironmentError);
+  });
 });
 
 describe('environment error from log excerpts', () => {

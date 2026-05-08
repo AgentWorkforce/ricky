@@ -627,7 +627,7 @@ function scanGatesForEnvErrors(
   let found = false;
   for (const gate of gates) {
     let foundInGateOutput = false;
-    const texts = textFields(gate.stderrExcerpt, gate.stdoutExcerpt, gate.outputExcerpt, gate.command);
+    const texts = textFields(gate.stderrExcerpt, gate.stdoutExcerpt, gate.outputExcerpt);
     for (const text of texts) {
       if (matchesEnvironmentPattern(text)) {
         signals.push({
@@ -664,7 +664,6 @@ function scanVerificationsForEnvErrors(
       v.outputExcerpt,
       v.message,
       v.actual,
-      v.command,
     );
     for (const text of texts) {
       if (matchesEnvironmentPattern(text)) {
@@ -691,7 +690,6 @@ function scanRetriesForEnvErrors(
       retry.stderrExcerpt,
       retry.stdoutExcerpt,
       retry.outputExcerpt,
-      retry.command,
     );
     for (const text of texts) {
       if (matchesEnvironmentPattern(text)) {
