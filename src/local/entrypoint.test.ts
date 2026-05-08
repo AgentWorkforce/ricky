@@ -1289,6 +1289,71 @@ describe('runLocal', () => {
     expect(localExecutor.runner.invocations).toHaveLength(0);
   });
 
+  it('does not ask execution-mode clarification when CLI mode already chose local', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        mode: 'local',
+        spec: 'Generate a workflow for a primitive that supports local BYOH and Cloud hosted execution.',
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.clarificationQuestions).toBeUndefined();
+    expect(result.logs).toEqual(expect.arrayContaining([
+      '[local] mode: local',
+      '[local] spec intake route: generate',
+    ]));
+    expect(result.nextActions.some((action) => action.includes('Should this workflow run locally/BYOH'))).toBe(false);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
+    expect(localExecutor.runner.invocations).toHaveLength(0);
+  });
+
+  it('uses --best-judgement to answer unresolved spec questions before generation', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: [
+          'Generate a workflow for package validation.',
+          'Open questions:',
+          '- Who owns final rollout signoff?',
+        ].join('\n'),
+        bestJudgement: true,
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.clarificationQuestions).toBeUndefined();
+    expect(result.generation).toMatchObject({
+      stage: 'generate',
+      status: 'ok',
+      decisions: {
+        best_judgement_clarifications: [
+          expect.objectContaining({
+            question: 'Who owns final rollout signoff?',
+            answered_by: 'impl-primary-codex',
+            mode: '--best-judgement',
+          }),
+        ],
+      },
+    });
+    expect(result.logs).toContain('[local] --best-judgement answered 1 clarification question(s) as impl-primary-codex');
+    expect(result.warnings).toContain('--best-judgement resolved blocking clarifications with implementer assumptions; review them in the generated workflow context.');
+
+    const writes = workflowArtifactWrites(localExecutor.writes);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].content).toContain('Best-judgement clarifications:');
+    expect(writes[0].content).toContain('Who owns final rollout signoff?');
+    expect(writes[0].content).toContain('Answered by implementing agent impl-primary-codex using --best-judgement');
+    expect(localExecutor.runner.invocations).toHaveLength(0);
+  });
+
   it('emits the generation stage contract when generation mode is explicit', async () => {
     const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
     const result = await runLocal(

@@ -76,6 +76,7 @@ export interface ParsedArgs {
   verbose?: boolean;
   autoFix?: number;
   refine?: false | { model?: string };
+  bestJudgement?: boolean;
   login?: boolean;
   connectMissing?: boolean;
   workforcePersonaWriterCli?: boolean;
@@ -171,6 +172,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.verbose) result.verbose = true;
   if (parsed.autoFix !== undefined && parsed.autoFix > 0) result.autoFix = parsed.autoFix;
   if (parsed.refine) result.refine = parsed.refine;
+  if (parsed.bestJudgement) result.bestJudgement = true;
   if (parsed.login) result.login = true;
   if (parsed.connectMissing) result.connectMissing = true;
   if (parsed.workforcePersonaWriterCli !== undefined) result.workforcePersonaWriterCli = parsed.workforcePersonaWriterCli;
@@ -349,6 +351,7 @@ export function renderHelp(): string[] {
     '  --refine[=model]    Optional LLM pass; off by default',
     '  --no-refine         Disable refinement; emit only the deterministic artifact',
     '  --with-llm[=model]  Alias for --refine',
+    '  --best-judgement    Answer unresolved spec questions with implementer assumptions',
     '  --workforce-persona Use Workforce personas to author the workflow',
     '  --no-workforce-persona Disable Workforce persona authoring',
     `  --auto-fix[=N]      Local diagnose/repair/resume loop (default ${DEFAULT_AUTO_FIX_ATTEMPTS} attempts, max 10)`,
@@ -428,6 +431,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(retry ? { retry } : {}),
       metadata: cliMetadataFor(parsed, 'artifact'),
     };
@@ -447,6 +451,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'inline-spec'),
     };
@@ -465,6 +470,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'spec-file'),
     };
@@ -484,6 +490,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'stdin'),
     };
@@ -520,6 +527,7 @@ function cliMetadataFor(parsed: ParsedArgs, handoff: string): Record<string, unk
     ...(parsed.background ? { runMode: 'background' } : {}),
     ...(parsed.foreground ? { runMode: 'foreground' } : {}),
     ...(parsed.yes ? { yes: 'non-destructive-confirmations-only' } : {}),
+    ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
   };
 }
 

@@ -26,6 +26,22 @@ describe('power user parser defaults', () => {
     });
   });
 
+  it('parses best-judgement clarification handling for local generation', () => {
+    expect(parsePowerUserArgs(['local', '--spec', 'build a workflow', '--best-judgement'])).toMatchObject({
+      command: 'run',
+      surface: 'local',
+      mode: 'local',
+      bestJudgement: true,
+    });
+    expect(parsePowerUserArgs(['workflow', '--spec-file', './SPEC.md', '--best-judgment'])).toMatchObject({
+      command: 'run',
+      surface: 'workflow',
+      mode: 'local',
+      specFile: './SPEC.md',
+      bestJudgement: true,
+    });
+  });
+
   it('parses the workflow one-shot command for local execution and Cloud generation', () => {
     expect(parsePowerUserArgs(['workflow', '--spec-file', './SPEC.md', '--run'])).toMatchObject({
       command: 'run',

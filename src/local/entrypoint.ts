@@ -44,6 +44,7 @@ import type {
 const requireFromHere = createRequire(import.meta.url);
 const SCRIPT_PROCESS_KILL_GRACE_MS = 2_000;
 const FORWARDED_SCRIPT_PARENT_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+const BEST_JUDGEMENT_IMPLEMENTER = 'impl-primary-codex';
 
 // ---------------------------------------------------------------------------
 // Local response contract
@@ -70,6 +71,14 @@ export interface LocalAssistantTurnContextDecision {
   enrichment_ids: string[];
 }
 
+export interface BestJudgementClarificationDecision {
+  question_id: string;
+  question: string;
+  answer: string;
+  answered_by: string;
+  mode: '--best-judgement';
+}
+
 export interface LocalGenerationStageResult {
   stage: 'generate';
   status: LocalGenerationStatus;
@@ -90,6 +99,7 @@ export interface LocalGenerationStageResult {
     refinement?: unknown;
     workforce_persona?: unknown;
     clarification_questions?: ClarificationQuestion[];
+    best_judgement_clarifications?: BestJudgementClarificationDecision[];
     assistant_turn_context?: LocalAssistantTurnContextDecision;
   };
 }
@@ -948,8 +958,10 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           : new SdkScriptWorkflowCoordinator(options.scriptWorkflowRunner ?? createSdkScriptWorkflowRunner(), options.onRuntimeOutput));
       const stageMode = resolveStageMode(request.stageMode, options.returnGeneratedArtifactOnly);
       const includeStageContract = true;
-      const specDigest = digestSpec(request.spec);
+      let activeRequest = request;
+      let specDigest = digestSpec(activeRequest.spec);
       let generationStage: LocalGenerationStageResult | undefined;
+      let bestJudgementClarifications: BestJudgementClarificationDecision[] | undefined;
 
       const assistantTurnContext = await observeRickyTurnContext(request, logs);
 
@@ -971,7 +983,24 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         return { ok: false, artifacts, logs, warnings, nextActions };
       }
 
-      const intakeResult = intake(toRawSpecPayload(request));
+      let intakeResult = intake(toRawSpecPayload(activeRequest));
+      if (shouldApplyBestJudgement(activeRequest, intakeResult.clarificationQuestions)) {
+        bestJudgementClarifications = answerClarificationsWithBestJudgement(intakeResult.clarificationQuestions);
+        activeRequest = {
+          ...activeRequest,
+          spec: appendBestJudgementClarificationAnswers(activeRequest.spec, bestJudgementClarifications),
+          metadata: {
+            ...activeRequest.metadata,
+            bestJudgement: true,
+            bestJudgementClarifications,
+          },
+        };
+        specDigest = digestSpec(activeRequest.spec);
+        logs.push(`[local] --best-judgement answered ${bestJudgementClarifications.length} clarification question(s) as ${BEST_JUDGEMENT_IMPLEMENTER}`);
+        warnings.push('--best-judgement resolved blocking clarifications with implementer assumptions; review them in the generated workflow context.');
+        warnings.push(...bestJudgementClarifications.map((answer) => `--best-judgement ${answer.question}: ${answer.answer}`));
+        intakeResult = intake(toRawSpecPayload(activeRequest));
+      }
       logs.push(`[local] spec intake route: ${intakeResult.routing?.target ?? 'none'}`);
       onProgress?.(`Spec intake routed to ${intakeResult.routing?.target ?? 'clarify'}...`);
 
@@ -986,7 +1015,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           stage: 'generate',
           status: intakeResult.clarificationQuestions.length > 0 ? 'needs_clarification' : 'error',
           error: warnings[0] ?? 'Spec intake could not produce an executable workflow artifact.',
-          ...decisionsForClarification(intakeResult.clarificationQuestions, assistantTurnContext),
+          ...decisionsForClarification(intakeResult.clarificationQuestions, assistantTurnContext, bestJudgementClarifications),
         };
         return {
           ok: false,
@@ -1000,7 +1029,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       }
 
       const workflowFile = workflowFileForRoute(
-        request,
+        activeRequest,
         intakeResult.routing.target,
         intakeResult.routing.normalizedSpec.desiredAction.workflowFileHint,
       );
@@ -1008,17 +1037,17 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       let generationResult: GenerationResult | null = null;
 
       if (intakeResult.routing.target === 'generate' || !workflowFile) {
-        const executionPreference: ExecutionPreference = request.mode === 'both' ? 'auto' : 'local';
+        const executionPreference: ExecutionPreference = activeRequest.mode === 'both' ? 'auto' : 'local';
         const normalizedSpec = {
           ...intakeResult.routing.normalizedSpec,
           executionPreference,
         };
-        const workforcePersonaWriter = resolveWorkforcePersonaWriterOptions(request, options, cwd, executionPreference);
+        const workforcePersonaWriter = resolveWorkforcePersonaWriterOptions(activeRequest, options, cwd, executionPreference);
         const generationInput: GenerationInput = {
           spec: normalizedSpec,
           dryRunEnabled: true,
-          artifactPath: artifactPathOverrideFor(request),
-          refine: request.refine,
+          artifactPath: artifactPathOverrideFor(activeRequest),
+          refine: activeRequest.refine,
           ...(workforcePersonaWriter ? { workforcePersonaWriter } : {}),
         };
         onProgress?.('Selecting workflow pattern, agents, and validation gates...');
@@ -1062,6 +1091,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
             generationResult.validation.errors[0],
             generationResult,
             assistantTurnContext,
+            bestJudgementClarifications,
           );
           return {
             ok: false,
@@ -1082,7 +1112,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
         }
         logs.push(`[local] wrote workflow artifact: ${artifact.artifactPath}`);
-        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult, assistantTurnContext);
+        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult, assistantTurnContext, bestJudgementClarifications);
       }
 
       const runTarget = artifact?.artifactPath ?? workflowFile;
@@ -1147,9 +1177,9 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
       const runtimeRunIdFile = runtimeRunIdFilePath(cwd, workflowId);
       await ensureParentDir(runtimeRunIdFile);
-      if (request.metadata.autoFixProgressOwner !== true) {
-        onProgress?.(request.retry?.startFromStep
-          ? `Running workflow from ${request.retry.startFromStep}...`
+      if (activeRequest.metadata.autoFixProgressOwner !== true) {
+        onProgress?.(activeRequest.retry?.startFromStep
+          ? `Running workflow from ${activeRequest.retry.startFromStep}...`
           : 'Running workflow...');
       }
       const runResult = await coordinator.launch({
@@ -1158,13 +1188,14 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         timeoutMs: options.timeoutMs,
         route,
         env: { AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
-        ...stableRunIdFor(request),
-        retry: request.retry,
+        ...stableRunIdFor(activeRequest),
+        retry: activeRequest.retry,
         metadata: {
           requestId: intakeResult.requestId,
-          source: request.source,
+          source: activeRequest.source,
           route: intakeResult.routing.target,
           generatedWorkflowId: artifact?.workflowId,
+          ...(bestJudgementClarifications ? { bestJudgementClarifications } : {}),
           ...(assistantTurnContext ? { assistantTurnContext } : {}),
         },
       });
@@ -1198,7 +1229,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       }
 
       nextActions.push('Inspect generated artifacts and local run evidence.');
-      if (request.mode === 'both') {
+      if (activeRequest.mode === 'both') {
         nextActions.push('After local validation, optionally promote to Cloud execution.');
       }
 
@@ -1357,6 +1388,66 @@ function isLocalInvocationRequest(input: LocalEntrypointInput): input is LocalIn
     '_normalized' in input &&
     input._normalized === true
   );
+}
+
+function shouldApplyBestJudgement(
+  request: LocalInvocationRequest,
+  questions: ClarificationQuestion[],
+): boolean {
+  return request.bestJudgement === true && questions.some((question) => question.blocking);
+}
+
+function answerClarificationsWithBestJudgement(
+  questions: ClarificationQuestion[],
+): BestJudgementClarificationDecision[] {
+  return questions
+    .filter((question) => question.blocking)
+    .map((question) => ({
+      question_id: question.id,
+      question: question.question,
+      answer: bestJudgementAnswerFor(question),
+      answered_by: BEST_JUDGEMENT_IMPLEMENTER,
+      mode: '--best-judgement',
+    }));
+}
+
+function bestJudgementAnswerFor(question: ClarificationQuestion): string {
+  if (question.defaultAssumption) {
+    return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: ${question.defaultAssumption}`;
+  }
+
+  const lower = question.question.toLowerCase();
+  if (/\bwho\b|\bowner\b|\bsign[- ]?off\b|\bresponsible\b/.test(lower)) {
+    return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: ${BEST_JUDGEMENT_IMPLEMENTER} owns the implementation assumption, reviewer-claude reviews it, and validator-claude performs final validation signoff.`;
+  }
+  if (/\bpackage manager\b|\bnpm\b|\bpnpm\b|\byarn\b/.test(lower)) {
+    return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: detect the package manager from repo lockfiles first, then default to npm when no lockfile is present.`;
+  }
+  if (/\bbranch\b|\bpr\b|\bpull request\b/.test(lower)) {
+    return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: use the repo branch convention, keep PR creation out of scope unless the spec explicitly requests it, and report the result summary.`;
+  }
+
+  return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: choose the smallest conservative workflow-compatible option, document it as an implementation assumption, and preserve a review gate where the assumption can be challenged.`;
+}
+
+function appendBestJudgementClarificationAnswers(
+  spec: string,
+  answers: BestJudgementClarificationDecision[],
+): string {
+  const answerLines = answers.flatMap((answer) => [
+    `- ${answer.question}`,
+    `  ${answer.answer}`,
+  ]);
+  const clarificationAnswerLines = answers.map((answer) => `- ${answer.question}: ${answer.answer}`);
+  const suffix = [
+    '',
+    'Best-judgement clarifications:',
+    ...answerLines,
+    '',
+    'Clarification answers:',
+    ...clarificationAnswerLines,
+  ].join('\n');
+  return `${spec.trimEnd()}${suffix}\n`;
 }
 
 function toRawSpecPayload(
@@ -1561,6 +1652,7 @@ function createGenerationStage(
   error?: string,
   generationResult?: GenerationResult,
   assistantTurnContext?: LocalAssistantTurnContextDecision,
+  bestJudgementClarifications?: BestJudgementClarificationDecision[],
 ): LocalGenerationStageResult {
   return {
     stage: 'generate',
@@ -1607,10 +1699,11 @@ function createGenerationStage(
             ...(generationResult.refinement ? { refinement: generationResult.refinement } : {}),
             ...(generationResult.workforcePersona ? { workforce_persona: generationResult.workforcePersona } : {}),
             ...((generationResult.clarificationQuestions?.length ?? 0) > 0 ? { clarification_questions: generationResult.clarificationQuestions } : {}),
+            ...(bestJudgementClarifications ? { best_judgement_clarifications: bestJudgementClarifications } : {}),
             ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
           },
         }
-      : decisionsForAssistantTurnContext(assistantTurnContext)),
+      : decisionsForAssistantTurnContext(assistantTurnContext, bestJudgementClarifications)),
   };
 }
 
@@ -1632,11 +1725,13 @@ function clarificationNextActions(questions: ClarificationQuestion[]): string[] 
 function decisionsForClarification(
   questions: ClarificationQuestion[],
   assistantTurnContext: LocalAssistantTurnContextDecision | undefined,
+  bestJudgementClarifications?: BestJudgementClarificationDecision[],
 ): Pick<LocalGenerationStageResult, 'decisions'> {
-  if (questions.length === 0) return decisionsForAssistantTurnContext(assistantTurnContext);
+  if (questions.length === 0) return decisionsForAssistantTurnContext(assistantTurnContext, bestJudgementClarifications);
   return {
     decisions: {
       clarification_questions: questions,
+      ...(bestJudgementClarifications ? { best_judgement_clarifications: bestJudgementClarifications } : {}),
       ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
     },
   };
@@ -1683,11 +1778,13 @@ function createArtifactReferenceGenerationStage(
 
 function decisionsForAssistantTurnContext(
   assistantTurnContext: LocalAssistantTurnContextDecision | undefined,
+  bestJudgementClarifications?: BestJudgementClarificationDecision[],
 ): Pick<LocalGenerationStageResult, 'decisions'> {
-  if (!assistantTurnContext) return {};
+  if (!assistantTurnContext && !bestJudgementClarifications) return {};
   return {
     decisions: {
-      assistant_turn_context: assistantTurnContext,
+      ...(bestJudgementClarifications ? { best_judgement_clarifications: bestJudgementClarifications } : {}),
+      ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
     },
   };
 }
