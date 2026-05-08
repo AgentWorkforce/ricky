@@ -759,6 +759,19 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave1-runtime/implement-failure-diagnosis-engine/signoff.md \
         'RICKY_FAILURE_DIAGNOSIS_ENGINE_COMPLETE'
       ;;
+    workflows/wave2-product/04-workflow-validator-specialist.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-validator-specialist/signoff.md \
+        'WORKFLOW_VALIDATOR_SPECIALIST_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/product/specialists/validator/ >/dev/null
+      ;;
     workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave1-runtime/prove-runtime-environment-orchestration-unblockers/signoff.md \
