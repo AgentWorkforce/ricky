@@ -44,6 +44,7 @@
     "test": "npm run bundle && vitest run",
     "evals:compile": "node scripts/evals/compile-ricky-evals.mjs",
     "evals": "npm run evals:compile && node scripts/evals/run-ricky-evals.mjs",
+    "evals:opencode": "npm run evals:compile && RICKY_EVAL_EXECUTOR=opencode HUMAN_EVAL_PROVIDER=1 node scripts/evals/run-ricky-evals.mjs --provider",
     "evals:list": "npm run evals:compile && node scripts/evals/run-ricky-evals.mjs --list",
     "evals:summary": "node scripts/evals/summarize-ricky-evals.mjs",
     "evals:compare": "node scripts/evals/compare-ricky-evals.mjs",

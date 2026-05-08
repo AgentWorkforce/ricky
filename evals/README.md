@@ -32,6 +32,35 @@ npm run evals:list
 Run history and review worksheets are written under `.ricky/evals/runs/`, which
 is intentionally ignored by git.
 
+## Running Against OpenCode
+
+Ricky can also run the human-review cases against a local OpenCode one-shot
+model. This path does not need `OPENROUTER_API_KEY`; it shells out to
+`opencode run -m <model> <prompt>` and captures the answer into the normal
+human-review worksheet.
+
+```sh
+npm run evals:opencode -- --suite workflow-authoring
+```
+
+By default this uses `opencode/minimax-m2.5-free`. Override the local/free model or
+binary with environment variables:
+
+```sh
+RICKY_EVAL_OPENCODE_MODEL=opencode/nemotron-3-super-free npm run evals:opencode -- --tag workflow-authoring
+RICKY_EVAL_OPENCODE_BIN=/path/to/opencode npm run evals:opencode -- --case generation-quality.workflow-contract
+```
+
+For a case-specific provider run, set `Executor: opencode` in the case. To run
+the existing `Executor: manual` cases through OpenCode without editing them, use
+`npm run evals:opencode` or set `RICKY_EVAL_EXECUTOR=opencode` with
+`--provider`.
+
+Agent Relay is still the better fit for heavier evals that need real worker
+topology, tool-mediated execution, or multi-agent coordination. The direct
+OpenCode executor is intentionally small so local quality sweeps stay cheap and
+fast.
+
 ## Writing Manual Cases
 
 Use `Executor: manual` when you want to capture a Ricky behavior expectation for

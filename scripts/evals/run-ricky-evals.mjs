@@ -6,12 +6,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  createDefaultHumanEvalExecutors,
   createSkippedEvalError,
   defaultRedactActual,
   runHumanEvalCli,
 } from '@agent-assistant/telemetry/evals';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const DEFAULT_OPENCODE_MODEL = 'opencode/minimax-m2.5-free';
+const PROVIDER_EXECUTOR = process.env.RICKY_EVAL_EXECUTOR ?? '';
+const defaultExecutors = createDefaultHumanEvalExecutors(ROOT);
 
 const exitCode = await runHumanEvalCli({
   argv: process.argv.slice(2),
@@ -19,6 +23,8 @@ const exitCode = await runHumanEvalCli({
   productName: 'Ricky Evals',
   runsDir: path.join(ROOT, '.ricky', 'evals', 'runs'),
   executors: {
+    manual: executeManual,
+    opencode: executeOpenCode,
     'ricky-cli': executeRickyCli,
   },
   defaultExecutor: 'manual',
@@ -32,6 +38,62 @@ const exitCode = await runHumanEvalCli({
 });
 
 process.exitCode = exitCode;
+
+function executeManual(testCase, context) {
+  if (context.providerMode && PROVIDER_EXECUTOR === 'opencode') {
+    return executeOpenCode(testCase, context);
+  }
+  return defaultExecutors.manual(testCase, context);
+}
+
+function executeOpenCode(testCase, context) {
+  if (!context.providerMode) {
+    throw createSkippedEvalError('opencode executor skipped; rerun with --provider or HUMAN_EVAL_PROVIDER=1');
+  }
+
+  const command = process.env.RICKY_EVAL_OPENCODE_BIN ?? 'opencode';
+  const model = process.env.RICKY_EVAL_OPENCODE_MODEL ?? DEFAULT_OPENCODE_MODEL;
+  const timeoutMs = readPositiveInt(process.env.RICKY_EVAL_OPENCODE_TIMEOUT_MS, 120_000);
+  const prompt = buildOpenCodePrompt(testCase);
+  const args = ['run'];
+  if (model) args.push('-m', model);
+  args.push(prompt);
+
+  const startedAt = Date.now();
+  const result = spawnSync(command, args, {
+    cwd: context.rootDir,
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    env: {
+      ...process.env,
+      CI: '1',
+      FORCE_COLOR: '0',
+      NO_COLOR: '1',
+    },
+  });
+  const durationMs = Date.now() - startedAt;
+
+  if (result.error) {
+    if (result.error.code === 'ENOENT') {
+      throw createSkippedEvalError(`opencode executor skipped; '${command}' was not found in PATH`);
+    }
+    throw result.error;
+  }
+
+  const stdout = result.stdout?.trimEnd() ?? '';
+  const stderr = result.stderr?.trimEnd() ?? '';
+  const content = stdout || stderr || '';
+
+  return {
+    ok: result.status === 0,
+    status: result.status === 0 ? 'completed' : `exit_${result.status ?? 'signal'}`,
+    stopReason: result.signal ?? undefined,
+    content,
+    model,
+    toolCalls: [],
+    notes: `Ran local opencode one-shot with model ${model}; exit=${result.status ?? result.signal ?? 'unknown'}; durationMs=${durationMs}.`,
+  };
+}
 
 function executeRickyCli(testCase, context) {
   const argvText = stringValue(testCase.mock?.argv) ?? stringValue(testCase.input.argv) ?? stringValue(testCase.input.message);
@@ -97,4 +159,33 @@ function splitArgv(value) {
 
 function stringValue(value) {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function buildOpenCodePrompt(testCase) {
+  const systemPrompt = stringValue(testCase.input.systemPrompt);
+  const threadHistory = Array.isArray(testCase.input.threadHistory)
+    ? testCase.input.threadHistory
+    : [];
+  const sections = [
+    'You are Ricky, the AgentWorkforce workflow reliability, coordination, and authoring assistant.',
+    [
+      'Follow Ricky repository conventions from AGENTS.md, workflow standards, shared authoring rules, and product specs.',
+      'Prefer concrete workflow contracts, deterministic verification gates, review artifacts, 80-to-100 validation loops, honest blocker reporting, and scoped branch/PR boundaries when the request involves workflow authoring or repair.',
+      'Answer the user request directly. Do not mention this eval harness or hidden rubric.',
+    ].join(' '),
+  ];
+
+  if (systemPrompt) {
+    sections.push(`Additional system context:\n${systemPrompt}`);
+  }
+  if (threadHistory.length > 0) {
+    sections.push(`Thread history:\n${JSON.stringify(threadHistory, null, 2)}`);
+  }
+  sections.push(`User request:\n${String(testCase.input.message ?? '').trim()}`);
+  return sections.join('\n\n');
+}
+
+function readPositiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
