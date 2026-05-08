@@ -157,6 +157,283 @@ describe('debugger-facing classification contract', () => {
   });
 });
 
+// ── Required deterministic evidence coverage ─────────────────────────
+
+describe('required deterministic classifier coverage', () => {
+  it('timeout evidence produces timeout classification with debugger hints', () => {
+    let run = makeRun({ runId: 'run-required-timeout' });
+    let step = makeStep({ stepId: 'step-required-timeout', stepName: 'timeout-worker' });
+    step = completeStep(step, 'timed_out');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+
+    expectClassificationSurface(result, {
+      category: FailureClass.Timeout,
+      severity: Severity.Critical,
+      confidence: Confidence.High,
+      nextAction: NextAction.Retry,
+    });
+    expect(result.summary).toContain('timed out');
+    expect(result.matchedSignals).toBe(result.signals);
+    expect(result.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'run-level',
+          observation: expect.stringContaining('timed_out'),
+        }),
+        expect.objectContaining({
+          source: 'step:step-required-timeout',
+          observation: expect.stringContaining('timed out'),
+        }),
+      ]),
+    );
+  });
+
+  it('failed deterministic gate produces verification failure with gate evidence', () => {
+    let run = makeRun({ runId: 'run-required-gate' });
+    let step = makeStep({ stepId: 'step-required-gate', stepName: 'verify-contract' });
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+
+    const gateResult = recordDeterministicGate(
+      run,
+      'required-ready-sentinel',
+      [
+        failingVerification({
+          type: 'output_contains',
+          expected: 'FAILURE_CLASSIFIER_READY',
+          actual: 'missing',
+        }),
+      ],
+      'step-required-gate',
+    );
+    run = completeRun(gateResult.run);
+
+    const result = classifyFailure(run);
+
+    expectClassificationSurface(result, {
+      category: FailureClass.VerificationFailure,
+      severity: Severity.High,
+      confidence: Confidence.High,
+      nextAction: NextAction.FixAndRetry,
+    });
+    expect(result.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'gate:required-ready-sentinel',
+          observation: expect.stringContaining('failed'),
+          strength: Confidence.High,
+        }),
+      ]),
+    );
+  });
+
+  it('repeated agent narrative without file or test changes produces agent drift', () => {
+    let run = makeRun({ runId: 'run-required-drift' });
+    let step = makeStep({ stepId: 'step-required-drift', stepName: 'writer' });
+
+    step = appendStepEvent(step, {
+      kind: 'narrative',
+      narrative: {
+        agentRole: 'writer-codex',
+        summary: 'Reviewing the implementation approach before editing.',
+        recordedAt: FIXED_NOW.toISOString(),
+      },
+    });
+    step = appendStepEvent(step, {
+      kind: 'narrative',
+      narrative: {
+        agentRole: 'writer-codex',
+        summary: 'Continuing with the same plan; no tests or files changed.',
+        recordedAt: FIXED_NOW.toISOString(),
+      },
+    });
+    step = appendStepEvent(step, {
+      kind: 'verification',
+      result: failingVerification({
+        type: 'file_exists',
+        expected: 'src/runtime/failure/classifier.test.ts',
+        actual: 'unchanged',
+        message: 'No file/test change after repeated narrative updates',
+      }),
+    });
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+
+    expect(step.artifacts).toEqual([]);
+    expect(step.logs).toEqual([]);
+    expectClassificationSurface(result, {
+      category: FailureClass.AgentDrift,
+      severity: Severity.Medium,
+      confidence: Confidence.High,
+      nextAction: NextAction.FixAndRetry,
+    });
+    expect(result.secondaryClasses).toContain(FailureClass.VerificationFailure);
+    expect(result.signals.map((signal) => signal.observation).join('\n')).toContain('step contract');
+  });
+
+  it('missing command, tool, or dependency output produces environment error', () => {
+    let run = makeRun({ runId: 'run-required-env' });
+    let step = makeStep({ stepId: 'step-required-env', stepName: 'tooling' });
+
+    step = appendStepEvent(step, {
+      kind: 'deterministic_gate',
+      gate: {
+        gateName: 'required-debugger-tool',
+        passed: false,
+        verifications: [
+          failingVerification({
+            type: 'custom',
+            expected: 'workflow-debugger command output',
+            actual: '',
+            command: 'workflow-debugger classify --run run-required-env',
+            stderrExcerpt: 'workflow-debugger: command not found',
+            message: 'Missing command/tool/dependency output',
+          }),
+        ],
+        command: 'workflow-debugger classify --run run-required-env',
+        stderrExcerpt: 'workflow-debugger: command not found',
+        recordedAt: FIXED_NOW.toISOString(),
+      },
+    });
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+
+    expectClassificationSurface(result, {
+      category: FailureClass.EnvironmentError,
+      severity: Severity.High,
+      confidence: Confidence.High,
+      nextAction: NextAction.InvestigateEnvironment,
+    });
+    expect(result.secondaryClasses).toContain(FailureClass.VerificationFailure);
+    expect(result.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'step:step-required-env/gate:required-debugger-tool',
+          observation: expect.stringContaining('command not found'),
+          strength: Confidence.High,
+        }),
+      ]),
+    );
+  });
+
+  it('no progress across bounded waits produces deadlock', () => {
+    let run = makeRun({ runId: 'run-required-deadlock' });
+    let waiting = makeStep({ stepId: 'step-required-waiting', stepName: 'waiting-agent' });
+    waiting = appendStepEvent(waiting, {
+      kind: 'status_change',
+      status: 'running',
+      message: 'bounded wait 1 produced no terminal progress',
+    });
+    waiting = appendStepEvent(waiting, {
+      kind: 'status_change',
+      status: 'running',
+      message: 'bounded wait 2 still produced no terminal progress',
+    });
+
+    let blocked = makeStep({ stepId: 'step-required-blocked', stepName: 'blocked-agent' });
+    blocked = appendStepEvent(blocked, {
+      kind: 'status_change',
+      status: 'pending',
+      message: 'pending behind waiting-agent',
+    });
+
+    run = addStepToRun(addStepToRun(run, waiting), blocked);
+    run = { ...run, status: 'failed' };
+
+    const result = classifyFailure(run);
+
+    expectClassificationSurface(result, {
+      category: FailureClass.Deadlock,
+      severity: Severity.Critical,
+      confidence: Confidence.Low,
+      nextAction: NextAction.Abort,
+    });
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'run-summary',
+        observation: expect.stringContaining('non-terminal'),
+        strength: Confidence.Medium,
+      }),
+    ]);
+  });
+
+  it('too many steps or retries produces step overflow', () => {
+    let run = makeRun({ runId: 'run-required-overflow' });
+    let step = makeStep({ stepId: 'step-required-overflow', stepName: 'retrying-step' });
+
+    for (let attempt = 1; attempt <= RETRY_OVERFLOW_THRESHOLD; attempt++) {
+      step = appendStepEvent(step, {
+        kind: 'retry',
+        retry: {
+          attempt,
+          stepId: 'step-required-overflow',
+          status: 'failed',
+          error: `Attempt ${attempt} failed before retry overflow`,
+          startedAt: FIXED_NOW.toISOString(),
+          completedAt: FIXED_NOW.toISOString(),
+        },
+      });
+    }
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+
+    expectClassificationSurface(result, {
+      category: FailureClass.StepOverflow,
+      severity: Severity.Medium,
+      confidence: Confidence.Medium,
+      nextAction: NextAction.Escalate,
+    });
+    expect(result.summary).toContain('exhausted retry budget');
+    expect(result.signals).toContainEqual(
+      expect.objectContaining({
+        source: 'step-overflow:step:step-required-overflow',
+        observation: expect.stringContaining(`${RETRY_OVERFLOW_THRESHOLD} retries`),
+        strength: Confidence.High,
+      }),
+    );
+  });
+
+  it('mixed or weak signals preserve confidence and matched signals', () => {
+    const result = classifyFailure(
+      'agent drift: repeated narrative did not meet the step contract; deterministic gate failed expected READY got missing',
+    );
+
+    expectClassificationSurface(result, {
+      category: FailureClass.AgentDrift,
+      severity: Severity.Medium,
+      confidence: Confidence.Low,
+      nextAction: NextAction.FixAndRetry,
+    });
+    expect(result.secondaryClasses).toEqual([FailureClass.VerificationFailure]);
+    expect(result.isMixedFailure).toBe(true);
+    expect(result.matchedSignals).toBe(result.signals);
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'plain-summary',
+        strength: Confidence.Medium,
+        observation: expect.stringContaining('agent drift'),
+      }),
+      expect.objectContaining({
+        source: 'plain-summary',
+        strength: Confidence.Medium,
+        observation: expect.stringContaining('verification failure'),
+      }),
+    ]);
+  });
+});
+
 // ── Timeout ──────────────────────────────────────────────────────────
 
 describe('timeout classification', () => {
