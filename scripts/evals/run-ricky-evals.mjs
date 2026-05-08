@@ -14,11 +14,11 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DEFAULT_OPENCODE_MODEL = 'opencode/minimax-m2.5-free';
-const PROVIDER_EXECUTOR = process.env.RICKY_EVAL_EXECUTOR ?? '';
+const { argv: evalArgv, executorOverride } = parseRickyEvalArgs(process.argv.slice(2));
 const defaultExecutors = createDefaultHumanEvalExecutors(ROOT);
 
 const exitCode = await runHumanEvalCli({
-  argv: process.argv.slice(2),
+  argv: evalArgv,
   rootDir: ROOT,
   productName: 'Ricky Evals',
   runsDir: path.join(ROOT, '.ricky', 'evals', 'runs'),
@@ -40,7 +40,7 @@ const exitCode = await runHumanEvalCli({
 process.exitCode = exitCode;
 
 function executeManual(testCase, context) {
-  if (context.providerMode && PROVIDER_EXECUTOR === 'opencode') {
+  if (context.providerMode && executorOverride === 'opencode') {
     return executeOpenCode(testCase, context);
   }
   return defaultExecutors.manual(testCase, context);
@@ -188,4 +188,19 @@ function buildOpenCodePrompt(testCase) {
 function readPositiveInt(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseRickyEvalArgs(argv) {
+  const passthrough = [];
+  let executorOverride;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--executor') {
+      executorOverride = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    passthrough.push(arg);
+  }
+  return { argv: passthrough, executorOverride };
 }

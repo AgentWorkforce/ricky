@@ -53,8 +53,7 @@ RICKY_EVAL_OPENCODE_BIN=/path/to/opencode npm run evals:opencode -- --case gener
 
 For a case-specific provider run, set `Executor: opencode` in the case. To run
 the existing `Executor: manual` cases through OpenCode without editing them, use
-`npm run evals:opencode` or set `RICKY_EVAL_EXECUTOR=opencode` with
-`--provider`.
+`npm run evals:opencode`.
 
 Agent Relay is still the better fit for heavier evals that need real worker
 topology, tool-mediated execution, or multi-agent coordination. The direct
