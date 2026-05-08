@@ -54,6 +54,7 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
 // ── Step overflow threshold ──────────────────────────────────────────
 
 export const RETRY_OVERFLOW_THRESHOLD = 5;
+export const STEP_VERIFICATION_OVERFLOW_THRESHOLD = 10;
 
 // ── Public API ───────────────────────────────────────────────────────
 
@@ -269,7 +270,7 @@ function classifyFromPlainSummary(summaryText: PlainValidationSummary): FailureC
     detected.push(FailureClass.Deadlock);
   }
 
-  if (/\b(step overflow|retry budget|retries exhausted|max attempts|too many attempts|retry storm)\b/i.test(text)) {
+  if (/\b(step overflow|retry budget|retries exhausted|max attempts|too many attempts|too many checks|too many verifications|oversized step|retry storm)\b/i.test(text)) {
     signals.push(plainSignal(`Plain summary indicates step overflow: ${truncate(text, 120)}`, Confidence.Medium));
     detected.push(FailureClass.StepOverflow);
   }
@@ -431,9 +432,7 @@ function detectStepOverflow(
   evidence: WorkflowRunEvidence,
   signals: EvidenceSignal[],
 ): boolean {
-  if (summary.retryCount < RETRY_OVERFLOW_THRESHOLD) {
-    return false;
-  }
+  let found = false;
 
   // Track whether we added a step-level retry signal locally
   let addedStepSignal = false;
@@ -447,21 +446,33 @@ function detectStepOverflow(
         strength: Confidence.High,
       });
       addedStepSignal = true;
+      found = true;
+    }
+
+    const verificationCount = totalStepVerificationCount(step);
+    if (verificationCount > STEP_VERIFICATION_OVERFLOW_THRESHOLD) {
+      signals.push({
+        observation: `Step "${step.stepName}" has ${verificationCount} verification checks, exceeding threshold of ${STEP_VERIFICATION_OVERFLOW_THRESHOLD}`,
+        source: `step-overflow:step:${step.stepId}/verifications`,
+        strength: Confidence.Medium,
+      });
+      found = true;
     }
   }
 
   // Only add the distributed retry summary signal if we didn't add any
   // step-level retry signal. This avoids depending on unrelated earlier
   // signals in the shared array.
-  if (!addedStepSignal) {
+  if (summary.retryCount >= RETRY_OVERFLOW_THRESHOLD && !addedStepSignal) {
     signals.push({
       observation: `${summary.retryCount} total retries across ${summary.totalSteps} steps exceeds threshold of ${RETRY_OVERFLOW_THRESHOLD}`,
       source: 'step-overflow:run-summary',
       strength: Confidence.Medium,
     });
+    found = true;
   }
 
-  return true;
+  return found;
 }
 
 function detectAgentDrift(
@@ -734,6 +745,14 @@ function stepHasPassingExecution(step: WorkflowStepEvidence): boolean {
   return false;
 }
 
+function totalStepVerificationCount(step: WorkflowStepEvidence): number {
+  return (
+    step.verifications.length +
+    step.deterministicGates.reduce((count, gate) => count + gate.verifications.length, 0) +
+    step.retries.reduce((count, retry) => count + (retry.verifications?.length ?? 0), 0)
+  );
+}
+
 function truncate(s: string, maxLen: number): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen - 3) + '...';
@@ -889,10 +908,17 @@ const CLASS_CONFIG: Record<FailureClass, ClassConfig> = {
   },
 
   [FailureClass.StepOverflow]: {
-    severity: (s) => (s.retryCount >= RETRY_OVERFLOW_THRESHOLD * 2 ? Severity.High : Severity.Medium),
+    severity: (s) =>
+      s.retryCount >= RETRY_OVERFLOW_THRESHOLD * 2 || s.totalSteps > STEP_VERIFICATION_OVERFLOW_THRESHOLD
+        ? Severity.High
+        : Severity.Medium,
     nextAction: NextAction.Escalate,
-    summarize: (s) =>
-      `Run "${s.workflowName}" exhausted retry budget — ${s.retryCount} retries across ${s.totalSteps} steps`,
+    summarize: (s) => {
+      if (s.retryCount > 0) {
+        return `Run "${s.workflowName}" exhausted retry budget — ${s.retryCount} retries across ${s.totalSteps} steps`;
+      }
+      return `Run "${s.workflowName}" exceeded step size budget — ${s.totalSteps} steps require debugger review`;
+    },
   },
 
   [FailureClass.Unknown]: {
