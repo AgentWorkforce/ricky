@@ -307,6 +307,76 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.normalizedSpec.targetFiles).not.toContain('AgentWorkforce/ricky');
   });
 
+  it('preserves two-segment directory targets when a target repo is present', () => {
+    const result = intake(
+      natural(
+        'Build a workflow for repo AgentWorkforce/ricky. Only touch workflows/wave2-product.',
+      ),
+    );
+
+    expect(result.routing?.normalizedSpec.targetRepo).toBe('AgentWorkforce/ricky');
+    expect(result.routing?.normalizedSpec.targetFiles).toContain('workflows/wave2-product');
+    expect(result.routing?.normalizedSpec.targetFiles).not.toContain('AgentWorkforce/ricky');
+  });
+
+  it('routes structured generation specs containing a logs evidence field to generate, not debug', () => {
+    const result = intake({
+      kind: 'structured_json',
+      surface: 'api',
+      receivedAt: RECEIVED_AT,
+      requestId: 'api-generate-with-logs-evidence',
+      data: {
+        spec: {
+          description: 'Generate a workflow that captures logs after validation steps.',
+          logs: ['Record generated workflow logs as evidence.'],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('generate');
+    expect(result.routing?.normalizedSpec.intent).toBe('generate');
+    expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
+  });
+
+  it('routes structured generation specs whose requiredEvidence mentions logs to generate, not debug', () => {
+    const result = intake({
+      kind: 'structured_json',
+      surface: 'api',
+      receivedAt: RECEIVED_AT,
+      requestId: 'api-generate-required-evidence-logs',
+      data: {
+        spec: {
+          description: 'Generate a workflow that emits structured logs and verifies them.',
+          requiredEvidence: ['logs at .workflow-artifacts/run.log', 'stdout contains DONE'],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('generate');
+    expect(result.routing?.normalizedSpec.intent).toBe('generate');
+  });
+
+  it('still routes structured payloads with strong failure signals (failedRunId) to debug', () => {
+    const result = intake({
+      kind: 'structured_json',
+      surface: 'api',
+      receivedAt: RECEIVED_AT,
+      requestId: 'api-debug-failed-run',
+      data: {
+        spec: {
+          description: 'Investigate failure for the workflow run.',
+          failedRunId: 'run-789',
+          logs: ['stack trace lines redacted'],
+        },
+      },
+    });
+
+    expect(result.routing?.target).toBe('debug');
+    expect(result.routing?.normalizedSpec.intent).toBe('debug');
+  });
+
   it('does not treat arbitrary .ts files as workflow file hints', () => {
     const result = intake(
       natural('Run src/runtime/local-coordinator.ts for the current repository.'),

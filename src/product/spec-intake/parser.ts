@@ -190,7 +190,7 @@ const READY_ARTIFACT_KEYS = [
   'artifactPath',
   'artifact_path',
 ];
-const FAILED_RUN_KEYS = [
+const STRONG_FAILED_RUN_KEYS = [
   'failedRunId',
   'failed_run_id',
   'runId',
@@ -201,6 +201,8 @@ const FAILED_RUN_KEYS = [
   'failure_evidence',
   'stackTrace',
   'stack_trace',
+];
+const WEAK_FAILED_RUN_KEYS = [
   'stderr',
   'stdout',
   'logs',
@@ -209,6 +211,7 @@ const FAILED_RUN_KEYS = [
   'evidencePath',
   'evidence_path',
 ];
+const FAILED_RUN_KEYS = [...STRONG_FAILED_RUN_KEYS, ...WEAK_FAILED_RUN_KEYS];
 const COORDINATION_KEYS = [
   'agents',
   'workers',
@@ -372,7 +375,13 @@ function inferIntentFromStructuredShape(data: Record<string, unknown>, fallbackT
     ...records.map((record) => stringifySelected(record, [...FAILED_RUN_KEYS, ...READY_ARTIFACT_KEYS, ...COORDINATION_KEYS])),
   ].join('\n');
 
-  if (records.some((record) => hasAnyRecordValue(record, FAILED_RUN_KEYS)) || /\b(failed run|stack trace|traceback|stderr|exit code [1-9])\b/i.test(text)) {
+  // Only treat structured payloads as debug when there's strong failure evidence
+  // (run identifiers, stack traces, failureEvidence) or explicit failure wording.
+  // Weak keys like `logs`, `stdout`, `stderr` can also describe required evidence
+  // for a generation spec, so they alone must not override the text/shape intent.
+  const hasStrongFailureKey = records.some((record) => hasAnyRecordValue(record, STRONG_FAILED_RUN_KEYS));
+  const hasFailureWording = /\b(failed run|stack trace|traceback|verification failed|exit code [1-9])\b/i.test(text);
+  if (hasStrongFailureKey || hasFailureWording) {
     return {
       primary: 'debug',
       signals: ['shape:failed-run-evidence'],
@@ -815,7 +824,7 @@ function extractTargetRepo(text: string): string | undefined {
   const repoMatch =
     text.match(/\b(?:repo|repository)\s*[:=]?\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i) ??
     text.match(/\bgithub\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
-  return repoMatch?.[1];
+  return repoMatch?.[1]?.replace(/[.,;:]+$/, '');
 }
 
 function extractTargetContext(text: string): string | undefined {
@@ -1029,12 +1038,8 @@ function capitalize(value: string): string {
 
 function excludeRepoSlug(files: string[], targetRepo: string | undefined): string[] {
   if (!targetRepo) return files;
-  return files.filter((file) => file !== targetRepo && !isRepoSlug(file));
-}
-
-function isRepoSlug(value: string): boolean {
-  const parts = value.split('/');
-  return parts.length === 2 && parts.every((part) => /^[\w@.-]+$/.test(part)) && !value.includes('.');
+  const normalized = targetRepo.toLowerCase();
+  return files.filter((file) => file.toLowerCase() !== normalized);
 }
 
 function escapeRegExp(value: string): string {
