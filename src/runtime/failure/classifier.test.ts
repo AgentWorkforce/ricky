@@ -105,6 +105,12 @@ function expectDebuggerDiagnostics(
   result: FailureClassification,
   expectedFragments: readonly string[],
 ): void {
+  expect(result.category).toBe(result.failureClass);
+  expect(result.summary).toEqual(expect.any(String));
+  expect(result.summary.length).toBeGreaterThan(0);
+  expect(result.severity).toEqual(expect.any(String));
+  expect(result.confidence).toEqual(expect.any(String));
+  expect(result.nextAction).toEqual(expect.any(String));
   expect(result.suggestedNextAction).toBe(result.nextAction);
   expect(result.matchedSignals).toBe(result.signals);
 
@@ -458,6 +464,11 @@ describe('required deterministic classifier coverage', () => {
     expect(result.secondaryClasses).toEqual([FailureClass.VerificationFailure]);
     expect(result.isMixedFailure).toBe(true);
     expect(result.matchedSignals).toBe(result.signals);
+    expect(result.confidence).toBe(Confidence.Low);
+    expect(result.signals.map((signal) => signal.strength)).toEqual([
+      Confidence.Medium,
+      Confidence.Medium,
+    ]);
     expectDebuggerDiagnostics(result, ['agent drift', 'verification failure', 'plain-summary']);
     expect(result.signals).toEqual([
       expect.objectContaining({

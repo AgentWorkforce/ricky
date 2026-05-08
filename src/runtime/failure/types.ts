@@ -8,7 +8,7 @@
 import type {
   EvidenceSummary,
   WorkflowRunEvidence,
-} from '../../shared/models/workflow-evidence.js';
+} from '../evidence/types.js';
 
 // ── Failure Classes ──────────────────────────────────────────────────
 

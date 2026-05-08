@@ -11,7 +11,7 @@ import type {
   WorkflowStepEvidence,
   DeterministicGateResult,
   VerificationResult,
-} from '../../shared/models/workflow-evidence.js';
+} from '../evidence/types.js';
 import { summarizeEvidence } from '../evidence/capture.js';
 import {
   type FailureClassification,
@@ -801,6 +801,7 @@ function unknownFailure(
   summary: EvidenceSummary,
   signals: EvidenceSignal[],
 ): FailureClassification {
+  const normalizedSignals = uniqueSignals(signals);
   return {
     category: FailureClass.Unknown,
     failureClass: FailureClass.Unknown,
@@ -809,8 +810,8 @@ function unknownFailure(
     nextAction: NextAction.Escalate,
     suggestedNextAction: NextAction.Escalate,
     summary: `Run "${summary.workflowName}" failed but no deterministic classification matched (${summary.failedSteps} failed steps)`,
-    signals,
-    matchedSignals: signals,
+    signals: normalizedSignals,
+    matchedSignals: normalizedSignals,
     secondaryClasses: [],
     isMixedFailure: false,
   };

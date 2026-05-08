@@ -1,4 +1,15 @@
-export * from './types.js';
+export {
+  Confidence,
+  FailureClass,
+  NextAction,
+  Severity,
+} from './types.js';
+export type {
+  EvidenceSignal,
+  FailureClassification,
+  FailureClassifierInput,
+  PlainValidationSummary,
+} from './types.js';
 export {
   classifyFailure,
   classifyFromSummary,
