@@ -892,6 +892,79 @@ describe('LocalCoordinator', () => {
     );
   });
 
+  it('keeps running, output, failure, and runner-boundary evidence on the public result contract', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-focused-contract',
+      workflowFile: 'generated/focused-workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { workflowId: 'focused-workflow' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'generated/focused-workflow.yaml', '--json'],
+      { cwd: '/repo', env: { RELAYCAST_WORKSPACE: 'unit-test' } },
+    );
+    expect(coordinator.getActiveRun('run-focused-contract')).toMatchObject({
+      runId: 'run-focused-contract',
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/focused-workflow.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      metadata: { workflowId: 'focused-workflow' },
+    });
+
+    invocations[0].emitStdout('{"event":"workflow.started"}');
+    invocations[0].emitStderr('step failed: review');
+    invocations[0].complete(9);
+    const result = await resultPromise;
+
+    expect(lifecycleEvents).toEqual(result.events);
+    expect(result.status).toBe('failed');
+    expect(result.exitCode).toBe(9);
+    expect(result.error).toBe('exited with code 9');
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/focused-workflow.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+    expect(result.metadata).toEqual({ workflowId: 'focused-workflow' });
+    expect(result.stdout).toEqual(['{"event":"workflow.started"}']);
+    expect(result.stderr).toEqual(['step failed: review']);
+    expect(result.stderrSnippet).toMatchObject({
+      lines: ['step failed: review'],
+      totalLines: 1,
+      truncated: false,
+    });
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'failed',
+      data: { exitCode: 9, error: 'exited with code 9' },
+    });
+    expect(coordinator.getActiveRun('run-focused-contract')).toBeUndefined();
+  });
+
   it('handles exitPromise resolving to null (signal termination)', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
