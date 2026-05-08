@@ -101,6 +101,23 @@ function expectClassificationSurface(
   expect(result.signals.every((signal) => Object.values(Confidence).includes(signal.strength))).toBe(true);
 }
 
+function expectDebuggerDiagnostics(
+  result: FailureClassification,
+  expectedFragments: readonly string[],
+): void {
+  expect(result.suggestedNextAction).toBe(result.nextAction);
+  expect(result.matchedSignals).toBe(result.signals);
+
+  const diagnosticText = [
+    result.summary,
+    ...result.signals.map((signal) => `${signal.source}: ${signal.observation}`),
+  ].join('\n');
+
+  for (const fragment of expectedFragments) {
+    expect(diagnosticText).toContain(fragment);
+  }
+}
+
 // ── Debugger Result Contract ────────────────────────────────────────
 
 describe('debugger-facing classification contract', () => {
@@ -179,6 +196,7 @@ describe('required deterministic classifier coverage', () => {
       confidence: Confidence.High,
       nextAction: NextAction.Retry,
     });
+    expectDebuggerDiagnostics(result, ['timed out', 'timed_out', 'step-required-timeout']);
     expect(result.summary).toContain('timed out');
     expect(result.matchedSignals).toBe(result.signals);
     expect(result.signals).toEqual(
@@ -223,6 +241,11 @@ describe('required deterministic classifier coverage', () => {
       confidence: Confidence.High,
       nextAction: NextAction.FixAndRetry,
     });
+    expectDebuggerDiagnostics(result, [
+      'failed verification',
+      'gate:required-ready-sentinel',
+      'Gate "required-ready-sentinel" failed',
+    ]);
     expect(result.signals).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -277,6 +300,7 @@ describe('required deterministic classifier coverage', () => {
       confidence: Confidence.High,
       nextAction: NextAction.FixAndRetry,
     });
+    expectDebuggerDiagnostics(result, ['agent drift', 'step-required-drift', 'step contract']);
     expect(result.secondaryClasses).toContain(FailureClass.VerificationFailure);
     expect(result.signals.map((signal) => signal.observation).join('\n')).toContain('step contract');
   });
@@ -317,6 +341,11 @@ describe('required deterministic classifier coverage', () => {
       confidence: Confidence.High,
       nextAction: NextAction.InvestigateEnvironment,
     });
+    expectDebuggerDiagnostics(result, [
+      'environment/infrastructure error',
+      'required-debugger-tool',
+      'command not found',
+    ]);
     expect(result.secondaryClasses).toContain(FailureClass.VerificationFailure);
     expect(result.signals).toEqual(
       expect.arrayContaining([
@@ -361,6 +390,7 @@ describe('required deterministic classifier coverage', () => {
       confidence: Confidence.Low,
       nextAction: NextAction.Abort,
     });
+    expectDebuggerDiagnostics(result, ['deadlocked', 'non-terminal', '2 steps stuck']);
     expect(result.signals).toEqual([
       expect.objectContaining({
         source: 'run-summary',
@@ -399,6 +429,11 @@ describe('required deterministic classifier coverage', () => {
       confidence: Confidence.Medium,
       nextAction: NextAction.Escalate,
     });
+    expectDebuggerDiagnostics(result, [
+      'exhausted retry budget',
+      'step-required-overflow',
+      `${RETRY_OVERFLOW_THRESHOLD} retries`,
+    ]);
     expect(result.summary).toContain('exhausted retry budget');
     expect(result.signals).toContainEqual(
       expect.objectContaining({
@@ -423,6 +458,7 @@ describe('required deterministic classifier coverage', () => {
     expect(result.secondaryClasses).toEqual([FailureClass.VerificationFailure]);
     expect(result.isMixedFailure).toBe(true);
     expect(result.matchedSignals).toBe(result.signals);
+    expectDebuggerDiagnostics(result, ['agent drift', 'verification failure', 'plain-summary']);
     expect(result.signals).toEqual([
       expect.objectContaining({
         source: 'plain-summary',
