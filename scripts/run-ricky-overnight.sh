@@ -285,7 +285,7 @@ reconcile_stale_state_dir() {
   [[ -n "$artifact_dir" ]] || return 0
   status_file="$artifact_dir/status.txt"
 
-  if [[ -f "$status_file" ]] && grep -qx 'running' "$status_file"; then
+  if [[ -f "$status_file" ]] && grep -Eqx 'running|checkpointed' "$status_file"; then
     if ! is_pid_running "$run_pid" && ! is_process_group_running "$run_pgid"; then
       mark_artifact_stale_or_complete "$artifact_dir"
       reconciled_status="$(cat "$status_file" 2>/dev/null || true)"
@@ -1169,7 +1169,7 @@ restore_checkpoint() {
   fi
   append_unique_lines_from_file "$previous_failed_file" "$FAILED_FILE"
   append_unique_lines_from_file "$previous_skipped_file" "$SKIPPED_FILE"
-  if [[ -n "$previous_status_file" && -f "$previous_status_file" ]] && grep -qx 'running' "$previous_status_file"; then
+  if [[ -n "$previous_status_file" && -f "$previous_status_file" ]] && grep -Eqx 'running|checkpointed' "$previous_status_file"; then
     if ! is_pid_running "$previous_pid" && ! is_process_group_running "$previous_pgid"; then
       mark_artifact_stale_or_complete "$previous_artifact_dir"
       log "reconciled prior overnight artifact with no live process: $previous_artifact_dir"

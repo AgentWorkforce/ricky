@@ -80,6 +80,8 @@ describe('LocalCoordinator', () => {
   it('records running then completed status for a successful workflow launch', async () => {
     const { runner, run, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
 
     const resultPromise = coordinator.launch({
       runId: 'run-success',
@@ -113,6 +115,7 @@ describe('LocalCoordinator', () => {
     expect(result.status).toBe('passed');
     expect(result.exitCode).toBe(0);
     expect(coordinator.getActiveRun('run-success')).toBeUndefined();
+    expect(lifecycleEvents).toEqual(result.events);
     expect(result.events.map((event) => event.kind)).toEqual([
       'started',
       'status_change',
@@ -156,12 +159,21 @@ describe('LocalCoordinator', () => {
     });
 
     invocations[0].emitStderr('fatal: missing token');
+    expect(coordinator.getActiveRun('run-failed')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'workflow.yaml'],
+        cwd: '/repo',
+      },
+    });
     invocations[0].complete(12);
     const result = await resultPromise;
 
     expect(result.status).toBe('failed');
     expect(result.exitCode).toBe(12);
     expect(result.error).toBe('exited with code 12');
+    expect(coordinator.getActiveRun('run-failed')).toBeUndefined();
     expect(result.stderr).toEqual(['fatal: missing token']);
     expect(result.stderrSnippet).toMatchObject({
       lines: ['fatal: missing token'],
@@ -233,6 +245,7 @@ describe('LocalCoordinator', () => {
       data: { exitCode: null, timeoutMs: 25 },
     });
     expect(coordinator.getActiveRun('run-timeout')).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
 
     invocations[0].complete(0);
     await Promise.resolve();
@@ -306,6 +319,7 @@ describe('LocalCoordinator', () => {
       data: { exitCode: null, error: 'cancelled' },
     });
     expect(coordinator.getActiveRun('run-cancelled')).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
 
     invocations[0].complete(0);
     await Promise.resolve();
