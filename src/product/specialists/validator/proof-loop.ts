@@ -13,7 +13,7 @@ export interface ProofLoopInput {
 
 export function evaluateProofLoop(input: ProofLoopInput): ProofLoopStep[] {
   const initialSoftRun = evaluateInitialSoftRun(input.dryRunResult, input.config.requireDryRun);
-  const fixLoop = evaluateFixLoop(input.dryRunResult, input.fixAttempts, input.config.maxFixAttempts);
+  const fixLoop = evaluateFixLoop(input.dryRunResult, input.fixAttempts, input.config.maxFixAttempts, input.config.requireDryRun);
   const finalGate = evaluateFinalGate(input.finalDryRunResult, input.dryRunResult, input.config.requireDryRun);
   const buildGate = evaluateBuildGate(input.buildResult, input.config.requireBuild);
   const regressionGate = evaluateRegressionGate(input.testResult, input.regressionResults, input.config);
@@ -51,8 +51,24 @@ function evaluateInitialSoftRun(result: CommandResult | undefined, required: boo
   });
 }
 
-function evaluateFixLoop(result: CommandResult | undefined, fixAttempts: number | undefined, maxFixAttempts: number): ProofLoopStep {
+function evaluateFixLoop(
+  result: CommandResult | undefined,
+  fixAttempts: number | undefined,
+  maxFixAttempts: number,
+  requireDryRun: boolean,
+): ProofLoopStep {
   if (!result) {
+    if (!requireDryRun) {
+      return step({
+        phase: 'fix_loop',
+        evidenceLabel: 'fix_loop',
+        passed: true,
+        blocking: false,
+        severity: 'info',
+        message: 'Fix loop skipped: dry-run evidence is not required by proofLoopConfig.',
+        fixHint: 'Provide initial soft-run evidence and fixAttempts if fix-loop modeling is needed.',
+      });
+    }
     return step({
       phase: 'fix_loop',
       evidenceLabel: 'fix_loop',
@@ -106,6 +122,19 @@ function evaluateFixLoop(result: CommandResult | undefined, fixAttempts: number 
 }
 
 function evaluateFinalGate(finalResult: CommandResult | undefined, initialResult: CommandResult | undefined, required: boolean): ProofLoopStep {
+  if (finalResult && initialResult && isReusedEvidence(finalResult, initialResult)) {
+    return step({
+      phase: 'final_gate',
+      evidenceLabel: 'final_hard_gate',
+      passed: false,
+      blocking: true,
+      severity: 'error',
+      commandResult: finalResult,
+      message: 'Final hard gate must not reuse initial soft-run evidence; provide post-fix evidence captured separately.',
+      fixHint: 'Capture finalDryRunResult from a failOnError: true gate after the fix loop, distinct from the initial dryRunResult.',
+    });
+  }
+
   if (!finalResult && initialResult && required) {
     return step({
       phase: 'final_gate',
@@ -217,6 +246,16 @@ function evaluateRegressionGate(
 
 function step(input: ProofLoopStep): ProofLoopStep {
   return input;
+}
+
+function isReusedEvidence(a: CommandResult, b: CommandResult): boolean {
+  if (a === b) return true;
+  return (
+    a.command === b.command &&
+    a.exitCode === b.exitCode &&
+    (a.stdout ?? '') === (b.stdout ?? '') &&
+    (a.stderr ?? '') === (b.stderr ?? '')
+  );
 }
 
 function deriveValidationRecovery(result: CommandResult): ValidationRecovery | undefined {

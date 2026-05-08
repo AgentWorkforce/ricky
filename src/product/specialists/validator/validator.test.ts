@@ -76,9 +76,13 @@ describe('validateWorkflow', () => {
       'npx agent-relay run --dry-run workflows/generated/validator-specialist.ts',
       'Workflow dry-run failed: missing final signoff dependency.',
     );
+    const finalGateFailure = failed(
+      'npx tsc --noEmit && npx vitest run src/product/specialists/validator/validator.test.ts',
+      'Final post-fix validation failed: missing final signoff dependency.',
+    );
     const result = validate(completeWorkflowText(), {
       dryRunResult: dryRunFailure,
-      finalDryRunResult: dryRunFailure,
+      finalDryRunResult: finalGateFailure,
       buildResult: passed('npx tsc --noEmit'),
       testResult: passed('npx vitest run src/product/specialists/validator/validator.test.ts'),
       regressionResults: [passed('npx vitest run')],
@@ -92,7 +96,7 @@ describe('validateWorkflow', () => {
         blocking: true,
         severity: 'error',
         commandResult: expect.objectContaining({
-          command: dryRunFailure.command,
+          command: finalGateFailure.command,
           stderr: expect.stringContaining('missing final signoff dependency'),
         }),
         message: 'Final hard gate failed.',
@@ -100,6 +104,67 @@ describe('validateWorkflow', () => {
       }),
     );
     expectBlockingProofStep(result, 'final_gate', /Final hard gate failed/);
+  });
+
+  it('rejects when finalDryRunResult is the same object as dryRunResult', () => {
+    const reused = passed('npx agent-relay run --dry-run workflows/generated/validator-specialist.ts');
+    const result = validate(completeWorkflowText(), {
+      dryRunResult: reused,
+      finalDryRunResult: reused,
+    });
+
+    expect(result).toMatchObject({ signoff: 'rejected', ready: false, allProofLoopStepsPassed: false });
+    expect(result.proofLoopSteps).toContainEqual(
+      expect.objectContaining({
+        phase: 'final_gate',
+        passed: false,
+        blocking: true,
+        severity: 'error',
+        message: expect.stringMatching(/must not reuse initial soft-run evidence/i),
+      }),
+    );
+  });
+
+  it('rejects when finalDryRunResult fingerprints match dryRunResult', () => {
+    const dryRunResult = passed('npx agent-relay run --dry-run workflows/generated/validator-specialist.ts');
+    const finalDryRunResult: CommandResult = {
+      command: dryRunResult.command,
+      exitCode: dryRunResult.exitCode,
+      stdout: dryRunResult.stdout,
+      stderr: dryRunResult.stderr,
+    };
+    const result = validate(completeWorkflowText(), {
+      dryRunResult,
+      finalDryRunResult,
+    });
+
+    expect(result).toMatchObject({ signoff: 'rejected', ready: false, allProofLoopStepsPassed: false });
+    expect(result.proofLoopSteps).toContainEqual(
+      expect.objectContaining({
+        phase: 'final_gate',
+        passed: false,
+        blocking: true,
+        severity: 'error',
+        message: expect.stringMatching(/must not reuse initial soft-run evidence/i),
+      }),
+    );
+  });
+
+  it('passes fix-loop and final gate when requireDryRun is false and no dryRunResult is provided', () => {
+    const result = validate(completeWorkflowText(), {
+      dryRunResult: undefined,
+      finalDryRunResult: undefined,
+      buildResult: passed('npx tsc --noEmit'),
+      testResult: passed('npx vitest run src/product/specialists/validator/validator.test.ts'),
+      regressionResults: [passed('npx vitest run')],
+      proofLoopConfig: { requireDryRun: false },
+    });
+
+    const fixLoop = result.proofLoopSteps.find((step) => step.phase === 'fix_loop');
+    const finalGate = result.proofLoopSteps.find((step) => step.phase === 'final_gate');
+    expect(fixLoop).toMatchObject({ passed: true, blocking: false });
+    expect(finalGate).toMatchObject({ passed: true, blocking: false });
+    expect(result.allProofLoopStepsPassed).toBe(true);
   });
 
   it('attaches recovery guidance for unsupported validation commands', () => {

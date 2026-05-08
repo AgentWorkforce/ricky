@@ -59,7 +59,7 @@ function checkRelayShape(text: string, context: StructuralContext): StructuralFi
 }
 
 function checkWorkflowFactory(text: string, context: StructuralContext): StructuralFinding {
-  const hasWorkflowFactory = /\bworkflow\s*\(\s*['"`][^'"`]+['"`]\s*\)/.test(text);
+  const hasWorkflowFactory = /\bworkflow\s*\(\s*['"`][^'"`]+['"`][\s,)]/.test(text);
   const hasImport = /from\s+['"]@agent-relay\/sdk\/workflows['"]/.test(text);
   return finding({
     check: 'workflow_factory',
@@ -293,17 +293,19 @@ function checkRegressionGate(text: string, context: StructuralContext): Structur
   }
 
   const regressionBlock = context.regressionBlock;
+  const checksTrackedChanges = /git\s+diff\s+--name-only/.test(regressionBlock);
+  const checksUntrackedChanges = /git\s+ls-files\s+--others\s+--exclude-standard/.test(regressionBlock);
   const hasFailClosedLogic = /!\s*grep\s+-Ev|if\s+.*grep\s+-Ev.*;\s*then\s+exit\s+1|grep\s+-Ev[^|]*\|\s*(?:xargs\s+test\s+-z|wc\s+-l.*-eq\s+0)/.test(regressionBlock);
-  const passed = hasRegressionGate && hasFailClosedLogic;
+  const passed = hasRegressionGate && checksTrackedChanges && checksUntrackedChanges && hasFailClosedLogic;
   return finding({
     check: 'regression_gate',
     passed,
     severity: 'error',
     message: passed
       ? 'Workflow includes a regression gate with fail-closed shell logic.'
-      : 'Regression gate must use fail-closed shell logic so out-of-scope files cause the gate to fail (e.g., pipe grep -Ev output to a failOnError: true step, or use "! grep -Ev ...").',
+      : 'Regression gate must inspect tracked and untracked changes and use fail-closed shell logic so out-of-scope files cause the gate to fail.',
     location: firstLocation(context.lines, /regression-gate|regression-scope-gate|grep -Ev/i),
-    fixHint: 'Ensure the regression gate exits non-zero when out-of-scope files exist. With grep -Ev in a failOnError: true step, matching lines (out-of-scope paths) cause exit 0, which passes the gate incorrectly. Use "! grep -Ev" or "if grep -Ev ...; then exit 1; fi" instead.',
+    fixHint: 'Build the changed set from git diff --name-only plus git ls-files --others --exclude-standard, then exit non-zero when grep -Ev finds any path outside the declared file targets and .workflow-artifacts/.',
   });
 }
 
