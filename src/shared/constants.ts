@@ -34,6 +34,8 @@ export const DEFAULT_FIX_LOOP_TIMEOUT_MS = 1_200_000; // 20 min — bounded fix 
 
 export const DEFAULT_RETRY_MAX_ATTEMPTS = 2;
 
+export const DEFAULT_REPAIR_RETRY_ATTEMPTS = 2;
+
 export const DEFAULT_AUTO_FIX_ATTEMPTS = 7;
 
 export const DEFAULT_RETRY_BACKOFF_MS = 1_000;

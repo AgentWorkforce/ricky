@@ -166,6 +166,12 @@ npm scripts (canonical ordering matches `package.json`):
 - `npm test` — bundle the CLI, then run the full test suite and proof tests
 - `npm start` — launch the interactive CLI from `src/surfaces/cli/commands/cli-main.ts`
 - `npm run dev` — alias for `npm start`
+- `npm run evals` — compile and run the Ricky eval suite
+- `npm run evals:compile` — compile Ricky eval definitions
+- `npm run evals:opencode` — run Ricky evals through the OpenCode executor path
+- `npm run evals:list` — list available Ricky evals
+- `npm run evals:summary` — summarize the latest Ricky eval results
+- `npm run evals:compare` — compare Ricky eval result sets
 - `npm run batch` — run workflow batches via `scripts/run-ricky-batch.sh`
 - `npm run overnight` — run the overnight workflow queue via `scripts/run-ricky-overnight.sh`
   - default queue mode is now `flight-safe`, which only runs the workflows currently classified as unattended-safe

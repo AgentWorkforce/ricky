@@ -404,6 +404,40 @@ describe('runWithAutoFix', () => {
     );
   });
 
+  it('deterministically repairs generated master child runs that disabled nested auto-fix', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/master.ts',
+      artifactContent: legacyMasterWorkflowContent(),
+      evidence: sdkRuntimeBlockerEvidence('run-update-config-2'),
+    });
+
+    expect(repair).toMatchObject({
+      applied: true,
+      mode: 'deterministic',
+      summary: expect.stringContaining('allowed nested child workflows to use Ricky auto-fix'),
+    });
+    expect(repair?.summary).toContain('replaced fail-fast error handling with repair-aware retry');
+    expect(repair?.content).toContain("ricky run 'workflows/generated/child.ts' --foreground");
+    expect(repair?.content).not.toContain('--no-auto-fix');
+    expect(repair?.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"master-lead\", repairRetries: 2 })");
+  });
+
+  it('deterministically makes generated child final validation non-terminal', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/child.ts',
+      artifactContent: legacyChildWorkflowContent(),
+      evidence: sdkRuntimeBlockerEvidence('final-hard-validation'),
+    });
+
+    expect(repair).toMatchObject({
+      applied: true,
+      mode: 'deterministic',
+      summary: expect.stringContaining('generated child final validation non-terminal'),
+    });
+    expect(repair?.content).toContain('.step("final-hard-validation"');
+    expect(repair?.content).toContain('failOnError: false');
+  });
+
   it('skips sentinel-guard hardening when no later tail-grep check references the same path and marker', () => {
     const repair = repairWorkflowDeterministically({
       artifactPath: 'workflows/generated/sentinel-no-check.ts',
@@ -447,6 +481,41 @@ describe('runWithAutoFix', () => {
       ]),
     });
     expect(result.nextActions.join('\n')).toContain('Direct repair is available.');
+  });
+
+  it('retries instead of stopping when the workflow repair provider throws', async () => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(blockerResponse('INVALID_ARTIFACT', 'run-1', 'final-hard-validation'))
+      .mockResolvedValueOnce(successResponse('run-2'));
+    const workflowRepairer = vi.fn().mockRejectedValue(new Error('structured artifact missing'));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: guidedDebugger,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(workflowRepairer).toHaveBeenCalledTimes(1);
+    expect(runSingleAttempt).toHaveBeenCalledTimes(2);
+    expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
+      attempt: 2,
+      maxAttempts: 3,
+      previousRunId: 'run-1',
+      retryOfRunId: 'run-1',
+      startFromStep: 'final-hard-validation',
+    });
+    expect(result.auto_fix?.attempts[0]).toMatchObject({
+      fix_error: 'structured artifact missing',
+      warning: expect.stringContaining('Workflow repair provider failed; retrying without an artifact rewrite'),
+    });
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('Workflow repair provider failed; retrying without an artifact rewrite'),
+    ]));
   });
 
   it('uses the persona repair path even when the debugger recommends guided repair', async () => {
@@ -1079,6 +1148,83 @@ function workflowRepair(content: string) {
 
 function workflowContent(): string {
   return 'import { workflow } from "@agent-relay/sdk/workflows";\nworkflow("foo").run({ cwd: process.cwd() });\n';
+}
+
+function legacyMasterWorkflowContent(): string {
+  return [
+    "import { workflow } from '@agent-relay/sdk/workflows';",
+    '',
+    '// RICKY_MASTER_EXECUTOR_WORKFLOW',
+    'async function main() {',
+    '  await workflow("ricky-master")',
+    '    .onError(\'fail-fast\')',
+    '    .step("run-child", {',
+    '      type: "deterministic",',
+    '      command: "set -e\\nricky run \'workflows/generated/child.ts\' --foreground --no-auto-fix\\ntest -f \'.workflow-artifacts/child/signoff.md\'",',
+    '      captureOutput: true,',
+    '      failOnError: true,',
+    '    })',
+    '    .run({ cwd: process.cwd() });',
+    '}',
+  ].join('\n');
+}
+
+function legacyChildWorkflowContent(): string {
+  return [
+    "import { workflow } from '@agent-relay/sdk/workflows';",
+    '',
+    'async function main() {',
+    '  await workflow("ricky-child-update-config-2")',
+    '    .step("final-hard-validation", {',
+    '      type: "deterministic",',
+    '      dependsOn: ["fix-loop"],',
+    '      command: "set -e\\nnpm run typecheck\\ngit diff --name-only",',
+    '      captureOutput: true,',
+    '      failOnError: true,',
+    '    })',
+    '    .step("final-signoff", {',
+    '      type: "deterministic",',
+    '      dependsOn: ["final-hard-validation"],',
+    '      command: "echo RICKY_CHILD_WORKFLOW_COMPLETE",',
+    '      captureOutput: true,',
+    '      failOnError: true,',
+    '    })',
+    '    .run({ cwd: process.cwd() });',
+    '}',
+  ].join('\n');
+}
+
+function sdkRuntimeBlockerEvidence(failedStep: string): WorkflowRunEvidence {
+  return {
+    runId: 'run-1',
+    workflowId: 'wf-1',
+    workflowName: 'ricky-master',
+    status: 'failed',
+    startedAt: '2026-04-28T00:00:00.000Z',
+    completedAt: '2026-04-28T00:00:01.000Z',
+    steps: [
+      {
+        stepId: failedStep,
+        stepName: failedStep,
+        status: 'failed',
+        startedAt: '2026-04-28T00:00:00.000Z',
+        completedAt: '2026-04-28T00:00:01.000Z',
+        error: `Step "${failedStep}" failed: Command failed with exit code 2`,
+        verifications: [],
+        deterministicGates: [],
+        logs: [{ stream: 'stdout', excerpt: `✗ ${failedStep} — FAILED: Command failed with exit code 2` }],
+        artifacts: [],
+        retries: [],
+        narrative: [],
+        history: [],
+      },
+    ],
+    deterministicGates: [],
+    logs: [{ stream: 'stdout', excerpt: `INVALID_ARTIFACT at ${failedStep}` }],
+    artifacts: [],
+    narrative: [],
+    routing: [],
+  };
 }
 
 function leadPlanMarkerWorkflowContent(): string {

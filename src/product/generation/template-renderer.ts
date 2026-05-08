@@ -6,6 +6,7 @@ import {
   DEFAULT_IMPLEMENT_TIMEOUT_MS,
   DEFAULT_LEAD_PLAN_TIMEOUT_MS,
   DEFAULT_MAX_CONCURRENCY,
+  DEFAULT_REPAIR_RETRY_ATTEMPTS,
   DEFAULT_RETRY_BACKOFF_MS,
   DEFAULT_RETRY_MAX_ATTEMPTS,
   DEFAULT_REVIEW_TIMEOUT_MS,
@@ -117,7 +118,7 @@ function renderSource(input: {
   isCodeWorkflow: boolean;
   toolSelection: ToolSelectionContext;
 }): string {
-  const onError = input.pattern.riskLevel === 'low' ? "'fail-fast'" : `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS} }`;
+  const onError = renderRepairAwareOnError(repairAgentFor(input.isCodeWorkflow));
   const contextSetup = buildGeneratedContextSetup(input.spec, input.artifactsDir, input.pattern, input.skills, input.skillApplicationEvidence, input.toolSelection);
   const lines: string[] = [
     "import { workflow } from '@agent-relay/sdk/workflows';",
@@ -201,6 +202,14 @@ function renderSource(input: {
   ];
 
   return `${lines.join('\n')}\n`;
+}
+
+function renderRepairAwareOnError(repairAgent: string): string {
+  return `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS}, repairAgent: ${literal(repairAgent)}, repairRetries: ${DEFAULT_REPAIR_RETRY_ATTEMPTS} }`;
+}
+
+function repairAgentFor(isCodeWorkflow: boolean): string {
+  return isCodeWorkflow ? 'validator-claude' : 'validator-codex';
 }
 
 function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSpec[] {
