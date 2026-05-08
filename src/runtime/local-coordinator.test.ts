@@ -115,6 +115,16 @@ describe('LocalCoordinator', () => {
     expect(result.status).toBe('passed');
     expect(result.exitCode).toBe(0);
     expect(coordinator.getActiveRun('run-success')).toBeUndefined();
+    expect(coordinator.getRunResult('run-success')).toMatchObject({
+      runId: 'run-success',
+      status: 'passed',
+      exitCode: 0,
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'workflow.yaml'],
+        cwd: '/repo',
+      },
+    });
     expect(lifecycleEvents).toEqual(result.events);
     expect(result.events.map((event) => event.kind)).toEqual([
       'started',
@@ -248,8 +258,20 @@ describe('LocalCoordinator', () => {
     expect(vi.getTimerCount()).toBe(0);
 
     invocations[0].complete(0);
+    invocations[0].emitStdout('late output');
+    invocations[0].emitStderr('late error');
     await Promise.resolve();
     expect(result.status).toBe('timed_out');
+    expect(result.stdout).toEqual(['still working']);
+    expect(result.stderr).toEqual(['waiting on worker']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'timeout',
+    ]);
   });
 
   it('keeps timeout evidence stable when a killed command rejects later', async () => {

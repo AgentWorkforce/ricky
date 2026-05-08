@@ -71,6 +71,7 @@ export class LocalCoordinator {
     const events: LifecycleEvent[] = [];
     const retry = normalizeRetry(request.retry);
     const invocationSummary = buildInvocationSummary(request);
+    const metadata = cloneMetadata(request.metadata);
     const snippetLimit = request.logSnippetLineLimit ?? DEFAULT_SNIPPET_LINE_LIMIT;
     const timeoutMs = normalizeTimeout(request.timeoutMs);
     let status: RunStatus = 'pending';
@@ -152,7 +153,7 @@ export class LocalCoordinator {
         events,
         retry,
         invocation: invocationSummary,
-        metadata: request.metadata,
+        metadata,
         error: outcome.error,
       };
 
@@ -169,7 +170,7 @@ export class LocalCoordinator {
       startedMs,
       retry,
       invocationSummary,
-      metadata: request.metadata,
+      metadata,
       cancel: () => {
         if (settled) return;
         const killError = state.invocation ? killInvocation(state.invocation) : undefined;
@@ -190,7 +191,7 @@ export class LocalCoordinator {
       cwd: request.cwd,
       invocation: invocationSummary,
       retry,
-      metadata: request.metadata,
+      metadata: cloneMetadata(metadata),
     });
 
     // A lifecycle observer may have cancelled the run during the started
