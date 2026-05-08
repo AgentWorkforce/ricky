@@ -337,7 +337,7 @@ export async function resolveWorkforcePersonaContextWithModules(
       const selectionModule = await loadSelectionModule();
       warnings.push(...selectionModule.warnings);
       try {
-        const selected = selectionModule.module.usePersona(intent, selectionOptions(options));
+        const selected = selectionModule.module.usePersona(intent, metadataSelectionOptions(options));
         if (isUsablePersonaContext(selected)) {
           return {
             source: 'package',
@@ -400,7 +400,7 @@ export async function resolveWorkforcePersonaContextWithModules(
     try {
       const selectionModule = await loadSelectionModule();
       warnings.push(...selectionModule.warnings);
-      const context = selectionModule.module.usePersona(intent, selectionOptions(options));
+      const context = selectionModule.module.usePersona(intent, runnableSelectionFallbackOptions(options));
       if (isUsablePersonaContext(context)) {
         return {
           source: selectionModule.source,
@@ -415,7 +415,32 @@ export async function resolveWorkforcePersonaContextWithModules(
       }
       warnings.push(`Workforce usePersona(${intent}) returned unusable selection metadata.`);
     } catch (error) {
-      warnings.push(`Workforce selection metadata for ${intent} failed: ${errorMessage(error)}`);
+      const retry = retryWithoutInstallRoot(error, options);
+      if (retry) {
+        warnings.push(retry.warning);
+        try {
+          const selectionModule = await loadSelectionModule();
+          warnings.push(...selectionModule.warnings);
+          const context = selectionModule.module.usePersona(intent, metadataSelectionOptions(options));
+          if (isUsablePersonaContext(context)) {
+            return {
+              source: selectionModule.source,
+              intent,
+              context,
+              warnings,
+            };
+          }
+          if (selectionFromPersonaResult(context)) {
+            warnings.push(`Workforce usePersona(${intent}) without installRoot resolved metadata but did not provide a runnable sendMessage API.`);
+            continue;
+          }
+          warnings.push(`Workforce usePersona(${intent}) without installRoot returned unusable selection metadata.`);
+        } catch (retryError) {
+          warnings.push(`Workforce usePersona(${intent}) without installRoot failed: ${errorMessage(retryError)}`);
+        }
+      } else {
+        warnings.push(`Workforce selection metadata for ${intent} failed: ${errorMessage(error)}`);
+      }
     }
   }
 
@@ -977,11 +1002,20 @@ function runnableSelectionOptions(
     : undefined;
 }
 
-function selectionOptions(
+function metadataSelectionOptions(
   options: { tier?: string; installRoot?: string },
 ): WorkforceSelectionOptions | undefined {
   const resolved: WorkforceSelectionOptions = {};
   if (options.tier) resolved.tier = options.tier;
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
+function runnableSelectionFallbackOptions(
+  options: { tier?: string; installRoot?: string },
+): WorkforceSelectionOptions | undefined {
+  const resolved: WorkforceSelectionOptions = {};
+  if (options.tier) resolved.tier = options.tier;
+  if (options.installRoot) resolved.installRoot = options.installRoot;
   return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
 

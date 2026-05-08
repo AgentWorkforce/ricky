@@ -846,9 +846,10 @@ describe('workforce persona workflow writer', () => {
   });
 
   it('uses a runnable usePersona(...).sendMessage seam when harness-kit is unavailable', async () => {
+    const selectionOptionsCalls: unknown[] = [];
     const resolved = await resolveWorkforcePersonaContextWithModules(
       ['agent-relay-workflow'],
-      { tier: 'best' },
+      { tier: 'best', installRoot: '/state/ricky/persona-skills' },
       {
         source: 'package',
         warnings: ['harness-kit unavailable'],
@@ -859,6 +860,7 @@ describe('workforce persona workflow writer', () => {
         warnings: ['using packaged workload-router fallback'],
         module: {
           usePersona(intent, options) {
+            selectionOptionsCalls.push(options);
             return runnableContext({ personaId: intent, tier: options?.tier ?? 'minimum' });
           },
         },
@@ -871,12 +873,53 @@ describe('workforce persona workflow writer', () => {
       personaId: 'agent-relay-workflow',
       tier: 'best',
     });
+    expect(selectionOptionsCalls).toEqual([
+      { tier: 'best', installRoot: '/state/ricky/persona-skills' },
+    ]);
     expect(resolved.warnings).toEqual([
       'harness-kit unavailable',
       'using packaged workload-router fallback',
     ]);
     const result = await resolved.context.sendMessage('task');
     expect(result.status).toBe('completed');
+  });
+
+  it('retries the runnable usePersona fallback without installRoot when the selected harness rejects it', async () => {
+    const selectionOptionsCalls: unknown[] = [];
+    const resolved = await resolveWorkforcePersonaContextWithModules(
+      ['agent-relay-workflow'],
+      { installRoot: '/state/ricky/persona-skills' },
+      {
+        source: 'package',
+        warnings: ['harness-kit unavailable'],
+        module: {},
+      },
+      async () => ({
+        source: 'package',
+        warnings: [],
+        module: {
+          usePersona(intent, options) {
+            selectionOptionsCalls.push(options);
+            if (options?.installRoot) {
+              throw new Error('installRoot is only supported for the claude harness (got: opencode)');
+            }
+            return runnableContext({ personaId: intent, tier: 'best-value' });
+          },
+        },
+      }),
+    );
+
+    expect(resolved.context.selection).toMatchObject({
+      personaId: 'agent-relay-workflow',
+      tier: 'best-value',
+    });
+    expect(selectionOptionsCalls).toEqual([
+      { installRoot: '/state/ricky/persona-skills' },
+      undefined,
+    ]);
+    expect(resolved.warnings).toContain(
+      'Workforce persona selected a non-claude harness; retrying runnable context without installRoot.',
+    );
   });
 
   it('preserves npm load failure wording when harness-kit cannot be imported', async () => {
