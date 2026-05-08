@@ -118,6 +118,8 @@ export interface CoordinatorResult {
   /** Alias for consumers that model run lifecycle as start/end. */
   endedAt: string;
   durationMs: number;
+  /** Normalized timeout guard applied to this local runtime invocation. */
+  timeoutMs?: number;
   stdout: string[];
   stderr: string[];
   stdoutSnippet: LogSnippet;
@@ -135,6 +137,8 @@ export interface ActiveRunSnapshot {
   cwd: string;
   status: RunStatus;
   startedAt: string;
+  /** Normalized timeout guard currently protecting this active run. */
+  timeoutMs?: number;
   retry: RunRetryMetadata;
   invocation: CommandInvocationSummary;
   metadata?: Record<string, unknown>;

@@ -28,6 +28,7 @@ interface ActiveRunState {
   status: RunStatus;
   startedAt: string;
   startedMs: number;
+  timeoutMs: number;
   retry: RunRetryMetadata;
   invocationSummary: CommandInvocationSummary;
   metadata?: Record<string, unknown>;
@@ -146,6 +147,7 @@ export class LocalCoordinator {
         completedAt,
         endedAt: completedAt,
         durationMs: Math.max(0, completedMs - startedMs),
+        timeoutMs,
         stdout,
         stderr,
         stdoutSnippet: buildSnippet(stdout, snippetLimit),
@@ -168,6 +170,7 @@ export class LocalCoordinator {
       status,
       startedAt,
       startedMs,
+      timeoutMs,
       retry,
       invocationSummary,
       metadata,
@@ -189,6 +192,7 @@ export class LocalCoordinator {
     emit('started', 'Run started', {
       workflowFile: request.workflowFile,
       cwd: request.cwd,
+      timeoutMs,
       invocation: invocationSummary,
       retry,
       metadata: cloneMetadata(metadata),
@@ -437,6 +441,7 @@ function snapshot(state: ActiveRunState): ActiveRunSnapshot {
     cwd: state.cwd,
     status: state.status,
     startedAt: state.startedAt,
+    timeoutMs: state.timeoutMs,
     retry: cloneRetry(state.retry),
     invocation: cloneInvocationSummary(state.invocationSummary),
     metadata: cloneMetadata(state.metadata),

@@ -157,6 +157,80 @@ describe('LocalCoordinator', () => {
     expect(result.stderr).toEqual([]);
   });
 
+  it('records generated workflow success evidence through the injected runner', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-generated-success-evidence',
+      workflowFile: 'generated/local-run-coordinator.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { workflowId: 'local-run-coordinator' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'generated/local-run-coordinator.yaml', '--json'],
+      { cwd: '/repo', env: { RELAYCAST_WORKSPACE: 'unit-test' } },
+    );
+    expect(coordinator.getActiveRun('run-generated-success-evidence')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/local-run-coordinator.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      metadata: { workflowId: 'local-run-coordinator' },
+    });
+
+    invocations[0].emitStdout('{"step":"prepare-context","status":"running"}');
+    invocations[0].emitStderr('non-fatal workflow warning');
+    invocations[0].complete(0);
+    const result = await resultPromise;
+
+    expect(lifecycleEvents).toEqual(result.events);
+    expect(result.status).toBe('passed');
+    expect(result.exitCode).toBe(0);
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/local-run-coordinator.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+    expect(result.metadata).toEqual({ workflowId: 'local-run-coordinator' });
+    expect(result.stdout).toEqual(['{"step":"prepare-context","status":"running"}']);
+    expect(result.stderr).toEqual(['non-fatal workflow warning']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+    expect(result.events.map((event) => event.status)).toEqual([
+      'pending',
+      'running',
+      'running',
+      'running',
+      'passed',
+      'passed',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'passed',
+      data: { exitCode: 0 },
+    });
+    expect(coordinator.getActiveRun('run-generated-success-evidence')).toBeUndefined();
+  });
+
   it('records failed status, exit code, and stderr for a failed command', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
