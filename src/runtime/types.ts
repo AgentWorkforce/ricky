@@ -88,6 +88,11 @@ export interface CommandRunner {
   run(command: string, args: string[], options: CommandRunnerOptions): CommandInvocation;
 }
 
+export interface LocalCoordinatorOptions {
+  /** Number of completed run reports retained for later programmatic lookup. Defaults to 100. */
+  completedRunLimit?: number;
+}
+
 export interface CommandInvocationSummary {
   command: string;
   args: string[];

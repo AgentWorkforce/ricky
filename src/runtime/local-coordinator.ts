@@ -10,6 +10,7 @@ import type {
   CommandRunner,
   CoordinatorResult,
   LifecycleEvent,
+  LocalCoordinatorOptions,
   LogSnippet,
   RunRequest,
   RunRetryMetadata,
@@ -18,6 +19,7 @@ import type {
 const DEFAULT_COMMAND = 'agent-relay';
 const DEFAULT_BASE_ARGS = ['run'] as const;
 const DEFAULT_SNIPPET_LINE_LIMIT = 40;
+const DEFAULT_COMPLETED_RUN_LIMIT = 100;
 
 interface ActiveRunState {
   runId: string;
@@ -45,8 +47,15 @@ interface TerminalOutcome {
 export class LocalCoordinator {
   private readonly emitter = new EventEmitter();
   private readonly activeRuns = new Map<string, ActiveRunState>();
+  private readonly completedRuns = new Map<string, CoordinatorResult>();
+  private readonly completedRunLimit: number;
 
-  constructor(private readonly runner: CommandRunner) {}
+  constructor(
+    private readonly runner: CommandRunner,
+    options: LocalCoordinatorOptions = {},
+  ) {
+    this.completedRunLimit = normalizeCompletedRunLimit(options.completedRunLimit);
+  }
 
   async launch(request: RunRequest): Promise<CoordinatorResult> {
     const runId = request.runId ?? randomUUID();
@@ -126,7 +135,7 @@ export class LocalCoordinator {
       const completedAt = new Date(completedMs).toISOString();
       this.activeRuns.delete(runId);
 
-      resolveResult({
+      const result: CoordinatorResult = {
         runId,
         workflowFile: request.workflowFile,
         cwd: request.cwd,
@@ -145,7 +154,10 @@ export class LocalCoordinator {
         invocation: invocationSummary,
         metadata: request.metadata,
         error: outcome.error,
-      });
+      };
+
+      this.recordCompletedRun(result);
+      resolveResult(result);
     };
 
     const state: ActiveRunState = {
@@ -324,6 +336,27 @@ export class LocalCoordinator {
   listActiveRuns(): ActiveRunSnapshot[] {
     return [...this.activeRuns.values()].map(snapshot);
   }
+
+  getRunResult(runId: string): CoordinatorResult | undefined {
+    const result = this.completedRuns.get(runId);
+    return result ? cloneCoordinatorResult(result) : undefined;
+  }
+
+  listRunResults(): CoordinatorResult[] {
+    return [...this.completedRuns.values()].map(cloneCoordinatorResult);
+  }
+
+  private recordCompletedRun(result: CoordinatorResult): void {
+    if (this.completedRunLimit === 0) return;
+    this.completedRuns.set(result.runId, cloneCoordinatorResult(result));
+
+    // Keep report lookup bounded; active run state remains the authoritative live view.
+    while (this.completedRuns.size > this.completedRunLimit) {
+      const oldestRunId = this.completedRuns.keys().next().value;
+      if (oldestRunId === undefined) return;
+      this.completedRuns.delete(oldestRunId);
+    }
+  }
 }
 
 function buildInvocationSummary(request: RunRequest): CommandInvocationSummary {
@@ -371,6 +404,12 @@ function normalizeAttempt(value: number | undefined): number {
   return Math.floor(value);
 }
 
+function normalizeCompletedRunLimit(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_COMPLETED_RUN_LIMIT;
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_COMPLETED_RUN_LIMIT;
+  return Math.floor(value);
+}
+
 function buildSnippet(lines: string[], maxLines: number): LogSnippet {
   const normalizedMax = Number.isFinite(maxLines) ? Math.max(0, Math.floor(maxLines)) : DEFAULT_SNIPPET_LINE_LIMIT;
   return {
@@ -413,6 +452,34 @@ function cloneInvocationSummary(invocation: CommandInvocationSummary): CommandIn
     args: [...invocation.args],
     cwd: invocation.cwd,
     env: invocation.env ? { ...invocation.env } : undefined,
+  };
+}
+
+function cloneCoordinatorResult(result: CoordinatorResult): CoordinatorResult {
+  return {
+    ...result,
+    stdout: [...result.stdout],
+    stderr: [...result.stderr],
+    stdoutSnippet: cloneSnippet(result.stdoutSnippet),
+    stderrSnippet: cloneSnippet(result.stderrSnippet),
+    events: result.events.map(cloneLifecycleEvent),
+    retry: cloneRetry(result.retry),
+    invocation: cloneInvocationSummary(result.invocation),
+    metadata: cloneMetadata(result.metadata),
+  };
+}
+
+function cloneSnippet(snippet: LogSnippet): LogSnippet {
+  return {
+    ...snippet,
+    lines: [...snippet.lines],
+  };
+}
+
+function cloneLifecycleEvent(event: LifecycleEvent): LifecycleEvent {
+  return {
+    ...event,
+    data: event.data ? { ...event.data } : undefined,
   };
 }
 
