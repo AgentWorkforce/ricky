@@ -948,6 +948,19 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave0-foundation/architecture-docs/signoff.md \
         'W0_ARCHITECTURE_DOCS_WORKFLOW_COMPLETE'
       ;;
+    workflows/wave2-product/01-workflow-spec-intake.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-spec-intake/signoff.md \
+        'WORKFLOW_SPEC_INTAKE_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-spec-intake/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave2-product/workflow-spec-intake/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/product/spec-intake/ >/dev/null
+      ;;
     workflows/wave2-product/02-workflow-generation-pipeline.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave2-product/workflow-generation-pipeline/fix-loop.md \
