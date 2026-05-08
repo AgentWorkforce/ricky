@@ -152,7 +152,7 @@ Review checklist:
     .step('review-claude', {
       agent: 'reviewer-claude',
       dependsOn: ['initial-soft-validation'],
-      timeoutMs: 180_000,
+      timeoutMs: 420_000,
       task: `Review spec intake for Ricky product truth and user journey fit.
 
 Read src/product/spec-intake/ and initial validation output:
@@ -164,6 +164,8 @@ Assess:
 - Routing cleanly separates generate, debug, coordinate, execute, and clarify.
 - The normalized model is strong enough for the generation pipeline.
 
+This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
+
 Write .workflow-artifacts/wave2-product/workflow-spec-intake/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-spec-intake/review-claude.md' },
     })
@@ -171,13 +173,15 @@ Write .workflow-artifacts/wave2-product/workflow-spec-intake/review-claude.md en
     .step('review-codex', {
       agent: 'reviewer-codex',
       dependsOn: ['initial-soft-validation'],
-      timeoutMs: 180_000,
+      timeoutMs: 420_000,
       task: `Review spec intake implementation and tests.
 
 Read src/product/spec-intake/ and initial validation output:
 {{steps.initial-soft-validation.output}}
 
 Assess TypeScript exports, deterministic parsing, validation issue modeling, routing edge cases, and test strength.
+
+This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
 
 Write .workflow-artifacts/wave2-product/workflow-spec-intake/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-spec-intake/review-codex.md' },
@@ -227,13 +231,15 @@ Write .workflow-artifacts/wave2-product/workflow-spec-intake/fix-loop.md ending 
     .step('final-review-claude', {
       agent: 'reviewer-claude',
       dependsOn: ['post-fix-validation'],
-      timeoutMs: 180_000,
+      timeoutMs: 420_000,
       task: `Re-review spec intake after the fix loop.
 
 Read src/product/spec-intake/, the fix-loop artifact, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm prior findings are fixed or explicitly non-blocking, and that Claude, CLI, MCP, Slack, web, and API intake preserve the no-hand-authored-workflow product promise.
+
+This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
 
 Write .workflow-artifacts/wave2-product/workflow-spec-intake/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-spec-intake/final-review-claude.md' },
@@ -242,13 +248,15 @@ Write .workflow-artifacts/wave2-product/workflow-spec-intake/final-review-claude
     .step('final-review-codex', {
       agent: 'reviewer-codex',
       dependsOn: ['post-fix-validation'],
-      timeoutMs: 180_000,
+      timeoutMs: 420_000,
       task: `Re-review spec intake implementation and tests after fixes.
 
 Read src/product/spec-intake/, the fix-loop artifact, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm deterministic parsing, normalization, routing, exports, and tests are ready for final hard gates.
+
+This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
 
 Write .workflow-artifacts/wave2-product/workflow-spec-intake/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave2-product/workflow-spec-intake/final-review-codex.md' },

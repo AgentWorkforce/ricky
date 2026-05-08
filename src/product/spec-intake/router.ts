@@ -118,6 +118,7 @@ function hasFailureEvidence(normalized: NormalizedWorkflowSpec): boolean {
   const text = [
     normalized.description,
     normalized.targetContext,
+    ...normalized.targetFiles,
     ...normalized.evidenceRequirements.map((requirement) => requirement.requirement),
   ]
     .filter(Boolean)

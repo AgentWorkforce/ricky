@@ -212,5 +212,5 @@ function spansAgents(parsed: ParsedSpec): boolean {
 
 function hasReadyArtifact(parsed: ParsedSpec): boolean {
   const text = [parsed.description, ...parsed.targetFiles].filter(Boolean).join('\n');
-  return /\b(?:ready artifact|ready workflow|workflow artifact|artifact path)\b/i.test(text) && Boolean(findWorkflowFileHint(parsed));
+  return /\b(?:ready artifact|ready workflow|provided artifact|target artifact|workflow artifact|artifact path)\b/i.test(text) && Boolean(findWorkflowFileHint(parsed));
 }

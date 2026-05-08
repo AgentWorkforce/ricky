@@ -52,21 +52,23 @@ describe('spec intake parser, normalizer, and router', () => {
   });
 
   it('normalizes CLI natural-language constraints and acceptance gates', () => {
-    const result = intake(
-      natural(
-        [
-          'Build a workflow for repo AgentWorkforce/ricky to verify the local runtime.',
-          'Must only modify src/runtime/local-coordinator.ts.',
-          'Do not call external services.',
-          'Acceptance: npm test exits 0.',
-          'Gate: deterministic routing proof is recorded.',
-        ].join('\n'),
-      ),
+    const payload = natural(
+      [
+        'Build a workflow for repo AgentWorkforce/ricky to verify the local runtime.',
+        'Must only modify src/runtime/local-coordinator.ts.',
+        'Do not call external services.',
+        'Acceptance: npm test exits 0.',
+        'Gate: deterministic routing proof is recorded.',
+      ].join('\n'),
     );
+    const result = intake(payload);
+    const stagedRouting = routeThroughStages(payload);
 
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('generate');
+    expect(stagedRouting.target).toBe('generate');
     expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
+    expect(stagedRouting.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
     expect(result.routing?.normalizedSpec.targetRepo).toBe('AgentWorkforce/ricky');
     expect(result.routing?.normalizedSpec.constraints).toEqual(
       expect.arrayContaining([
@@ -85,6 +87,8 @@ describe('spec intake parser, normalizer, and router', () => {
         expect.objectContaining({ gate: 'deterministic routing proof is recorded.', kind: 'deterministic' }),
       ]),
     );
+    expect(stagedRouting.normalizedSpec.constraints).toEqual(result.routing?.normalizedSpec.constraints);
+    expect(stagedRouting.normalizedSpec.acceptanceGates).toEqual(result.routing?.normalizedSpec.acceptanceGates);
     expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBeUndefined();
   });
 
@@ -175,11 +179,14 @@ describe('spec intake parser, normalizer, and router', () => {
     };
 
     const result = intake(payload);
+    const stagedRouting = routeThroughStages(payload);
     const normalized = result.routing?.normalizedSpec;
 
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('generate');
+    expect(stagedRouting.target).toBe('generate');
     expect(normalized?.sourceSpec.intent.signals).toContain('tool:ricky.workflow.generate');
+    expect(stagedRouting.normalizedSpec.sourceSpec.intent.signals).toContain('tool:ricky.workflow.generate');
     expect(normalized?.providerContext).toMatchObject({
       surface: 'mcp',
       toolName: 'ricky.workflow.generate',
@@ -191,6 +198,7 @@ describe('spec intake parser, normalizer, and router', () => {
       requestId: 'mcp-request',
       metadata: { origin: 'relaycast' },
     });
+    expect(stagedRouting.normalizedSpec.providerContext).toMatchObject(normalized?.providerContext ?? {});
     expect(normalized?.sourceSpec.rawPayload).toBe(payload);
     expect(normalized?.sourceSpec.surface).toBe('mcp');
     expect(normalized?.sourceSpec.providerContext.requestId).toBe('mcp-request');
@@ -215,19 +223,21 @@ describe('spec intake parser, normalizer, and router', () => {
   });
 
   it('routes failed-run evidence to debug', () => {
-    const result = intake(
-      natural(
-        [
-          'Debug the failed workflow run id run-123 for workflows/release.workflow.ts.',
-          'Evidence: stdout contains a stack trace stored at artifacts/run-123.log.',
-          'Verification: explain the failure and identify the failing step.',
-        ].join('\n'),
-      ),
+    const payload = natural(
+      [
+        'Debug the failed workflow run id run-123 for workflows/release.workflow.ts.',
+        'Evidence: stdout contains a stack trace stored at artifacts/run-123.log.',
+        'Verification: explain the failure and identify the failing step.',
+      ].join('\n'),
     );
+    const result = intake(payload);
+    const stagedRouting = routeThroughStages(payload);
 
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('debug');
+    expect(stagedRouting.target).toBe('debug');
     expect(result.routing?.normalizedSpec.intent).toBe('debug');
+    expect(stagedRouting.normalizedSpec.intent).toBe('debug');
     expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('debug');
     expect(result.routing?.normalizedSpec.targetFiles).toEqual(
       expect.arrayContaining(['workflows/release.workflow.ts', 'artifacts/run-123.log']),
@@ -243,15 +253,18 @@ describe('spec intake parser, normalizer, and router', () => {
   });
 
   it('routes ready artifact requests to execute', () => {
-    const result = intake(
-      natural('Run the ready artifact workflows/release.workflow.ts for the current repository.'),
-    );
+    const payload = natural('Run the ready artifact workflows/release.workflow.ts for the current repository.');
+    const result = intake(payload);
+    const stagedRouting = routeThroughStages(payload);
 
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('execute');
+    expect(stagedRouting.target).toBe('execute');
     expect(result.routing?.normalizedSpec.intent).toBe('execute');
+    expect(stagedRouting.normalizedSpec.intent).toBe('execute');
     expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('execute');
     expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBe('workflows/release.workflow.ts');
+    expect(stagedRouting.normalizedSpec.desiredAction.workflowFileHint).toBe('workflows/release.workflow.ts');
     expect(result.routing?.reason).toContain('executable workflow artifact');
   });
 
@@ -360,11 +373,15 @@ describe('spec intake parser, normalizer, and router', () => {
   });
 
   it('returns clarify for ambiguous input with actionable missing fields', () => {
-    const result = intake(natural('Can you help me figure out the next thing?'));
+    const payload = natural('Can you help me figure out the next thing?');
+    const result = intake(payload);
+    const stagedRouting = routeThroughStages(payload);
 
     expect(result.success).toBe(false);
     expect(result.routing?.target).toBe('clarify');
+    expect(stagedRouting.target).toBe('clarify');
     expect(result.routing?.normalizedSpec.intent).toBe('clarify');
+    expect(stagedRouting.normalizedSpec.intent).toBe('clarify');
     expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('clarify');
     expect(result.routing?.reason).toContain('ambiguous');
     expect(result.validationIssues).toEqual(
@@ -372,6 +389,15 @@ describe('spec intake parser, normalizer, and router', () => {
         expect.objectContaining({
           severity: 'warning',
           field: 'intent',
+          suggestion: expect.stringContaining('workflow goal or target artifact'),
+        }),
+      ]),
+    );
+    expect(result.validationIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'intent',
+          message: expect.stringContaining('ambiguous'),
           suggestion: expect.stringContaining('workflow goal or target artifact'),
         }),
       ]),

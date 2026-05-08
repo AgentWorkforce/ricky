@@ -133,10 +133,21 @@ const DESCRIPTION_KEYS = [
   'handoff',
   'claudeHandoff',
   'claude_handoff',
+  'claudeMessage',
+  'claude_message',
   'cliInput',
   'cli_input',
+  'command',
   'commandText',
   'command_text',
+  'slashCommandText',
+  'slash_command_text',
+  'webInput',
+  'web_input',
+  'apiRequest',
+  'api_request',
+  'slackText',
+  'slack_text',
   'task',
 ];
 const STRUCTURED_TEXT_KEYS = [
@@ -148,6 +159,8 @@ const STRUCTURED_TEXT_KEYS = [
   'workflowPath',
   'artifactPath',
   'artifact_path',
+  'readyArtifact',
+  'ready_artifact',
   'command',
   'expected',
   'description',
@@ -164,6 +177,70 @@ const STRUCTURED_TEXT_KEYS = [
   'criterion',
   'criteria',
   'value',
+];
+const READY_ARTIFACT_KEYS = [
+  'readyArtifact',
+  'ready_artifact',
+  'readyWorkflow',
+  'ready_workflow',
+  'providedArtifact',
+  'provided_artifact',
+  'workflowFile',
+  'workflowPath',
+  'artifactPath',
+  'artifact_path',
+];
+const FAILED_RUN_KEYS = [
+  'failedRunId',
+  'failed_run_id',
+  'runId',
+  'run_id',
+  'workflowRunId',
+  'workflow_run_id',
+  'failureEvidence',
+  'failure_evidence',
+  'stackTrace',
+  'stack_trace',
+  'stderr',
+  'stdout',
+  'logs',
+  'logPath',
+  'log_path',
+  'evidencePath',
+  'evidence_path',
+];
+const COORDINATION_KEYS = [
+  'agents',
+  'workers',
+  'assignees',
+  'participants',
+  'handoffs',
+  'handoff',
+  'coordination',
+  'orchestration',
+  'swarm',
+  'parallelAgents',
+  'parallel_agents',
+];
+const SPEC_SHAPE_KEYS = [
+  'spec',
+  'workflowSpec',
+  'workflow_spec',
+  'goal',
+  'objective',
+  'instructions',
+  'constraints',
+  'requirements',
+  'nonGoals',
+  'non_goals',
+  'acceptanceGates',
+  'acceptance_gates',
+  'acceptanceCriteria',
+  'acceptance_criteria',
+  'requiredEvidence',
+  'required_evidence',
+  'verificationCommands',
+  'verification_commands',
 ];
 
 export function parseSpec(payload: RawSpecPayload): ParsedSpec {
@@ -252,33 +329,78 @@ function detectIntentFromRecord(data: Record<string, unknown>, fallbackText: str
     }
   }
 
-  return detectIntent(
-    [
-      fallbackText,
-      stringifySelected(data, [
-        'spec',
-        'workflowSpec',
-        'workflow_spec',
-        'prompt',
-        'description',
-        'title',
-        'text',
-        'message',
-        'input',
-        'handoff',
-        'claudeHandoff',
-        'goal',
-        'objective',
-        'evidence',
-        'requiredEvidence',
-        'readyArtifact',
-        'ready_artifact',
-        'artifact',
-        'runId',
-        'failedRunId',
-      ]),
-    ].join('\n'),
-  );
+  const structuredText = [
+    fallbackText,
+    stringifySelected(data, [
+      'spec',
+      'workflowSpec',
+      'workflow_spec',
+      'prompt',
+      'description',
+      'title',
+      'text',
+      'message',
+      'input',
+      'handoff',
+      'claudeHandoff',
+      'goal',
+      'objective',
+      'evidence',
+      'requiredEvidence',
+      'readyArtifact',
+      'ready_artifact',
+      'artifact',
+      'runId',
+      'failedRunId',
+    ]),
+  ].join('\n');
+  const shapeIntent = inferIntentFromStructuredShape(data, fallbackText);
+  if (shapeIntent.primary === 'debug' || shapeIntent.primary === 'execute' || shapeIntent.primary === 'coordinate') {
+    return shapeIntent;
+  }
+
+  const textIntent = detectIntent(structuredText);
+  if (textIntent.primary !== 'clarify' && textIntent.primary !== 'unknown') return textIntent;
+  if (shapeIntent.primary !== 'unknown') return shapeIntent;
+  return textIntent;
+}
+
+function inferIntentFromStructuredShape(data: Record<string, unknown>, fallbackText: string): IntentSignal {
+  const records = collectCandidateRecords(data);
+  const text = [
+    fallbackText,
+    ...records.map((record) => stringifySelected(record, [...FAILED_RUN_KEYS, ...READY_ARTIFACT_KEYS, ...COORDINATION_KEYS])),
+  ].join('\n');
+
+  if (records.some((record) => hasAnyRecordValue(record, FAILED_RUN_KEYS)) || /\b(failed run|stack trace|traceback|stderr|exit code [1-9])\b/i.test(text)) {
+    return {
+      primary: 'debug',
+      signals: ['shape:failed-run-evidence'],
+    };
+  }
+
+  if (records.some((record) => hasWorkflowArtifactValue(record, READY_ARTIFACT_KEYS))) {
+    return {
+      primary: 'execute',
+      signals: ['shape:ready-artifact'],
+    };
+  }
+
+  if (records.some((record) => hasAnyRecordValue(record, COORDINATION_KEYS))) {
+    return {
+      primary: 'coordinate',
+      signals: ['shape:agent-coordination'],
+    };
+  }
+
+  if (records.some((record) => hasAnyRecordValue(record, SPEC_SHAPE_KEYS))) {
+    return {
+      primary: 'generate',
+      signals: ['shape:workflow-spec'],
+    };
+  }
+
+  return { primary: 'unknown', signals: [] };
 }
 
 export function detectIntent(text: string): IntentSignal {
@@ -796,6 +918,30 @@ function readStringArray(data: Record<string, unknown>, keys: string[]): string[
     if (typeof value === 'string' && value.trim()) values.push(value.trim());
   }
   return dedupe(values);
+}
+
+function collectCandidateRecords(data: Record<string, unknown>): Record<string, unknown>[] {
+  const records = [data];
+  for (const key of ['request', 'body', 'payload', 'input', 'message', 'event', 'spec', 'workflowSpec', 'workflow_spec']) {
+    const nested = data[key];
+    if (isRecord(nested)) records.push(nested);
+  }
+  return records;
+}
+
+function hasAnyRecordValue(data: Record<string, unknown>, keys: string[]): boolean {
+  return keys.some((key) => {
+    const value = data[key];
+    if (value === undefined || value === null) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    if (isRecord(value)) return Object.keys(value).length > 0;
+    return true;
+  });
+}
+
+function hasWorkflowArtifactValue(data: Record<string, unknown>, keys: string[]): boolean {
+  return keys.some((key) => readStringArray(data, [key]).some(isWorkflowArtifact));
 }
 
 function runEvidenceRequirement(data: Record<string, unknown>): string[] {
