@@ -83,6 +83,10 @@ function expectClassificationSurface(
   expect(result.category).toBe(expected.category);
   expect(result.failureClass).toBe(expected.category);
   expect(result.severity).toBe(expected.severity);
+  expect(Object.values(FailureClass)).toContain(result.category);
+  expect(Object.values(Severity)).toContain(result.severity);
+  expect(Object.values(Confidence)).toContain(result.confidence);
+  expect(Object.values(NextAction)).toContain(result.nextAction);
   if (expected.confidence) {
     expect(result.confidence).toBe(expected.confidence);
   } else {

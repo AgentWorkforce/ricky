@@ -284,6 +284,10 @@ function classifyFromPlainSummary(summaryText: PlainValidationSummary): FailureC
     detected.push(FailureClass.VerificationFailure);
   }
 
+  if (/\b(mixed|multiple|conflicting)\s+(?:failures?|signals?|causes?)\b/i.test(text)) {
+    signals.push(plainSignal(`Plain summary indicates mixed or conflicting failure evidence: ${truncate(text, 120)}`, Confidence.Low));
+  }
+
   if (detected.length === 0) {
     return unknownFailure(summary, signals);
   }
@@ -744,18 +748,20 @@ function buildClassification(
   summary: EvidenceSummary,
 ): FailureClassification {
   const config = CLASS_CONFIG[primary];
+  const normalizedSignals = uniqueSignals(signals);
+  const normalizedSecondary = uniqueClasses(secondary).filter((failureClass) => failureClass !== primary);
   return {
     category: primary,
     failureClass: primary,
     severity: config.severity(summary),
-    confidence: deriveConfidence(signals),
+    confidence: deriveConfidence(normalizedSignals),
     nextAction: config.nextAction,
     suggestedNextAction: config.nextAction,
     summary: config.summarize(summary),
-    signals,
-    matchedSignals: signals,
-    secondaryClasses: secondary,
-    isMixedFailure: secondary.length > 0,
+    signals: normalizedSignals,
+    matchedSignals: normalizedSignals,
+    secondaryClasses: normalizedSecondary,
+    isMixedFailure: normalizedSecondary.length > 0,
   };
 }
 
@@ -816,6 +822,24 @@ function deriveConfidence(signals: EvidenceSignal[]): Confidence {
   if (highCount >= 2) return Confidence.High;
   if (highCount === 1) return Confidence.Medium;
   return Confidence.Low;
+}
+
+function uniqueClasses(classes: FailureClass[]): FailureClass[] {
+  return Array.from(new Set(classes));
+}
+
+function uniqueSignals(signals: EvidenceSignal[]): EvidenceSignal[] {
+  const seen = new Set<string>();
+  const unique: EvidenceSignal[] = [];
+
+  for (const signal of signals) {
+    const key = `${signal.source}\0${signal.strength}\0${signal.observation}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(signal);
+  }
+
+  return unique;
 }
 
 // ── Per-class configuration ──────────────────────────────────────────

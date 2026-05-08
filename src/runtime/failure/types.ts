@@ -90,13 +90,13 @@ export interface FailureClassification {
   confidence: Confidence;
   /** Recommended next action */
   nextAction: NextAction;
-  /** Alias for consumers that present debugger/validator recommendations */
+  /** Classifier-populated alias for debugger/validator recommendation UI */
   suggestedNextAction?: NextAction;
   /** Human-readable summary of the failure */
   summary: string;
   /** Evidence signals that contributed to this classification */
   signals: EvidenceSignal[];
-  /** Alias for consumers that expose explicitly matched classifier signals */
+  /** Classifier-populated alias for consumers that expose matched signals */
   matchedSignals?: EvidenceSignal[];
   /** Secondary failure classes detected (if any) */
   secondaryClasses: FailureClass[];
