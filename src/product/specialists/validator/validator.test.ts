@@ -4,7 +4,7 @@ import {
   FailureTaxonomyCategory,
   RecoveryDecision,
 } from '../../../runtime/diagnostics/failure-diagnosis.js';
-import type { CommandResult, StructuralCheckName, ValidatorResult } from './types.js';
+import type { CommandResult, ProofLoopPhase, StructuralCheckName, ValidatorResult } from './types.js';
 import { validateWorkflow } from './validator.js';
 
 const VALIDATED_AT = '2026-04-26T00:00:00.000Z';
@@ -99,6 +99,7 @@ describe('validateWorkflow', () => {
         fixHint: expect.stringContaining('Fix final hard-gate failures'),
       }),
     );
+    expectBlockingProofStep(result, 'final_gate', /Final hard gate failed/);
   });
 
   it('attaches recovery guidance for unsupported validation commands', () => {
@@ -162,6 +163,7 @@ describe('validateWorkflow', () => {
         message: 'Regression gate failed: npx vitest run.',
       }),
     );
+    expectBlockingProofStep(result, 'regression_gate', /Regression gate failed: npx vitest run/);
   });
 
   it('blocks stale pre-fix review verdicts after the fix loop instead of final re-review evidence', () => {
@@ -268,6 +270,7 @@ describe('validateWorkflow', () => {
         fixHint: expect.stringContaining('Restrict regression allowlists'),
       }),
     );
+    expectWarningFinding(result, 'regression_allowlist_scope', /src\/product\/generation/);
   });
 });
 
@@ -292,17 +295,42 @@ function validate(
 }
 
 function expectBlockingFinding(result: ValidatorResult, check: StructuralCheckName, message: RegExp): void {
-  expect(result.blockingFindings).toContainEqual(
-    expect.objectContaining({
-      check,
-      passed: false,
-      severity: 'error',
-      blocking: true,
-      path: 'workflows/generated/validator-specialist.ts',
-      message: expect.stringMatching(message),
-      fixHint: expect.any(String),
-    }),
-  );
+  const finding = result.blockingFindings.find((candidate) => candidate.check === check);
+  expect(finding).toMatchObject({
+    check,
+    passed: false,
+    severity: 'error',
+    blocking: true,
+    path: 'workflows/generated/validator-specialist.ts',
+    message: expect.stringMatching(message),
+  });
+  expect(finding?.fixHint).toEqual(expect.stringMatching(/\S/));
+}
+
+function expectWarningFinding(result: ValidatorResult, check: StructuralCheckName, message: RegExp): void {
+  const finding = result.warningFindings.find((candidate) => candidate.check === check);
+  expect(finding).toMatchObject({
+    check,
+    passed: false,
+    severity: 'warning',
+    blocking: false,
+    path: 'workflows/generated/validator-specialist.ts',
+    message: expect.stringMatching(message),
+  });
+  expect(finding?.fixHint).toEqual(expect.stringMatching(/\S/));
+}
+
+function expectBlockingProofStep(result: ValidatorResult, phase: ProofLoopPhase, message: RegExp): void {
+  const step = result.blockingProofSteps.find((candidate) => candidate.phase === phase);
+  expect(step).toMatchObject({
+    phase,
+    passed: false,
+    severity: 'error',
+    blocking: true,
+    message: expect.stringMatching(message),
+  });
+  expect(step?.commandResult).toEqual(expect.objectContaining({ command: expect.any(String), exitCode: 1 }));
+  expect(step?.fixHint).toEqual(expect.stringMatching(/\S/));
 }
 
 function completeWorkflowText(): string {

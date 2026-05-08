@@ -143,18 +143,17 @@ artifact_runner_logs_show_failure() {
   return 1
 }
 
-artifact_checkpoint_indicates_queue_exhausted() {
+artifact_checkpoint_read_progress() {
   local artifact_dir="$1"
   local checkpoint_file="$artifact_dir/checkpoint.env"
-  local queue_file="$artifact_dir/queue.txt"
+  local current_index_ref="$2"
+  local current_workflow_ref="$3"
   local current_index=""
   local current_workflow=""
-  local queue_total="0"
   local key raw_value value
 
   [[ -d "$artifact_dir" ]] || return 1
   [[ -f "$checkpoint_file" ]] || return 1
-  [[ -f "$queue_file" ]] || return 1
 
   while IFS='=' read -r key raw_value; do
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
@@ -166,12 +165,36 @@ artifact_checkpoint_indicates_queue_exhausted() {
     esac
   done < "$checkpoint_file"
 
+  printf -v "$current_index_ref" '%s' "$current_index"
+  printf -v "$current_workflow_ref" '%s' "$current_workflow"
+}
+
+artifact_checkpoint_indicates_queue_exhausted() {
+  local artifact_dir="$1"
+  local queue_file="$artifact_dir/queue.txt"
+  local current_index=""
+  local current_workflow=""
+  local queue_total="0"
+
+  [[ -d "$artifact_dir" ]] || return 1
+  [[ -f "$queue_file" ]] || return 1
+  artifact_checkpoint_read_progress "$artifact_dir" current_index current_workflow || return 1
+
   [[ "$current_index" =~ ^[0-9]+$ ]] || return 1
   queue_total="$(grep -cve '^[[:space:]]*$' "$queue_file" 2>/dev/null || echo 0)"
   [[ "$queue_total" =~ ^[0-9]+$ ]] || queue_total="0"
 
   [[ -z "$current_workflow" ]] || return 1
   (( current_index >= queue_total ))
+}
+
+artifact_checkpoint_has_active_workflow() {
+  local artifact_dir="$1"
+  local current_index=""
+  local current_workflow=""
+
+  artifact_checkpoint_read_progress "$artifact_dir" current_index current_workflow || return 1
+  [[ -n "$current_workflow" ]]
 }
 
 artifact_queue_exhausted_terminal_status() {
@@ -204,7 +227,7 @@ mark_artifact_stale_or_complete() {
   if artifact_runner_logs_show_failure "$artifact_dir"; then
     resolved_status="failed"
     resolved_reason="runner failed before harness status flush"
-  elif artifact_runner_logs_show_success "$artifact_dir"; then
+  elif artifact_runner_logs_show_success "$artifact_dir" && ! artifact_checkpoint_has_active_workflow "$artifact_dir"; then
     resolved_status="complete"
     resolved_reason="runner completed before harness status flush"
   elif artifact_checkpoint_indicates_queue_exhausted "$artifact_dir"; then
@@ -429,7 +452,7 @@ on_exit() {
 
   if [[ "$STATUS_MARKED" != "true" ]]; then
     if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
-      if artifact_runner_logs_show_success "$ARTIFACT_DIR"; then
+      if artifact_runner_logs_show_success "$ARTIFACT_DIR" && ! artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR"; then
         STATUS_REASON="runner completed before harness status flush"
         echo "complete" > "$STATUS_FILE"
         persist_checkpoint

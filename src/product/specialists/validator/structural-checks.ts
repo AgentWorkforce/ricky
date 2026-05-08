@@ -320,10 +320,10 @@ function checkRunCwd(text: string, context: StructuralContext): StructuralFindin
 }
 
 function checkStalePrefixReviewGate(text: string, context: StructuralContext): StructuralFinding {
-  const fixLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]fix-loop['"`]/i);
-  const postFixLine = indexOfLineAfter(context.lines, fixLine, /\.step\s*\(\s*['"`][^'"`]*post-fix[^'"`]*(validation|gate)[^'"`]*['"`]/i);
-  const finalReviewLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]final-review[^'"`]*['"`]/i);
-  const finalPassLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`]final-review-pass-gate['"`]|FINAL_REVIEW_[A-Z_]+_PASS/i);
+  const fixLine = indexOfLine(context.lines, /\.step\s*\(\s*['"`][^'"`]*(fix-loop|fixes|bounded-fix)[^'"`]*['"`]/i);
+  const postFixLine = indexOfLineAfter(context.lines, fixLine, /\.step\s*\(\s*['"`][^'"`]*post-fix[^'"`]*(validation|gate)?[^'"`]*['"`]/i);
+  const finalReviewLine = indexOfLineAfter(context.lines, postFixLine, /\.step\s*\(\s*['"`]final-review(?!-pass-gate)[^'"`]*['"`]/i);
+  const finalPassLine = indexOfLineAfter(context.lines, finalReviewLine, /\.step\s*\(\s*['"`]final-review-pass-gate['"`]|FINAL_REVIEW_[A-Z_]+_PASS/i);
   const tailAfterFixValidation = postFixLine >= 0 ? context.lines.slice(postFixLine).join('\n') : '';
   const checksInitialReviewAfterFix = hasInitialReviewEvidence(tailAfterFixValidation);
   const orderedFinalReview =
