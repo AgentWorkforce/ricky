@@ -1323,8 +1323,16 @@ validate_repo() {
 
 inspect_repo_changes() {
   log "capturing repo status"
-  git status --short | tee "$ARTIFACT_DIR/git-status.txt"
+  git status --short > "$ARTIFACT_DIR/git-status.txt"
   git diff --stat > "$ARTIFACT_DIR/git-diff-stat.txt" || true
+
+  if [[ -s "$ARTIFACT_DIR/git-status.txt" ]]; then
+    cat "$ARTIFACT_DIR/git-status.txt"
+  fi
+
+  if [[ -s "$ARTIFACT_DIR/git-diff-stat.txt" ]]; then
+    cat "$ARTIFACT_DIR/git-diff-stat.txt"
+  fi
 }
 
 repo_has_captured_head_delta() {
