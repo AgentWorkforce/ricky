@@ -1013,6 +1013,25 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave12-simplified-workflow-cli/no-dead-end-proof/signoff.md \
         'NO_DEAD_END_SIGNOFF_COMPLETE'
       ;;
+    workflows/wave13-master-executor/01-implement-master-executor-planner.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave13-master-executor/implement-master-executor/signoff.md \
+        'RICKY_MASTER_EXECUTOR_IMPLEMENTED' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave13-master-executor/implement-master-executor/review-claude.md \
+        'RICKY_MASTER_EXECUTOR_CLAUDE_REVIEW_READY' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave13-master-executor/implement-master-executor/review-codex.md \
+        'RICKY_MASTER_EXECUTOR_CODEX_REVIEW_READY' \
+        && test -f src/product/orchestration/types.ts \
+        && test -f src/product/orchestration/planner.ts \
+        && test -f src/product/orchestration/master-executor.ts \
+        && test -f src/product/orchestration/index.ts \
+        && test -f src/product/orchestration/master-executor.test.ts \
+        && grep -q "export \* as orchestration from './orchestration/index.js'" src/product/index.ts \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/product/orchestration/master-executor.test.ts >/dev/null
+      ;;
     workflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/signoff.md \
