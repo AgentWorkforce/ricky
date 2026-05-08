@@ -665,6 +665,7 @@ describe('workforce persona workflow writer', () => {
 
   it('uses workload-router only for selection metadata when harness-kit needs useRunnableSelection', async () => {
     const selections: unknown[] = [];
+    const selectionOptionsCalls: unknown[] = [];
     const resolved = await resolveWorkforcePersonaContextWithModules(
       ['relay-orchestrator'],
       { installRoot: '/state/ricky/persona-skills' },
@@ -682,7 +683,8 @@ describe('workforce persona workflow writer', () => {
         source: 'package',
         warnings: [],
         module: {
-          usePersona(intent) {
+          usePersona(intent, options) {
+            selectionOptionsCalls.push(options);
             return {
               selection: {
                 personaId: intent,
@@ -698,6 +700,7 @@ describe('workforce persona workflow writer', () => {
     );
 
     expect(resolved.context.selection.personaId).toBe('relay-orchestrator');
+    expect(selectionOptionsCalls).toEqual([undefined]);
     expect(selections).toHaveLength(1);
     expect(selections[0]).toMatchObject({
       selection: { personaId: 'relay-orchestrator' },
@@ -784,10 +787,69 @@ describe('workforce persona workflow writer', () => {
     expect(result.artifact?.content).toBe(base.artifact!.content);
   });
 
+  it('lets the Workforce router choose the default writer tier unless callers override it', async () => {
+    const base = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/router-tier.ts',
+    });
+    expect(base.success).toBe(true);
+
+    const resolverOptions: Array<Record<string, unknown> | undefined> = [];
+    const resolver: WorkforcePersonaResolver = async (_intents, options) => {
+      resolverOptions.push(options);
+      return {
+        source: 'package',
+        intent: 'agent-relay-workflow',
+        warnings: [],
+        context: {
+          selection: {
+            personaId: 'agent-relay-workflow',
+            tier: 'best-value',
+            runtime: {
+              harness: 'opencode',
+              model: 'opencode/gpt-5-nano',
+              harnessSettings: { timeoutSeconds: 900, reasoning: 'medium' },
+            },
+          },
+          sendMessage() {
+            return execution(personaResponse('workflows/generated/router-tier.ts', base.artifact!.content));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/router-tier.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'router-tier',
+        targetMode: 'local',
+        resolver,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(resolverOptions).toEqual([{}]);
+    expect(result.workforcePersona).toMatchObject({
+      personaId: 'agent-relay-workflow',
+      tier: 'best-value',
+      harness: 'opencode',
+      model: 'opencode/gpt-5-nano',
+    });
+  });
+
   it('uses a runnable usePersona(...).sendMessage seam when harness-kit is unavailable', async () => {
+    const selectionOptionsCalls: unknown[] = [];
     const resolved = await resolveWorkforcePersonaContextWithModules(
       ['agent-relay-workflow'],
-      { tier: 'best' },
+      { tier: 'best', installRoot: '/state/ricky/persona-skills' },
       {
         source: 'package',
         warnings: ['harness-kit unavailable'],
@@ -798,6 +860,7 @@ describe('workforce persona workflow writer', () => {
         warnings: ['using packaged workload-router fallback'],
         module: {
           usePersona(intent, options) {
+            selectionOptionsCalls.push(options);
             return runnableContext({ personaId: intent, tier: options?.tier ?? 'minimum' });
           },
         },
@@ -810,12 +873,53 @@ describe('workforce persona workflow writer', () => {
       personaId: 'agent-relay-workflow',
       tier: 'best',
     });
+    expect(selectionOptionsCalls).toEqual([
+      { tier: 'best', installRoot: '/state/ricky/persona-skills' },
+    ]);
     expect(resolved.warnings).toEqual([
       'harness-kit unavailable',
       'using packaged workload-router fallback',
     ]);
     const result = await resolved.context.sendMessage('task');
     expect(result.status).toBe('completed');
+  });
+
+  it('retries the runnable usePersona fallback without installRoot when the selected harness rejects it', async () => {
+    const selectionOptionsCalls: unknown[] = [];
+    const resolved = await resolveWorkforcePersonaContextWithModules(
+      ['agent-relay-workflow'],
+      { installRoot: '/state/ricky/persona-skills' },
+      {
+        source: 'package',
+        warnings: ['harness-kit unavailable'],
+        module: {},
+      },
+      async () => ({
+        source: 'package',
+        warnings: [],
+        module: {
+          usePersona(intent, options) {
+            selectionOptionsCalls.push(options);
+            if (options?.installRoot) {
+              throw new Error('installRoot is only supported for the claude harness (got: opencode)');
+            }
+            return runnableContext({ personaId: intent, tier: 'best-value' });
+          },
+        },
+      }),
+    );
+
+    expect(resolved.context.selection).toMatchObject({
+      personaId: 'agent-relay-workflow',
+      tier: 'best-value',
+    });
+    expect(selectionOptionsCalls).toEqual([
+      { installRoot: '/state/ricky/persona-skills' },
+      undefined,
+    ]);
+    expect(resolved.warnings).toContain(
+      'Workforce persona selected a non-claude harness; retrying runnable context without installRoot.',
+    );
   });
 
   it('preserves npm load failure wording when harness-kit cannot be imported', async () => {
