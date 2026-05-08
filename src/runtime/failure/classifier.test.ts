@@ -97,6 +97,66 @@ function expectClassificationSurface(
   expect(result.signals.every((signal) => Object.values(Confidence).includes(signal.strength))).toBe(true);
 }
 
+// ── Debugger Result Contract ────────────────────────────────────────
+
+describe('debugger-facing classification contract', () => {
+  it.each([
+    {
+      name: 'timeout evidence',
+      summary: 'final validation timed out after deadline exceeded',
+      category: FailureClass.Timeout,
+      severity: Severity.Critical,
+      nextAction: NextAction.Retry,
+    },
+    {
+      name: 'failed deterministic gate evidence',
+      summary: 'deterministic gate failed: expected READY got missing',
+      category: FailureClass.VerificationFailure,
+      severity: Severity.High,
+      nextAction: NextAction.FixAndRetry,
+    },
+    {
+      name: 'agent drift evidence',
+      summary: 'agent drift: repeated narrative did not meet the step contract',
+      category: FailureClass.AgentDrift,
+      severity: Severity.Medium,
+      nextAction: NextAction.FixAndRetry,
+    },
+    {
+      name: 'missing command/tool/dependency evidence',
+      summary: 'workflow-debugger classify failed: command not found',
+      category: FailureClass.EnvironmentError,
+      severity: Severity.High,
+      nextAction: NextAction.InvestigateEnvironment,
+    },
+    {
+      name: 'deadlock evidence',
+      summary: 'no progress across bounded waits; worker steps pending forever',
+      category: FailureClass.Deadlock,
+      severity: Severity.Critical,
+      nextAction: NextAction.Abort,
+    },
+    {
+      name: 'step overflow evidence',
+      summary: 'step overflow: too many attempts after retry budget exhausted',
+      category: FailureClass.StepOverflow,
+      severity: Severity.Medium,
+      nextAction: NextAction.Escalate,
+    },
+  ])('returns actionable debugger fields for $name', ({ summary, category, severity, nextAction }) => {
+    const result = classifyFailure(summary);
+
+    expectClassificationSurface(result, {
+      category,
+      severity,
+      nextAction,
+    });
+    expect(result.confidence).toEqual(expect.any(String));
+    expect(result.signals.length).toBeGreaterThan(0);
+    expect(result.matchedSignals).toBe(result.signals);
+  });
+});
+
 // ── Timeout ──────────────────────────────────────────────────────────
 
 describe('timeout classification', () => {
