@@ -858,6 +858,66 @@ describe('classifyFromSummary', () => {
   });
 });
 
+// ── Plain Validation Summaries ───────────────────────────────────────
+
+describe('plain validation summary classification', () => {
+  it('classifies plain timeout summaries', () => {
+    const result = classifyFailure('final validation timed out after deadline exceeded');
+
+    expectClassificationSurface(result, {
+      category: FailureClass.Timeout,
+      severity: Severity.Critical,
+      nextAction: NextAction.Retry,
+    });
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'plain-summary',
+        strength: Confidence.High,
+      }),
+    ]);
+  });
+
+  it('classifies plain environment error summaries through classifyFromSummary', () => {
+    const result = classifyFromSummary('MISSING_ENV_VAR: OPENAI_API_KEY');
+
+    expectClassificationSurface(result, {
+      category: FailureClass.EnvironmentError,
+      severity: Severity.High,
+      nextAction: NextAction.InvestigateEnvironment,
+    });
+    expect(result.signals.map((s) => s.observation).join('\n')).toContain('MISSING_ENV_VAR');
+  });
+
+  it('classifies plain verification failure summaries', () => {
+    const result = classifyFailure('deterministic gate failed: expected READY got missing');
+
+    expectClassificationSurface(result, {
+      category: FailureClass.VerificationFailure,
+      severity: Severity.High,
+      nextAction: NextAction.FixAndRetry,
+    });
+  });
+
+  it('returns no-failure for explicit plain pass summaries', () => {
+    const result = classifyFromSummary('All checks passed; no failures detected');
+
+    expect(result.failureClass).toBe(FailureClass.Unknown);
+    expect(result.severity).toBe(Severity.Low);
+    expect(result.confidence).toBe(Confidence.High);
+    expect(result.summary).toContain('no failure detected');
+    expect(result.signals).toEqual([]);
+  });
+
+  it('returns unknown for plain summaries without deterministic failure signals', () => {
+    const result = classifyFailure('workflow output was inconclusive');
+
+    expect(result.failureClass).toBe(FailureClass.Unknown);
+    expect(result.nextAction).toBe(NextAction.Escalate);
+    expect(result.confidence).toBe(Confidence.Low);
+    expect(result.signals).toEqual([]);
+  });
+});
+
 // ── Edge-case fixes (Codex review) ─────────────────────────────────
 
 describe('agent drift vs verification failure boundary', () => {
