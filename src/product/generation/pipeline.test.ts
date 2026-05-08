@@ -46,11 +46,15 @@ describe('workflow generation pipeline', () => {
     expect(rendered.artifactPath).toBe('workflows/generated/runtime-master.ts');
     expect(rendered.content).toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
     expect(rendered.content).toContain('Master plan: 5 child workflows');
-    expect(rendered.content).toContain('ricky run \'workflows/generated/runtime-master-children/01-nested-runner.ts\' --foreground --no-auto-fix');
+    expect(rendered.content).toContain('ricky run \'workflows/generated/runtime-master-children/01-nested-runner.ts\' --foreground');
+    expect(rendered.content).not.toMatch(/^\s*command: "set -e\\nricky run .*--no-auto-fix/m);
     expect(rendered.content).toContain('MASTER_EXECUTOR_RESULT_READY');
     expect(rendered.content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
     expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"master-lead\", repairRetries: 2 })");
     expect(rendered.content.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(rendered.content.replace(/\\+"/g, '"')).toMatch(
+      /\.step\("final-hard-validation"[\s\S]*?failOnError: false,[\s\S]*?\.step\("final-signoff"/,
+    );
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
   });
 

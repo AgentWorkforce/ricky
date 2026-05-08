@@ -297,7 +297,7 @@ function renderChildRunStep(child: ChildWorkflowPlan): string[] {
     : ['verify-child-workflows'];
   const command = [
     'set -e',
-    `ricky run ${shellQuote(child.workflowFilePath)} --foreground --no-auto-fix`,
+    `ricky run ${shellQuote(child.workflowFilePath)} --foreground`,
     `test -f ${shellQuote(child.signoffArtifactPath)}`,
     `grep -F ${shellQuote(child.signoffMarker)} ${shellQuote(child.signoffArtifactPath)}`,
     'echo RICKY_MASTER_CHILD_RUN_VERIFIED',
@@ -408,7 +408,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
       'echo RICKY_CHILD_FINAL_VALIDATION_READY',
     ].join('\n'))},`,
     '      captureOutput: true,',
-    '      failOnError: true,',
+    '      failOnError: false,',
     '    })',
     '    .step("final-signoff", {',
     '      type: "deterministic",',

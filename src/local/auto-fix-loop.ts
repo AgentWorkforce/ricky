@@ -368,6 +368,29 @@ export async function runWithAutoFix(
       } catch (error) {
         attemptSummary.fix_error = error instanceof Error ? error.message : String(error);
         warnings.push(...warningsFromError(error));
+        if (attempt < maxAttempts) {
+          const warning = `Workflow repair provider failed; retrying without an artifact rewrite: ${attemptSummary.fix_error}`;
+          attemptSummary.warning = warning;
+          warnings.push(warning);
+          if (!runId) {
+            warnings.push('Auto-fix retry could not resolve a previous run id; retrying without step-level resume.');
+          } else if (!retryOfRunId) {
+            retryOfRunId = runId;
+          }
+          currentRequest = {
+            ...retryBaseRequest(currentRequest, response),
+            autoFix: undefined,
+            retry: {
+              attempt: attempt + 1,
+              maxAttempts,
+              ...(runId ? { previousRunId: runId, retryOfRunId: retryOfRunId ?? runId } : {}),
+              ...(failedStep ? { startFromStep: failedStep } : {}),
+              reason: `auto-fix retry after workflow repair provider failure for ${blockerCode ?? 'local failure'}`,
+            },
+          };
+          onProgress?.(`Workflow repair provider failed; retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
+          continue;
+        }
         const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
         escalated.nextActions = [
           ...escalated.nextActions,
@@ -561,6 +584,18 @@ export function repairWorkflowDeterministically(
   if (sentinelGuardRepair.content !== content) {
     content = sentinelGuardRepair.content;
     changes.push(...sentinelGuardRepair.changes);
+  }
+
+  const masterChildRepair = repairMasterChildRunRepairLoop(content);
+  if (masterChildRepair.content !== content) {
+    content = masterChildRepair.content;
+    changes.push(...masterChildRepair.changes);
+  }
+
+  const childValidationRepair = repairGeneratedChildFinalValidation(content);
+  if (childValidationRepair.content !== content) {
+    content = childValidationRepair.content;
+    changes.push(...childValidationRepair.changes);
   }
 
   if (content === input.artifactContent || changes.length === 0) return null;
@@ -966,6 +1001,41 @@ function repairSentinelGuardedRehydration(content: string): { content: string; c
   });
 
   return { content: next, changes: [...new Set(changes)] };
+}
+
+function repairMasterChildRunRepairLoop(content: string): { content: string; changes: string[] } {
+  const isMasterArtifact = content.includes('RICKY_MASTER_EXECUTOR_WORKFLOW') || content.includes('--foreground --no-auto-fix');
+  if (!isMasterArtifact) return { content, changes: [] };
+
+  const changes: string[] = [];
+  let next = content.replace(/--foreground\s+--no-auto-fix/g, () => {
+    changes.push('allowed nested child workflows to use Ricky auto-fix instead of --no-auto-fix');
+    return '--foreground';
+  });
+
+  next = next.replace(
+    /^\s*\.onError\(\s*['"]fail-fast['"]\s*\)/m,
+    (match) => {
+      changes.push('replaced fail-fast error handling with repair-aware retry');
+      const indent = match.match(/^\s*/)?.[0] ?? '';
+      return `${indent}.onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: "master-lead", repairRetries: 2 })`;
+    },
+  );
+
+  return { content: next, changes: [...new Set(changes)] };
+}
+
+function repairGeneratedChildFinalValidation(content: string): { content: string; changes: string[] } {
+  if (!/workflow\(["']ricky-child-/.test(content)) return { content, changes: [] };
+  const changes: string[] = [];
+  const next = content.replace(
+    /(\.step\(["']final-hard-validation["'][\s\S]*?captureOutput:\s*true,\n\s*)failOnError:\s*true,/,
+    (match, prefix: string) => {
+      changes.push('made generated child final validation non-terminal so master final validation owns integrated repo checks');
+      return `${prefix}failOnError: false,`;
+    },
+  );
+  return { content: next, changes };
 }
 
 function repairAgentStepTimeouts(content: string, evidence: WorkflowRunEvidence): { content: string; changes: string[] } {
