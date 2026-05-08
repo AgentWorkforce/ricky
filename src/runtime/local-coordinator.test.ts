@@ -826,6 +826,79 @@ describe('LocalCoordinator', () => {
     });
   });
 
+  it('returns lifecycle evidence from a custom injected runner without requiring agent-relay', async () => {
+    const invocation = new ManualInvocation();
+    const run = vi.fn(
+      (command: string, args: string[], options: CommandRunnerOptions): CommandInvocation => {
+        expect(command).toBe('unit-runtime');
+        expect(args).toEqual(['execute', 'generated/debuggable-workflow.yaml', '--json']);
+        expect(options).toEqual({
+          cwd: '/repo',
+          env: { RELAYCAST_WORKSPACE: 'unit-test' },
+        });
+        return invocation;
+      },
+    );
+    const coordinator = new LocalCoordinator({ run });
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-custom-injected-evidence',
+      workflowFile: 'generated/debuggable-workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      route: { command: 'unit-runtime', baseArgs: ['execute'] },
+      metadata: { workflowId: 'debuggable-workflow' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(coordinator.getActiveRun('run-custom-injected-evidence')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'unit-runtime',
+        args: ['execute', 'generated/debuggable-workflow.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      metadata: { workflowId: 'debuggable-workflow' },
+    });
+
+    invocation.emitStdout('{"step":"launch","status":"running"}');
+    invocation.emitStderr('launch warning');
+    invocation.complete(0);
+    const result = await resultPromise;
+
+    expect(lifecycleEvents).toEqual(result.events);
+    expect(result.status).toBe('passed');
+    expect(result.exitCode).toBe(0);
+    expect(result.invocation).toEqual({
+      command: 'unit-runtime',
+      args: ['execute', 'generated/debuggable-workflow.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+    expect(result.metadata).toEqual({ workflowId: 'debuggable-workflow' });
+    expect(result.stdout).toEqual(['{"step":"launch","status":"running"}']);
+    expect(result.stderr).toEqual(['launch warning']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'passed',
+      data: { exitCode: 0 },
+    });
+    expect(coordinator.getActiveRun('run-custom-injected-evidence')).toBeUndefined();
+  });
+
   it('does not require a real agent-relay process when the runner is injected', async () => {
     const invocation = new ManualInvocation();
     const run = vi.fn(

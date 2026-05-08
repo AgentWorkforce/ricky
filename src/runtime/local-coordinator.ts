@@ -328,12 +328,17 @@ export class LocalCoordinator {
 
 function buildInvocationSummary(request: RunRequest): CommandInvocationSummary {
   const command = request.route?.command ?? DEFAULT_COMMAND;
-  const baseArgs = request.route?.baseArgs ?? [...DEFAULT_BASE_ARGS];
+  const baseArgs = request.route?.baseArgs ? [...request.route.baseArgs] : [...DEFAULT_BASE_ARGS];
   return {
     command,
-    args: [...baseArgs, request.workflowFile, ...retryResumeArgs(request.retry), ...(request.extraArgs ?? [])],
+    args: [
+      ...baseArgs,
+      request.workflowFile,
+      ...retryResumeArgs(request.retry),
+      ...(request.extraArgs ? [...request.extraArgs] : []),
+    ],
     cwd: request.cwd,
-    env: request.env,
+    env: request.env ? { ...request.env } : undefined,
   };
 }
 
@@ -351,7 +356,7 @@ function normalizeTimeout(value: number | undefined): number {
 
 function normalizeRetry(retry: RunRequest['retry']): RunRetryMetadata {
   return {
-    attempt: retry?.attempt ?? 1,
+    attempt: normalizeAttempt(retry?.attempt),
     maxAttempts: retry?.maxAttempts,
     retryOfRunId: retry?.retryOfRunId,
     previousRunId: retry?.previousRunId,
@@ -359,6 +364,11 @@ function normalizeRetry(retry: RunRequest['retry']): RunRetryMetadata {
     reason: retry?.reason,
     backoffMs: retry?.backoffMs,
   };
+}
+
+function normalizeAttempt(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value < 1) return 1;
+  return Math.floor(value);
 }
 
 function buildSnippet(lines: string[], maxLines: number): LogSnippet {
@@ -387,10 +397,27 @@ function snapshot(state: ActiveRunState): ActiveRunSnapshot {
     cwd: state.cwd,
     status: state.status,
     startedAt: state.startedAt,
-    retry: state.retry,
-    invocation: state.invocationSummary,
-    metadata: state.metadata,
+    retry: cloneRetry(state.retry),
+    invocation: cloneInvocationSummary(state.invocationSummary),
+    metadata: cloneMetadata(state.metadata),
   };
+}
+
+function cloneRetry(retry: RunRetryMetadata): RunRetryMetadata {
+  return { ...retry };
+}
+
+function cloneInvocationSummary(invocation: CommandInvocationSummary): CommandInvocationSummary {
+  return {
+    command: invocation.command,
+    args: [...invocation.args],
+    cwd: invocation.cwd,
+    env: invocation.env ? { ...invocation.env } : undefined,
+  };
+}
+
+function cloneMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  return metadata ? { ...metadata } : undefined;
 }
 
 function errorMessage(err: unknown): string {
