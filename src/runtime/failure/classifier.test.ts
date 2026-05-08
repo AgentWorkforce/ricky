@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { classifyFailure, classifyFromSummary, RETRY_OVERFLOW_THRESHOLD } from './classifier.js';
+import {
+  classifyFailure,
+  classifyFromSummary,
+  RETRY_OVERFLOW_THRESHOLD,
+  STEP_VERIFICATION_OVERFLOW_THRESHOLD,
+} from './classifier.js';
 import {
   createRunEvidence,
   createStepEvidence,
@@ -448,6 +453,51 @@ describe('required deterministic classifier coverage', () => {
         strength: Confidence.High,
       }),
     );
+  });
+
+  it('too many bounded verification checks produces step overflow with diagnosable signals', () => {
+    let run = makeRun({ runId: 'run-required-check-overflow' });
+    let step = makeStep({ stepId: 'step-required-check-overflow', stepName: 'wide-verification-step' });
+
+    for (let check = 1; check <= STEP_VERIFICATION_OVERFLOW_THRESHOLD + 1; check++) {
+      step = appendStepEvent(step, {
+        kind: 'verification',
+        result: passingVerification({
+          type: 'custom',
+          expected: `bounded check ${check}`,
+          actual: `bounded check ${check}`,
+          message: `bounded verification check ${check} passed`,
+        }),
+      });
+    }
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+
+    expectClassificationSurface(result, {
+      category: FailureClass.StepOverflow,
+      severity: Severity.Medium,
+      confidence: Confidence.Low,
+      nextAction: NextAction.Escalate,
+    });
+    expectDebuggerDiagnostics(result, [
+      'exceeded step size budget',
+      'wide-verification-step',
+      `${STEP_VERIFICATION_OVERFLOW_THRESHOLD + 1} verification checks`,
+    ]);
+    expect(result.secondaryClasses).toEqual([]);
+    expect(result.matchedSignals).toBe(result.signals);
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'step-overflow:step:step-required-check-overflow/verifications',
+        observation: expect.stringContaining(
+          `${STEP_VERIFICATION_OVERFLOW_THRESHOLD + 1} verification checks`,
+        ),
+        strength: Confidence.Medium,
+      }),
+    ]);
   });
 
   it('mixed or weak signals preserve confidence and matched signals', () => {

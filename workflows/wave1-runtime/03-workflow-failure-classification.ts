@@ -166,7 +166,7 @@ Review checklist:
         'REVIEW_CLAUDE_PASS',
         'EOF',
         'echo FAILURE_CLASSIFIER_REVIEW_CLAUDE_PASS',
-      ].join(' && '),
+      ].join('\n'),
       captureOutput: true,
       failOnError: true,
     })
@@ -299,7 +299,7 @@ Write .workflow-artifacts/wave1-runtime/workflow-failure-classification/review-c
         'FINAL_REVIEW_CLAUDE_PASS',
         'EOF',
         'echo FAILURE_CLASSIFIER_FINAL_REVIEW_CLAUDE_PASS',
-      ].join(' && '),
+      ].join('\n'),
       captureOutput: true,
       failOnError: true,
     })
