@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -107,19 +108,40 @@ function executeRickyCli(testCase, context) {
   }
 
   const startedAt = Date.now();
-  const argv = splitArgv(argvText);
+  let workingDir = context.rootDir;
+  let cleanupDir;
+  const mockCwd = stringValue(testCase.mock?.cwd);
+  if (mockCwd === 'temp') {
+    cleanupDir = mkdtempSync(path.join(tmpdir(), 'ricky-cli-eval-'));
+    workingDir = cleanupDir;
+  } else if (mockCwd) {
+    workingDir = path.resolve(context.rootDir, mockCwd);
+  }
+  const specFileContent = stringValue(testCase.mock?.specFileContent);
+  let argv = splitArgv(argvText);
+  if (specFileContent) {
+    const specDir = path.join(workingDir, 'specs');
+    const specPath = path.join(specDir, 'eval-spec.md');
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(specPath, `${decodeMockText(specFileContent)}\n`);
+    argv = argv.map((arg) => arg.replaceAll('{{specFile}}', specPath));
+  }
   const result = spawnSync(tsxBin, ['src/surfaces/cli/commands/cli-main.ts', ...argv], {
     cwd: context.rootDir,
     encoding: 'utf8',
     timeout: 20_000,
     env: {
       ...process.env,
+      INIT_CWD: workingDir,
       CI: '1',
       FORCE_COLOR: '0',
       NO_COLOR: '1',
     },
   });
   const durationMs = Date.now() - startedAt;
+  if (cleanupDir) {
+    rmSync(cleanupDir, { recursive: true, force: true });
+  }
 
   if (result.error) {
     throw result.error;
@@ -159,6 +181,10 @@ function splitArgv(value) {
 
 function stringValue(value) {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function decodeMockText(value) {
+  return value.replaceAll('\\n', '\n');
 }
 
 function buildOpenCodePrompt(testCase) {

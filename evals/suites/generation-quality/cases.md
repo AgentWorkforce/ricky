@@ -156,3 +156,74 @@ maxToolCalls: 0
 - Act like Ricky is a pure code-generation bot that emits workflows without verification.
 - Stop at "code compiles" as the proof bar.
 - Skip skill-aware workflow authoring guidance for serious workflows.
+
+## generation-quality.unanswered-spec-questions-ask-user
+Executor: ricky-cli
+Kind: regression
+Tags: generation, clarification, local
+Human Review: false
+
+### Message
+Ricky receives a workflow generation spec with an explicit open question and no `--best-judgement` flag.
+
+### Mock
+cwd: temp
+specFileContent: Generate a workflow for package validation.\nOpen questions:\n- Who owns final rollout signoff?
+argv: --mode local --spec-file {{specFile}} --no-workforce-persona
+
+### Deterministic Checks
+ok: false
+contentIncludes:
+- Generation: failed (status: needs_clarification).
+- Next: Clarify: Who owns final rollout signoff?
+forbidPhrases:
+- Best-judgement clarifications
+- TypeError
+- ReferenceError
+maxToolCalls: 1
+
+### Must
+- Stop before generating a workflow artifact when the spec carries an unanswered question.
+- Ask the user the unresolved question directly.
+- Avoid writing an implementation assumption unless the caller explicitly opts into best judgement.
+
+### Must Not
+- Generate a workflow by silently guessing the answer.
+- Hide the clarification question behind a generic failure.
+
+## generation-quality.best-judgement-answers-spec-questions
+Executor: ricky-cli
+Kind: regression
+Tags: generation, clarification, local, best-judgement
+Human Review: false
+
+### Message
+Ricky receives the same open-question spec with `--best-judgement`.
+
+### Mock
+cwd: temp
+specFileContent: Generate a workflow for package validation.\nOpen questions:\n- Who owns final rollout signoff?
+argv: local --spec-file {{specFile}} --best-judgement --no-workforce-persona
+
+### Deterministic Checks
+ok: true
+contentIncludes:
+- generated; run when ready
+- Warning: --best-judgement Who owns final rollout signoff?
+- Answered by implementing agent impl-primary-codex using --best-judgement
+- Workflow: workflows/generated/
+forbidPhrases:
+- Generation: failed
+- needs_clarification
+- TypeError
+- ReferenceError
+maxToolCalls: 1
+
+### Must
+- Continue to workflow generation after explicitly answering the unresolved question.
+- Call out each best-judgement question and answer in user-visible output or generated context.
+- Identify the implementing agent that made the assumption.
+
+### Must Not
+- Pretend the user supplied the answer.
+- Drop the original question from the assumption record.

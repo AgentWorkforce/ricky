@@ -65,6 +65,13 @@ describe('parseArgs', () => {
       stdin: true,
       ...RUN_DEFAULTS,
     });
+    expect(parseArgs(['local', '--spec', 'build a workflow', '--best-judgement'])).toMatchObject({
+      command: 'run',
+      surface: 'local',
+      mode: 'local',
+      spec: 'build a workflow',
+      bestJudgement: true,
+    });
   });
 
   it('parses opt-in local run behavior and artifact execution', () => {
@@ -375,6 +382,7 @@ describe('renderHelp', () => {
     expect(helpText).toContain('ricky --mode local --spec <text>');
     expect(helpText).toContain('ricky --mode local --spec-file <path>');
     expect(helpText).toContain('ricky --mode local --stdin');
+    expect(helpText).toContain('--best-judgement');
     expect(helpText).toContain(
       'ricky --mode local --spec "generate a workflow for package checks"',
     );
@@ -1056,6 +1064,26 @@ describe('cliMain', () => {
       autoFix: { maxAttempts: 7 },
       refine: { model: 'sonnet' },
       cliMetadata: { handoff: 'inline-spec' },
+    });
+  });
+
+  it('threads best-judgement clarification handling through generated handoffs', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['--mode', 'local', '--spec', 'build a workflow', '--best-judgement'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+    });
+
+    expect(runner.mock.calls[0][0].handoff).toMatchObject({
+      source: 'cli',
+      stageMode: 'generate',
+      bestJudgement: true,
+      cliMetadata: {
+        handoff: 'inline-spec',
+        bestJudgement: true,
+      },
     });
   });
 

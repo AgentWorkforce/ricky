@@ -35,6 +35,7 @@ export interface PowerUserParsedArgs {
   verbose?: boolean;
   autoFix?: number;
   refine?: false | { model?: string };
+  bestJudgement?: boolean;
   login?: boolean;
   connectMissing?: boolean;
   /** Set only when the CLI passes --workforce-persona/--no-workforce-persona; omitted otherwise. */
@@ -117,6 +118,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const previousRunId = readFlagValue(effectiveArgv, '--previous-run-id') ?? readFlagValue(effectiveArgv, '--resume-from-run');
   const autoFix = parseAutoFix(effectiveArgv);
   const refine = parseRefine(effectiveArgv);
+  const bestJudgement = effectiveArgv.includes('--best-judgement') || effectiveArgv.includes('--best-judgment');
   const login = effectiveArgv.includes('--login');
   const connectMissing = effectiveArgv.includes('--connect-missing');
   const workforcePersonaWriterCli = parseWorkforcePersonaWriterCliFlag(effectiveArgv);
@@ -156,6 +158,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
     ...(previousRunId !== undefined ? { previousRunId } : {}),
     ...(autoFix !== undefined && autoFix > 0 ? { autoFix } : {}),
     ...(refine ? { refine } : {}),
+    ...(bestJudgement ? { bestJudgement: true } : {}),
     ...(login ? { login: true } : {}),
     ...(connectMissing ? { connectMissing: true } : {}),
     ...(workforcePersonaWriterCli !== undefined ? { workforcePersonaWriterCli } : {}),

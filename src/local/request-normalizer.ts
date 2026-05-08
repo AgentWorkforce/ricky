@@ -53,6 +53,11 @@ export interface BaseHandoff {
   retry?: Partial<RunRetryMetadata>;
   /** Optional LLM refinement request for generated workflow artifacts. */
   refine?: false | { model?: string };
+  /**
+   * Let Ricky resolve blocking spec clarifications with conservative implementer
+   * assumptions instead of asking the user before generation.
+   */
+  bestJudgement?: boolean;
 }
 
 /** Free-form spec string from a direct local caller. */
@@ -149,6 +154,8 @@ export interface LocalInvocationRequest {
   retry?: Partial<RunRetryMetadata>;
   /** Optional LLM refinement request for generated workflow artifacts. */
   refine?: false | { model?: string };
+  /** Resolve blocking clarification questions using implementer best judgement. */
+  bestJudgement?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,11 +303,12 @@ export async function normalizeRequest(
   }
 }
 
-function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine'> {
+function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'bestJudgement'> {
   return {
     ...(raw.autoFix ? { autoFix: raw.autoFix } : {}),
     ...(raw.retry ? { retry: raw.retry } : {}),
     ...(raw.refine ? { refine: raw.refine } : {}),
+    ...(raw.bestJudgement ? { bestJudgement: true } : {}),
   };
 }
 
