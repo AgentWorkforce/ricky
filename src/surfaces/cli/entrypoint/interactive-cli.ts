@@ -212,6 +212,13 @@ export interface InteractiveCliDeps extends CloudWorkflowFlowDeps {
   /** Concise local-run progress updates for foreground CLI execution. */
   localProgress?: (message: string) => void;
 
+  /**
+   * Stop any active local-progress indicator (spinner) — called before
+   * interactive prompts so they don't render underneath a still-spinning
+   * spinner. Safe to call when no spinner is active.
+   */
+  localProgressStop?: () => void;
+
   /** Foreground local workflow stdout/stderr passthrough. */
   localRuntimeOutput?: (stream: 'stdout' | 'stderr', line: string) => void;
 }
@@ -365,6 +372,10 @@ async function collectClarificationAnswers(
   deps: InteractiveCliDeps,
   questions: ClarificationQuestion[],
 ): Promise<ClarificationAnswer[]> {
+  // Stop the foreground spinner before prompting — otherwise ora keeps
+  // overdrawing the inquirer prompt line and the user sees a frozen
+  // "Spec intake routed to clarify..." with no visible question.
+  deps.localProgressStop?.();
   const answers: ClarificationAnswer[] = [];
   for (const [index, question] of questions.entries()) {
     const answer = deps.inputClarificationAnswer

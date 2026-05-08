@@ -136,6 +136,54 @@ describe('runInteractiveCli', () => {
     expect(execute.mock.calls[1][0].spec).toContain('Package B.');
   });
 
+  it('stops the foreground progress spinner before prompting for clarification answers', async () => {
+    const clarification = {
+      id: 'open-question-1',
+      question: 'Pick package A or B?',
+      reason: 'unresolved',
+      blocking: true,
+    };
+    const blockedResponse: LocalResponse = {
+      ok: false,
+      exitCode: 1,
+      artifacts: [],
+      logs: [],
+      warnings: [],
+      nextActions: [],
+      clarificationQuestions: [clarification],
+      generation: {
+        stage: 'generate',
+        status: 'needs_clarification',
+        decisions: { clarification_questions: [clarification] },
+      },
+    };
+    const successResponse: LocalResponse = {
+      ok: true, artifacts: [], logs: [], warnings: [], nextActions: [],
+    };
+    const execute = vi.fn()
+      .mockResolvedValueOnce(blockedResponse)
+      .mockResolvedValueOnce(successResponse);
+
+    const events: string[] = [];
+    const localProgressStop = vi.fn(() => { events.push('stop'); });
+    const inputClarificationAnswer = vi.fn(async () => {
+      events.push('prompt');
+      return 'Package B.';
+    });
+
+    await runInteractiveCli({
+      onboard: vi.fn().mockResolvedValue(onboarding('local')),
+      handoff: { source: 'cli', spec: 'Generate.', mode: 'local' },
+      localExecutor: { execute },
+      localProgress: vi.fn(),
+      localProgressStop,
+      inputClarificationAnswer,
+    });
+
+    expect(localProgressStop).toHaveBeenCalled();
+    expect(events).toEqual(['stop', 'prompt']);
+  });
+
   it('passes deps.cwd as invocationRoot to an injected local executor when the handoff omits it', async () => {
     const localResponse: LocalResponse = {
       ok: true,

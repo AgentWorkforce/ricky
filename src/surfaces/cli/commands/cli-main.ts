@@ -1674,6 +1674,7 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     ...(cliHandoff ? { handoff: cliHandoff } : {}),
     ...(cloudRequest ? { cloudRequest } : {}),
     ...(localProgress ? { localProgress } : {}),
+    ...(progressReporter ? { localProgressStop: progressReporter.stop } : {}),
     ...(localRuntimeOutput ? { localRuntimeOutput } : {}),
     allowClarificationPrompts: cliHandoff !== undefined && !parsed.json && !parsed.quiet,
     ...cloudRecoveryDeps,
