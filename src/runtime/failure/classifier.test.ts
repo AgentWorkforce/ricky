@@ -785,6 +785,34 @@ describe('unknown and mixed classification', () => {
     expect(result.signals.map((s) => s.observation).join('\n')).toContain('Verification');
   });
 
+  it('preserves low confidence and matched signals for weak mixed plain-summary signals', () => {
+    const result = classifyFailure(
+      'agent drift: step contract did not meet requirements; verification failed expected READY got missing',
+    );
+
+    expectClassificationSurface(result, {
+      category: FailureClass.AgentDrift,
+      severity: Severity.Medium,
+      confidence: Confidence.Low,
+      nextAction: NextAction.FixAndRetry,
+    });
+    expect(result.secondaryClasses).toEqual([FailureClass.VerificationFailure]);
+    expect(result.isMixedFailure).toBe(true);
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'plain-summary',
+        strength: Confidence.Medium,
+        observation: expect.stringContaining('agent drift'),
+      }),
+      expect.objectContaining({
+        source: 'plain-summary',
+        strength: Confidence.Medium,
+        observation: expect.stringContaining('verification failure'),
+      }),
+    ]);
+    expect(result.matchedSignals).toBe(result.signals);
+  });
+
   it('preserves low confidence for weak summary-only deadlock signals', () => {
     let run = makeRun();
     let step = makeStep();
