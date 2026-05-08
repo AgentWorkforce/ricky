@@ -65,10 +65,59 @@ async function executeOpenRouter(testCase, context) {
 
   const model = process.env.RICKY_EVAL_OPENROUTER_MODEL ?? DEFAULT_OPENROUTER_MODEL;
   const timeoutMs = readPositiveInt(process.env.RICKY_EVAL_OPENROUTER_TIMEOUT_MS, 120_000);
+  const maxAttempts = readPositiveInt(process.env.RICKY_EVAL_OPENROUTER_MAX_ATTEMPTS, 3);
+  const maxTokens = readPositiveInt(process.env.RICKY_EVAL_OPENROUTER_MAX_TOKENS, 1200);
+  const startedAt = Date.now();
+  const emptyAttempts = [];
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const { content, note } = await runOpenRouterAttempt({
+        apiKey,
+        model,
+        timeoutMs,
+        maxTokens,
+        testCase,
+      });
+      if (content) {
+        const durationMs = Date.now() - startedAt;
+        return {
+          ok: true,
+          status: 'completed',
+          content,
+          model,
+          toolCalls: [],
+          notes: `Ran OpenRouter eval with model ${model}; attempts=${attempt}; durationMs=${durationMs}.${note ? ` ${note}` : ''}`,
+        };
+      }
+      emptyAttempts.push(`attempt ${attempt}: ${note || 'empty content'}`);
+    } catch (error) {
+      if (attempt >= maxAttempts || !isRetryableOpenRouterError(error)) {
+        throw error;
+      }
+      emptyAttempts.push(`attempt ${attempt}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return {
+    ok: false,
+    status: 'completed',
+    content: [
+      `OpenRouter returned an empty response after ${maxAttempts} attempts for ${testCase.id}.`,
+      'This provider response is reviewable as an infrastructure-quality signal, but it is not a Ricky product answer.',
+      '',
+      'Attempts:',
+      ...emptyAttempts.map((attempt) => `- ${attempt}`),
+    ].join('\n'),
+    model,
+    toolCalls: [],
+    notes: `OpenRouter empty response fallback after ${maxAttempts} attempts; durationMs=${Date.now() - startedAt}.`,
+  };
+}
+
+async function runOpenRouterAttempt({ apiKey, model, timeoutMs, maxTokens, testCase }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const startedAt = Date.now();
-
   try {
     const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_ENDPOINT, {
       method: 'POST',
@@ -84,13 +133,15 @@ async function executeOpenRouter(testCase, context) {
       body: JSON.stringify({
         model,
         temperature: 0,
+        max_tokens: maxTokens,
         messages: [
           {
             role: 'system',
             content: [
               'You are Ricky, the AgentWorkforce workflow reliability, coordination, and authoring assistant.',
               'Follow Ricky repository conventions from AGENTS.md, workflow standards, shared authoring rules, and product specs.',
-              'Answer the user request directly. Do not mention this eval harness or hidden rubric.',
+              'Answer the user request directly. Keep the answer concise and under 700 words.',
+              'Do not mention this eval harness or hidden rubric.',
             ].join(' '),
           },
           {
@@ -101,34 +152,60 @@ async function executeOpenRouter(testCase, context) {
       }),
     });
 
-    const durationMs = Date.now() - startedAt;
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const detail = typeof payload?.error?.message === 'string' ? payload.error.message : JSON.stringify(payload);
-      throw new Error(`OpenRouter eval failed: ${response.status} ${detail}`);
+      const error = new Error(`OpenRouter eval failed: ${response.status} ${detail}`);
+      error.status = response.status;
+      throw error;
     }
 
-    const content = String(payload?.choices?.[0]?.message?.content ?? '').trim();
-    if (!content) {
-      throw new Error('OpenRouter eval returned an empty response.');
-    }
-
+    const choice = payload?.choices?.[0];
+    const content = contentFromOpenRouterChoice(choice);
+    const finishReason = typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined;
     return {
-      ok: true,
-      status: 'completed',
       content,
-      model,
-      toolCalls: [],
-      notes: `Ran OpenRouter eval with model ${model}; durationMs=${durationMs}.`,
+      note: finishReason ? `finish_reason=${finishReason}` : undefined,
     };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`OpenRouter eval timed out after ${timeoutMs}ms.`);
+      const timeoutError = new Error(`OpenRouter eval timed out after ${timeoutMs}ms.`);
+      timeoutError.retryable = true;
+      throw timeoutError;
     }
     throw error;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function contentFromOpenRouterChoice(choice) {
+  const message = choice?.message;
+  const direct = typeof message?.content === 'string' ? message.content.trim() : '';
+  if (direct) return direct;
+
+  const contentParts = Array.isArray(message?.content) ? message.content : [];
+  const fromParts = contentParts
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (typeof part?.text === 'string') return part.text;
+      if (typeof part?.content === 'string') return part.content;
+      return '';
+    })
+    .join('\n')
+    .trim();
+  if (fromParts) return fromParts;
+
+  const reasoning = typeof message?.reasoning === 'string' ? message.reasoning.trim() : '';
+  if (reasoning) return reasoning;
+
+  return '';
+}
+
+function isRetryableOpenRouterError(error) {
+  if (!(error instanceof Error)) return false;
+  const status = typeof error.status === 'number' ? error.status : undefined;
+  return error.retryable === true || error.name === 'AbortError' || status === 408 || status === 409 || status === 429 || (status !== undefined && status >= 500);
 }
 
 function executeOpenCode(testCase, context) {
