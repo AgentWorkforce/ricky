@@ -590,7 +590,11 @@ function isPlainPass(text: string): boolean {
   const reportsPass = /\b(pass(?:ed|ing)?|success(?:ful)?|all checks passed|no failures? detected|no failures?)\b/i.test(text);
   if (!reportsPass) return false;
 
-  const withoutNegatedFailure = text.replace(/\bno failures?(?: detected)?\b/gi, '');
+  const withoutNegatedFailure = text
+    .replace(/\bno failures?(?: detected)?\b/gi, '')
+    .replace(/\bno errors?(?: detected)?\b/gi, '')
+    .replace(/\bzero errors?\b/gi, '')
+    .replace(/\b0 errors?\b/gi, '');
   return !/\b(fail(?:ed|ure)?|error|timed?\s*out|timeout|deadlock|stuck)\b/i.test(withoutNegatedFailure);
 }
 

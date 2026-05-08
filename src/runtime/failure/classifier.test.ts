@@ -94,6 +94,7 @@ function expectClassificationSurface(
   expect(result.summary.length).toBeGreaterThan(0);
   expect(result.signals.every((signal) => signal.source.length > 0)).toBe(true);
   expect(result.signals.every((signal) => signal.observation.length > 0)).toBe(true);
+  expect(result.signals.every((signal) => Object.values(Confidence).includes(signal.strength))).toBe(true);
 }
 
 // ── Timeout ──────────────────────────────────────────────────────────
@@ -598,6 +599,26 @@ describe('step overflow classification', () => {
       }),
     );
   });
+
+  it('classifies plain too-many-attempts summaries as step overflow with diagnosable signals', () => {
+    const result = classifyFailure(
+      'step overflow: too many attempts after retry budget exhausted in bounded workflow runner',
+    );
+
+    expectClassificationSurface(result, {
+      category: FailureClass.StepOverflow,
+      severity: Severity.Medium,
+      confidence: Confidence.Low,
+      nextAction: NextAction.Escalate,
+    });
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'plain-summary',
+        strength: Confidence.Medium,
+        observation: expect.stringContaining('step overflow'),
+      }),
+    ]);
+  });
 });
 
 // ── Unknown / Mixed Cases ────────────────────────────────────────────
@@ -900,6 +921,16 @@ describe('plain validation summary classification', () => {
 
   it('returns no-failure for explicit plain pass summaries', () => {
     const result = classifyFromSummary('All checks passed; no failures detected');
+
+    expect(result.failureClass).toBe(FailureClass.Unknown);
+    expect(result.severity).toBe(Severity.Low);
+    expect(result.confidence).toBe(Confidence.High);
+    expect(result.summary).toContain('no failure detected');
+    expect(result.signals).toEqual([]);
+  });
+
+  it('returns no-failure for plain pass summaries with negated errors', () => {
+    const result = classifyFromSummary('All checks passed; no errors');
 
     expect(result.failureClass).toBe(FailureClass.Unknown);
     expect(result.severity).toBe(Severity.Low);
