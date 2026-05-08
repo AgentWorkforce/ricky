@@ -339,6 +339,27 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
   });
 
+  it('treats workflow path fields as generation hints when the request text still asks to generate', () => {
+    const result = intake({
+      kind: 'structured_json',
+      surface: 'api',
+      receivedAt: RECEIVED_AT,
+      requestId: 'api-generate-with-workflow-path-hint',
+      data: {
+        spec: {
+          description: 'Generate a local workflow for packages/local/src/entrypoint.ts',
+          workflowFile: 'workflows/local-cli.workflow.ts',
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('generate');
+    expect(result.routing?.normalizedSpec.intent).toBe('generate');
+    expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
+    expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBe('workflows/local-cli.workflow.ts');
+  });
+
   it('routes structured generation specs whose requiredEvidence mentions logs to generate, not debug', () => {
     const result = intake({
       kind: 'structured_json',

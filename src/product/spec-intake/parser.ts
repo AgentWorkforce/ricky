@@ -185,6 +185,8 @@ const READY_ARTIFACT_KEYS = [
   'ready_workflow',
   'providedArtifact',
   'provided_artifact',
+];
+const WORKFLOW_PATH_HINT_KEYS = [
   'workflowFile',
   'workflowPath',
   'artifactPath',
@@ -357,12 +359,16 @@ function detectIntentFromRecord(data: Record<string, unknown>, fallbackText: str
       'failedRunId',
     ]),
   ].join('\n');
+  const textIntent = detectIntent(structuredText);
   const shapeIntent = inferIntentFromStructuredShape(data, fallbackText);
-  if (shapeIntent.primary === 'debug' || shapeIntent.primary === 'execute' || shapeIntent.primary === 'coordinate') {
+  if (shapeIntent.primary === 'debug' || shapeIntent.primary === 'coordinate') {
     return shapeIntent;
   }
 
-  const textIntent = detectIntent(structuredText);
+  if (shapeIntent.primary === 'execute' && textIntent.primary !== 'generate') {
+    return shapeIntent;
+  }
+
   if (textIntent.primary !== 'clarify' && textIntent.primary !== 'unknown') return textIntent;
   if (shapeIntent.primary !== 'unknown') return shapeIntent;
   return textIntent;
@@ -392,6 +398,13 @@ function inferIntentFromStructuredShape(data: Record<string, unknown>, fallbackT
     return {
       primary: 'execute',
       signals: ['shape:ready-artifact'],
+    };
+  }
+
+  if (records.some((record) => hasWorkflowArtifactValue(record, WORKFLOW_PATH_HINT_KEYS))) {
+    return {
+      primary: 'generate',
+      signals: ['shape:workflow-path-hint'],
     };
   }
 
