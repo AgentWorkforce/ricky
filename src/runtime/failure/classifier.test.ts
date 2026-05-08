@@ -363,6 +363,7 @@ describe('environment error classification', () => {
       nextAction: NextAction.InvestigateEnvironment,
     });
     expect(result.signals.map((s) => s.observation).join('\n')).toContain('command not found');
+    expect(result.signals.map((s) => s.observation).join('\n')).toContain('workflow-debugger command output');
     expect(result.signals).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1013,6 +1014,31 @@ describe('environment error false-positive guard', () => {
     const result = classifyFailure(run);
     // Should NOT be environment_error — "execution failed" is an application error
     expect(result.failureClass).not.toBe(FailureClass.EnvironmentError);
+  });
+
+  it('does not classify assertion expected text as observed environment evidence', () => {
+    let run = makeRun({ runId: 'run-expected-env-text', workflowId: 'wf-expected-env-text', workflowName: 'edge' });
+    let step = makeStep({ stepId: 'step-expected-env-text', stepName: 'verify-output' });
+
+    step = appendStepEvent(step, {
+      kind: 'verification',
+      result: failingVerification({
+        type: 'output_contains',
+        expected: 'command not found',
+        actual: 'not present',
+      }),
+    });
+    step = completeStep(step, 'failed');
+    run = addStepToRun(run, step);
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+    expectClassificationSurface(result, {
+      category: FailureClass.VerificationFailure,
+      severity: Severity.High,
+      confidence: Confidence.Medium,
+      nextAction: NextAction.FixAndRetry,
+    });
   });
 });
 

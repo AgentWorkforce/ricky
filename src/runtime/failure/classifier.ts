@@ -124,7 +124,7 @@ function classifyWithFullEvidence(
   }
 
   // 2. Environment error detection
-  if (detectEnvironmentError(evidence, signals)) {
+  if (detectEnvironmentError(summary, evidence, signals)) {
     detected.push(FailureClass.EnvironmentError);
   }
 
@@ -333,6 +333,7 @@ function detectTimeout(
 }
 
 function detectEnvironmentError(
+  summary: EvidenceSummary,
   evidence: WorkflowRunEvidence,
   signals: EvidenceSignal[],
 ): boolean {
@@ -382,6 +383,15 @@ function detectEnvironmentError(
       });
       found = true;
     }
+  }
+
+  if (!found && summary.firstError && matchesEnvironmentPattern(summary.firstError)) {
+    signals.push({
+      observation: `Summary first error matches environment pattern: ${truncate(summary.firstError, 120)}`,
+      source: 'run-summary',
+      strength: Confidence.High,
+    });
+    found = true;
   }
 
   return found;
@@ -613,7 +623,7 @@ function scanGatesForEnvErrors(
   let found = false;
   for (const gate of gates) {
     let foundInGateOutput = false;
-    const texts = [gate.stderrExcerpt, gate.stdoutExcerpt, gate.outputExcerpt].filter(Boolean) as string[];
+    const texts = textFields(gate.stderrExcerpt, gate.stdoutExcerpt, gate.outputExcerpt, gate.command);
     for (const text of texts) {
       if (matchesEnvironmentPattern(text)) {
         signals.push({
@@ -644,7 +654,14 @@ function scanVerificationsForEnvErrors(
 ): boolean {
   let found = false;
   for (const v of verifications) {
-    const texts = [v.stderrExcerpt, v.stdoutExcerpt, v.outputExcerpt, v.message].filter(Boolean) as string[];
+    const texts = textFields(
+      v.stderrExcerpt,
+      v.stdoutExcerpt,
+      v.outputExcerpt,
+      v.message,
+      v.actual,
+      v.command,
+    );
     for (const text of texts) {
       if (matchesEnvironmentPattern(text)) {
         signals.push({
@@ -665,7 +682,13 @@ function scanRetriesForEnvErrors(
 ): boolean {
   let found = false;
   for (const retry of step.retries) {
-    const texts = [retry.error, retry.stderrExcerpt, retry.stdoutExcerpt, retry.outputExcerpt].filter(Boolean) as string[];
+    const texts = textFields(
+      retry.error,
+      retry.stderrExcerpt,
+      retry.stdoutExcerpt,
+      retry.outputExcerpt,
+      retry.command,
+    );
     for (const text of texts) {
       if (matchesEnvironmentPattern(text)) {
         signals.push({
@@ -684,6 +707,10 @@ function scanRetriesForEnvErrors(
     ) || found;
   }
   return found;
+}
+
+function textFields(...values: Array<string | undefined>): string[] {
+  return values.filter((value): value is string => Boolean(value));
 }
 
 function stepHasPassingExecution(step: WorkflowStepEvidence): boolean {
