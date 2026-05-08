@@ -318,6 +318,13 @@ export function validateGeneratedArtifact(
   if (!hasExplicitWorkflowRunCwd(content)) {
     issues.push(blockingIssue('validation', 'RUN_CWD_MISSING', 'Rendered workflow does not run with explicit cwd.'));
   }
+  if (requiresRepairAwareRetry(content)) {
+    issues.push(blockingIssue(
+      'validation',
+      'REPAIR_AWARE_RETRY_MISSING',
+      'Rendered workflow must use retry error handling with repairAgent and repairRetries so repairable deterministic gates do not fail the workflow outright.',
+    ));
+  }
 
   if (spec && requiresImplementationWorkflow(spec)) {
     if (!/IMPLEMENTATION_WORKFLOW_CONTRACT/.test(content)) {
@@ -422,6 +429,18 @@ export function validateGeneratedArtifact(
     hasDeterministicGates,
     hasReviewStage,
   };
+}
+
+function requiresRepairAwareRetry(content: string): boolean {
+  if (/^\s*\.onError\(\s*['"]fail-fast['"]/m.test(content)) return true;
+  const workflowErrorHandling = content
+    .split('\n')
+    .filter((line) => /^\s*\.onError\(/.test(line));
+  if (workflowErrorHandling.length === 0) return true;
+
+  return workflowErrorHandling.some((line) =>
+    !/\.onError\(\s*['"]retry['"]\s*,\s*\{.*\brepairAgent\s*:.*\brepairRetries\s*:/.test(line),
+  );
 }
 
 function hasDeterministicSanityGate(artifact: RenderedArtifact): boolean {

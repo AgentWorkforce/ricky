@@ -1,4 +1,9 @@
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
+import {
+  DEFAULT_REPAIR_RETRY_ATTEMPTS,
+  DEFAULT_RETRY_BACKOFF_MS,
+  DEFAULT_RETRY_MAX_ATTEMPTS,
+} from '../../shared/constants.js';
 import { planMasterExecution, type ChildWorkflowPlan, type MasterExecutionPlan } from '../orchestration/index.js';
 import type {
   DeterministicGate,
@@ -177,7 +182,7 @@ function renderMasterSource(input: {
     `    .channel(${literal(input.channel)})`,
     '    .maxConcurrency(4)',
     '    .timeout(7200000)',
-    '    .onError(\'fail-fast\')',
+    `    .onError(${repairAwareOnError('master-lead')})`,
     '',
     '    .agent("master-lead", { cli: "claude", interactive: false, role: "Plans child workflow boundaries, dependency waves, and final integration evidence.", retries: 1 })',
     '    .agent("master-reviewer", { cli: "codex", preset: "reviewer", role: "Reviews child signoff evidence and master executor readiness.", retries: 1 })',
@@ -328,7 +333,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     `    .channel(${literal(`wf-ricky-child-${child.id}`)})`,
     '    .maxConcurrency(2)',
     '    .timeout(3600000)',
-    '    .onError(\'retry\', { maxRetries: 1, retryDelayMs: 1000 })',
+    `    .onError(${repairAwareOnError('validator-claude')})`,
     '    .agent("lead-claude", { cli: "claude", interactive: false, role: "Plans this bounded child workflow slice.", retries: 1 })',
     '    .agent("impl-codex", { cli: "codex", role: "Implements only this child workflow slice and its declared file scope.", retries: 2 })',
     '    .agent("reviewer-codex", { cli: "codex", preset: "reviewer", role: "Reviews code, tests, deterministic gates, and PR/result evidence.", retries: 1 })',
@@ -433,6 +438,10 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     '});',
     '',
   ].join('\n')}`;
+}
+
+function repairAwareOnError(repairAgent: string): string {
+  return `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS}, repairAgent: ${literal(repairAgent)}, repairRetries: ${DEFAULT_REPAIR_RETRY_ATTEMPTS} }`;
 }
 
 function buildMasterTasks(plan: MasterExecutionPlan): WorkflowTask[] {

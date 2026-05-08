@@ -49,6 +49,8 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).toContain('ricky run \'workflows/generated/runtime-master-children/01-nested-runner.ts\' --foreground --no-auto-fix');
     expect(rendered.content).toContain('MASTER_EXECUTOR_RESULT_READY');
     expect(rendered.content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
+    expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"master-lead\", repairRetries: 2 })");
+    expect(rendered.content.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
   });
 
@@ -135,6 +137,8 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
     expect(artifact.content).toContain('.agent("validator-claude"');
+    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(artifact.content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
     expect(artifact.content).toContain('80-to-100 fix loop');
     expect(artifact.content).toContain('deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion');
     expect(artifact.content).toContain('If using rg, guard it with command -v rg');
@@ -378,6 +382,8 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('.agent("validator-codex", { cli: "codex", preset: "worker"');
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
+    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-codex\", repairRetries: 2 })");
+    expect(artifact.content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
     expect(artifact.content).toContain('Codex structural marker gate');
     expect(artifact.content).toContain('must not be presented as independent review evidence');
     expect(artifact.content).toContain('Substantive review evidence comes from the Claude review steps plus deterministic validation gates');
@@ -1294,6 +1300,36 @@ describe('workflow generation pipeline', () => {
     });
     expect(result.patternDecision.specSignals).toContain('choosing-swarm-patterns skill loaded');
     expect(result.patternDecision.reason).toMatch(/choosing-swarm-patterns/i);
+    expect(artifact(result).content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-codex\", repairRetries: 2 })");
+    expect(artifact(result).content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
+  });
+
+  it('rejects generated workflows that can still fail fast without a repair agent', () => {
+    const implementationSpec = spec({
+      description: 'Implement workflow retry policy validation.',
+      targetFiles: ['src/product/generation/pipeline.ts'],
+    });
+    const result = generate({
+      spec: implementationSpec,
+      artifactPath: 'workflows/generated/repair-policy.ts',
+    });
+    const baseArtifact = artifact(result);
+    const weakArtifact = {
+      ...baseArtifact,
+      content: baseArtifact.content.replace(
+        ".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })",
+        ".onError('retry', { maxRetries: 2, retryDelayMs: 1000 })",
+      ),
+    };
+
+    const validation = validateGeneratedArtifact(weakArtifact, result.patternDecision, result.skillContext, implementationSpec);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'REPAIR_AWARE_RETRY_MISSING' }),
+      ]),
+    );
   });
 
   it('respects pattern override', () => {

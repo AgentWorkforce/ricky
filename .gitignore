@@ -21,7 +21,6 @@ coverage/
 .agent-relay.stale.*/
 .relay/
 .ricky/
-.trajectories/
 .workflow-artifacts/
 .factory/
 .mcp.json
