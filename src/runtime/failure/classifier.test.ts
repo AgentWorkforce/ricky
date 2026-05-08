@@ -4,6 +4,7 @@ import {
   classifyFromSummary,
   RETRY_OVERFLOW_THRESHOLD,
   STEP_VERIFICATION_OVERFLOW_THRESHOLD,
+  WORKFLOW_STEP_OVERFLOW_THRESHOLD,
 } from './classifier.js';
 import {
   createRunEvidence,
@@ -453,6 +454,46 @@ describe('required deterministic classifier coverage', () => {
         strength: Confidence.High,
       }),
     );
+  });
+
+  it('too many workflow steps without retries produces step overflow', () => {
+    let run = makeRun({ runId: 'run-required-step-count-overflow' });
+
+    for (let index = 1; index <= WORKFLOW_STEP_OVERFLOW_THRESHOLD + 1; index++) {
+      const step = completeStep(
+        makeStep({
+          stepId: `step-required-size-${index}`,
+          stepName: `bounded-worker-${index}`,
+        }),
+        'failed',
+      );
+      run = addStepToRun(run, step);
+    }
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+
+    expectClassificationSurface(result, {
+      category: FailureClass.StepOverflow,
+      severity: Severity.High,
+      confidence: Confidence.Low,
+      nextAction: NextAction.Escalate,
+    });
+    expect(result.summary).toContain('exceeded step size budget');
+    expect(result.secondaryClasses).toEqual([]);
+    expect(result.matchedSignals).toBe(result.signals);
+    expectDebuggerDiagnostics(result, [
+      'exceeded step size budget',
+      `${WORKFLOW_STEP_OVERFLOW_THRESHOLD + 1} workflow steps`,
+      `threshold of ${WORKFLOW_STEP_OVERFLOW_THRESHOLD}`,
+    ]);
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'step-overflow:run-summary',
+        observation: expect.stringContaining(`threshold of ${WORKFLOW_STEP_OVERFLOW_THRESHOLD}`),
+        strength: Confidence.Medium,
+      }),
+    ]);
   });
 
   it('too many bounded verification checks produces step overflow with diagnosable signals', () => {
@@ -998,6 +1039,41 @@ describe('step overflow classification', () => {
         }),
       ]),
     );
+  });
+
+  it('classifies failed runs that exceed the workflow step-count threshold', () => {
+    let run = makeRun();
+
+    for (let index = 1; index <= WORKFLOW_STEP_OVERFLOW_THRESHOLD + 1; index++) {
+      const step = completeStep(
+        makeStep({
+          stepId: `step-${index}`,
+          stepName: `workflow-step-${index}`,
+        }),
+        'failed',
+      );
+      run = addStepToRun(run, step);
+    }
+    run = completeRun(run);
+
+    const result = classifyFailure(run);
+
+    expectClassificationSurface(result, {
+      category: FailureClass.StepOverflow,
+      severity: Severity.High,
+      confidence: Confidence.Low,
+      nextAction: NextAction.Escalate,
+    });
+    expect(result.signals).toEqual([
+      expect.objectContaining({
+        source: 'step-overflow:run-summary',
+        observation: expect.stringContaining(
+          `${WORKFLOW_STEP_OVERFLOW_THRESHOLD + 1} workflow steps exceeds threshold of ${WORKFLOW_STEP_OVERFLOW_THRESHOLD}`,
+        ),
+        strength: Confidence.Medium,
+      }),
+    ]);
+    expect(result.matchedSignals).toBe(result.signals);
   });
 
   it('classifies overflow across multiple steps', () => {

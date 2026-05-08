@@ -55,6 +55,7 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
 
 export const RETRY_OVERFLOW_THRESHOLD = 5;
 export const STEP_VERIFICATION_OVERFLOW_THRESHOLD = 10;
+export const WORKFLOW_STEP_OVERFLOW_THRESHOLD = 10;
 
 // ── Public API ───────────────────────────────────────────────────────
 
@@ -214,6 +215,15 @@ function classifyFromSummaryOnly(summary: EvidenceSummary): FailureClassificatio
   }
 
   // Step overflow from summary
+  if (summary.totalSteps > WORKFLOW_STEP_OVERFLOW_THRESHOLD) {
+    signals.push({
+      observation: `${summary.totalSteps} workflow steps exceeds threshold of ${WORKFLOW_STEP_OVERFLOW_THRESHOLD}`,
+      source: 'step-overflow:run-summary',
+      strength: Confidence.Medium,
+    });
+    detected.push(FailureClass.StepOverflow);
+  }
+
   if (summary.retryCount >= RETRY_OVERFLOW_THRESHOLD && summary.totalSteps > 0) {
     signals.push({
       observation: `${summary.retryCount} retries across ${summary.totalSteps} steps`,
@@ -458,6 +468,15 @@ function detectStepOverflow(
       });
       found = true;
     }
+  }
+
+  if (summary.totalSteps > WORKFLOW_STEP_OVERFLOW_THRESHOLD) {
+    signals.push({
+      observation: `${summary.totalSteps} workflow steps exceeds threshold of ${WORKFLOW_STEP_OVERFLOW_THRESHOLD}`,
+      source: 'step-overflow:run-summary',
+      strength: Confidence.Medium,
+    });
+    found = true;
   }
 
   // Only add the distributed retry summary signal if we didn't add any

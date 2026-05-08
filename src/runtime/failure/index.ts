@@ -15,4 +15,5 @@ export {
   classifyFromSummary,
   RETRY_OVERFLOW_THRESHOLD,
   STEP_VERIFICATION_OVERFLOW_THRESHOLD,
+  WORKFLOW_STEP_OVERFLOW_THRESHOLD,
 } from './classifier.js';
