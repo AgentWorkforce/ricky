@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { intake } from './index.js';
-import type { RawSpecPayload } from './types.js';
+import { intake, normalizeSpec, parseSpec, routeSpec } from './index.js';
+import type { RawSpecPayload, RoutingDecision } from './types.js';
 
 const RECEIVED_AT = '2026-04-26T00:00:00.000Z';
 
@@ -15,21 +15,30 @@ function natural(text: string, surface: RawSpecPayload['surface'] = 'cli'): RawS
   };
 }
 
+function routeThroughStages(payload: RawSpecPayload): RoutingDecision {
+  const parsed = parseSpec(payload);
+  const { normalized, issues } = normalizeSpec(parsed);
+  return routeSpec(normalized, issues);
+}
+
 describe('spec intake parser, normalizer, and router', () => {
   it('routes Claude handoff text with workflow intent to generate without requiring a hand-authored workflow file', () => {
-    const result = intake(
-      natural(
-        [
-          'Claude handoff: create a new workflow spec for release readiness.',
-          'Goal: generate coordinated validation for package, typecheck, and tests.',
-          'Do not assume the user has already authored a workflow file.',
-        ].join('\n'),
-        'claude_handoff',
-      ),
+    const payload = natural(
+      [
+        'Claude handoff: create a new workflow spec for release readiness.',
+        'Goal: generate coordinated validation for package, typecheck, and tests.',
+        'Do not assume the user has already authored a workflow file.',
+      ].join('\n'),
+      'claude_handoff',
     );
+    const result = intake(payload);
+    const stagedRouting = routeThroughStages(payload);
 
     expect(result.success).toBe(true);
     expect(result.routing?.target).toBe('generate');
+    expect(stagedRouting.target).toBe('generate');
+    expect(stagedRouting.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
+    expect(stagedRouting.normalizedSpec.desiredAction.workflowFileHint).toBeUndefined();
     expect(result.routing?.normalizedSpec.intent).toBe('generate');
     expect(result.routing?.normalizedSpec.sourceSpec.intent.primary).toBe('generate');
     expect(result.routing?.normalizedSpec.desiredAction.kind).toBe('generate');
