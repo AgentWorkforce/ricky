@@ -44,6 +44,7 @@
     "test": "npm run bundle && vitest run",
     "evals:compile": "node scripts/evals/compile-ricky-evals.mjs",
     "evals": "npm run evals:compile && node scripts/evals/run-ricky-evals.mjs",
+    "evals:provider": "npm run build && npm run evals -- --provider --executor openrouter",
     "evals:opencode": "npm run evals:compile && node scripts/evals/run-ricky-evals.mjs --provider --executor opencode",
     "evals:list": "npm run evals:compile && node scripts/evals/run-ricky-evals.mjs --list",
     "evals:summary": "node scripts/evals/summarize-ricky-evals.mjs",

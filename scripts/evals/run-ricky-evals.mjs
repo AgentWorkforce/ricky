@@ -15,6 +15,8 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DEFAULT_OPENCODE_MODEL = 'opencode/minimax-m2.5-free';
+const DEFAULT_OPENROUTER_MODEL = 'openai/gpt-oss-120b:free';
+const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const { argv: evalArgv, executorOverride } = parseRickyEvalArgs(process.argv.slice(2));
 const defaultExecutors = createDefaultHumanEvalExecutors(ROOT);
 
@@ -25,6 +27,7 @@ const exitCode = await runHumanEvalCli({
   runsDir: path.join(ROOT, '.ricky', 'evals', 'runs'),
   executors: {
     manual: executeManual,
+    openrouter: executeOpenRouter,
     opencode: executeOpenCode,
     'ricky-cli': executeRickyCli,
   },
@@ -41,10 +44,91 @@ const exitCode = await runHumanEvalCli({
 process.exitCode = exitCode;
 
 function executeManual(testCase, context) {
+  if (context.providerMode && executorOverride === 'openrouter') {
+    return executeOpenRouter(testCase, context);
+  }
   if (context.providerMode && executorOverride === 'opencode') {
     return executeOpenCode(testCase, context);
   }
   return defaultExecutors.manual(testCase, context);
+}
+
+async function executeOpenRouter(testCase, context) {
+  if (!context.providerMode) {
+    throw createSkippedEvalError('openrouter executor skipped; rerun with --provider or HUMAN_EVAL_PROVIDER=1');
+  }
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw createSkippedEvalError('openrouter executor skipped; OPENROUTER_API_KEY is missing');
+  }
+
+  const model = process.env.RICKY_EVAL_OPENROUTER_MODEL ?? DEFAULT_OPENROUTER_MODEL;
+  const timeoutMs = readPositiveInt(process.env.RICKY_EVAL_OPENROUTER_TIMEOUT_MS, 120_000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_ENDPOINT, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+        'http-referer': process.env.GITHUB_SERVER_URL
+          ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY ?? ''}`
+          : 'https://github.com/AgentWorkforce/ricky',
+        'x-title': 'Ricky Evals',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You are Ricky, the AgentWorkforce workflow reliability, coordination, and authoring assistant.',
+              'Follow Ricky repository conventions from AGENTS.md, workflow standards, shared authoring rules, and product specs.',
+              'Answer the user request directly. Do not mention this eval harness or hidden rubric.',
+            ].join(' '),
+          },
+          {
+            role: 'user',
+            content: buildProviderPrompt(testCase),
+          },
+        ],
+      }),
+    });
+
+    const durationMs = Date.now() - startedAt;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : JSON.stringify(payload);
+      throw new Error(`OpenRouter eval failed: ${response.status} ${detail}`);
+    }
+
+    const content = String(payload?.choices?.[0]?.message?.content ?? '').trim();
+    if (!content) {
+      throw new Error('OpenRouter eval returned an empty response.');
+    }
+
+    return {
+      ok: true,
+      status: 'completed',
+      content,
+      model,
+      toolCalls: [],
+      notes: `Ran OpenRouter eval with model ${model}; durationMs=${durationMs}.`,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`OpenRouter eval timed out after ${timeoutMs}ms.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function executeOpenCode(testCase, context) {
@@ -188,6 +272,10 @@ function decodeMockText(value) {
 }
 
 function buildOpenCodePrompt(testCase) {
+  return buildProviderPrompt(testCase);
+}
+
+function buildProviderPrompt(testCase) {
   const systemPrompt = stringValue(testCase.input.systemPrompt);
   const threadHistory = Array.isArray(testCase.input.threadHistory)
     ? testCase.input.threadHistory
