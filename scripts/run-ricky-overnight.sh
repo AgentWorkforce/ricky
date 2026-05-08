@@ -1321,10 +1321,26 @@ validate_repo() {
   npm test
 }
 
+capture_meaningful_git_status() {
+  git status --short -- . ':(exclude)tmp/' ':(exclude).workflow-artifacts/' ':(exclude).trajectories/'
+}
+
+capture_meaningful_git_diff_stat() {
+  git diff --stat -- . ':(exclude)tmp/' ':(exclude).workflow-artifacts/' ':(exclude).trajectories/' || true
+}
+
+meaningful_tracked_delta_exists() {
+  ! git diff --quiet -- . ':(exclude)tmp/' ':(exclude).workflow-artifacts/' ':(exclude).trajectories/'
+}
+
+meaningful_untracked_delta_exists() {
+  [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/' ':!.trajectories/')" ]]
+}
+
 inspect_repo_changes() {
   log "capturing repo status"
-  git status --short > "$ARTIFACT_DIR/git-status.txt"
-  git diff --stat > "$ARTIFACT_DIR/git-diff-stat.txt" || true
+  capture_meaningful_git_status > "$ARTIFACT_DIR/git-status.txt"
+  capture_meaningful_git_diff_stat > "$ARTIFACT_DIR/git-diff-stat.txt"
 
   if [[ -s "$ARTIFACT_DIR/git-status.txt" ]]; then
     cat "$ARTIFACT_DIR/git-status.txt"
@@ -1352,7 +1368,7 @@ repo_has_captured_head_delta() {
 }
 
 repo_has_meaningful_delta() {
-  ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]] || repo_has_captured_head_delta
+  meaningful_tracked_delta_exists || meaningful_untracked_delta_exists || repo_has_captured_head_delta
 }
 
 commit_if_clean_delta() {
@@ -1371,8 +1387,8 @@ commit_if_clean_delta() {
     head_advanced="true"
   fi
 
-  if ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]]; then
-    git add -A ':!tmp/' ':!.workflow-artifacts/'
+  if meaningful_tracked_delta_exists || meaningful_untracked_delta_exists; then
+    git add -A ':!tmp/' ':!.workflow-artifacts/' ':!.trajectories/'
     git commit -m "chore(overnight): capture $short progress" || true
   elif [[ "$head_advanced" == "true" ]]; then
     log "repo HEAD already advanced during $workflow_path; capturing committed state"
