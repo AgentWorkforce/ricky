@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "lastUpdated": "2026-05-08T22:46:08.531Z",
+  "lastUpdated": "2026-05-08T22:58:11.763Z",
   "trajectories": {
-    "traj_xhkvmppvbpaj": {
-      "title": "ricky-wave1-local-run-coordinator-workflow",
+    "traj_mu4hjoju67a3": {
+      "title": "ricky-wave10-close-agent-assistant-handoff-issue-workflow",
       "status": "completed",
-      "startedAt": "2026-05-08T22:38:27.166Z",
-      "completedAt": "2026-05-08T22:46:08.526Z",
-      "path": "/Users/khaliqgant/Projects/AgentWorkforce/ricky/.trajectories/completed/2026-05/traj_xhkvmppvbpaj.json"
+      "startedAt": "2026-05-08T22:58:03.843Z",
+      "completedAt": "2026-05-08T22:58:11.757Z",
+      "path": "/Users/khaliqgant/Projects/AgentWorkforce/ricky/.trajectories/completed/2026-05/traj_mu4hjoju67a3.json"
     }
   }
 }
