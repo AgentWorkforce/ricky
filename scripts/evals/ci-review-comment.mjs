@@ -209,6 +209,9 @@ function safeReadResultJson(filePath) {
 
 async function upsertPullRequestComment(body) {
   const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+  if (!owner || !repo) {
+    throw new Error(`Invalid GITHUB_REPOSITORY format: expected "owner/repo", got "${process.env.GITHUB_REPOSITORY}"`);
+  }
   const prNumber = process.env.PR_NUMBER;
   const headers = {
     accept: 'application/vnd.github+json',

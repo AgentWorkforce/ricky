@@ -44,10 +44,10 @@ const exitCode = await runHumanEvalCli({
 process.exitCode = exitCode;
 
 function executeManual(testCase, context) {
-  if (context.providerMode && executorOverride === 'openrouter') {
+  if (executorOverride === 'openrouter') {
     return executeOpenRouter(testCase, context);
   }
-  if (context.providerMode && executorOverride === 'opencode') {
+  if (executorOverride === 'opencode') {
     return executeOpenCode(testCase, context);
   }
   return defaultExecutors.manual(testCase, context);
@@ -195,9 +195,6 @@ function contentFromOpenRouterChoice(choice) {
     .join('\n')
     .trim();
   if (fromParts) return fromParts;
-
-  const reasoning = typeof message?.reasoning === 'string' ? message.reasoning.trim() : '';
-  if (reasoning) return reasoning;
 
   return '';
 }
