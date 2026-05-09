@@ -1033,10 +1033,31 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         intakeResult.routing.target,
         intakeResult.routing.normalizedSpec.desiredAction.workflowFileHint,
       );
+      // Auto-fix retries (retryBaseRequest) promote response.artifacts[0].path
+      // to request.specPath and flip source to 'workflow-artifact' even when
+      // the artifact was never written to disk. That combination matches
+      // isExecutableWorkflowPath, so workflowFile becomes non-null and the
+      // routing target stays away from 'generate' because the spec content
+      // still describes a feature, not a debug session. Without re-entering
+      // generation here, runtime-precheck fails INVALID_ARTIFACT every retry
+      // and the auto-fix budget burns identically.
+      //
+      // We only fall through for retries we synthesized ourselves
+      // (autoFixGeneratedFrom is set in retryBaseRequest); user-provided
+      // workflow-artifact handoffs that name a missing file should still
+      // surface the precheck blocker rather than silently regenerate.
+      const isAutoFixSynthesizedRetry = typeof activeRequest.metadata?.autoFixGeneratedFrom === 'string';
+      const fallThroughForMissingArtifact = isAutoFixSynthesizedRetry
+        && !!workflowFile
+        && intakeResult.routing.target !== 'generate'
+        && !(await workflowFileReadable(workflowFile, cwd));
       let artifact: RenderedArtifact | null = null;
       let generationResult: GenerationResult | null = null;
 
-      if (intakeResult.routing.target === 'generate' || !workflowFile) {
+      if (intakeResult.routing.target === 'generate' || !workflowFile || fallThroughForMissingArtifact) {
+        if (fallThroughForMissingArtifact) {
+          logs.push(`[local] workflow file ${workflowFile} is not readable on disk after auto-fix retry; re-entering generation instead of failing precheck`);
+        }
         const executionPreference: ExecutionPreference = activeRequest.mode === 'both' ? 'auto' : 'local';
         const normalizedSpec = {
           ...intakeResult.routing.normalizedSpec,
@@ -1605,6 +1626,17 @@ function artifactPathOverrideFor(request: LocalInvocationRequest): string | unde
 
 function isExecutableWorkflowPath(path: string): boolean {
   return /(?:^|\/)workflows\/.+\.(?:ts|js)$|\.workflow\.(?:ts|js|yaml|yml)$/i.test(path);
+}
+
+async function workflowFileReadable(workflowFile: string, cwd: string): Promise<boolean> {
+  const { access } = await import('node:fs/promises');
+  const resolved = isAbsolute(workflowFile) ? workflowFile : resolve(cwd, workflowFile);
+  try {
+    await access(resolved);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function mapCoordinatorLogs(result: CoordinatorResult): string[] {

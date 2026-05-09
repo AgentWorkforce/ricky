@@ -2381,6 +2381,75 @@ describe('runLocal', () => {
     expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
   });
 
+  // Regression: when an auto-fix retry synthesizes a workflow-artifact
+  // handoff (retryBaseRequest sets metadata.autoFixGeneratedFrom) pointing
+  // at a path that matches isExecutableWorkflowPath but does not exist on
+  // disk, and the spec content routes to a non-'generate' intent like
+  // 'debug', the executor used to skip generation and let runtime-precheck
+  // fail INVALID_ARTIFACT every retry. The fix re-enters the generation
+  // block so the artifact is actually rendered and written, breaking the
+  // 7/7 INVALID_ARTIFACT loop.
+  it('regression: auto-fix retry re-enters generation when synthesized workflowFile is missing on disk', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tempDir = await mkdtemp(join(tmpdir(), 'ricky-missing-workflow-'));
+
+    try {
+      const localExecutor = memoryLocalExecutorOptions({ cwd: tempDir });
+      const debugSpec = [
+        '# Spec: handle failing checks',
+        '',
+        'When checks have failed or stack traces appear, route the failure',
+        'to the remediation pipeline. We need to fix the broken state.',
+      ].join('\n');
+      const phantomArtifactPath = 'workflows/generated/never-written.workflow.ts';
+      const result = await runLocal(
+        {
+          source: 'workflow-artifact',
+          artifactPath: phantomArtifactPath,
+          // Marker that retryBaseRequest stamps on auto-fix-synthesized retries.
+          metadata: { autoFixGeneratedFrom: 'cli' },
+        },
+        { localExecutor, artifactReader: mockArtifactReader(debugSpec) },
+      );
+
+      expect(localExecutor.writes.length).toBeGreaterThanOrEqual(1);
+      expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(true);
+      expect(result.logs.some((l) => l.includes('is not readable on disk after auto-fix retry'))).toBe(true);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  // Companion: a user-provided workflow-artifact handoff that names a
+  // missing file should still surface the runtime-precheck blocker rather
+  // than silently regenerate. (This guards against over-broadening the fix.)
+  it('regression: user-provided missing workflow-artifact path does NOT regenerate', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tempDir = await mkdtemp(join(tmpdir(), 'ricky-user-missing-'));
+
+    try {
+      const localExecutor = memoryLocalExecutorOptions({ cwd: tempDir });
+      const result = await runLocal(
+        {
+          source: 'workflow-artifact',
+          artifactPath: 'workflows/generated/never-written.workflow.ts',
+        },
+        { localExecutor, artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";') },
+      );
+
+      // No generation, no write — the runtime path runs (commandRunner is
+      // mocked so precheck is bypassed), but the gate did not regenerate.
+      expect(result.logs.some((l) => l.includes('[local] workflow generation'))).toBe(false);
+      expect(localExecutor.writes).toHaveLength(0);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('reads workflow artifact input and routes the artifact path to the local runtime without Cloud fallback', async () => {
     const localExecutor = memoryLocalExecutorOptions({ stdout: ['artifact run ok'] });
     const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
