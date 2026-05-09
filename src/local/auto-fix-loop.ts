@@ -700,11 +700,21 @@ function injectWorkflowEnvLoader(content: string, requiredEnvVars: string[]): st
   let next = content;
   let changed = false;
 
-  if (!next.includes("from 'node:fs'") && !next.includes('from "node:fs"')) {
+  // We must check that the *aliases* loadRickyWorkflowEnv references are
+  // already imported, not just that the module name appears anywhere in the
+  // file. The master workflow renderer emits real `import { mkdirSync,
+  // writeFileSync } from 'node:fs'` strings inside shell HEREDOCs in
+  // .step({ command: ... }) calls — that's a string literal, not a module
+  // import, but a substring check for `from 'node:fs'` matches it and
+  // silently skips adding `import * as rickyWorkflowFs from 'node:fs'`.
+  // The injected loadRickyWorkflowEnv body then ReferenceErrors at module
+  // load time. Match an actual top-of-file `import * as rickyWorkflowFs`
+  // statement so the helpers always have their aliases.
+  if (!hasRickyWorkflowAliasImport(next, 'rickyWorkflowFs', 'node:fs')) {
     next = insertAfterWorkflowImport(next, "import * as rickyWorkflowFs from 'node:fs';");
     changed = true;
   }
-  if (!next.includes("from 'node:path'") && !next.includes('from "node:path"')) {
+  if (!hasRickyWorkflowAliasImport(next, 'rickyWorkflowPath', 'node:path')) {
     next = insertAfterWorkflowImport(next, "import * as rickyWorkflowPath from 'node:path';");
     changed = true;
   }
@@ -740,6 +750,22 @@ function insertAfterWorkflowImport(content: string, importLine: string): string 
     return content.replace(workflowImport, (match) => `${match}${importLine}\n`);
   }
   return `${importLine}\n${content}`;
+}
+
+function hasRickyWorkflowAliasImport(content: string, alias: string, moduleName: string): boolean {
+  // Only treat the alias as imported when there is an actual top-of-file
+  // `import * as <alias> from '<moduleName>'` (or `"<moduleName>"`)
+  // statement anchored to the start of a line. Substring matches against
+  // `from 'node:fs'` would otherwise be fooled by shell HEREDOC strings
+  // inside .step({ command: ... }) bodies that happen to contain a literal
+  // import line as part of an embedded `node --input-type=module` script.
+  const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedModule = moduleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const importPattern = new RegExp(
+    `^import\\s+\\*\\s+as\\s+${escapedAlias}\\s+from\\s+['"]${escapedModule}['"];?\\s*$`,
+    'm',
+  );
+  return importPattern.test(content);
 }
 
 function insertBeforeMain(content: string, helper: string): string {

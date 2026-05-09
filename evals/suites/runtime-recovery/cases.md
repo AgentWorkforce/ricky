@@ -69,6 +69,28 @@ maxToolCalls: 0
 - Hide the existing run marker from the user.
 - Treat the conflict as a generic failure with no recovery path.
 
+## runtime-recovery.env-loader-injection-runtime-loadable
+Executor: manual
+Kind: regression
+Tags: runtime, auto-fix, env-loader
+Human Review: true
+
+### Message
+A workflow artifact references a `MISSING_ENV_VAR` value. Ricky's deterministic auto-fix injects the `.env.local` / `.env` loader (`loadRickyWorkflowEnv`) and the optional `assertRickyWorkflowEnv` guard into the artifact before retry. The artifact may be a master-rendered workflow whose `.step({ command: ... })` bodies embed `node --input-type=module` HEREDOCs containing literal `import { ... } from 'node:fs'` / `from 'node:path'` strings.
+
+### Deterministic Checks
+maxToolCalls: 0
+
+### Must
+- Produce a repaired artifact that successfully loads under Node, not just one that contains the marker comment. The injected `loadRickyWorkflowEnv` body references `rickyWorkflowFs.*` and `rickyWorkflowPath.*`, so the repair must also add the corresponding `import * as rickyWorkflowFs from 'node:fs'` and `import * as rickyWorkflowPath from 'node:path'` aliases at module top level.
+- Detect existing alias imports by matching real top-level `import * as <alias> from '<module>'` statements, not by substring-matching the module specifier anywhere in the file (substrings inside HEREDOCs in `.step({ command: ... })` bodies do not count as imports).
+- Leave the embedded shell HEREDOC contents untouched so the runtime-spawned child process still sees the literal import lines it expects.
+
+### Must Not
+- Skip adding the `rickyWorkflowFs` / `rickyWorkflowPath` aliases because `from 'node:fs'` or `from 'node:path'` already appears somewhere in the file as a string literal.
+- Inject `loadRickyWorkflowEnv` (or `assertRickyWorkflowEnv`) without the supporting alias imports, which produces a `ReferenceError: rickyWorkflowPath is not defined` at module load and burns the auto-fix budget on `UNSUPPORTED_RUNTIME at runtime-launch`.
+- Rewrite or escape the embedded HEREDOC text in step commands.
+
 ## runtime-recovery.auto-fix-bounded-loop
 Executor: manual
 Kind: capability
