@@ -15,6 +15,8 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DEFAULT_OPENCODE_MODEL = 'opencode/minimax-m2.5-free';
+const DEFAULT_OPENROUTER_MODEL = 'openai/gpt-oss-120b:free';
+const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const { argv: evalArgv, executorOverride } = parseRickyEvalArgs(process.argv.slice(2));
 const defaultExecutors = createDefaultHumanEvalExecutors(ROOT);
 
@@ -25,6 +27,7 @@ const exitCode = await runHumanEvalCli({
   runsDir: path.join(ROOT, '.ricky', 'evals', 'runs'),
   executors: {
     manual: executeManual,
+    openrouter: executeOpenRouter,
     opencode: executeOpenCode,
     'ricky-cli': executeRickyCli,
   },
@@ -41,10 +44,165 @@ const exitCode = await runHumanEvalCli({
 process.exitCode = exitCode;
 
 function executeManual(testCase, context) {
-  if (context.providerMode && executorOverride === 'opencode') {
+  if (executorOverride === 'openrouter') {
+    return executeOpenRouter(testCase, context);
+  }
+  if (executorOverride === 'opencode') {
     return executeOpenCode(testCase, context);
   }
   return defaultExecutors.manual(testCase, context);
+}
+
+async function executeOpenRouter(testCase, context) {
+  if (!context.providerMode) {
+    throw createSkippedEvalError('openrouter executor skipped; rerun with --provider or HUMAN_EVAL_PROVIDER=1');
+  }
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw createSkippedEvalError('openrouter executor skipped; OPENROUTER_API_KEY is missing');
+  }
+
+  const model = process.env.RICKY_EVAL_OPENROUTER_MODEL ?? DEFAULT_OPENROUTER_MODEL;
+  const timeoutMs = readPositiveInt(process.env.RICKY_EVAL_OPENROUTER_TIMEOUT_MS, 120_000);
+  const maxAttempts = readPositiveInt(process.env.RICKY_EVAL_OPENROUTER_MAX_ATTEMPTS, 3);
+  const maxTokens = readPositiveInt(process.env.RICKY_EVAL_OPENROUTER_MAX_TOKENS, 1200);
+  const startedAt = Date.now();
+  const emptyAttempts = [];
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const { content, note } = await runOpenRouterAttempt({
+        apiKey,
+        model,
+        timeoutMs,
+        maxTokens,
+        testCase,
+      });
+      if (content) {
+        const durationMs = Date.now() - startedAt;
+        return {
+          ok: true,
+          status: 'completed',
+          content,
+          model,
+          toolCalls: [],
+          notes: `Ran OpenRouter eval with model ${model}; attempts=${attempt}; durationMs=${durationMs}.${note ? ` ${note}` : ''}`,
+        };
+      }
+      emptyAttempts.push(`attempt ${attempt}: ${note || 'empty content'}`);
+    } catch (error) {
+      if (attempt >= maxAttempts || !isRetryableOpenRouterError(error)) {
+        throw error;
+      }
+      emptyAttempts.push(`attempt ${attempt}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return {
+    ok: false,
+    status: 'completed',
+    content: [
+      `OpenRouter returned an empty response after ${maxAttempts} attempts for ${testCase.id}.`,
+      'This provider response is reviewable as an infrastructure-quality signal, but it is not a Ricky product answer.',
+      '',
+      'Attempts:',
+      ...emptyAttempts.map((attempt) => `- ${attempt}`),
+    ].join('\n'),
+    model,
+    toolCalls: [],
+    notes: `OpenRouter empty response fallback after ${maxAttempts} attempts; durationMs=${Date.now() - startedAt}.`,
+  };
+}
+
+async function runOpenRouterAttempt({ apiKey, model, timeoutMs, maxTokens, testCase }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_ENDPOINT, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+        'http-referer': process.env.GITHUB_SERVER_URL
+          ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY ?? ''}`
+          : 'https://github.com/AgentWorkforce/ricky',
+        'x-title': 'Ricky Evals',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: maxTokens,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You are Ricky, the AgentWorkforce workflow reliability, coordination, and authoring assistant.',
+              'Follow Ricky repository conventions from AGENTS.md, workflow standards, shared authoring rules, and product specs.',
+              'Answer the user request directly. Keep the answer concise and under 700 words.',
+              'Do not mention this eval harness or hidden rubric.',
+            ].join(' '),
+          },
+          {
+            role: 'user',
+            content: buildProviderPrompt(testCase),
+          },
+        ],
+      }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : JSON.stringify(payload);
+      const error = new Error(`OpenRouter eval failed: ${response.status} ${detail}`);
+      error.status = response.status;
+      throw error;
+    }
+
+    const choice = payload?.choices?.[0];
+    const content = contentFromOpenRouterChoice(choice);
+    const finishReason = typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined;
+    return {
+      content,
+      note: finishReason ? `finish_reason=${finishReason}` : undefined,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      const timeoutError = new Error(`OpenRouter eval timed out after ${timeoutMs}ms.`);
+      timeoutError.retryable = true;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function contentFromOpenRouterChoice(choice) {
+  const message = choice?.message;
+  const direct = typeof message?.content === 'string' ? message.content.trim() : '';
+  if (direct) return direct;
+
+  const contentParts = Array.isArray(message?.content) ? message.content : [];
+  const fromParts = contentParts
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (typeof part?.text === 'string') return part.text;
+      if (typeof part?.content === 'string') return part.content;
+      return '';
+    })
+    .join('\n')
+    .trim();
+  if (fromParts) return fromParts;
+
+  return '';
+}
+
+function isRetryableOpenRouterError(error) {
+  if (!(error instanceof Error)) return false;
+  const status = typeof error.status === 'number' ? error.status : undefined;
+  return error.retryable === true || error.name === 'AbortError' || status === 408 || status === 409 || status === 429 || (status !== undefined && status >= 500);
 }
 
 function executeOpenCode(testCase, context) {
@@ -188,6 +346,10 @@ function decodeMockText(value) {
 }
 
 function buildOpenCodePrompt(testCase) {
+  return buildProviderPrompt(testCase);
+}
+
+function buildProviderPrompt(testCase) {
   const systemPrompt = stringValue(testCase.input.systemPrompt);
   const threadHistory = Array.isArray(testCase.input.threadHistory)
     ? testCase.input.threadHistory
