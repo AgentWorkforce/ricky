@@ -53,7 +53,7 @@ async function main() {
         "  { pattern: /export/i, message: 'failure index exports are missing from index.ts', haystack: indexText },",
         "  { pattern: /describe|it\\(/, message: 'classifier tests are missing structured cases', haystack: tests },",
         "];",
-        "const failures = requiredChecks.filter((check) => !check.pattern.test(check.haystack)).map((check) => check.message);"
+        "const failures = requiredChecks.filter((check) => !check.pattern.test(check.haystack)).map((check) => check.message);",
         "if (failures.length) {",
         "  console.error(failures.join('\\n'));",
         "  process.exit(1);",
