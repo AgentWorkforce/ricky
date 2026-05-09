@@ -753,6 +753,24 @@ describe('spec intake parser, normalizer, and router', () => {
       expect(targets).toContain('packages/core/src/bootstrap/launcher.ts');
     });
 
+    it('treats a present-but-empty `## Target Files` block as authoritative', () => {
+      const result = intake(
+        natural(
+          [
+            '# Spec',
+            'Prose mentions `packages/core/src/bootstrap/launcher.ts`, but the explicit block is empty.',
+            '',
+            '## Target Files',
+            '',
+            '## Acceptance',
+            'It works.',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toEqual([]);
+    });
+
     it('keeps deeply-nested paths without an extension (3+ segments)', () => {
       const result = intake(
         natural('Touch packages/web/lib/nango-bridge for the new adapter.'),

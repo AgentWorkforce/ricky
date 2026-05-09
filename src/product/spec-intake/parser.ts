@@ -878,7 +878,7 @@ function extractTargetContext(text: string): string | undefined {
 
 function extractTargetFiles(text: string): string[] {
   const fromBlock = extractTargetFilesBlock(text);
-  if (fromBlock.length > 0) return fromBlock;
+  if (fromBlock !== null) return fromBlock;
   const paths: string[] = [];
   for (const match of text.matchAll(PATH_PATTERN)) {
     const candidate = match[1];
@@ -898,9 +898,9 @@ function looksLikeRealPath(candidate: string): boolean {
   return RECOGNIZED_PATH_PREFIXES.some((prefix) => candidate.startsWith(prefix));
 }
 
-function extractTargetFilesBlock(text: string): string[] {
+function extractTargetFilesBlock(text: string): string[] | null {
   const headingMatch = text.match(/^##+\s+Target\s+Files\s*$/im);
-  if (!headingMatch || headingMatch.index === undefined) return [];
+  if (!headingMatch || headingMatch.index === undefined) return null;
   const startIdx = headingMatch.index + headingMatch[0].length;
   const remainder = text.slice(startIdx);
   const nextHeadingMatch = remainder.match(/^#{1,6}\s+/m);
