@@ -327,7 +327,15 @@ describe('workforce persona workflow writer', () => {
     expect(result.artifact?.content).toContain('WORKFORCE_PERSONA_MASTER_AUTHORING');
   });
 
-  it('errors instead of writing a file when the harness returns malformed text', async () => {
+  it('falls back to deterministic rendering with a visible warning when the harness returns malformed text', async () => {
+    // Regression: previously this returned success: false and discarded the
+    // valid baseResult.artifact entirely. The auto-fix loop then chased a
+    // phantom artifact (retryBaseRequest promotes response.artifacts[0].path
+    // → request.specPath → workflowFileForRoute returns it → gate skips
+    // generation → precheck fails INVALID_ARTIFACT every retry until the
+    // auto-fix budget burns). We now mirror the existing pre-write
+    // validation fallback: success: true with the deterministic render and
+    // a warning that surfaces the persona writer failure.
     const resolver: WorkforcePersonaResolver = async () => ({
       source: 'package',
       intent: 'agent-relay-workflow',
@@ -355,9 +363,17 @@ describe('workforce persona workflow writer', () => {
       },
     });
 
-    expect(result.success).toBe(false);
-    const errorText = result.validation.errors.join(' | ');
-    expect(errorText).toMatch(/workflow|persona|fenced|structured/i);
+    expect(result.success).toBe(true);
+    expect(result.artifact).not.toBeNull();
+    expect(result.artifact?.artifactPath).toBe('workflows/generated/malformed.ts');
+    // The fallback artifact is the deterministic render, not the malformed
+    // persona output.
+    expect(result.artifact?.content).toContain('workflow(');
+    // The persona writer failure is surfaced as a warning so users notice
+    // even though Ricky kept their run unblocked.
+    const warningText = result.validation.warnings.join(' | ');
+    expect(warningText).toMatch(/workforce persona writer failed/i);
+    expect(result.workforcePersona?.warnings.join(' | ')).toMatch(/workforce persona writer failed/i);
   });
 
   it('returns persona clarification questions instead of falling back to deterministic rendering', async () => {

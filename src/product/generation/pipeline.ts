@@ -201,29 +201,36 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
         workforcePersona: null,
       };
     }
+    // The workforce-persona writer failed (e.g. opencode/claude CLI errored,
+    // timed out, or returned a non-completed status). We already have a
+    // valid deterministic baseResult.artifact (the early-return at the top
+    // of this function ensures baseResult.success === true and
+    // baseResult.artifact is non-null), so fall back to it instead of
+    // returning success: false. Returning success: false here previously
+    // caused entrypoint.execute() to early-return without writing anything,
+    // which then made the auto-fix loop chase a phantom artifact path
+    // (retryBaseRequest promotes response.artifacts[0].path → request.specPath
+    // → workflowFileForRoute returns it → gate skips generation → precheck
+    // fails INVALID_ARTIFACT every retry until the auto-fix budget burns).
+    //
+    // This matches the validation-failure fallback above (lines 154-166),
+    // which also returns success: true with the deterministic baseResult.
     const writerError = error instanceof WorkforcePersonaWriterError ? error : null;
-    const issue = blockingIssue(
-      'rendering',
-      'WORKFORCE_PERSONA_WRITER_FAILED',
-      writerError?.message ?? `Workforce persona writer failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    const validation = {
-      ...baseResult.validation,
-      valid: false,
-      errors: [...baseResult.validation.errors, issue.message],
-      issues: [...baseResult.validation.issues, issue],
-    };
+    const fallbackMessage = `Workforce persona writer failed (${
+      writerError?.message ?? (error instanceof Error ? error.message : String(error))
+    }); used Ricky deterministic renderer instead.`;
+    const fallbackIssue = warningIssue('rendering', 'WORKFORCE_PERSONA_WRITER_FAILED', fallbackMessage);
     return {
       ...baseResult,
-      success: false,
-      validation,
+      success: true,
+      validation: addValidationWarning(baseResult.validation, fallbackIssue),
       workforcePersona: {
         personaId: 'unresolved',
         tier: 'unknown',
         harness: 'unknown',
         model: 'unknown',
         promptDigest: '',
-        warnings: writerError?.warnings ?? [],
+        warnings: [...(writerError?.warnings ?? []), fallbackMessage],
         runId: null,
         source: 'package',
         selectedIntent: 'agent-relay-workflow',
