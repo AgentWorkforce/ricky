@@ -97,6 +97,7 @@ const REQUIRED_PACKAGE_SCRIPTS = [
   'dev',
   'evals',
   'evals:compile',
+  'evals:provider',
   'evals:opencode',
   'evals:list',
   'evals:summary',

@@ -168,6 +168,7 @@ npm scripts (canonical ordering matches `package.json`):
 - `npm run dev` — alias for `npm start`
 - `npm run evals` — compile and run the Ricky eval suite
 - `npm run evals:compile` — compile Ricky eval definitions
+- `npm run evals:provider` — build Ricky, then run evals through the provider executor path
 - `npm run evals:opencode` — run Ricky evals through the OpenCode executor path
 - `npm run evals:list` — list available Ricky evals
 - `npm run evals:summary` — summarize the latest Ricky eval results

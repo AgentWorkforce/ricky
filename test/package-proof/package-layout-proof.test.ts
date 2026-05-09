@@ -72,7 +72,7 @@ describe('Ricky package layout and npm-default proof', () => {
     [
       'package-script-allowlist',
       [
-        'required scripts: batch, build, bundle, clean, dev, evals, evals:compare, evals:compile, evals:list, evals:opencode, evals:summary, overnight, prepack, start, test, typecheck',
+        'required scripts: batch, build, bundle, clean, dev, evals, evals:compare, evals:compile, evals:list, evals:opencode, evals:provider, evals:summary, overnight, prepack, start, test, typecheck',
         'missing required scripts: (none)',
         'unexpected extra scripts: (none)',
       ],
