@@ -17,9 +17,9 @@
       }
     },
     "@agent-relay/writing-agent-relay-workflows#codex": {
-      "version": "1.6.4",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.4.tar.gz",
-      "integrity": "sha256-6c153a39dbbf2b446c971db5d879f01d06d1837d2146bea688534ff8c9baa263",
+      "version": "1.6.6",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.6.tar.gz",
+      "integrity": "sha256-f7afafbd897fb5108e7f7a7f4dc8f0d412b3af707ee3435bc5ce53886d3e2c58",
       "format": "codex",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -48,9 +48,9 @@
       }
     },
     "@agent-relay/relay-80-100-workflow#codex": {
-      "version": "1.0.2",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.2.tar.gz",
-      "integrity": "sha256-4714f4520696e8862b1b3fc2887e833db5e315cece2b0037861e8b003348693e",
+      "version": "1.0.4",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.4.tar.gz",
+      "integrity": "sha256-b33716b2ed6b66b9dbcb9412393c8d0eabc030326f7bf1fae7b3664330c6a6a6",
       "format": "codex",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -79,9 +79,9 @@
       }
     },
     "@agent-relay/writing-agent-relay-workflows#claude": {
-      "version": "1.6.4",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.4.tar.gz",
-      "integrity": "sha256-6c153a39dbbf2b446c971db5d879f01d06d1837d2146bea688534ff8c9baa263",
+      "version": "1.6.6",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.6.tar.gz",
+      "integrity": "sha256-f7afafbd897fb5108e7f7a7f4dc8f0d412b3af707ee3435bc5ce53886d3e2c58",
       "format": "claude",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -89,9 +89,9 @@
       "installedPath": ".claude/skills/writing-agent-relay-workflows/SKILL.md"
     },
     "@agent-relay/relay-80-100-workflow#claude": {
-      "version": "1.0.2",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.2.tar.gz",
-      "integrity": "sha256-4714f4520696e8862b1b3fc2887e833db5e315cece2b0037861e8b003348693e",
+      "version": "1.0.4",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.4.tar.gz",
+      "integrity": "sha256-b33716b2ed6b66b9dbcb9412393c8d0eabc030326f7bf1fae7b3664330c6a6a6",
       "format": "claude",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -99,7 +99,7 @@
       "installedPath": ".claude/skills/relay-80-100-workflow/SKILL.md"
     }
   },
-  "generated": "2026-05-09T10:04:23.796Z",
+  "generated": "2026-05-09T10:42:57.672Z",
   "collections": {
     "agent-relay-starter": {
       "name_slug": "agent-relay-starter",
