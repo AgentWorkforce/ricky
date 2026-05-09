@@ -12,7 +12,7 @@ describe('Ricky package layout and npm-default proof', () => {
   it('all cases pass', () => {
     const summary = summarizePackageLayoutProof();
 
-    expect(summary.passed).toBe(true);
+    expect(summary.passed, formatPackageProofSummaryFailure(summary)).toBe(true);
     expect(summary.failures).toEqual([]);
   });
 
@@ -124,7 +124,7 @@ describe('Ricky package layout and npm-default proof', () => {
       const proofResult = evaluatePackageLayoutProofCase(name);
       const evidence = proofResult.evidence.join('\n');
 
-      expect(proofResult.passed).toBe(true);
+      expect(proofResult.passed, formatPackageProofCaseFailure(proofResult)).toBe(true);
       for (const expected of expectedEvidence) {
         expect(evidence).toContain(expected);
       }
@@ -146,3 +146,15 @@ describe('Ricky package layout and npm-default proof', () => {
     expect(elapsed).toBeLessThan(2000);
   });
 });
+
+function formatPackageProofSummaryFailure(summary: ReturnType<typeof summarizePackageLayoutProof>): string {
+  const failures = summary.failures.length > 0 ? summary.failures.join('\n') : '(none)';
+  const gaps = summary.gaps.length > 0 ? summary.gaps.join('\n') : '(none)';
+  return `Package layout proof failed.\nFailures:\n${failures}\nGaps:\n${gaps}`;
+}
+
+function formatPackageProofCaseFailure(proofResult: ReturnType<typeof evaluatePackageLayoutProofCase>): string {
+  const failures = proofResult.failures.length > 0 ? proofResult.failures.join('\n') : '(none)';
+  const evidence = proofResult.evidence.length > 0 ? proofResult.evidence.join('\n') : '(none)';
+  return `Package layout proof case failed: ${proofResult.name}\nFailures:\n${failures}\nEvidence:\n${evidence}`;
+}
