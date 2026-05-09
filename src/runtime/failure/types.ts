@@ -6,6 +6,7 @@
  */
 
 import type {
+  EvidenceOutcome,
   EvidenceSummary,
   WorkflowRunEvidence,
 } from '../evidence/types.js';
@@ -63,6 +64,7 @@ export type PlainValidationSummary = string;
 
 export type FailureClassifierInput =
   | WorkflowRunEvidence
+  | EvidenceOutcome
   | EvidenceSummary
   | PlainValidationSummary;
 

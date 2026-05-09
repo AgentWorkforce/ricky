@@ -6,10 +6,16 @@
  */
 
 import type {
+  EvidenceOutcome,
   EvidenceSummary,
   WorkflowRunEvidence,
   WorkflowStepEvidence,
   DeterministicGateResult,
+  DeterministicGateAudit,
+  EvidenceCommandReference,
+  EvidenceOutputSnippet,
+  FixLoopAttemptEvidence,
+  NarrativeAuditRecord,
   VerificationResult,
 } from '../evidence/types.js';
 import { summarizeEvidence } from '../evidence/capture.js';
@@ -66,11 +72,16 @@ export const WORKFLOW_STEP_OVERFLOW_THRESHOLD = 10;
  * and a summary indicating no failure).
  */
 export function classifyFailure(evidence: WorkflowRunEvidence): FailureClassification;
+export function classifyFailure(outcome: EvidenceOutcome): FailureClassification;
 export function classifyFailure(summary: EvidenceSummary): FailureClassification;
 export function classifyFailure(summary: PlainValidationSummary): FailureClassification;
 export function classifyFailure(input: FailureClassifierInput): FailureClassification {
   if (typeof input === 'string') {
     return classifyFromPlainSummary(input);
+  }
+
+  if (isEvidenceOutcome(input)) {
+    return classifyFromOutcome(input);
   }
 
   if (isEvidenceSummary(input)) {
@@ -79,6 +90,53 @@ export function classifyFailure(input: FailureClassifierInput): FailureClassific
 
   const summary = summarizeEvidence(input);
   return classifyWithFullEvidence(summary, input);
+}
+
+// ── Internal classification from structured evidence outcome ─────────
+
+function classifyFromOutcome(outcome: EvidenceOutcome): FailureClassification {
+  const summary = summaryWithOutcomeMessage(outcome);
+
+  if (isCleanPass(summary)) {
+    return noFailure(summary);
+  }
+
+  if (summary.runStatus === 'running' || summary.runStatus === 'pending') {
+    return stillRunning(summary);
+  }
+
+  const signals: EvidenceSignal[] = [];
+  const detected: FailureClass[] = [];
+
+  if (detectOutcomeTimeout(outcome, signals)) {
+    detected.push(FailureClass.Timeout);
+  }
+
+  if (detectOutcomeEnvironmentError(outcome, signals)) {
+    detected.push(FailureClass.EnvironmentError);
+  }
+
+  if (detectDeadlock(summary, signals)) {
+    detected.push(FailureClass.Deadlock);
+  }
+
+  if (detectOutcomeStepOverflow(outcome, signals)) {
+    detected.push(FailureClass.StepOverflow);
+  }
+
+  if (detectOutcomeAgentDrift(outcome, signals)) {
+    detected.push(FailureClass.AgentDrift);
+  }
+
+  if (detectOutcomeVerificationFailure(outcome, signals)) {
+    detected.push(FailureClass.VerificationFailure);
+  }
+
+  if (detected.length === 0) {
+    return unknownFailure(summary, signals);
+  }
+
+  return buildClassification(detected[0], detected.slice(1), signals, summary);
 }
 
 /**
@@ -578,6 +636,104 @@ function detectVerificationFailure(
 }
 
 // ── Helper functions ─────────────────────────────────────────────────
+
+function isEvidenceOutcome(input: FailureClassifierInput): input is EvidenceOutcome {
+  return typeof input === 'object' && input !== null && 'statusClass' in input && 'summary' in input && 'failureKind' in input;
+}
+
+function summaryWithOutcomeMessage(outcome: EvidenceOutcome): EvidenceSummary {
+  return {
+    ...outcome.summary,
+    firstError: outcome.failureMessage ?? outcome.summary.firstError,
+  };
+}
+
+function detectOutcomeTimeout(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  if (outcome.status === 'timed_out' || outcome.failureKind === 'timeout') {
+    signals.push({ observation: `Run status is ${outcome.status}`, source: 'run-level', strength: Confidence.High });
+    found = true;
+  }
+  if (outcome.timedOutStepIds.length > 0) {
+    signals.push({
+      observation: `${outcome.timedOutStepIds.length} steps timed out: ${outcome.timedOutStepIds.join(', ')}`,
+      source: 'run-summary',
+      strength: Confidence.High,
+    });
+    found = true;
+  }
+  return found;
+}
+
+function detectOutcomeEnvironmentError(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  const texts = [
+    outcome.failureMessage,
+    ...outcome.commands.flatMap((command) => textFields(command.command, command.stdoutExcerpt, command.stderrExcerpt, command.outputExcerpt)),
+    ...outcome.outputSnippets.map((snippet) => snippet.text),
+    ...outcome.deterministicGates.flatMap((gate) => gate.outputSnippets.map((snippet) => snippet.text)),
+  ].filter((value): value is string => Boolean(value));
+  for (const text of texts) {
+    if (matchesEnvironmentPattern(text)) {
+      signals.push({ observation: `Outcome text matches environment error: ${truncate(text, 120)}`, source: 'run-level', strength: Confidence.High });
+      found = true;
+      break;
+    }
+  }
+  return found;
+}
+
+function detectOutcomeStepOverflow(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  if (outcome.retryExhaustedStepIds.length >= RETRY_OVERFLOW_THRESHOLD) {
+    signals.push({
+      observation: `${outcome.retryExhaustedStepIds.length} steps exhausted retries: ${outcome.retryExhaustedStepIds.join(', ')}`,
+      source: 'step-overflow:run-summary',
+      strength: Confidence.High,
+    });
+    found = true;
+  }
+  if (outcome.summary.retryCount >= RETRY_OVERFLOW_THRESHOLD || outcome.summary.totalSteps > WORKFLOW_STEP_OVERFLOW_THRESHOLD) {
+    signals.push({
+      observation: `Outcome summary exceeded workflow retry/step thresholds (${outcome.summary.retryCount} retries, ${outcome.summary.totalSteps} steps)`,
+      source: 'step-overflow:run-summary',
+      strength: Confidence.Medium,
+    });
+    found = true;
+  }
+  return found;
+}
+
+function detectOutcomeAgentDrift(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  if (outcome.narrative.length >= 2 && outcome.artifacts.length === 0 && outcome.failedStepIds.length > 0) {
+    signals.push({
+      observation: `Repeated narrative without repo proof across failed steps: ${outcome.failedStepIds.join(', ')}`,
+      source: 'run-level',
+      strength: Confidence.Medium,
+    });
+    return true;
+  }
+  return false;
+}
+
+function detectOutcomeVerificationFailure(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  for (const gate of outcome.deterministicGates) {
+    if (!gate.passed) {
+      signals.push({ observation: `Gate "${gate.gateName}" failed`, source: `gate:${gate.gateName}`, strength: Confidence.High });
+      found = true;
+    }
+  }
+  if (!found && outcome.failureKind === 'verification') {
+    signals.push({
+      observation: outcome.failureMessage ?? 'Outcome reported verification failure',
+      source: 'run-level',
+      strength: Confidence.High,
+    });
+    found = true;
+  }
+  return found;
+}
 
 function isEvidenceSummary(input: WorkflowRunEvidence | EvidenceSummary): input is EvidenceSummary {
   return (

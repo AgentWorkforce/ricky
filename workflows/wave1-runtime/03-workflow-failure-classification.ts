@@ -92,24 +92,19 @@ async function main() {
     })
 
     .step('implement-classifier', {
-      agent: 'impl-primary-codex',
+      type: 'deterministic',
       dependsOn: ['lead-plan'],
-      task: `Implement the deterministic failure classifier.
-
-Own only:
-- src/runtime/failure/types.ts
-- src/runtime/failure/classifier.ts
-- src/runtime/failure/index.ts
-
-Requirements:
-- Classify timeout, verification failure, agent drift, environment error, deadlock, step overflow, and unknown/mixed failures.
-- Accept structured evidence from the Wave 1 evidence model where available, while tolerating plain validation summaries for early bootstrap.
-- Return category, severity, confidence, matched signals, and suggested next action for Ricky's debugger and validator specialists.
-- Keep the API deterministic and testable; avoid network calls, subprocesses, or LLM calls.
-- Export a small public surface from index.ts.
-
-After editing, stop. Do not modify tests in this step.`,
-      verification: { type: 'file_exists', value: 'src/runtime/failure/classifier.ts' },
+      command: [
+        'test -f src/runtime/failure/types.ts',
+        'test -f src/runtime/failure/classifier.ts',
+        'test -f src/runtime/failure/index.ts',
+        'grep -Eq "timeout|verification|drift|environment|deadlock|overflow" src/runtime/failure/types.ts src/runtime/failure/classifier.ts',
+        'grep -Eq "export .*classif|export function|export const" src/runtime/failure/classifier.ts',
+        'grep -q "export" src/runtime/failure/index.ts',
+        'echo FAILURE_CLASSIFIER_IMPLEMENTATION_ALREADY_PRESENT',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step('verify-classifier-after-edit', {
@@ -130,27 +125,16 @@ After editing, stop. Do not modify tests in this step.`,
     })
 
     .step('implement-tests', {
-      agent: 'impl-tests-codex',
+      type: 'deterministic',
       dependsOn: ['verify-classifier-after-edit'],
-      task: `Write deterministic classifier tests.
-
-Own only:
-- src/runtime/failure/classifier.test.ts
-
-Required coverage:
-- timeout evidence produces timeout classification
-- failed deterministic gate produces verification failure
-- repeated agent narrative without file/test change produces agent drift
-- missing command/tool/dependency output produces environment error
-- no progress across bounded waits produces deadlock
-- too many steps/retries produces step overflow
-- mixed or weak signals preserve confidence and matched signals
-
-Review checklist:
-- Tests do not require live workflow runs.
-- Tests make future debugger behavior diagnosable.
-- Classifier results include category, severity, confidence, and next-action hints.`,
-      verification: { type: 'file_exists', value: 'src/runtime/failure/classifier.test.ts' },
+      command: [
+        'test -f src/runtime/failure/classifier.test.ts',
+        'grep -Eq "describe|it\\(" src/runtime/failure/classifier.test.ts',
+        'grep -Eq "timeout|verification|drift|environment|deadlock|overflow" src/runtime/failure/classifier.test.ts',
+        'echo FAILURE_CLASSIFIER_TESTS_ALREADY_PRESENT',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step('verify-tests-after-edit', {
