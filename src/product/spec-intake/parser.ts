@@ -114,7 +114,35 @@ const MCP_TOOL_INTENTS: Record<string, IntentKind> = {
   'ricky.workflow.execute': 'execute',
 };
 
-const PATH_PATTERN = /(?:^|\s)([./~]?[\w@.-]+(?:\/[\w@.-]+)+(?:\.[A-Za-z0-9]+)?)/g;
+const PATH_PATTERN = /(?:^|[\s`'"(\[<])([./~]?[\w@.-]+(?:\/[\w@.-]+)+(?:\.[A-Za-z0-9]+)?)/g;
+
+const RECOGNIZED_PATH_PREFIXES = [
+  'packages/',
+  'src/',
+  'tests/',
+  'test/',
+  'lib/',
+  'app/',
+  'apps/',
+  'bin/',
+  'scripts/',
+  'infra/',
+  'docs/',
+  'workflows/',
+  'migrations/',
+  'examples/',
+  'e2e/',
+  'public/',
+  'static/',
+  'assets/',
+  'config/',
+  'cmd/',
+  'internal/',
+  'pkg/',
+  '.github/',
+  '.claude/',
+  '.agents/',
+];
 const DESCRIPTION_KEYS = [
   'description',
   'prompt',
@@ -849,14 +877,49 @@ function extractTargetContext(text: string): string | undefined {
 }
 
 function extractTargetFiles(text: string): string[] {
+  const fromBlock = extractTargetFilesBlock(text);
+  if (fromBlock.length > 0) return fromBlock;
   const paths: string[] = [];
   for (const match of text.matchAll(PATH_PATTERN)) {
     const candidate = match[1];
-    if (candidate && !candidate.startsWith('http')) {
-      paths.push(candidate.replace(/[),.;:]$/, ''));
-    }
+    if (!candidate) continue;
+    const cleaned = candidate.replace(/[`'")\],.;:]+$/, '');
+    if (!cleaned || cleaned.startsWith('http')) continue;
+    if (!looksLikeRealPath(cleaned)) continue;
+    paths.push(cleaned);
   }
   return dedupe(paths);
+}
+
+function looksLikeRealPath(candidate: string): boolean {
+  if (/\.[A-Za-z0-9]+$/.test(candidate)) return true;
+  const slashes = (candidate.match(/\//g) ?? []).length;
+  if (slashes >= 2) return true;
+  return RECOGNIZED_PATH_PREFIXES.some((prefix) => candidate.startsWith(prefix));
+}
+
+function extractTargetFilesBlock(text: string): string[] {
+  const headingMatch = text.match(/^##+\s+Target\s+Files\s*$/im);
+  if (!headingMatch || headingMatch.index === undefined) return [];
+  const startIdx = headingMatch.index + headingMatch[0].length;
+  const remainder = text.slice(startIdx);
+  const nextHeadingMatch = remainder.match(/^#{1,6}\s+/m);
+  const blockText =
+    nextHeadingMatch && nextHeadingMatch.index !== undefined
+      ? remainder.slice(0, nextHeadingMatch.index)
+      : remainder;
+  const candidates: string[] = [];
+  for (const rawLine of blockText.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith('<!--') || trimmed.startsWith('//')) continue;
+    const withoutBullet = trimmed.replace(/^[-*+]\s+/, '');
+    const unwrapped = withoutBullet.replace(/^[`'"]|[`'"]$/g, '').trim();
+    if (!unwrapped || unwrapped.startsWith('#')) continue;
+    if (!unwrapped.includes('/')) continue;
+    candidates.push(unwrapped);
+  }
+  return dedupe(candidates);
 }
 
 function extractLabeledLines(text: string, labels: string[]): string[] {

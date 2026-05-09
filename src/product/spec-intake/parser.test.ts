@@ -669,4 +669,96 @@ describe('spec intake parser, normalizer, and router', () => {
       }),
     ]);
   });
+
+  describe('targetFiles extraction', () => {
+    it('captures backticked paths from markdown prose', () => {
+      const result = intake(
+        natural(
+          [
+            'Implementation plan:',
+            '- Update `packages/web/app/api/v1/workflows/run/route.ts` to accept the new mode.',
+            '- Update `packages/core/src/bootstrap/launcher.ts` to provision a sandbox.',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toEqual(
+        expect.arrayContaining([
+          'packages/web/app/api/v1/workflows/run/route.ts',
+          'packages/core/src/bootstrap/launcher.ts',
+        ]),
+      );
+    });
+
+    it('captures paths inside parentheses and double quotes', () => {
+      const result = intake(
+        natural(
+          [
+            'See the helper at (src/lib/helpers/foo.ts) for context.',
+            'Migration lives at "migrations/2026-05-09-add-runtime-mode.sql".',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toEqual(
+        expect.arrayContaining([
+          'src/lib/helpers/foo.ts',
+          'migrations/2026-05-09-add-runtime-mode.sql',
+        ]),
+      );
+    });
+
+    it('suppresses prose noise that has no extension and no recognized prefix', () => {
+      const result = intake(
+        natural(
+          'Send the PR number, base/head SHA, and the user/account pair to MSD.',
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).not.toContain('base/head');
+      expect(targets).not.toContain('user/account');
+    });
+
+    it('extracts paths from a structured `## Target Files` block in priority over prose', () => {
+      const result = intake(
+        natural(
+          [
+            '# Spec',
+            'Some prose mentioning `tests/scratch/example.ts` casually.',
+            '',
+            '## Target Files',
+            '',
+            '- `packages/web/app/api/v1/workflows/run/route.ts`',
+            '- packages/core/src/bootstrap/launcher.ts',
+            '',
+            '## Acceptance',
+            'It works.',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toEqual([
+        'packages/web/app/api/v1/workflows/run/route.ts',
+        'packages/core/src/bootstrap/launcher.ts',
+      ]);
+      // Prose-only candidate is excluded when the structured block is present.
+      expect(targets).not.toContain('tests/scratch/example.ts');
+    });
+
+    it('falls back to prose extraction when there is no Target Files block', () => {
+      const result = intake(
+        natural('Edit `packages/core/src/bootstrap/launcher.ts` to provision a sandbox.'),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toContain('packages/core/src/bootstrap/launcher.ts');
+    });
+
+    it('keeps deeply-nested paths without an extension (3+ segments)', () => {
+      const result = intake(
+        natural('Touch packages/web/lib/nango-bridge for the new adapter.'),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toContain('packages/web/lib/nango-bridge');
+    });
+  });
 });
