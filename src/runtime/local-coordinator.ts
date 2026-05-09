@@ -87,7 +87,7 @@ export class LocalCoordinator {
     const notifyLifecycleObservers = (event: LifecycleEvent): void => {
       for (const listener of this.emitter.listeners('lifecycle')) {
         try {
-          (listener as (event: LifecycleEvent) => void)(event);
+          (listener as (event: LifecycleEvent) => void)(cloneLifecycleEvent(event));
         } catch {
           // Observer failures must not break coordinator settlement or leak active state.
         }
@@ -485,12 +485,29 @@ function cloneSnippet(snippet: LogSnippet): LogSnippet {
 function cloneLifecycleEvent(event: LifecycleEvent): LifecycleEvent {
   return {
     ...event,
-    data: event.data ? { ...event.data } : undefined,
+    data: cloneRecord(event.data),
   };
 }
 
 function cloneMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  return metadata ? { ...metadata } : undefined;
+  return cloneRecord(metadata);
+}
+
+function cloneRecord(record: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!record) return undefined;
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, cloneValue(value)]));
+}
+
+function cloneValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneValue);
+  if (isPlainRecord(value)) return cloneRecord(value);
+  return value;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function errorMessage(err: unknown): string {

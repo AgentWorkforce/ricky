@@ -611,6 +611,57 @@ describe('LocalCoordinator', () => {
     ]);
   });
 
+  it('keeps returned evidence stable when lifecycle observers mutate received events', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    coordinator.on('lifecycle', (event) => {
+      event.message = 'observer-mutated-message';
+      if (event.data) {
+        event.data.stream = 'observer-mutated-stream';
+        const metadata = event.data.metadata as Record<string, unknown> | undefined;
+        if (metadata) {
+          metadata.workflowId = 'observer-mutated-workflow';
+          (metadata.tags as string[] | undefined)?.push('observer-mutated-tag');
+        }
+      }
+    });
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-observer-mutation',
+      workflowFile: 'workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      metadata: { workflowId: 'wf-observer', tags: ['original-tag'] },
+    });
+
+    invocations[0].emitStdout('durable output');
+    invocations[0].complete(0);
+    const result = await resultPromise;
+
+    expect(result.metadata).toEqual({ workflowId: 'wf-observer', tags: ['original-tag'] });
+    expect(result.stdout).toEqual(['durable output']);
+    expect(result.events[0]).toMatchObject({
+      kind: 'started',
+      message: 'Run started',
+      data: {
+        metadata: { workflowId: 'wf-observer', tags: ['original-tag'] },
+      },
+    });
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stdout',
+        message: 'durable output',
+        data: { stream: 'stdout' },
+      }),
+    );
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'passed',
+      data: { exitCode: 0 },
+    });
+  });
+
   it('rejects duplicate runId when a run with that id is already active', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
