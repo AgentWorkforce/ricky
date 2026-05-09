@@ -11,6 +11,7 @@ import type { FailureClassification } from '../runtime/failure/types.js';
 import { debugWorkflowRun as defaultDebugWorkflowRun } from '../product/specialists/debugger/debugger.js';
 import type { DebuggerResult } from '../product/specialists/debugger/types.js';
 import type { WorkflowRunEvidence, WorkflowStepEvidence } from '../shared/models/workflow-evidence.js';
+import { isSyntheticStageId } from './synthetic-step-ids.js';
 import { repairWorkflowWithWorkforcePersona } from '../product/generation/workforce-persona-repairer.js';
 import type { WorkforcePersonaRepairAttempt } from '../product/generation/workforce-persona-repairer.js';
 import {
@@ -1628,7 +1629,10 @@ function resolveRunId(response: LocalResponse): string | undefined {
 }
 
 function failedStepFromEvidence(evidence: WorkflowRunEvidence): string | undefined {
-  return evidence.steps.find((step) => step.status === 'failed')?.stepId;
+  const real = evidence.steps.find(
+    (step) => step.status === 'failed' && !isSyntheticStageId(step.stepId),
+  );
+  return real?.stepId;
 }
 
 function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: number): WorkflowRunEvidence {
