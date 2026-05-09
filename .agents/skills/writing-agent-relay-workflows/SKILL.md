@@ -1,6 +1,6 @@
 ---
 name: writing-agent-relay-workflows
-description: Use when building multi-agent workflows with the relay broker-sdk - covers conversation-shape vs pipeline-shape coordination, the WorkflowBuilder API, DAG step dependencies, agent definitions, step output chaining via {{steps.X.output}}, verification gates, evidence-based completion, owner decisions, dedicated channels, dynamic channel management (subscribe/unsubscribe/mute/unmute), swarm patterns, chat-native coordination recipes (Q/A, broadcast-ack, peer review, standup, hand-off), error handling, event listeners, step sizing rules, authoring best practices, and the lead+workers team pattern for complex steps
+description: Use when building multi-agent workflows with the relay broker-sdk - covers conversation-shape vs pipeline-shape coordination, repairable/reliable workflow gates, the WorkflowBuilder API, DAG step dependencies, agent definitions, step output chaining via {{steps.X.output}}, verification gates, evidence-based completion, owner decisions, dedicated channels, dynamic channel management (subscribe/unsubscribe/mute/unmute), swarm patterns, chat-native coordination recipes (Q/A, broadcast-ack, peer review, standup, hand-off), error handling, event listeners, step sizing rules, authoring best practices, and the lead+workers team pattern for complex steps
 ---
 
 ### Overview
@@ -17,7 +17,16 @@ The relay broker-sdk workflow system orchestrates multiple AI agents (Claude, Co
 - Orchestrating different AI CLIs (claude, codex, gemini, aider, goose)
 - Creating DAG, pipeline, fan-out, or other swarm patterns
 - Needing verification gates, retries, or step output chaining
+- Designing product-contract workflows where failing checks should route to agents for repair instead of stopping the run
 - Dynamic channel management: agents joining/leaving/muting channels mid-workflow
+
+### Default Principle: Workflows Repair Before They Fail
+
+- Run deterministic checks as evidence-capturing gates with `captureOutput: true`.
+- Prefer `failOnError: false` for intermediate validation gates so the workflow can pass the output to a repair agent.
+- Add a repair step immediately after each red-prone gate. The repair agent reads `{{steps.<gate>.output}}`, fixes source/tests/config, reruns the same command locally, and exits only after the gate is green or the blocker is external.
+- Keep final acceptance deterministic, but still put an agent repair step before commit/PR creation. The workflow should only stop after the repair budget is exhausted or a true external blocker remains.
+- Use `.reliable()` or `.repairable()` on SDK versions that support it, especially for product-contract workflows. As of AgentWorkforce/relay#827, retry-mode workflows with agents are repair-aware by default, repair agents run before retrying malformed/failed agent steps, and the SDK covers DAG, pipeline, fan-out, worktree-backed, deterministic-only, and agent-plus-gate shapes.
 
 ### Choose Your Coordination Style — Conversation vs Pipeline
 
@@ -26,7 +35,7 @@ Before writing the workflow, decide *how the agents will coordinate*. The relay 
 | Shape | What it is | Use when |
 |---|---|---|
 | **Conversation** (chat-native) | Interactive agents share a channel; messages, `@-mentions`, and ambient awareness drive coordination. Lead and workers spawn in parallel and self-organize. The relay is the coordination layer, not just transport. | Multi-file work, peer review loops, cross-agent feedback, dynamic re-planning, multi-PR coordination, anything with a human-in-the-loop escape, swarms where workers pick up each other's output. |
-| **Pipeline** (one-shot DAG) | Each step runs as a one-shot subprocess (`claude -p`, `codex exec`); steps hand off via `{{steps.X.output}}` text injection. No agents are alive at the same time; no chat happens. | Linear, well-specified transformations; deterministic data passing; no review loop expected; the work could be expressed as a `bash | bash | bash` pipe. |
+| **Pipeline** (one-shot DAG) | Each step runs as a one-shot subprocess (`claude -p`, `codex exec`); steps hand off via `{{steps.X.output}}` text injection. No agents are alive at the same time; no chat happens. | Linear, well-specified transformations; deterministic data passing; no review loop expected; the work could be expressed as a `bash \| bash \| bash` pipe. |
 
 **Default to Conversation for any non-trivial work.** Pipeline DAGs are simpler to reason about but they do not exercise the relay primitive — they are a Unix pipe with extra steps. If you would happily write the same task as a single shell pipeline, pipeline-shape is fine. Otherwise, you almost certainly want a Conversation shape.
 
@@ -85,6 +94,7 @@ const result = await workflow('my-workflow')
   .channel('wf-my-feature')          // dedicated channel — agents share it
   .maxConcurrency(4)
   .timeout(3_600_000)
+  .repairable()
 
   // Interactive agents — no preset, they live on the channel
   .agent('lead', {
@@ -136,10 +146,27 @@ Implement your assigned file. Post a completion message. Address feedback.`,
   })
 
   // Downstream gates on the lead — lead exits when satisfied.
+  // Capture failures, then hand them to an agent for repair.
   .step('verify', {
     type: 'deterministic',
     dependsOn: ['lead-coordinate'],
-    command: 'npm run typecheck && npm test',
+    command: 'npm run typecheck && npm test 2>&1',
+    captureOutput: true,
+    failOnError: false,
+  })
+  .step('repair-verify', {
+    agent: 'lead',
+    dependsOn: ['verify'],
+    task: `If verification passed, summarize evidence.
+If it failed, use this output to assign and fix issues, then rerun the command until green:
+{{steps.verify.output}}`,
+    verification: { type: 'exit_code' },
+  })
+  .step('verify-final', {
+    type: 'deterministic',
+    dependsOn: ['repair-verify'],
+    command: 'npm run typecheck && npm test 2>&1',
+    captureOutput: true,
     failOnError: true,
   })
 
@@ -327,7 +354,7 @@ export function applyCloudRepoSetup<T>(wf: T, opts: CloudRepoSetupOptions): T {
 
 ```typescript
 import { workflow } from '@agent-relay/sdk/workflows';
-import { createGitHubStep } from '@agent-relay/sdk/github';
+import { createGitHubStep } from '@agent-relay/sdk';
 
 const REPO = 'AgentWorkforce/cloud';
 const BRANCH = `agent-relay/run-${Date.now()}`;
@@ -470,6 +497,21 @@ import { ClaudeModels, CodexModels, GeminiModels } from '@agent-relay/config';
   type: 'deterministic',
   command: 'test -f src/auth.ts && echo "FILE_EXISTS"',
   dependsOn: ['implement'],
+  captureOutput: true,
+  failOnError: false,
+})
+.step('repair-files', {
+  agent: 'worker',
+  dependsOn: ['verify-files'],
+  task: `If verify-files failed, create or fix the missing file and rerun the check.
+Output:
+{{steps.verify-files.output}}`,
+  verification: { type: 'exit_code' },
+})
+.step('verify-files-final', {
+  type: 'deterministic',
+  command: 'test -f src/auth.ts && echo "FILE_EXISTS"',
+  dependsOn: ['repair-files'],
   captureOutput: true,
   failOnError: true,
 })
@@ -644,11 +686,29 @@ steps:
     type: deterministic
     dependsOn: [edit-types]
     command: 'if git diff --quiet src/types.ts; then echo "NOT MODIFIED"; exit 1; fi; echo "OK"'
+    captureOutput: true
+    failOnError: false
+
+  - name: fix-types-verification
+    agent: dev
+    dependsOn: [verify-types]
+    task: |
+      If verify-types failed, fix src/types.ts and rerun the verify command.
+      Output:
+      {{steps.verify-types.output}}
+    verification:
+      type: exit_code
+
+  - name: verify-types-final
+    type: deterministic
+    dependsOn: [fix-types-verification]
+    command: 'if git diff --quiet src/types.ts; then echo "NOT MODIFIED"; exit 1; fi; echo "OK"'
+    captureOutput: true
     failOnError: true
 
   - name: read-service
     type: deterministic
-    dependsOn: [verify-types]
+    dependsOn: [verify-types-final]
     command: cat src/service.ts
     captureOutput: true
 
@@ -667,13 +727,50 @@ steps:
     type: deterministic
     dependsOn: [edit-service]
     command: 'if git diff --quiet src/service.ts; then echo "NOT MODIFIED"; exit 1; fi; echo "OK"'
+    captureOutput: true
+    failOnError: false
+
+  - name: fix-service-verification
+    agent: dev
+    dependsOn: [verify-service]
+    task: |
+      If verify-service failed, fix src/service.ts and rerun the verify command.
+      Output:
+      {{steps.verify-service.output}}
+    verification:
+      type: exit_code
+
+  - name: verify-service-final
+    type: deterministic
+    dependsOn: [fix-service-verification]
+    command: 'if git diff --quiet src/service.ts; then echo "NOT MODIFIED"; exit 1; fi; echo "OK"'
+    captureOutput: true
     failOnError: true
 
   # Deterministic commit — never rely on agents to commit
   - name: commit
     type: deterministic
-    dependsOn: [verify-service]
-    command: git add src/types.ts src/service.ts && git commit -m "feat: add pending status"
+    dependsOn: [verify-service-final]
+    command: npm run typecheck && npm test && git add src/types.ts src/service.ts && git commit -m "feat: add pending status"
+    captureOutput: true
+    failOnError: false
+
+  - name: repair-commit
+    agent: dev
+    dependsOn: [commit]
+    task: |
+      If commit failed, fix the blocker, rerun npm run typecheck && npm test, and create the commit.
+      If commit passed, confirm the commit subject.
+      Output:
+      {{steps.commit.output}}
+    verification:
+      type: exit_code
+
+  - name: verify-commit-created
+    type: deterministic
+    dependsOn: [repair-commit]
+    command: 'git log -1 --pretty=%s | grep -q "^feat: add pending status$" && echo "COMMIT_OK" || (echo "COMMIT_MISSING"; exit 1)'
+    captureOutput: true
     failOnError: true
 ```
 
@@ -693,6 +790,68 @@ steps:
     done
     if [ $missing -gt 0 ]; then echo "$missing files missing"; exit 1; fi
     echo "All files present"
+  captureOutput: true
+  failOnError: false
+
+- name: fix-missing-files
+  agent: impl-auth
+  dependsOn: [verify-files]
+  task: |
+    If verify-files found missing files, create/fix them and rerun the check.
+    Output:
+    {{steps.verify-files.output}}
+  verification:
+    type: exit_code
+
+- name: verify-files-final
+  type: deterministic
+  dependsOn: [fix-missing-files]
+  command: |
+    missing=0
+    for f in src/auth/credentials.ts src/storage/client.ts; do
+      if [ ! -f "$f" ]; then echo "MISSING: $f"; missing=$((missing+1)); fi
+    done
+    if [ $missing -gt 0 ]; then echo "$missing files missing"; exit 1; fi
+    echo "All files present"
+  captureOutput: true
+  failOnError: true
+```
+
+#### Edit Gates Must See Untracked Files
+
+```yaml
+- name: provider-edit-gate-capture
+  type: deterministic
+  dependsOn: [implement-providers]
+  command: |
+    if [ -z "$(git status --short -- packages/new-provider .workflow-artifacts/my-flow)" ]; then
+      echo "NO_PROVIDER_CHANGES"
+      exit 1
+    fi
+    echo "PROVIDER_EDIT_GATE_OK"
+  captureOutput: true
+  failOnError: false
+
+- name: repair-edit-gate
+  agent: provider-worker
+  dependsOn: [provider-edit-gate-capture]
+  task: |
+    If provider-edit-gate-capture reported NO_PROVIDER_CHANGES, inspect git
+    status including untracked files and add the missing provider artifacts.
+    If it already passed, do nothing.
+  verification:
+    type: exit_code
+
+- name: provider-edit-gate-final
+  type: deterministic
+  dependsOn: [repair-edit-gate]
+  command: |
+    if [ -z "$(git status --short -- packages/new-provider .workflow-artifacts/my-flow)" ]; then
+      echo "NO_PROVIDER_CHANGES"
+      exit 1
+    fi
+    echo "PROVIDER_EDIT_GATE_FINAL_OK"
+  captureOutput: true
   failOnError: true
 ```
 
@@ -777,7 +936,7 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 
 | Mistake | Fix |
 |---------|-----|
-| Treating relay as transport, not as a coordination layer (every step is `preset: 'worker'`, every handoff is `{{steps.X.output}}`) | Default to **Conversation shape** for non-trivial work — interactive agents on a shared channel. Pipeline-shape is only correct when the work could be expressed as a `bash | bash | bash` pipe. |
+| Treating relay as transport, not as a coordination layer (every step is `preset: 'worker'`, every handoff is `{{steps.X.output}}`) | Default to **Conversation shape** for non-trivial work — interactive agents on a shared channel. Pipeline-shape is only correct when the work could be expressed as a `bash \| bash \| bash` pipe. |
 | Interactive agents on a channel whose task strings don't tell them to talk to each other | Pick a [Chat-Native Coordination Recipe](#chat-native-coordination-recipes) (Q/A, Broadcast/Ack, Peer Review, Standup, Hand-Off) and bake it into the task prompt — otherwise you're paying for a chat substrate you're not using |
 | All workflows run sequentially | Group independent workflows into parallel waves (4-7x speedup) |
 | Every step depends on the previous one | Only add `dependsOn` when there's a real data dependency |
@@ -811,6 +970,10 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 | Single step editing 4+ files | Agents modify 1-2 then exit. Split to one file per step with verify gates |
 | Relying on agents to `git commit` | Agents emit markers without running git. Use deterministic commit step |
 | File-writing steps without `file_exists` verification | `exit_code` auto-passes even if no file written |
+| Edit gate uses `git diff --quiet` for new files/packages | `git diff` ignores untracked files and can fail a valid implementation with `NO_CHANGES` | Use `git status --short -- <paths>` for materialization gates |
+| Hard-stop validation gates in product workflows | A red check stops the agent team at the exact moment it should fix the problem. Capture gate output with `failOnError: false`, add a repair agent step, rerun, and reserve hard failure for exhausted repair budget or external blockers |
+| Final acceptance before repair | Broken work can stop or commit without giving the team a final chance to fix it. Run final acceptance, hand output to a repair owner, rerun, then commit/open PR only after green deterministic evidence |
+| Treating optional notification credentials as fatal | Workflow progress gets blocked by a non-core side effect. Prefer primitive/runtime fallbacks such as the Slack primitive's `cloud-relay` or `noop` shape from AgentWorkforce/relay#823 when notification is not the product contract |
 | Manual peer fanout in `handleChannelMessage()` | Use broker-managed channel subscriptions — broker fans out to all subscribers automatically |
 | Client-side `personaNames.has(from)` filtering | Use `relay.subscribe()`/`relay.unsubscribe()` — only subscribed agents receive messages |
 | Agents receiving noisy cross-channel messages during focused work | Use `relay.mute({ agent, channel })` to silence non-primary channels without leaving them |

@@ -3,27 +3,30 @@ name: relay-80-100-workflow
 description: Use when writing agent-relay workflows that must fully validate features end-to-end before merging. Covers the 80-to-100 pattern - going beyond "code compiles" to "feature works, tested E2E locally." Includes repair-before-failure validation gates, PGlite for in-memory Postgres testing, mock sandbox patterns, test-fix-rerun loops, verify gates after every edit, and the full lifecycle from implementation through passing tests to commit.
 ---
 
-### Overview
+# Writing 80-to-100 Validated Workflows
+
+## Overview
 
 Most agent workflows get features to ~80%: code written, types check, maybe a build passes. This skill covers the **80-to-100 gap** — making workflows that fully validate features end-to-end before committing. The goal: every feature merged via these workflows is **tested, verified, and known-working**, not just "it compiles."
 
-### When to Use
+## When to Use
 
 - Writing workflows where the deliverable must be **production-ready**, not just code-complete
 - Features that touch databases, APIs, or infrastructure that can be tested locally
 - Any workflow where "it compiles" is not sufficient proof of correctness
 - When you want confidence that the commit actually works before deploying
 
-### Core Principle: Test In The Workflow
+## Core Principle: Test In The Workflow
 
-#### The key insight: **run tests as deterministic steps inside the workflow itself**. Don't just write test files — execute them, verify they pass, fix failures, and re-run. The workflow doesn't commit until tests are green.
+The key insight: **run tests as deterministic steps inside the workflow itself**. Don't just write test files — execute them, verify they pass, fix failures, and re-run. The workflow doesn't commit until tests are green.
 
 ```
 implement → write tests → run tests → fix failures → re-run → build check → regression check → commit
 ```
 
+This means the commit at the end of the workflow represents code that is **proven working**, not just code that an agent wrote and claimed works.
 
-### Repair Before Failure
+## Repair Before Failure
 
 An 80-to-100 workflow should not stop merely because a test, typecheck, lint, schema, or E2E gate turns red. That red output is work for the agent team. Capture it, hand it to a repair owner, fix it, and rerun. Reserve workflow failure for cases the team cannot repair in the current run, such as missing credentials, wrong repository, exhausted repair budget, or an unsafe dirty worktree.
 
@@ -36,9 +39,9 @@ Use this shape for every meaningful gate:
 
 AgentWorkforce/relay#827 added repair-aware reliability to the SDK (`.reliable()` / `.repairable()` and repair-aware retry-mode workflows). Prefer those presets when available, but still model explicit repair owners when gate output needs domain-specific fixing.
 
-### The Test-Fix-Rerun Pattern
+## The Test-Fix-Rerun Pattern
 
-#### Every testable feature in a workflow should follow this four-step pattern:
+Every testable feature in a workflow should follow this four-step pattern:
 
 ```typescript
 // Step 1: Run tests (allow failure — we expect issues on first run)
@@ -88,10 +91,19 @@ If it failed, fix the remaining issue and rerun until green:
 })
 ```
 
+**Why four steps instead of one?**
+- The first run captures output for the agent to diagnose
+- The agent step can iterate (read errors, fix, re-run) multiple times
+- The final deterministic run is still evidence-based, but a repair agent sees it before the workflow stops
+- The last repair step keeps the workflow aligned with the agent-team model instead of ending on a fixable failure
 
-### PGlite: In-Memory Postgres for Database Testing
+## PGlite: In-Memory Postgres for Database Testing
 
-#### Setup
+When your feature touches the database, use **PGlite** — a WASM-based Postgres that runs in-process. No Docker, no external services, no flaky network dependencies.
+
+### Setup
+
+Install as a dev dependency in the workflow:
 
 ```typescript
 .step('install-pglite', {
@@ -101,7 +113,9 @@ If it failed, fix the remaining issue and rerun until green:
 })
 ```
 
-#### Test Helper Pattern
+### Test Helper Pattern
+
+Create a reusable helper that boots an in-memory Postgres with your schema:
 
 ```typescript
 // tests/helpers/pglite-db.ts
@@ -126,7 +140,17 @@ export async function createTestDb() {
 }
 ```
 
-#### Test Structure
+### PGlite Gotchas
+
+| Issue | Fix |
+|-------|-----|
+| `pgcrypto` extension not available | Use `gen_random_uuid()` (built-in since PG 13) or generate UUIDs in app code |
+| UUID columns | PGlite supports UUID natively — no special handling needed |
+| `drizzle-orm/pglite` import | Exists since drizzle-orm 0.30+. If not found, check version. |
+| Index creation | PGlite supports standard CREATE INDEX — no limitations |
+| Concurrent writes | PGlite is single-connection. Test concurrent logic with sequential assertions. |
+
+### Test Structure
 
 ```typescript
 // tests/my-feature.test.ts
@@ -151,10 +175,9 @@ describe('my feature', () => {
 });
 ```
 
+## Verify Gates After Every Edit
 
-### Verify Gates After Every Edit
-
-#### Never trust that an agent edited a file correctly. Add a deterministic verify gate after every agent edit step:
+Never trust that an agent edited a file correctly. Add a deterministic verify gate after every agent edit step:
 
 ```typescript
 // Agent edits a file
@@ -182,7 +205,25 @@ grep "my_new_table" packages/web/lib/db/schema.ts >/dev/null && echo "OK" || (ec
 })
 ```
 
-#### Edit Gates That Include New Files
+**What to verify:**
+- File was actually modified (`git diff --quiet` returns non-zero)
+- Key content exists (grep for table names, function names, imports)
+- For new files: `file_exists` verification type
+- For new directories, package trees, generated files, or mixed tracked/untracked
+  edits: use `git status --short -- <paths>`, because `git diff --quiet`
+  ignores untracked files
+
+**What NOT to verify:**
+- Exact content (too brittle — agents format differently)
+- Line counts or byte sizes (meaningless)
+
+### Edit Gates That Include New Files
+
+When an agent may create new files or package directories, do not use
+`git diff --quiet -- <paths>` as the only edit gate. It only sees tracked
+changes, so a valid new package can be misclassified as "no changes."
+
+Use `git status --short -- <paths>` and keep the first gate repairable:
 
 ```typescript
 .step('edit-gate-capture', {
@@ -221,10 +262,13 @@ echo "EDIT_GATE_FINAL_OK"`,
 })
 ```
 
+Rule of thumb: `git diff --quiet` is fine for tracked-only edits to known
+files. Use `git status --short -- <paths>` for materialization gates that may
+include new tests, docs, generated artifacts, or package directories.
 
-### Mock Sandbox Pattern
+## Mock Sandbox Pattern
 
-#### When testing code that interacts with Daytona sandboxes, use inline mock objects matching the existing test conventions:
+When testing code that interacts with Daytona sandboxes, use inline mock objects matching the existing test conventions:
 
 ```typescript
 const daytona = {
@@ -245,10 +289,25 @@ const daytona = {
 };
 ```
 
+For testing that your code calls the right methods, record calls in an array:
 
-### Regression Testing
+```typescript
+const emitted: EmitEventOptions[] = [];
+const mockClient: SessionEventClient = {
+  emit: async (opts) => { emitted.push(opts); },
+  getEvents: async () => [],
+  getLatestSequence: async () => 0,
+};
 
-#### After your new tests pass, always run the **existing test suite** to catch regressions:
+// ... run the code ...
+
+assert.equal(emitted.length, 4);
+assert.equal(emitted[0].eventType, 'sandbox_created');
+```
+
+## Regression Testing
+
+After your new tests pass, always run the **existing test suite** to catch regressions:
 
 ```typescript
 .step('run-existing-tests', {
@@ -278,10 +337,9 @@ Fix until all tests pass.`,
 })
 ```
 
+## Full Workflow Template
 
-### Full Workflow Template
-
-#### Here's the complete pattern for a feature that touches the database:
+Here's the complete pattern for a feature that touches the database:
 
 ```typescript
 import { workflow } from '@agent-relay/sdk/workflows';
@@ -437,8 +495,7 @@ Output:
   .run({ cwd: process.cwd() });
 ```
 
-
-### Checklist: Is Your Workflow 80-to-100?
+## Checklist: Is Your Workflow 80-to-100?
 
 | Check | How |
 |-------|-----|
@@ -451,7 +508,7 @@ Output:
 | Every edit is verified and repairable | `git diff --quiet` + grep for tracked-only edits; `git status --short -- <paths>` when new files/packages may appear; then a fix step |
 | Commit only happens after green evidence | Final commit step reruns acceptance checks and commits only on zero exit codes |
 
-### Common Anti-Patterns
+## Common Anti-Patterns
 
 | Anti-pattern | Why it fails | Fix |
 |-------------|-------------|-----|
