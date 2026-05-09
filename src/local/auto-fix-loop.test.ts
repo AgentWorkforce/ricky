@@ -93,8 +93,8 @@ describe('runWithAutoFix', () => {
   it('passes failed repair history into the next workflow repair attempt', async () => {
     const runSingleAttempt = vi
       .fn()
-      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'))
-      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-2', 'runtime-launch'))
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'install-deps'))
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-2', 'install-deps'))
       .mockResolvedValueOnce(successResponse('run-3'));
     const workflowRepairer = vi
       .fn()
@@ -123,7 +123,7 @@ describe('runWithAutoFix', () => {
         retryAttempt: 2,
         outcome: expect.objectContaining({
           status: 'blocker',
-          failedStep: 'runtime-launch',
+          failedStep: 'install-deps',
           blockerCode: 'MISSING_ENV_VAR',
           runId: 'run-2',
           debuggerSummary: 'Set TEST_TOKEN before retrying.',
@@ -521,7 +521,7 @@ describe('runWithAutoFix', () => {
   it('uses the persona repair path even when the debugger recommends guided repair', async () => {
     const runSingleAttempt = vi
       .fn()
-      .mockResolvedValueOnce(blockerResponse('INVALID_ARTIFACT', 'run-1', 'runtime-launch'))
+      .mockResolvedValueOnce(blockerResponse('INVALID_ARTIFACT', 'run-1', 'install-deps'))
       .mockResolvedValueOnce(successResponse('run-2'));
     const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('guided repair workflow'));
 
@@ -542,7 +542,7 @@ describe('runWithAutoFix', () => {
   it('repairs missing environment prerequisites in the workflow artifact before retrying', async () => {
     const runSingleAttempt = vi
       .fn()
-      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'))
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'install-deps'))
       .mockResolvedValueOnce(successResponse('run-2'));
     const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired env workflow'));
 
@@ -557,7 +557,7 @@ describe('runWithAutoFix', () => {
 
     expect(runSingleAttempt).toHaveBeenCalledTimes(2);
     expect(workflowRepairer).toHaveBeenCalledWith(expect.objectContaining({
-      failedStep: 'runtime-launch',
+      failedStep: 'install-deps',
       runId: 'run-1',
       response: expect.objectContaining({
         execution: expect.objectContaining({
@@ -568,7 +568,7 @@ describe('runWithAutoFix', () => {
     expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
       previousRunId: 'run-1',
       retryOfRunId: 'run-1',
-      startFromStep: 'runtime-launch',
+      startFromStep: 'install-deps',
     });
     expect(result.ok).toBe(true);
     expect(result.auto_fix).toMatchObject({
@@ -717,6 +717,55 @@ describe('runWithAutoFix', () => {
     });
     expect(runSingleAttempt.mock.calls[1][0].retry.previousRunId).toBeUndefined();
     expect(result.warnings).toContain('Auto-fix retry could not resolve a previous run id; retrying without step-level resume.');
+  });
+
+  it.each([
+    ['runtime-launch'],
+    ['local-runtime'],
+    ['runtime-precheck'],
+  ])('does not forward synthetic stage id %s as startFromStep on retry', async (syntheticId) => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', syntheticId))
+      .mockResolvedValueOnce(successResponse('run-2'));
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired workflow'));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(runSingleAttempt).toHaveBeenCalledTimes(2);
+    expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
+      attempt: 2,
+      previousRunId: 'run-1',
+    });
+    expect(runSingleAttempt.mock.calls[1][0].retry.startFromStep).toBeUndefined();
+    expect(workflowRepairer.mock.calls[0][0].failedStep).toBeUndefined();
+  });
+
+});
+
+describe('isSyntheticStageId', () => {
+  it('matches the runtime-launch / local-runtime / runtime-precheck labels', async () => {
+    const { isSyntheticStageId, SYNTHETIC_LOCAL_STAGE_IDS } = await import('./synthetic-step-ids.js');
+    expect(isSyntheticStageId('runtime-launch')).toBe(true);
+    expect(isSyntheticStageId('local-runtime')).toBe(true);
+    expect(isSyntheticStageId('runtime-precheck')).toBe(true);
+    expect(SYNTHETIC_LOCAL_STAGE_IDS.size).toBe(3);
+  });
+
+  it('does not match real workflow step ids', async () => {
+    const { isSyntheticStageId } = await import('./synthetic-step-ids.js');
+    expect(isSyntheticStageId('install-deps')).toBe(false);
+    expect(isSyntheticStageId('aggregate-drift')).toBe(false);
+    expect(isSyntheticStageId(undefined)).toBe(false);
+    expect(isSyntheticStageId('')).toBe(false);
   });
 });
 
