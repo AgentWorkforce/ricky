@@ -765,7 +765,25 @@ function hasRickyWorkflowAliasImport(content: string, alias: string, moduleName:
     `^import\\s+\\*\\s+as\\s+${escapedAlias}\\s+from\\s+['"]${escapedModule}['"];?\\s*$`,
     'm',
   );
-  return importPattern.test(content);
+  const lines = content.split(/\r?\n/);
+  let preambleLength = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      trimmed === '' ||
+      trimmed.startsWith('//') ||
+      trimmed.startsWith('/*') ||
+      trimmed.startsWith('*') ||
+      trimmed.startsWith('*/') ||
+      trimmed.startsWith('import ') ||
+      trimmed.startsWith('export ')
+    ) {
+      preambleLength += line.length + 1;
+      continue;
+    }
+    break;
+  }
+  return importPattern.test(content.slice(0, preambleLength));
 }
 
 function insertBeforeMain(content: string, helper: string): string {
