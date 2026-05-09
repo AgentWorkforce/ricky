@@ -360,6 +360,43 @@ describe('parseArgs', () => {
       connectTarget: 'linear',
     });
   });
+
+  it('parses schedule commands', () => {
+    expect(parseArgs([
+      'schedule',
+      'workflows/generated/package-checks.ts',
+      '--cron',
+      '0 9 * * 1',
+      '--name',
+      'Package checks',
+      '--timezone',
+      'America/New_York',
+    ])).toMatchObject({
+      command: 'schedule',
+      surface: 'schedule',
+      artifact: 'workflows/generated/package-checks.ts',
+      cronExpression: '0 9 * * 1',
+      workflowName: 'Package checks',
+      timezone: 'America/New_York',
+    });
+    expect(parseArgs(['schedule', 'workflows/generated/package-checks.ts', '--at', '2026-05-10T09:00:00Z'])).toMatchObject({
+      command: 'schedule',
+      scheduledAt: '2026-05-10T09:00:00Z',
+    });
+    expect(parseArgs(['schedule', 'list', '--json'])).toEqual({
+      command: 'schedules',
+      surface: 'schedule',
+      json: true,
+    });
+    expect(parseArgs(['schedules', '--json'])).toEqual({
+      command: 'schedules',
+      surface: 'schedule',
+      json: true,
+    });
+    expect(parseArgs(['schedule', 'workflows/generated/package-checks.ts'])).toMatchObject({
+      errors: ['schedule requires --cron or --at.'],
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -400,6 +437,8 @@ describe('renderHelp', () => {
     expect(helpText).not.toContain('ricky workflow --spec-file <path> --mode cloud --run');
     expect(helpText).toContain('ricky run <path> --background');
     expect(helpText).toContain('ricky run <path> --cloud');
+    expect(helpText).toContain('ricky schedule <artifact> --cron "0 * * * *"');
+    expect(helpText).toContain('ricky schedules');
     expect(helpText).toContain('ricky run <artifact> --start-from <step>');
     expect(helpText).toContain('ricky status --run <run-id>');
     expect(helpText).toContain('Without --run:  artifact path on disk');
@@ -2666,6 +2705,69 @@ describe('cliMain', () => {
     });
     expect(connect.exitCode).toBe(0);
     expect(connect.output).toEqual(['Ricky connect cloud: connected.']);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('schedules a cloud workflow without invoking the interactive runner', async () => {
+    const runner = vi.fn();
+    const scheduleWorkflow = vi.fn().mockResolvedValue({
+      schedule: {
+        id: 'sched-1',
+        name: 'Package checks',
+        scheduleType: 'cron',
+        cronExpression: '0 9 * * 1',
+        timezone: 'UTC',
+        status: 'active',
+      },
+    });
+
+    const result = await cliMain({
+      argv: [
+        'schedule',
+        'workflows/generated/package-checks.ts',
+        '--cron',
+        '0 9 * * 1',
+        '--name',
+        'Package checks',
+      ],
+      runInteractive: runner,
+      scheduleWorkflow,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(scheduleWorkflow).toHaveBeenCalledWith('workflows/generated/package-checks.ts', {
+      name: 'Package checks',
+      cronExpression: '0 9 * * 1',
+    });
+    expect(result.output.join('\n')).toContain('Ricky cloud schedule created');
+    expect(result.output.join('\n')).toContain('sched-1');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('lists cloud workflow schedules without invoking the interactive runner', async () => {
+    const runner = vi.fn();
+    const listWorkflowSchedules = vi.fn().mockResolvedValue({
+      schedules: [
+        {
+          id: 'sched-1',
+          name: 'Package checks',
+          scheduleType: 'cron',
+          cronExpression: '0 9 * * 1',
+          status: 'active',
+        },
+      ],
+    });
+
+    const result = await cliMain({
+      argv: ['schedules', '--json'],
+      runInteractive: runner,
+      listWorkflowSchedules,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.output.join('\n'))).toMatchObject({
+      schedules: [{ id: 'sched-1', name: 'Package checks' }],
+    });
     expect(runner).not.toHaveBeenCalled();
   });
 

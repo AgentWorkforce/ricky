@@ -2,8 +2,8 @@ import type { RickyMode } from '../cli/mode-selector.js';
 import { isRickyMode } from '../cli/mode-selector.js';
 import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
 
-export type PowerUserCommand = 'run' | 'help' | 'version' | 'status' | 'connect';
-export type PowerUserSurface = 'legacy' | 'local' | 'cloud' | 'workflow' | 'status' | 'connect';
+export type PowerUserCommand = 'run' | 'help' | 'version' | 'status' | 'connect' | 'schedule' | 'schedules';
+export type PowerUserSurface = 'legacy' | 'local' | 'cloud' | 'workflow' | 'status' | 'connect' | 'schedule';
 export type ConnectTarget = 'cloud' | 'agents' | 'integrations' | 'linear';
 export type StatusTarget = 'linear';
 
@@ -23,6 +23,9 @@ export interface PowerUserParsedArgs {
   artifact?: string;
   stdin?: boolean;
   workflowName?: string;
+  cronExpression?: string;
+  scheduledAt?: string;
+  timezone?: string;
   runRequested?: boolean;
   noRun?: boolean;
   background?: boolean;
@@ -79,6 +82,14 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
 
   if (first === 'connect') {
     return parseConnect(argv.slice(1));
+  }
+
+  if (first === 'schedule') {
+    return parseSchedule(argv.slice(1));
+  }
+
+  if (first === 'schedules') {
+    return withCommonFlags({ command: 'schedules', surface: 'schedule' }, argv.slice(1));
   }
 
   const surface = first === 'local' || first === 'cloud' || first === 'workflow' ? first : 'legacy';
@@ -186,6 +197,51 @@ function parseConnect(argv: string[]): PowerUserParsedArgs {
     ...(cloudTargets && cloudTargets.length > 0 ? { cloudTargets } : {}),
     ...(errors.length > 0 ? { errors } : {}),
   };
+}
+
+function parseSchedule(argv: string[]): PowerUserParsedArgs {
+  if (argv[0]?.trim().toLowerCase() === 'list') {
+    return withCommonFlags({ command: 'schedules', surface: 'schedule' }, argv.slice(1));
+  }
+
+  const base = withCommonFlags({ command: 'schedule', surface: 'schedule' }, argv);
+  const artifact = readScheduleArtifact(argv);
+  const workflowName = readFlagValue(argv, '--name');
+  const cronExpression = readFlagValue(argv, '--cron');
+  const scheduledAt = readFlagValue(argv, '--at') ?? readFlagValue(argv, '--scheduled-at');
+  const timezone = readFlagValue(argv, '--timezone');
+  const errors: string[] = [...(base.errors ?? [])];
+
+  for (const flag of ['--name', '--cron', '--at', '--scheduled-at', '--timezone']) {
+    if (argv.includes(flag) && readFlagValue(argv, flag) === undefined) {
+      errors.push(`${flag} requires a value.`);
+    }
+  }
+  if (!artifact) errors.push('schedule requires a workflow artifact path.');
+  if (cronExpression && scheduledAt) errors.push('schedule requires exactly one of --cron or --at.');
+  if (!cronExpression && !scheduledAt) errors.push('schedule requires --cron or --at.');
+
+  return {
+    ...base,
+    ...(artifact ? { artifact } : {}),
+    ...(workflowName ? { workflowName } : {}),
+    ...(cronExpression ? { cronExpression } : {}),
+    ...(scheduledAt ? { scheduledAt } : {}),
+    ...(timezone ? { timezone } : {}),
+    ...(errors.length > 0 ? { errors } : {}),
+  };
+}
+
+function readScheduleArtifact(argv: string[]): string | undefined {
+  const valueFlags = new Set(['--name', '--cron', '--at', '--scheduled-at', '--timezone']);
+  for (let index = 0; index < argv.length; index += 1) {
+    const candidate = argv[index];
+    const previous = argv[index - 1];
+    if (!candidate || candidate.startsWith('--')) continue;
+    if (previous && valueFlags.has(previous)) continue;
+    return candidate;
+  }
+  return undefined;
 }
 
 function resolveCloudTargets(
