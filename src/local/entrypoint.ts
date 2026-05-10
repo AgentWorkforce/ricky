@@ -922,11 +922,48 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
   const { mkdir, writeFile } = await import('node:fs/promises');
   const loaderPath = join(localRunStateRoot(cwd), 'sdk-runtime-loader.mjs');
   const runtimeUrl = pathToFileURL(runtime.entryPath).href;
+
+  // Workflow files routinely import additional SDK subpaths (e.g.
+  // `@agent-relay/sdk/github`, `@agent-relay/sdk/relay`) and the sibling
+  // `@agent-relay/config` package. Resolve all of them against the same
+  // bundled SDK location so consumer repos don't need a local
+  // `npm install` of `@agent-relay/*` just to load workflow files under
+  // Ricky.
+  //
+  // runtime.entryPath looks like /<sdkRoot>/dist/workflows/index.js, so
+  // step up three dirs to get the SDK package root and one more for the
+  // parent `@agent-relay` scope dir (which also contains `config/`).
+  const sdkPackageRoot = dirname(dirname(dirname(runtime.entryPath)));
+  const scopeRoot = dirname(sdkPackageRoot);
+  const sdkRootUrl = pathToFileURL(sdkPackageRoot).href;
+  const sdkIndexUrl = pathToFileURL(join(sdkPackageRoot, 'dist', 'index.js')).href;
+  const configPackageRoot = join(scopeRoot, 'config');
+  const configRootUrl = pathToFileURL(configPackageRoot).href;
+  const configIndexUrl = pathToFileURL(join(configPackageRoot, 'dist', 'index.js')).href;
+
   const loaderSource = [
     `const sdkWorkflowsUrl = ${JSON.stringify(runtimeUrl)};`,
+    `const sdkRootUrl = ${JSON.stringify(sdkRootUrl)};`,
+    `const sdkIndexUrl = ${JSON.stringify(sdkIndexUrl)};`,
+    `const configRootUrl = ${JSON.stringify(configRootUrl)};`,
+    `const configIndexUrl = ${JSON.stringify(configIndexUrl)};`,
+    'const SDK_SUBPATH_PREFIX = "@agent-relay/sdk/";',
+    'const CONFIG_SUBPATH_PREFIX = "@agent-relay/config/";',
     'export async function resolve(specifier, context, nextResolve) {',
     "  if (specifier === '@agent-relay/sdk/workflows') {",
     '    return { url: sdkWorkflowsUrl, shortCircuit: true };',
+    '  }',
+    "  if (specifier === '@agent-relay/sdk') {",
+    '    return { url: sdkIndexUrl, shortCircuit: true };',
+    '  }',
+    '  if (specifier.startsWith(SDK_SUBPATH_PREFIX)) {',
+    '    return nextResolve(sdkRootUrl + "/" + specifier.slice(SDK_SUBPATH_PREFIX.length), context);',
+    '  }',
+    "  if (specifier === '@agent-relay/config') {",
+    '    return { url: configIndexUrl, shortCircuit: true };',
+    '  }',
+    '  if (specifier.startsWith(CONFIG_SUBPATH_PREFIX)) {',
+    '    return nextResolve(configRootUrl + "/" + specifier.slice(CONFIG_SUBPATH_PREFIX.length), context);',
     '  }',
     '  return nextResolve(specifier, context);',
     '}',
