@@ -75,6 +75,23 @@ describe('extractTargetFilesFromMarkdown', () => {
       extractTargetFilesFromMarkdown('See `https://example.com/api/v1/foo` for context.'),
     ).toEqual([]);
   });
+
+  it('rejects URLs and prose noise inside a `## Target Files` block', () => {
+    const text = [
+      '## Target Files',
+      '',
+      '- `packages/web/route.ts`',
+      '- https://example.com/api/v1/foo',
+      '- base/head',
+      '- `packages/core/launcher.ts`,',
+      '',
+      '## Acceptance',
+    ].join('\n');
+    expect(extractTargetFilesFromMarkdown(text)).toEqual([
+      'packages/web/route.ts',
+      'packages/core/launcher.ts',
+    ]);
+  });
 });
 
 describe('looksLikeRealPath', () => {

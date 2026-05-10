@@ -90,7 +90,9 @@ function extractFromTargetFilesSection(tree: Root): string[] {
     if (child.type === 'list') {
       for (const item of (child as List).children) {
         const path = pathFromListItem(item);
-        if (path && path.includes('/')) out.push(path);
+        if (!path) continue;
+        const cleaned = path.replace(/[`'")\],.;:]+$/, '').trim();
+        if (looksLikeRealPath(cleaned)) out.push(cleaned);
       }
     }
   }
