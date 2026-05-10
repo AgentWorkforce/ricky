@@ -3119,13 +3119,13 @@ describe('runLocal', () => {
   });
 
   it('drains broker stdout after SDK startup so event floods cannot wedge the workflow node', async () => {
-    const { chmod, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-broker-drain-repo-'));
     const stateHome = await mkdtemp(join(tmpdir(), 'ricky-sdk-broker-drain-state-'));
     const brokerDir = await mkdtemp(join(tmpdir(), 'ricky-sdk-broker-drain-bin-'));
-    const brokerPath = join(brokerDir, 'agent-relay-broker');
+    const brokerPath = join(brokerDir, process.platform === 'win32' ? 'agent-relay-broker.exe' : 'agent-relay-broker');
     const artifactPath = 'workflows/generated/broker-drain.workflow.ts';
     const previousStateHome = process.env.RICKY_STATE_HOME;
     const previousFakeBrokerPath = process.env.FAKE_BROKER_PATH;
@@ -3134,11 +3134,16 @@ describe('runLocal', () => {
       process.env.RICKY_STATE_HOME = stateHome;
       process.env.FAKE_BROKER_PATH = brokerPath;
       await mkdir(join(repo, 'workflows/generated'), { recursive: true });
+      // Give the SDK a real executable named like the broker while keeping the
+      // broker body in the `init` script that Node receives as argv[1].
+      await copyFile(process.execPath, brokerPath);
+      if (process.platform !== 'win32') {
+        await chmod(brokerPath, 0o755);
+      }
       await writeFile(
-        brokerPath,
+        join(repo, 'init'),
         [
-          '#!/usr/bin/env node',
-          "import http from 'node:http';",
+          "const http = require('node:http');",
           'const server = http.createServer((req, res) => {',
           "  if (req.url === '/api/session') {",
           "    res.writeHead(200, { 'content-type': 'application/json' });",
@@ -3177,7 +3182,6 @@ describe('runLocal', () => {
         ].join('\n'),
         'utf8',
       );
-      await chmod(brokerPath, 0o755);
       await writeFile(
         join(repo, artifactPath),
         [
