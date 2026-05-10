@@ -58,6 +58,43 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
   });
 
+  // Regression: master-rendered final-hard-validation used to hardcode
+  // `npx tsc --noEmit`, which dumps the full `tsc --help` text and exits 1
+  // when invoked from a monorepo root with no top-level tsconfig.json
+  // (npm workspaces with `packages/*/tsconfig.json` layout — common in
+  // MSD-style repos). The auto-fix loop then "repaired" the workflow 7×,
+  // all failing identically because the workflow command was correct in
+  // general — just wrong for that repo shape. The renderer now emits a
+  // workspace-aware shell snippet that prefers `npm run typecheck` when the
+  // project defines that script and falls back to `npx tsc --noEmit`
+  // otherwise. The fallback path keeps `npx tsc --noEmit` as a literal
+  // substring so downstream tests, evidence capture, and human readers
+  // still recognize the intent.
+  it('emits a workspace-aware typecheck command in master-rendered final-hard-validation', () => {
+    const result = generate({
+      spec: spec({
+        description:
+          'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['npm test'],
+      }),
+      artifactPath: 'workflows/generated/runtime-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const rendered = artifact(result).content;
+
+    // The final-hard-validation step body must include both branches of the
+    // workspace-aware fallback so monorepos and flat repos both succeed.
+    expect(rendered).toContain('npm pkg get scripts.typecheck');
+    expect(rendered).toContain('npm run typecheck');
+    expect(rendered).toContain('npx tsc --noEmit');
+
+    // The bare `npx tsc --noEmit` (without the conditional guard) must not
+    // appear as the first command after `set -e` in any rendered .step body.
+    // That pattern is what would dump the tsc help text in monorepo roots.
+    expect(rendered).not.toMatch(/command: "set -e\\nnpx tsc --noEmit\\n/);
+  });
+
   it('uses a master workflow for broad target-file specs and leaves narrow specs on the existing renderer', () => {
     const broad = generate({
       spec: spec({
