@@ -978,9 +978,35 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
   ].join('\n');
   await mkdir(dirname(loaderPath), { recursive: true });
   await writeFile(loaderPath, loaderSource, 'utf8');
+  // The SDK reads broker stdout just long enough to parse the startup URL.
+  // Once readline closes, the stream can pause and a chatty broker can block
+  // writing events into the full pipe. Patch spawn in the workflow process so
+  // only managed agent-relay-broker init children are resumed after that pause.
   const registerSource = [
-    'import{register}from"node:module";',
+    'import{createRequire,register,syncBuiltinESMExports}from"node:module";',
     'import{pathToFileURL}from"node:url";',
+    'const require=createRequire(pathToFileURL("./"));',
+    'const childProcess=require("node:child_process");',
+    'const brokerStdoutDrainPatchKey=Symbol.for("ricky.sdkRuntimeLoader.brokerStdoutDrainPatch");',
+    'if(!childProcess[brokerStdoutDrainPatchKey]){',
+    'const originalSpawn=childProcess.spawn;',
+    'childProcess.spawn=function rickySpawnWithBrokerStdoutDrain(command,args,options){',
+    'const child=originalSpawn.apply(this,arguments);',
+    'const argv=Array.isArray(args)?args.map(String):[];',
+    'const executable=String(command??"");',
+    'if(argv[0]==="init"&&/(?:^|[/\\\\])agent-relay-broker(?:\\.exe)?$/u.test(executable)&&child.stdout){',
+    'const drainBrokerStdout=()=>{',
+    'child.stdout?.off("pause",drainBrokerStdout);',
+    'child.stdout?.on("data",()=>{});',
+    'child.stdout?.resume();',
+    '};',
+    'child.stdout.on("pause",drainBrokerStdout);',
+    '}',
+    'return child;',
+    '};',
+    'childProcess[brokerStdoutDrainPatchKey]=true;',
+    'syncBuiltinESMExports();',
+    '}',
     `register(${JSON.stringify(pathToFileURL(loaderPath).href)},pathToFileURL("./"));`,
   ].join('');
   return `--import=data:text/javascript,${encodeURIComponent(registerSource)}`;
