@@ -143,3 +143,15 @@ export interface ActiveRunSnapshot {
   invocation: CommandInvocationSummary;
   metadata?: Record<string, unknown>;
 }
+
+export interface LocalCoordinatorApi {
+  launch(request: RunRequest): Promise<CoordinatorResult>;
+  on(event: 'lifecycle', cb: (event: LifecycleEvent) => void): void;
+  off(event: 'lifecycle', cb: (event: LifecycleEvent) => void): void;
+  monitor(runId?: string): AsyncIterable<LifecycleEvent>;
+  cancel(runId: string): void;
+  getActiveRun(runId: string): ActiveRunSnapshot | undefined;
+  listActiveRuns(): ActiveRunSnapshot[];
+  getRunResult(runId: string): CoordinatorResult | undefined;
+  listRunResults(): CoordinatorResult[];
+}

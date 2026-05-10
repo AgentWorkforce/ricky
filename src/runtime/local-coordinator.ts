@@ -10,6 +10,7 @@ import type {
   CommandRunner,
   CoordinatorResult,
   LifecycleEvent,
+  LocalCoordinatorApi,
   LocalCoordinatorOptions,
   LogSnippet,
   RunRequest,
@@ -45,7 +46,7 @@ interface TerminalOutcome {
   data?: Record<string, unknown>;
 }
 
-export class LocalCoordinator {
+export class LocalCoordinator implements LocalCoordinatorApi {
   private readonly emitter = new EventEmitter();
   private readonly activeRuns = new Map<string, ActiveRunState>();
   private readonly completedRuns = new Map<string, CoordinatorResult>();

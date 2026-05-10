@@ -687,6 +687,67 @@ describe('LocalCoordinator', () => {
     ]);
   });
 
+  it('retains completed evidence snapshots for debugger lookup without exposing mutable state', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-debugger-evidence',
+      workflowFile: 'generated/debuggable-workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { workflowId: 'debuggable-workflow', tags: ['generated'] },
+    });
+
+    invocations[0].emitStdout('{"step":"launch","status":"running"}');
+    invocations[0].emitStderr('launch warning');
+    invocations[0].complete(0);
+    await resultPromise;
+
+    const firstLookup = coordinator.getRunResult('run-debugger-evidence');
+    expect(firstLookup).toMatchObject({
+      runId: 'run-debugger-evidence',
+      status: 'passed',
+      exitCode: 0,
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/debuggable-workflow.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      stdout: ['{"step":"launch","status":"running"}'],
+      stderr: ['launch warning'],
+      metadata: { workflowId: 'debuggable-workflow', tags: ['generated'] },
+    });
+    expect(coordinator.listRunResults()).toHaveLength(1);
+
+    firstLookup?.stdout.push('mutated stdout');
+    firstLookup?.events.push({
+      kind: 'stdout',
+      runId: 'run-debugger-evidence',
+      timestamp: '2026-04-26T10:00:01.000Z',
+      status: 'passed',
+      message: 'mutated event',
+    });
+    const metadata = firstLookup?.metadata as { tags?: string[] } | undefined;
+    metadata?.tags?.push('mutated-tag');
+
+    expect(coordinator.getRunResult('run-debugger-evidence')).toMatchObject({
+      stdout: ['{"step":"launch","status":"running"}'],
+      metadata: { workflowId: 'debuggable-workflow', tags: ['generated'] },
+    });
+    expect(coordinator.getRunResult('run-debugger-evidence')?.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+  });
+
   it('keeps returned evidence stable when lifecycle observers mutate received events', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
