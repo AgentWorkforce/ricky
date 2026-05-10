@@ -170,6 +170,42 @@ Your trajectory helps others understand:
 Future agents can query past trajectories to learn from your decisions.
 <!-- prpm:snippet:end @agent-workforce/trail-snippet@1.1.2 -->
 
+# Ricky Source Code Conventions
+
+Rules that apply to Ricky's own source under `src/`, distinct from the workflow-authoring rules below.
+
+## Source-Text Analysis: Use Grammar-Aware Parsers, Not Regex
+
+When Ricky source code needs to inspect text whose grammar Ricky already understands — TypeScript or JavaScript artifacts, Markdown specs, JSON manifests, shell command bodies — use a parser for that grammar. Do not use substring matches, line-anchored regex, or comment-stripping heuristics. Do not call an LLM.
+
+**Why parsers, not regex.** The bugs we keep shipping in this area share one shape: a substring or regex that looked right against the file's "normal" code matches the same characters inside a string literal, a comment, a fenced code block, a HEREDOC, or a multi-line declaration. The injected fix then either no-ops (because we falsely detected the pattern as already present) or duplicates a declaration (because we falsely detected it as missing). Two recent examples in the same week converged on this conclusion:
+
+- `src/local/auto-fix-loop.ts:hasRickyWorkflowAliasImport` — `injectWorkflowEnvLoader`'s substring check for `from 'node:fs'` matched the literal text inside a `node --input-type=module` HEREDOC embedded in a `.step({ command: ... })` body, then skipped adding the real `import * as rickyWorkflowFs` alias. The fix walks `ts.createSourceFile` `ImportDeclaration` nodes; string-literal contents are structurally inert.
+- `src/product/spec-intake/markdown-target-files.ts:extractTargetFilesFromMarkdown` — the previous `PATH_PATTERN` regex over markdown spec text matched paths inside fenced code blocks and prose noise like `base/head`. The fix walks `mdast-util-from-markdown` `inlineCode` nodes; fenced blocks become `code` nodes and are excluded by construction.
+
+**Why not an LLM.** For hot-path pure functions:
+
+- Non-determinism breaks the offline eval suite and makes regressions hard to bisect.
+- Latency multiplies on every retry and every `--no-run` / `--run` invocation.
+- Spawning a model adds an external-dependency surface to a deterministic transformation.
+- For paths that later drive shell commands, model output is a prompt-injection surface.
+
+LLMs are the right tool for judgment ("is this code refactor good?"). They are the wrong tool for "does this file have an import statement matching this pattern."
+
+**Concrete tools available.** Both are already in `dependencies`:
+
+- TypeScript / JavaScript: `import ts from 'typescript'`; `ts.createSourceFile(name, content, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)` then walk `sourceFile.statements`.
+- Markdown: `import { fromMarkdown } from 'mdast-util-from-markdown'`; walk the resulting mdast tree (`inlineCode`, `code`, `heading`, `list`, etc.).
+
+**When you must touch source text, prefer in this order:**
+
+1. AST walk for the file's grammar (TS, mdast, JSON.parse, etc.).
+2. A small purpose-built tokenizer that strips inert regions (string literals, comments, code fences) before checking the cleaned content. Use this only when the parser dependency is genuinely too heavy for the call site.
+3. Regex on a region you have already proven inert (e.g., a single import-statement node's `getText()` output).
+4. Substring matching on the raw file. **Default to no.** If you reach for this, the bug class above is already loaded and aimed at you.
+
+The detection rule is the strict one. Insertion code that anchors against a known marker (e.g., "append after the `import { workflow }` line") may stay regex-based when the marker itself is unambiguous, but if you find yourself stripping comments or guessing string-literal boundaries, switch to AST.
+
 # Ricky Workflow Conventions
 
 Every agent working in this repo must follow these rules when authoring, reviewing, or modifying Ricky workflows.
