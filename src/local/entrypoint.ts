@@ -922,11 +922,55 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
   const { mkdir, writeFile } = await import('node:fs/promises');
   const loaderPath = join(localRunStateRoot(cwd), 'sdk-runtime-loader.mjs');
   const runtimeUrl = pathToFileURL(runtime.entryPath).href;
+
+  // Workflow files routinely import additional SDK subpaths (e.g.
+  // `@agent-relay/sdk/github`, `@agent-relay/sdk/relay`) and the sibling
+  // `@agent-relay/config` package. Resolve all of them against the same
+  // bundled SDK location so consumer repos don't need a local
+  // `npm install` of `@agent-relay/*` just to load workflow files under
+  // Ricky.
+  //
+  // runtime.entryPath looks like /<sdkRoot>/dist/workflows/index.js, so
+  // step up three dirs to get the SDK package root and one more for the
+  // parent `@agent-relay` scope dir (which also contains `config/`).
+  const sdkPackageRoot = dirname(dirname(dirname(runtime.entryPath)));
+  const scopeRoot = dirname(sdkPackageRoot);
+  const sdkIndexUrl = pathToFileURL(join(sdkPackageRoot, 'dist', 'index.js')).href;
+  const configPackageRoot = join(scopeRoot, 'config');
+  const configIndexUrl = pathToFileURL(join(configPackageRoot, 'dist', 'index.js')).href;
+  // Anchor URLs for re-resolving subpaths through node's package-exports
+  // machinery. We pretend the import came from a file inside each package's
+  // own root, so node walks up to find the @agent-relay/sdk (or config)
+  // entry in Ricky's bundled node_modules and consults that package's
+  // exports map. This is what `nextResolve(specifier, { parentURL })`
+  // is for — passing a fully-qualified file:// URL would skip exports
+  // resolution and try to load the literal path.
+  const sdkParentUrl = pathToFileURL(join(sdkPackageRoot, 'index.js')).href;
+  const configParentUrl = pathToFileURL(join(configPackageRoot, 'index.js')).href;
+
   const loaderSource = [
     `const sdkWorkflowsUrl = ${JSON.stringify(runtimeUrl)};`,
+    `const sdkIndexUrl = ${JSON.stringify(sdkIndexUrl)};`,
+    `const configIndexUrl = ${JSON.stringify(configIndexUrl)};`,
+    `const sdkParentUrl = ${JSON.stringify(sdkParentUrl)};`,
+    `const configParentUrl = ${JSON.stringify(configParentUrl)};`,
+    'const SDK_SUBPATH_PREFIX = "@agent-relay/sdk/";',
+    'const CONFIG_SUBPATH_PREFIX = "@agent-relay/config/";',
     'export async function resolve(specifier, context, nextResolve) {',
     "  if (specifier === '@agent-relay/sdk/workflows') {",
     '    return { url: sdkWorkflowsUrl, shortCircuit: true };',
+    '  }',
+    "  if (specifier === '@agent-relay/sdk') {",
+    '    return { url: sdkIndexUrl, shortCircuit: true };',
+    '  }',
+    "  if (specifier === '@agent-relay/config') {",
+    '    return { url: configIndexUrl, shortCircuit: true };',
+    '  }',
+    '  if (specifier.startsWith(SDK_SUBPATH_PREFIX)) {',
+    '    return nextResolve(specifier, { ...context, parentURL: sdkParentUrl });',
+    '  }',
+    '  if (specifier.startsWith(CONFIG_SUBPATH_PREFIX)) {',
+    '    return nextResolve(specifier, { ...context, parentURL: configParentUrl });',
     '  }',
     '  return nextResolve(specifier, context);',
     '}',
