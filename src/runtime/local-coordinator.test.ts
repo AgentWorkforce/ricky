@@ -1667,6 +1667,142 @@ describe('LocalCoordinator', () => {
     expect(coordinator.getActiveRun('run-generated-lifecycle-evidence')).toBeUndefined();
   });
 
+  it('lets generated workflow callers wait for successful launch evidence without a real agent-relay process', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+    const launchPromise = coordinator.launch({
+      runId: 'run-wait-success-evidence',
+      workflowFile: 'generated/success-evidence.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { workflowId: 'success-evidence' },
+    });
+    const waitPromise = coordinator.waitForRunResult('run-wait-success-evidence');
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(invocations).toHaveLength(1);
+    expect(coordinator.getActiveRun('run-wait-success-evidence')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/success-evidence.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+    });
+
+    invocations[0].emitStdout('{"step":"launch","status":"running"}');
+    invocations[0].emitStderr('launch warning');
+    invocations[0].complete(0);
+    const [result, waitedResult] = await Promise.all([launchPromise, waitPromise]);
+
+    expect(waitedResult).toEqual(result);
+    expect(lifecycleEvents).toEqual(result.events);
+    expect(result.status).toBe('passed');
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toEqual(['{"step":"launch","status":"running"}']);
+    expect(result.stderr).toEqual(['launch warning']);
+    expect(result.metadata).toEqual({ workflowId: 'success-evidence' });
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+    expect(coordinator.getActiveRun('run-wait-success-evidence')).toBeUndefined();
+  });
+
+  it('retains failed command evidence for later debugger analysis', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const launchPromise = coordinator.launch({
+      runId: 'run-debugger-failure-evidence',
+      workflowFile: 'generated/failure-evidence.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      metadata: { workflowId: 'failure-evidence' },
+    });
+    const waitPromise = coordinator.waitForRunResult('run-debugger-failure-evidence');
+
+    invocations[0].emitStderr('compile failed');
+    invocations[0].complete(11);
+    const [result, waitedResult] = await Promise.all([launchPromise, waitPromise]);
+
+    expect(waitedResult).toEqual(result);
+    expect(result.status).toBe('failed');
+    expect(result.exitCode).toBe(11);
+    expect(result.error).toBe('exited with code 11');
+    expect(result.stderr).toEqual(['compile failed']);
+    expect(result.stderrSnippet).toMatchObject({
+      lines: ['compile failed'],
+      totalLines: 1,
+      truncated: false,
+    });
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'stderr',
+        status: 'running',
+        message: 'compile failed',
+      }),
+    );
+    expect(coordinator.getRunResult('run-debugger-failure-evidence')).toMatchObject({
+      status: 'failed',
+      exitCode: 11,
+      stderr: ['compile failed'],
+      metadata: { workflowId: 'failure-evidence' },
+    });
+  });
+
+  it('settles timed-out generated workflow evidence deterministically through the injected runner', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+
+    const launchPromise = coordinator.launch({
+      runId: 'run-wait-timeout-evidence',
+      workflowFile: 'generated/timeout-evidence.yaml',
+      cwd: '/repo',
+      timeoutMs: 10,
+      metadata: { workflowId: 'timeout-evidence' },
+    });
+    const waitPromise = coordinator.waitForRunResult('run-wait-timeout-evidence');
+
+    invocations[0].emitStdout('waiting for remote step');
+    invocations[0].emitStderr('remote step still pending');
+    await vi.advanceTimersByTimeAsync(10);
+    const [result, waitedResult] = await Promise.all([launchPromise, waitPromise]);
+
+    expect(waitedResult).toEqual(result);
+    expect(invocations[0].killed).toBe(true);
+    expect(result.status).toBe('timed_out');
+    expect(result.exitCode).toBeNull();
+    expect(result.error).toBe('timed out after 10ms');
+    expect(result.stdout).toEqual(['waiting for remote step']);
+    expect(result.stderr).toEqual(['remote step still pending']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'timeout',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'timeout',
+      status: 'timed_out',
+      data: { exitCode: null, timeoutMs: 10 },
+    });
+    expect(coordinator.getActiveRun('run-wait-timeout-evidence')).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('does not invoke the runner when a lifecycle observer cancels during pre-spawn events', async () => {
     const { runner, run, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);

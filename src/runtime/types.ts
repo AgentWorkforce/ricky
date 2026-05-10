@@ -154,4 +154,6 @@ export interface LocalCoordinatorApi {
   listActiveRuns(): ActiveRunSnapshot[];
   getRunResult(runId: string): CoordinatorResult | undefined;
   listRunResults(): CoordinatorResult[];
+  /** Resolve once an active run settles; returns undefined when the run is unknown. */
+  waitForRunResult(runId: string): Promise<CoordinatorResult | undefined>;
 }

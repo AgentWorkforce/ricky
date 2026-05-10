@@ -50,6 +50,7 @@ export class LocalCoordinator implements LocalCoordinatorApi {
   private readonly emitter = new EventEmitter();
   private readonly activeRuns = new Map<string, ActiveRunState>();
   private readonly completedRuns = new Map<string, CoordinatorResult>();
+  private readonly runResultWaiters = new Map<string, Array<(result: CoordinatorResult) => void>>();
   private readonly completedRunLimit: number;
 
   constructor(
@@ -161,6 +162,7 @@ export class LocalCoordinator implements LocalCoordinatorApi {
       };
 
       this.recordCompletedRun(result);
+      this.resolveRunResultWaiters(result);
       resolveResult(result);
     };
 
@@ -352,6 +354,18 @@ export class LocalCoordinator implements LocalCoordinatorApi {
     return [...this.completedRuns.values()].map(cloneCoordinatorResult);
   }
 
+  async waitForRunResult(runId: string): Promise<CoordinatorResult | undefined> {
+    const completed = this.getRunResult(runId);
+    if (completed) return completed;
+    if (!this.activeRuns.has(runId)) return undefined;
+
+    return new Promise((resolve) => {
+      const waiters = this.runResultWaiters.get(runId) ?? [];
+      waiters.push((result) => resolve(cloneCoordinatorResult(result)));
+      this.runResultWaiters.set(runId, waiters);
+    });
+  }
+
   private recordCompletedRun(result: CoordinatorResult): void {
     if (this.completedRunLimit === 0) return;
     this.completedRuns.set(result.runId, cloneCoordinatorResult(result));
@@ -361,6 +375,15 @@ export class LocalCoordinator implements LocalCoordinatorApi {
       const oldestRunId = this.completedRuns.keys().next().value;
       if (oldestRunId === undefined) return;
       this.completedRuns.delete(oldestRunId);
+    }
+  }
+
+  private resolveRunResultWaiters(result: CoordinatorResult): void {
+    const waiters = this.runResultWaiters.get(result.runId);
+    if (!waiters) return;
+    this.runResultWaiters.delete(result.runId);
+    for (const resolve of waiters) {
+      resolve(result);
     }
   }
 }
