@@ -656,6 +656,44 @@ describe('runWithAutoFix', () => {
     expect(repair?.content).toContain("import { mkdirSync, writeFileSync } from 'node:fs';");
   });
 
+  it('recognizes already-present rickyWorkflow* alias imports declared via multi-line statement and skips re-injection', () => {
+    // Multi-line import shapes are not handled by line-anchored regex/preamble
+    // checks but are trivially correct under an AST walk. If the AST detection
+    // misses the existing import, the injection logic would add a duplicate
+    // alias, which TypeScript's strip-types loader rejects with
+    // SyntaxError: Identifier 'rickyWorkflowFs' has already been declared.
+    const contentWithMultiLineExistingAlias = [
+      "import { workflow } from '@agent-relay/sdk/workflows';",
+      "import * as",
+      '  rickyWorkflowFs',
+      "  from 'node:fs';",
+      "import * as rickyWorkflowPath from 'node:path';",
+      '',
+      '// RICKY_WORKFLOW_ENV_LOADER',
+      'function loadRickyWorkflowEnv() { /* already injected */ }',
+      '',
+      'async function main() {',
+      '  loadRickyWorkflowEnv();',
+      '  await workflow("foo").run({ cwd: process.cwd() });',
+      '}',
+    ].join('\n');
+
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/already-injected.ts',
+      artifactContent: contentWithMultiLineExistingAlias,
+      evidence: missingEnvEvidence(),
+      response: blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'),
+    });
+
+    // No second `import * as rickyWorkflowFs` statement should appear.
+    const fsAliasMatches = (repair?.content ?? contentWithMultiLineExistingAlias)
+      .match(/import\s+\*\s+as\s+rickyWorkflowFs\b/g);
+    expect(fsAliasMatches).toHaveLength(1);
+    const pathAliasMatches = (repair?.content ?? contentWithMultiLineExistingAlias)
+      .match(/import\s+\*\s+as\s+rickyWorkflowPath\b/g);
+    expect(pathAliasMatches).toHaveLength(1);
+  });
+
   it('routes semantic workflow failures to persona repair instead of deterministic repair', async () => {
     const artifactPath = 'workflows/demo-persona-repair/semantic-contract.ts';
     const artifactContent = await readFile(new URL('../../workflows/demo-persona-repair/semantic-contract.ts', import.meta.url), 'utf8');
