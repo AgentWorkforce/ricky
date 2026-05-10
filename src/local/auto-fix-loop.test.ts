@@ -609,6 +609,91 @@ describe('runWithAutoFix', () => {
     expect(repair?.content).toContain('MISSING_ENV_VAR:');
   });
 
+  // Regression: when a master-rendered workflow embeds a `node --input-type=module`
+  // HEREDOC inside a .step({ command: ... }) string, the embedded shell text
+  // contains the literal substring `from 'node:fs'`. The previous import-detection
+  // used `content.includes("from 'node:fs'")`, which the embedded string fooled
+  // — Ricky then injected `loadRickyWorkflowEnv` (which references
+  // `rickyWorkflowFs` and `rickyWorkflowPath`) without adding the
+  // `import * as rickyWorkflowFs from 'node:fs'` alias at module top level. The
+  // resulting workflow ReferenceError'd at module load and Auto-fix burned
+  // 7/7 attempts on UNSUPPORTED_RUNTIME at runtime-launch. Detection must
+  // match an actual top-level `import * as <alias> from '<module>'` line.
+  it('adds the rickyWorkflow* alias imports even when the workflow embeds `from \'node:fs\'` inside a .step command HEREDOC', () => {
+    const masterRenderedContentWithEmbeddedImports = [
+      "import { workflow } from '@agent-relay/sdk/workflows';",
+      '',
+      '// RICKY_MASTER_EXECUTOR_WORKFLOW',
+      'async function main() {',
+      '  await workflow("ricky-master")',
+      '    .step("materialize-children", {',
+      '      type: "deterministic",',
+      // Mirrors master-workflow-renderer.ts:138-149 — the master renderer emits
+      // a node --input-type=module HEREDOC as a string inside a step command.
+      // That string literally contains `from \'node:fs\'` and `from \'node:path\'`.
+      '      command: "node --input-type=module <<\'NODE\'\\nimport { mkdirSync, writeFileSync } from \'node:fs\';\\nimport { dirname } from \'node:path\';\\nNODE",',
+      '      captureOutput: true,',
+      '      failOnError: true,',
+      '    })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+    ].join('\n');
+
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/master.ts',
+      artifactContent: masterRenderedContentWithEmbeddedImports,
+      evidence: missingEnvEvidence(),
+      response: blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'),
+    });
+
+    expect(repair?.applied).toBe(true);
+    // Aliases must be added at module top level despite the embedded
+    // HEREDOC string containing `from 'node:fs'` / `from 'node:path'`.
+    expect(repair?.content).toMatch(/^import \* as rickyWorkflowFs from 'node:fs';/m);
+    expect(repair?.content).toMatch(/^import \* as rickyWorkflowPath from 'node:path';/m);
+    expect(repair?.content).toContain('RICKY_WORKFLOW_ENV_LOADER');
+    // The HEREDOC is preserved unchanged.
+    expect(repair?.content).toContain("import { mkdirSync, writeFileSync } from 'node:fs';");
+  });
+
+  it('recognizes already-present rickyWorkflow* alias imports declared via multi-line statement and skips re-injection', () => {
+    // Multi-line import shapes are not handled by line-anchored regex/preamble
+    // checks but are trivially correct under an AST walk. If the AST detection
+    // misses the existing import, the injection logic would add a duplicate
+    // alias, which TypeScript's strip-types loader rejects with
+    // SyntaxError: Identifier 'rickyWorkflowFs' has already been declared.
+    const contentWithMultiLineExistingAlias = [
+      "import { workflow } from '@agent-relay/sdk/workflows';",
+      "import * as",
+      '  rickyWorkflowFs',
+      "  from 'node:fs';",
+      "import * as rickyWorkflowPath from 'node:path';",
+      '',
+      '// RICKY_WORKFLOW_ENV_LOADER',
+      'function loadRickyWorkflowEnv() { /* already injected */ }',
+      '',
+      'async function main() {',
+      '  loadRickyWorkflowEnv();',
+      '  await workflow("foo").run({ cwd: process.cwd() });',
+      '}',
+    ].join('\n');
+
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/already-injected.ts',
+      artifactContent: contentWithMultiLineExistingAlias,
+      evidence: missingEnvEvidence(),
+      response: blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'),
+    });
+
+    // No second `import * as rickyWorkflowFs` statement should appear.
+    const fsAliasMatches = (repair?.content ?? contentWithMultiLineExistingAlias)
+      .match(/import\s+\*\s+as\s+rickyWorkflowFs\b/g);
+    expect(fsAliasMatches).toHaveLength(1);
+    const pathAliasMatches = (repair?.content ?? contentWithMultiLineExistingAlias)
+      .match(/import\s+\*\s+as\s+rickyWorkflowPath\b/g);
+    expect(pathAliasMatches).toHaveLength(1);
+  });
+
   it('routes semantic workflow failures to persona repair instead of deterministic repair', async () => {
     const artifactPath = 'workflows/demo-persona-repair/semantic-contract.ts';
     const artifactContent = await readFile(new URL('../../workflows/demo-persona-repair/semantic-contract.ts', import.meta.url), 'utf8');

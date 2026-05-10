@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import ts from 'typescript';
 
 import type { LocalInvocationRequest } from './request-normalizer.js';
 import type { LocalClassifiedBlocker, LocalResponse } from './entrypoint.js';
@@ -700,11 +701,23 @@ function injectWorkflowEnvLoader(content: string, requiredEnvVars: string[]): st
   let next = content;
   let changed = false;
 
-  if (!next.includes("from 'node:fs'") && !next.includes('from "node:fs"')) {
+  // We must check that the *aliases* loadRickyWorkflowEnv references are
+  // already imported, not just that the module name appears anywhere in the
+  // file. The master workflow renderer emits real `import { mkdirSync,
+  // writeFileSync } from 'node:fs'` strings inside shell HEREDOCs in
+  // .step({ command: ... }) calls — that's a string literal, not a module
+  // import, but a substring check for `from 'node:fs'` matches it and
+  // silently skips adding `import * as rickyWorkflowFs from 'node:fs'`.
+  // The injected loadRickyWorkflowEnv body then ReferenceErrors at module
+  // load time. hasRickyWorkflowAliasImport uses the TypeScript AST to walk
+  // module-scope ImportDeclaration nodes so string-literal contents are
+  // structurally inert and the alias detection is independent of source
+  // formatting.
+  if (!hasRickyWorkflowAliasImport(next, 'rickyWorkflowFs', 'node:fs')) {
     next = insertAfterWorkflowImport(next, "import * as rickyWorkflowFs from 'node:fs';");
     changed = true;
   }
-  if (!next.includes("from 'node:path'") && !next.includes('from "node:path"')) {
+  if (!hasRickyWorkflowAliasImport(next, 'rickyWorkflowPath', 'node:path')) {
     next = insertAfterWorkflowImport(next, "import * as rickyWorkflowPath from 'node:path';");
     changed = true;
   }
@@ -740,6 +753,45 @@ function insertAfterWorkflowImport(content: string, importLine: string): string 
     return content.replace(workflowImport, (match) => `${match}${importLine}\n`);
   }
   return `${importLine}\n${content}`;
+}
+
+function hasRickyWorkflowAliasImport(content: string, alias: string, moduleName: string): boolean {
+  // Walk module-scope ImportDeclaration nodes via the TypeScript AST and
+  // look for `import * as <alias> from '<moduleName>'`. Using the parser
+  // (rather than substring or regex matching on the raw source) makes
+  // detection structural: contents inside StringLiteral /
+  // NoSubstitutionTemplateLiteral / TemplateExpression nodes are inert, so
+  // shell HEREDOCs in .step({ command: ... }) bodies that embed
+  // `import { ... } from 'node:fs'` as part of a `node --input-type=module`
+  // script no longer fool us into skipping the real top-level alias import.
+  // Comments are also inert. Multi-line imports, alternate quoting, and
+  // imports placed lower in the file all just work because the parser owns
+  // the lexical structure instead of us simulating it with regex.
+  let sourceFile: ts.SourceFile;
+  try {
+    sourceFile = ts.createSourceFile(
+      'ricky-workflow-artifact.ts',
+      content,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ false,
+      ts.ScriptKind.TS,
+    );
+  } catch {
+    // Unparseable artifacts fall through and get the alias re-injected so
+    // the helpers always have their imports. The real syntax error will
+    // surface at runtime via the strip-types loader.
+    return false;
+  }
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== moduleName) continue;
+    const namedBindings = statement.importClause?.namedBindings;
+    if (!namedBindings || !ts.isNamespaceImport(namedBindings)) continue;
+    if (namedBindings.name.text === alias) return true;
+  }
+  return false;
 }
 
 function insertBeforeMain(content: string, helper: string): string {
