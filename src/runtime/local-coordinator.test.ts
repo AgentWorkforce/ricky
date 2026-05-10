@@ -348,6 +348,82 @@ describe('LocalCoordinator', () => {
     ]);
   });
 
+  it('records timeout evidence for debugger lookup through the injected runner', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-timeout-debug-evidence',
+      workflowFile: 'generated/timeout-workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 25,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { workflowId: 'timeout-workflow' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'generated/timeout-workflow.yaml', '--json'],
+      { cwd: '/repo', env: { RELAYCAST_WORKSPACE: 'unit-test' } },
+    );
+    expect(coordinator.getActiveRun('run-timeout-debug-evidence')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/timeout-workflow.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      metadata: { workflowId: 'timeout-workflow' },
+    });
+
+    invocations[0].emitStdout('{"step":"wait-for-review","status":"running"}');
+    invocations[0].emitStderr('review step has not completed');
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await resultPromise;
+
+    expect(invocations[0].killed).toBe(true);
+    expect(lifecycleEvents).toEqual(result.events);
+    expect(result.status).toBe('timed_out');
+    expect(result.exitCode).toBeNull();
+    expect(result.error).toBe('timed out after 25ms');
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/timeout-workflow.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+    expect(result.metadata).toEqual({ workflowId: 'timeout-workflow' });
+    expect(result.stdout).toEqual(['{"step":"wait-for-review","status":"running"}']);
+    expect(result.stderr).toEqual(['review step has not completed']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'timeout',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'timeout',
+      status: 'timed_out',
+      data: { exitCode: null, timeoutMs: 25 },
+    });
+    expect(coordinator.getActiveRun('run-timeout-debug-evidence')).toBeUndefined();
+    expect(coordinator.getRunResult('run-timeout-debug-evidence')).toMatchObject({
+      status: 'timed_out',
+      exitCode: null,
+      stdout: ['{"step":"wait-for-review","status":"running"}'],
+      stderr: ['review step has not completed'],
+      metadata: { workflowId: 'timeout-workflow' },
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('keeps timeout evidence stable when a killed command rejects later', async () => {
     const { runner, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
