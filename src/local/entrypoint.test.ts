@@ -3055,6 +3055,69 @@ describe('runLocal', () => {
     }
   });
 
+  it('resolves @agent-relay/sdk subpaths and @agent-relay/config via the bundled package', async () => {
+    // Regression test for the loader bug fixed in PR #92: previously the
+    // generated sdk-runtime-loader only redirected `@agent-relay/sdk/workflows`,
+    // so workflow files importing other SDK subpaths (e.g. `/github`) or any
+    // `@agent-relay/config` subpath failed in consumer repos that hadn't
+    // `npm install`ed the SDK locally — defeating the point of bundling.
+    //
+    // This test imports a non-`workflows` SDK subpath AND an `@agent-relay/config`
+    // subpath, and asserts the workflow runs successfully without the consumer
+    // repo having any node_modules.
+    const { access, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-subpaths-repo-'));
+    const stateHome = await mkdtemp(join(tmpdir(), 'ricky-sdk-subpaths-state-'));
+    const artifactPath = 'workflows/generated/sdk-subpaths.workflow.ts';
+    const previousStateHome = process.env.RICKY_STATE_HOME;
+
+    try {
+      process.env.RICKY_STATE_HOME = stateHome;
+      await mkdir(join(repo, 'workflows/generated'), { recursive: true });
+      await writeFile(
+        join(repo, artifactPath),
+        [
+          'import { workflow } from "@agent-relay/sdk/workflows";',
+          'import * as github from "@agent-relay/sdk/github";',
+          'import * as relayConfig from "@agent-relay/config/relay-config";',
+          'import * as agentConfig from "@agent-relay/config/agent-config";',
+          'console.log("workflow=" + typeof workflow);',
+          'console.log("sdk-subpath=" + typeof github);',
+          'console.log("config-subpath-relay=" + typeof relayConfig);',
+          'console.log("config-subpath-agent=" + typeof agentConfig);',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+
+      const result = await runLocal(
+        { source: 'workflow-artifact', artifactPath, stageMode: 'run' },
+        {
+          artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          localExecutor: {
+            cwd: repo,
+            timeoutMs: 10_000,
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.execution?.status).toBe('success');
+      // No consumer-repo node_modules needed.
+      await expect(access(join(repo, 'node_modules'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      if (previousStateHome === undefined) {
+        delete process.env.RICKY_STATE_HOME;
+      } else {
+        process.env.RICKY_STATE_HOME = previousStateHome;
+      }
+      await rm(repo, { recursive: true, force: true });
+      await rm(stateHome, { recursive: true, force: true });
+    }
+  });
+
   it('kills the SDK workflow process tree when the local timeout fires', async () => {
     const { mkdir, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');

@@ -935,18 +935,25 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
   // parent `@agent-relay` scope dir (which also contains `config/`).
   const sdkPackageRoot = dirname(dirname(dirname(runtime.entryPath)));
   const scopeRoot = dirname(sdkPackageRoot);
-  const sdkRootUrl = pathToFileURL(sdkPackageRoot).href;
   const sdkIndexUrl = pathToFileURL(join(sdkPackageRoot, 'dist', 'index.js')).href;
   const configPackageRoot = join(scopeRoot, 'config');
-  const configRootUrl = pathToFileURL(configPackageRoot).href;
   const configIndexUrl = pathToFileURL(join(configPackageRoot, 'dist', 'index.js')).href;
+  // Anchor URLs for re-resolving subpaths through node's package-exports
+  // machinery. We pretend the import came from a file inside each package's
+  // own root, so node walks up to find the @agent-relay/sdk (or config)
+  // entry in Ricky's bundled node_modules and consults that package's
+  // exports map. This is what `nextResolve(specifier, { parentURL })`
+  // is for — passing a fully-qualified file:// URL would skip exports
+  // resolution and try to load the literal path.
+  const sdkParentUrl = pathToFileURL(join(sdkPackageRoot, 'index.js')).href;
+  const configParentUrl = pathToFileURL(join(configPackageRoot, 'index.js')).href;
 
   const loaderSource = [
     `const sdkWorkflowsUrl = ${JSON.stringify(runtimeUrl)};`,
-    `const sdkRootUrl = ${JSON.stringify(sdkRootUrl)};`,
     `const sdkIndexUrl = ${JSON.stringify(sdkIndexUrl)};`,
-    `const configRootUrl = ${JSON.stringify(configRootUrl)};`,
     `const configIndexUrl = ${JSON.stringify(configIndexUrl)};`,
+    `const sdkParentUrl = ${JSON.stringify(sdkParentUrl)};`,
+    `const configParentUrl = ${JSON.stringify(configParentUrl)};`,
     'const SDK_SUBPATH_PREFIX = "@agent-relay/sdk/";',
     'const CONFIG_SUBPATH_PREFIX = "@agent-relay/config/";',
     'export async function resolve(specifier, context, nextResolve) {',
@@ -956,14 +963,14 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
     "  if (specifier === '@agent-relay/sdk') {",
     '    return { url: sdkIndexUrl, shortCircuit: true };',
     '  }',
-    '  if (specifier.startsWith(SDK_SUBPATH_PREFIX)) {',
-    '    return nextResolve(sdkRootUrl + "/" + specifier.slice(SDK_SUBPATH_PREFIX.length), context);',
-    '  }',
     "  if (specifier === '@agent-relay/config') {",
     '    return { url: configIndexUrl, shortCircuit: true };',
     '  }',
+    '  if (specifier.startsWith(SDK_SUBPATH_PREFIX)) {',
+    '    return nextResolve(specifier, { ...context, parentURL: sdkParentUrl });',
+    '  }',
     '  if (specifier.startsWith(CONFIG_SUBPATH_PREFIX)) {',
-    '    return nextResolve(configRootUrl + "/" + specifier.slice(CONFIG_SUBPATH_PREFIX.length), context);',
+    '    return nextResolve(specifier, { ...context, parentURL: configParentUrl });',
     '  }',
     '  return nextResolve(specifier, context);',
     '}',
