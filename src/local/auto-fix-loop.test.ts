@@ -609,6 +609,34 @@ describe('runWithAutoFix', () => {
     expect(repair?.content).toContain('MISSING_ENV_VAR:');
   });
 
+  // Regression: assertRickyWorkflowEnv used to throw at module-load time
+  // unconditionally, before the SDK had a chance to honour --start-from.
+  // That made resuming with --start-from impossible if the resumed step
+  // didn't actually need the missing env var (the upstream-only step did,
+  // but it was being skipped). The injected helper now warns-and-continues
+  // when process.env.START_FROM is set so resumed steps can run and any
+  // step that genuinely needs a missing value still fails with its own
+  // signal at the point of use.
+  it('injects an env-assert helper that honors START_FROM for --start-from resumes', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/foo.ts',
+      artifactContent: workflowContent(),
+      evidence: missingEnvEvidence(),
+      response: blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'),
+    });
+
+    expect(repair?.applied).toBe(true);
+    // Resume signal acknowledged.
+    expect(repair?.content).toContain('process.env.START_FROM');
+    // Warn-and-continue path uses console.warn rather than throwing so the
+    // SDK can proceed to the resumed step.
+    expect(repair?.content).toMatch(/console\.warn\([^)]*Skipping env-var assertion/);
+    expect(repair?.content).toMatch(/--start-from active/);
+    // The non-resume path still throws fast — preserves the original
+    // contract for first-run invocations.
+    expect(repair?.content).toContain('throw new Error(`MISSING_ENV_VAR:');
+  });
+
   // Regression: when a master-rendered workflow embeds a `node --input-type=module`
   // HEREDOC inside a .step({ command: ... }) string, the embedded shell text
   // contains the literal substring `from 'node:fs'`. The previous import-detection

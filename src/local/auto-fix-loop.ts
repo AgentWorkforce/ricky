@@ -822,9 +822,19 @@ function loadRickyWorkflowEnv(cwd = process.cwd()) {
 
 function assertRickyWorkflowEnv(names: string[]): void {
   const missing = names.filter((name) => !process.env[name]);
-  if (missing.length > 0) {
-    throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
+  if (missing.length === 0) return;
+  // When the workflow is being resumed via --start-from, the SDK sets
+  // process.env.START_FROM. Skipped upstream steps may have been the
+  // ones that needed these env vars; the resumed steps may not. Warn
+  // instead of failing fast so the resume can proceed and any step that
+  // actually needs a missing value will fail naturally with its own
+  // signal. Without this, --start-from on a workflow whose missing env
+  // var isn't in the resumed step's path is unrecoverable from the CLI.
+  if (process.env.START_FROM) {
+    console.warn(\`[ricky] Skipping env-var assertion (--start-from active): missing \${missing.join(', ')}. Resumed steps that actually need these will fail with their own error.\`);
+    return;
   }
+  throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
 }
 
 function unquoteRickyWorkflowEnvValue(value: string): string {
@@ -839,9 +849,12 @@ function unquoteRickyWorkflowEnvValue(value: string): string {
 function rickyWorkflowEnvAssertSource(): string {
   return `function assertRickyWorkflowEnv(names: string[]): void {
   const missing = names.filter((name) => !process.env[name]);
-  if (missing.length > 0) {
-    throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
+  if (missing.length === 0) return;
+  if (process.env.START_FROM) {
+    console.warn(\`[ricky] Skipping env-var assertion (--start-from active): missing \${missing.join(', ')}. Resumed steps that actually need these will fail with their own error.\`);
+    return;
   }
+  throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
 }`;
 }
 
