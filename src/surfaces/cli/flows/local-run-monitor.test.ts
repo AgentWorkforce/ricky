@@ -267,9 +267,12 @@ describe('local run monitor', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'ricky-monitor-subprocess-'));
     const stateHome = join(cwd, '.ricky-state-home');
     const harnessPath = join(cwd, 'background-monitor-harness.mjs');
+    const releaseSignalPath = join(cwd, 'release-run.signal');
     const monitorUrl = pathToFileURL(join(process.cwd(), 'src/surfaces/cli/flows/local-run-monitor.ts')).href;
     await writeFile(harnessPath, `
+      import { existsSync } from 'node:fs';
       import { startLocalRunMonitor } from ${JSON.stringify(monitorUrl)};
+      const releaseSignalPath = ${JSON.stringify(releaseSignalPath)};
       const state = await startLocalRunMonitor({
         cwd: process.env.REPO_UNDER_TEST,
         artifactPath: 'workflows/generated/release-health.ts',
@@ -281,7 +284,9 @@ describe('local run monitor', () => {
         },
         runIdFactory: () => 'subprocess-background-run',
         runLocalFn: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          while (!existsSync(releaseSignalPath)) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
           return {
             ok: true,
             artifacts: [],
@@ -341,6 +346,7 @@ describe('local run monitor', () => {
       const runningStatus = await readRunStatusInSubprocess(cwd, stateHome, started.runId);
       expect(runningStatus.status).toBe('running');
 
+      await writeFile(releaseSignalPath, 'go', 'utf8');
       await waitForExit(child, 5000);
       expect(child.exitCode).toBe(0);
 
