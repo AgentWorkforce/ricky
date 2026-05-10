@@ -27,6 +27,27 @@ interface RenderedMasterWorkflow {
   plan: MasterExecutionPlan;
 }
 
+// Workspace-aware typecheck: prefer the project's own `npm run typecheck`
+// script when one exists (the right thing for monorepos like
+// `npm run typecheck -ws` or custom build pipelines), and fall back to
+// `npx tsc --noEmit` when the project is a flat single-tsconfig repo.
+//
+// Without this guard, `npx tsc --noEmit` invoked from a monorepo root with
+// no top-level tsconfig.json (npm workspaces, packages/*/tsconfig.json
+// layout — common in MSD-style repos) finds neither input files nor a
+// config and dumps the full `tsc --help` text on stdout while exiting 1.
+// The auto-fix loop then "repairs" the workflow 7×, all failing identically
+// because the workflow command is correct in general — just wrong for this
+// repo shape.
+//
+// `npm pkg get scripts.typecheck` returns `"<command>"` when the script
+// exists and `{}` when it does not (npm v7.20.0+, shipped with Node 16+).
+// We compare against the literal `{}` so the snippet is portable across
+// any package layout. The substring `npx tsc --noEmit` is preserved so
+// downstream tools and human readers still recognize the intent.
+const TYPECHECK_COMMAND =
+  'if [ "$(npm pkg get scripts.typecheck 2>/dev/null)" != "{}" ]; then npm run typecheck; else npx tsc --noEmit; fi';
+
 const MASTER_EXPLICIT_PATTERN =
   /\b(master executor|master orchestration|smaller workflows|child workflows|several workflows|multiple workflows|break(?:ing)? (?:it )?(?:out|up)|divvy|decompos(?:e|ition)|workflow waves?)\b/i;
 
@@ -261,7 +282,7 @@ function renderMasterSource(input: {
     '      dependsOn: ["review-child-evidence"],',
     `      command: ${literal([
       'set -e',
-      'npx tsc --noEmit',
+      TYPECHECK_COMMAND,
       'npm test',
       'git diff --name-only',
       `grep -F RICKY_MASTER_REVIEW_READY ${shellQuote(`${input.artifactsDir}/review-codex.md`)}`,
@@ -462,9 +483,9 @@ function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan): Dete
     gate('skill-boundary-metadata-gate', `test -f ${artifactsDir}/skill-application-boundary.json`, 'file_exists', true, ['prepare-context'], 'pre_review'),
     gate('lead-plan-gate', `grep -F RICKY_MASTER_LEAD_PLAN_READY ${artifactsDir}/lead-plan.md`, 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('child-workflow-file-gate', plan.children.map((child) => `test -f ${child.workflowFilePath}`).join(' && '), 'file_exists', true, ['materialize-child-workflows'], 'pre_review'),
-    gate('initial-soft-validation', 'npx tsc --noEmit 2>&1 | tail -160', 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
+    gate('initial-soft-validation', `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
     gate('final-review-pass-gate', `grep -F RICKY_MASTER_REVIEW_READY ${artifactsDir}/review-codex.md`, 'output_contains', true, ['review-child-evidence'], 'final'),
-    gate('final-hard-validation', 'npx tsc --noEmit && npm test', 'exit_code', true, ['final-review-pass-gate'], 'final'),
+    gate('final-hard-validation', `{ ${TYPECHECK_COMMAND}; } && npm test`, 'exit_code', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', 'git diff --name-only', 'output_contains', true, ['final-hard-validation'], 'final'),
     gate('regression-gate', 'npm test', 'exit_code', true, ['git-diff-gate'], 'regression'),
   ];
