@@ -62,6 +62,8 @@
     "@agentworkforce/harness-kit": "^0.19.0",
     "@agentworkforce/workload-router": "^0.19.0",
     "@inquirer/prompts": "^8.4.2",
+    "@types/mdast": "^4.0.4",
+    "mdast-util-from-markdown": "^2.0.3",
     "ora": "^8.2.0",
     "ssh2": "^1.17.0"
   },
