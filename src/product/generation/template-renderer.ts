@@ -1236,6 +1236,25 @@ function describeImplementation(spec: NormalizedWorkflowSpec): string {
   return `Edit declared targets: ${spec.targetFiles.join(', ')}`;
 }
 
+/**
+ * Derive the test command for a generated workflow based on the spec.
+ *
+ * Resolution order:
+ *
+ *   1. Explicit `vitest`/`npm test` acceptance gate → `mapAcceptanceGateToCommand`.
+ *   2. Test-file targets in `spec.targetFiles` → `npx vitest run <files>`.
+ *   3. Source-file targets that live under monorepo workspaces
+ *      (`packages/<pkg>/`, `apps/<pkg>/`, `services/<pkg>/`, including
+ *      scoped `packages/@scope/<pkg>/` layouts) → one
+ *      `npm test --workspace=<pkg>` per unique workspace, chained with
+ *      `&&`. This keeps validation focused on the spec's declared scope
+ *      so unrelated failures in sibling packages cannot block the
+ *      generated workflow's final-hard-validation gate.
+ *   4. Fallback for any other target shape → `npx vitest run`.
+ *
+ * Exported so the master workflow renderer can reuse the same logic
+ * instead of forking another implementation.
+ */
 export function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
   const explicitTestGate = spec.acceptanceGates.find((gate) => /\b(vitest|npm test)\b/i.test(gate.gate));
   if (explicitTestGate) return mapAcceptanceGateToCommand(explicitTestGate.gate);
@@ -1243,15 +1262,6 @@ export function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
   const testTargets = spec.targetFiles.filter((file) => /\.(test|spec)\.(ts|tsx|js|jsx)$/i.test(file));
   if (testTargets.length > 0) return `npx vitest run ${testTargets.map(shellQuote).join(' ')}`;
 
-  // Workspace-scoped fallback: when target files live under
-  // packages/<pkg>/, apps/<pkg>/, or services/<pkg>/ (the three monorepo
-  // conventions npm/pnpm/yarn workspaces overwhelmingly use), validate by
-  // running `npm test --workspace=<pkg>` for each workspace the spec
-  // touches. Without this, the unscoped `npx vitest run` (or `npm test`)
-  // fallback walks the entire repo's test suite and any pre-existing or
-  // unrelated failure in another package blocks the workflow's
-  // final-hard-validation gate — work no agent in this generated workflow
-  // can sensibly repair because it isn't in the spec's declared scope.
   const workspaces = uniqueWorkspacesFromTargetFiles(spec.targetFiles);
   if (workspaces.length > 0) {
     return workspaces.map((ws) => `npm test --workspace=${shellQuote(ws)}`).join(' && ');
@@ -1260,10 +1270,17 @@ export function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
   return 'npx vitest run';
 }
 
+/**
+ * Extract the unique monorepo workspace paths touched by a list of target
+ * files. Recognises the three workspace-root conventions
+ * (`packages/`, `apps/`, `services/`) plus optional npm scope prefixes
+ * (e.g. `packages/@scope/<pkg>/`). Returns the workspace paths sorted for
+ * deterministic command emission.
+ */
 function uniqueWorkspacesFromTargetFiles(files: string[]): string[] {
   const workspaces = new Set<string>();
   for (const file of files) {
-    const match = file.match(/^((?:packages|apps|services)\/[^\/]+)\//);
+    const match = file.match(/^((?:packages|apps|services)\/(?:@[^\/]+\/)?[^\/]+)\//);
     if (match) workspaces.add(match[1]);
   }
   return [...workspaces].sort();
