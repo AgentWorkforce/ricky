@@ -263,3 +263,102 @@ maxToolCalls: 1
 ### Must Not
 - Infer `auto` solely from runtime keywords when an explicit CLI mode is present.
 - Force the user to rewrite a design spec to remove one runtime keyword.
+## generation-quality.target-files-from-backticked-prose
+Executor: ricky-cli
+Kind: regression
+Tags: generation, target-files, parser, local
+Human Review: false
+
+### Message
+Ricky receives a markdown spec that names target file paths inside backticks in prose. The parser must recognize them so the workflow targets real source files instead of falling back to the manifest-driven single-artifact path.
+
+### Mock
+cwd: temp
+specFileContent: # Spec\n\nImplementation plan:\n\n- Update `packages/web/app/api/v1/workflows/run/route.ts` to accept the new mode.\n- Update `packages/core/src/bootstrap/launcher.ts` to provision a sandbox.\n
+argv: --mode local --spec-file {{specFile}} --no-run --json --no-workforce-persona
+
+### Deterministic Checks
+ok: true
+contentIncludes:
+- "target_files":
+- packages/web/app/api/v1/workflows/run/route.ts
+- packages/core/src/bootstrap/launcher.ts
+forbidPhrases:
+- TypeError
+- ReferenceError
+maxToolCalls: 1
+
+### Must
+- Extract paths wrapped in markdown backticks into `target_files`.
+- Surface `target_files` in the generation JSON so callers can verify scope.
+
+### Must Not
+- Fall back to the manifest-driven single-artifact path when the spec names concrete files.
+- Capture prose noise like `base/head` as a target file.
+
+## generation-quality.target-files-from-structured-block
+Executor: ricky-cli
+Kind: regression
+Tags: generation, target-files, parser, local
+Human Review: false
+
+### Message
+A spec with an explicit `## Target Files` block must take precedence over any prose paths so authors can be unambiguous about scope.
+
+### Mock
+cwd: temp
+specFileContent: # Spec\n\nProse mentions `tests/scratch/example.ts` casually.\n\n## Target Files\n\n- `packages/web/app/api/v1/workflows/run/route.ts`\n- packages/core/src/bootstrap/launcher.ts\n\n## Acceptance\n\nIt works.\n
+argv: --mode local --spec-file {{specFile}} --no-run --json --no-workforce-persona
+
+### Deterministic Checks
+ok: true
+contentIncludes:
+- "target_files":
+- packages/web/app/api/v1/workflows/run/route.ts
+- packages/core/src/bootstrap/launcher.ts
+forbidPhrases:
+- tests/scratch/example.ts
+- TypeError
+- ReferenceError
+maxToolCalls: 1
+
+### Must
+- Honor the structured `## Target Files` block as the source of truth when present.
+- Strip leading bullets and surrounding backticks from each line in the block.
+
+### Must Not
+- Mix prose-extracted candidates into `target_files` when a structured block is declared.
+
+## generation-quality.target-files-suppresses-prose-noise
+Executor: ricky-cli
+Kind: regression
+Tags: generation, target-files, parser, local
+Human Review: false
+
+### Message
+The parser must suppress two-segment prose tokens that have no extension and no recognized leading directory (e.g. `base/head`, `my-org/my-repo`) so they are not captured as target files.
+
+### Mock
+cwd: temp
+specFileContent: # Spec\n\nSend the PR number, base/head SHA, and the user/account pair to MSD. Then update `packages/web/app/api/v1/workflows/run/route.ts`.\n
+argv: --mode local --spec-file {{specFile}} --no-run --json --no-workforce-persona
+
+### Deterministic Checks
+ok: true
+contentIncludes:
+- "target_files":
+- packages/web/app/api/v1/workflows/run/route.ts
+forbidPhrases:
+- "\"base/head\""
+- "\"user/account\""
+- TypeError
+- ReferenceError
+maxToolCalls: 1
+
+### Must
+- Keep real backticked paths in `target_files`.
+- Drop two-segment prose tokens that look like noise.
+
+### Must Not
+- Capture human-readable phrases as file paths.
+

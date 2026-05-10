@@ -86,6 +86,7 @@ export interface LocalGenerationStageResult {
     path: string;
     workflow_id: string;
     spec_digest: string;
+    target_files?: string[];
   };
   next?: {
     run_command: string;
@@ -1092,6 +1093,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
             generationResult,
             assistantTurnContext,
             bestJudgementClarifications,
+            normalizedSpec.targetFiles,
           );
           return {
             ok: false,
@@ -1112,7 +1114,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
         }
         logs.push(`[local] wrote workflow artifact: ${artifact.artifactPath}`);
-        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult, assistantTurnContext, bestJudgementClarifications);
+        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult, assistantTurnContext, bestJudgementClarifications, normalizedSpec.targetFiles);
       }
 
       const runTarget = artifact?.artifactPath ?? workflowFile;
@@ -1653,6 +1655,7 @@ function createGenerationStage(
   generationResult?: GenerationResult,
   assistantTurnContext?: LocalAssistantTurnContextDecision,
   bestJudgementClarifications?: BestJudgementClarificationDecision[],
+  targetFiles?: string[],
 ): LocalGenerationStageResult {
   return {
     stage: 'generate',
@@ -1663,6 +1666,7 @@ function createGenerationStage(
             path: artifact.artifactPath,
             workflow_id: artifact.workflowId,
             spec_digest: specDigest,
+            ...(targetFiles && targetFiles.length > 0 ? { target_files: targetFiles } : {}),
           },
         }
       : {}),

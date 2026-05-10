@@ -62,12 +62,14 @@
     "@agentworkforce/harness-kit": "^0.19.0",
     "@agentworkforce/workload-router": "^0.19.0",
     "@inquirer/prompts": "^8.4.2",
+    "mdast-util-from-markdown": "^2.0.3",
     "ora": "^8.2.0",
     "ssh2": "^1.17.0",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
     "@agent-assistant/telemetry": "^0.4.31",
+    "@types/mdast": "^4.0.4",
     "@types/node": "^24.5.2",
     "esbuild": "^0.28.0",
     "tsx": "^4.21.0",
