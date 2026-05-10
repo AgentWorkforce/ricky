@@ -1396,11 +1396,26 @@ describe('LocalCoordinator', () => {
       metadata: { workflowId: 'generated-debug-target', source: 'generated-workflow' },
     });
 
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(invocations).toHaveLength(1);
     expect(run).toHaveBeenCalledWith(
       'agent-relay',
       ['run', 'generated/debug-target.yaml', '--json'],
       { cwd: '/repo', env: { RELAYCAST_WORKSPACE: 'unit-test' } },
     );
+    expect(coordinator.getActiveRun('run-generated-debug-failure')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/debug-target.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      metadata: {
+        workflowId: 'generated-debug-target',
+        source: 'generated-workflow',
+      },
+    });
 
     invocations[0].emitStdout('{"step":"prepare","status":"running"}');
     invocations[0].emitStderr('MISSING_ENV_VAR: RELAYCAST_WORKSPACE');
@@ -1446,6 +1461,12 @@ describe('LocalCoordinator', () => {
       kind: 'completed',
       status: 'failed',
       data: { exitCode: 2, error: 'exited with code 2' },
+    });
+    expect(coordinator.getActiveRun('run-generated-debug-failure')).toBeUndefined();
+    expect(coordinator.getRunResult('run-generated-debug-failure')).toMatchObject({
+      status: 'failed',
+      exitCode: 2,
+      stderr: ['MISSING_ENV_VAR: RELAYCAST_WORKSPACE'],
     });
   });
 
