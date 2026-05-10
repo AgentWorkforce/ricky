@@ -59,38 +59,63 @@ async function main() {
     })
 
     .step('lead-plan', {
-      agent: 'lead-codex',
+      type: 'deterministic',
       dependsOn: ['prepare-context'],
-      task: `Plan the local run coordinator implementation.
-
-Read:
-- .workflow-artifacts/wave1-runtime/local-run-coordinator/workflow-standards.md
-- .workflow-artifacts/wave1-runtime/local-run-coordinator/authoring-rules.md
-- .workflow-artifacts/wave1-runtime/local-run-coordinator/generated-template.md
-- .workflow-artifacts/wave1-runtime/local-run-coordinator/application-wave-plan.md
-- .workflow-artifacts/wave1-runtime/local-run-coordinator/product-spec.md
-
-Deliverables:
-- src/runtime/types.ts defines run request, run status, lifecycle event, command invocation, and coordinator result types.
-- src/runtime/local-coordinator.ts exports a coordinator class or function that wraps local agent-relay execution behind Ricky-specific launch, monitor, and report methods.
-- src/runtime/local-coordinator.test.ts covers successful launch, non-zero exit, timeout/cancellation, log capture, and state transitions.
-
-Non-goals:
-- Do not implement Cloud APIs, spec parsing, generation, debugger logic, or UI behavior.
-- Do not require users to hand-author workflows; this runtime receives generated or selected workflow artifacts from Ricky product layers.
-- Do not shell out from tests to real long-running agent-relay processes; use injectable command runners.
-
-Verification:
-- npx tsc --noEmit
-- npx vitest run src/runtime/local-coordinator.test.ts
-- grep for exported coordinator surface in src/runtime/local-coordinator.ts
-- git diff must be limited to the target runtime files unless a tiny index export is explicitly justified.
-
-Write .workflow-artifacts/wave1-runtime/local-run-coordinator/implementation-plan.md with the contract, interfaces, risks, and exact test cases. End with LOCAL_COORDINATOR_PLAN_READY.`,
-      verification: {
-        type: 'file_exists',
-        value: '.workflow-artifacts/wave1-runtime/local-run-coordinator/implementation-plan.md',
-      },
+      command: [
+        "node - <<'NODE'",
+        "const fs = require('node:fs');",
+        "const out = '.workflow-artifacts/wave1-runtime/local-run-coordinator/implementation-plan.md';",
+        "const types = fs.readFileSync('src/runtime/types.ts', 'utf8');",
+        "const coordinator = fs.readFileSync('src/runtime/local-coordinator.ts', 'utf8');",
+        "const tests = fs.readFileSync('src/runtime/local-coordinator.test.ts', 'utf8');",
+        "const checks = [",
+        "  { pattern: /export\\s+(interface|type)\\s+RunRequest/, message: 'RunRequest export is missing from src/runtime/types.ts', haystack: types },",
+        "  { pattern: /export\\s+type\\s*\\{\\s*RunStatus\\s*\\}/, message: 'RunStatus re-export is missing from src/runtime/types.ts', haystack: types },",
+        "  { pattern: /export\\s+interface\\s+CommandRunner/, message: 'CommandRunner export is missing from src/runtime/types.ts', haystack: types },",
+        "  { pattern: /export\\s+interface\\s+CoordinatorResult/, message: 'CoordinatorResult export is missing from src/runtime/types.ts', haystack: types },",
+        "  { pattern: /export\\s+class\\s+LocalCoordinator/, message: 'LocalCoordinator export is missing from src/runtime/local-coordinator.ts', haystack: coordinator },",
+        "  { pattern: /runner\\.run\\(/, message: 'injectable command-runner boundary is not evident in src/runtime/local-coordinator.ts', haystack: coordinator },",
+        "  { pattern: /workflowFile/, message: 'workflow file evidence capture is missing from src/runtime/local-coordinator.ts', haystack: coordinator },",
+        "  { pattern: /stdoutSnippet|stderrSnippet/, message: 'stdout\/stderr snippet capture is missing from src/runtime/local-coordinator.ts', haystack: coordinator },",
+        "  { pattern: /timeout|cancel|stderr|stdout|completed/, message: 'targeted coordinator coverage is missing from src/runtime/local-coordinator.test.ts', haystack: tests },",
+        "  { pattern: /describe|it\\(/, message: 'structured local coordinator tests are missing', haystack: tests },",
+        "];",
+        "const failures = checks.filter((check) => !check.pattern.test(check.haystack)).map((check) => check.message);",
+        "if (failures.length) {",
+        "  console.error(failures.join('\\n'));",
+        "  process.exit(1);",
+        "}",
+        "const lines = [",
+        "  '# Local Run Coordinator Implementation Plan',",
+        "  '',",
+        "  '## Implementation contract',",
+        "  '- Preserve the Ricky-specific local execution substrate in `src/runtime/local-coordinator.ts` and the coordinator contracts in `src/runtime/types.ts`.',",
+        "  '- Keep command execution injectable so tests and future product layers can simulate agent-relay invocations without real long-running child processes.',",
+        "  '- Preserve focused behavioral coverage in `src/runtime/local-coordinator.test.ts` for success, failure, timeout/cancellation, evidence capture, and state transitions.',",
+        "  '',",
+        "  '## Current repo-truth assessment',",
+        "  '- The owned local coordinator surface already exists in repo truth.',",
+        "  '- This lead-plan step is recorded deterministically to avoid the hanging interactive Codex worker path observed in overnight reruns of this slice.',",
+        "  '- Any future edits in this slice must stay scoped to `src/runtime/types.ts`, `src/runtime/local-coordinator.ts`, `src/runtime/local-coordinator.test.ts`, and this workflow artifact directory unless a tiny export change is justified.',",
+        "  '',",
+        "  '## Verification commands',",
+        "  '- `npx tsc --noEmit`',",
+        "  '- `npx vitest run src/runtime/local-coordinator.test.ts`',",
+        "  '- `grep` for exported coordinator contracts plus timeout/cancel/stdout/stderr coverage across the owned files',",
+        "  '- `git diff --name-only -- src/runtime/types.ts src/runtime/local-coordinator.ts src/runtime/local-coordinator.test.ts .workflow-artifacts/wave1-runtime/local-run-coordinator`',",
+        "  '',",
+        "  '## Risks',",
+        "  '- Broader workflow slices that still depend on interactive Codex planning may exhibit the same overnight stall until migrated to deterministic repo-truth gates.',",
+        "  '- This plan does not claim broader product validation beyond the owned local coordinator surface.',",
+        "  '',",
+        "  'LOCAL_COORDINATOR_PLAN_READY',",
+        "];",
+        "fs.writeFileSync(out, `${lines.join('\\n')}\\n`);",
+        "console.log('LOCAL_COORDINATOR_PLAN_READY');",
+        "NODE",
+      ].join('\n'),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step('implement-runtime-surface', {
