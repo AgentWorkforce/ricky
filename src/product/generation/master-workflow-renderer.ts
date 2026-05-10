@@ -5,6 +5,7 @@ import {
   DEFAULT_RETRY_MAX_ATTEMPTS,
 } from '../../shared/constants.js';
 import { planMasterExecution, type ChildWorkflowPlan, type MasterExecutionPlan } from '../orchestration/index.js';
+import { deriveTestCommand } from './template-renderer.js';
 import type {
   DeterministicGate,
   PatternDecision,
@@ -82,7 +83,7 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
   });
   const channel = `wf-ricky-${slug}`;
   const tasks = buildMasterTasks(plan);
-  const gates = buildMasterGates(artifactsDir, plan);
+  const gates = buildMasterGates(artifactsDir, plan, input.spec);
   const skillApplicationEvidence = buildMasterSkillEvidence(input.skills);
   const toolSelections = buildMasterToolSelections(plan);
   const content = renderMasterSource({
@@ -283,7 +284,7 @@ function renderMasterSource(input: {
     `      command: ${literal([
       'set -e',
       TYPECHECK_COMMAND,
-      'npm test',
+      deriveTestCommand(input.spec),
       'git diff --name-only',
       `grep -F RICKY_MASTER_REVIEW_READY ${shellQuote(`${input.artifactsDir}/review-codex.md`)}`,
       'echo RICKY_MASTER_FINAL_VALIDATION_READY',
@@ -478,16 +479,17 @@ function buildMasterTasks(plan: MasterExecutionPlan): WorkflowTask[] {
   ];
 }
 
-function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan): DeterministicGate[] {
+function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan, spec: NormalizedWorkflowSpec): DeterministicGate[] {
+  const testCommand = deriveTestCommand(spec);
   return [
     gate('skill-boundary-metadata-gate', `test -f ${artifactsDir}/skill-application-boundary.json`, 'file_exists', true, ['prepare-context'], 'pre_review'),
     gate('lead-plan-gate', `grep -F RICKY_MASTER_LEAD_PLAN_READY ${artifactsDir}/lead-plan.md`, 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('child-workflow-file-gate', plan.children.map((child) => `test -f ${child.workflowFilePath}`).join(' && '), 'file_exists', true, ['materialize-child-workflows'], 'pre_review'),
     gate('initial-soft-validation', `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
     gate('final-review-pass-gate', `grep -F RICKY_MASTER_REVIEW_READY ${artifactsDir}/review-codex.md`, 'output_contains', true, ['review-child-evidence'], 'final'),
-    gate('final-hard-validation', `{ ${TYPECHECK_COMMAND}; } && npm test`, 'exit_code', true, ['final-review-pass-gate'], 'final'),
+    gate('final-hard-validation', `{ ${TYPECHECK_COMMAND}; } && ${testCommand}`, 'exit_code', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', 'git diff --name-only', 'output_contains', true, ['final-hard-validation'], 'final'),
-    gate('regression-gate', 'npm test', 'exit_code', true, ['git-diff-gate'], 'regression'),
+    gate('regression-gate', testCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
   ];
 }
 

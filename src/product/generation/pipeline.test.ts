@@ -59,6 +59,88 @@ describe('workflow generation pipeline', () => {
   });
 
   // Regression: master-rendered final-hard-validation used to hardcode
+  // `npm test`, which walks the entire repo's test suite from the cwd.
+  // For monorepo specs that scope work to a few `packages/<pkg>/` files,
+  // any pre-existing or transient failure in an *unrelated* workspace
+  // package then blocks the workflow's final gate — work no agent in the
+  // generated workflow can sensibly repair because it isn't in the spec's
+  // declared scope. The renderer now derives the test command from the
+  // spec's targetFiles: when those targets share workspace prefixes
+  // (`packages/<pkg>/`, `apps/<pkg>/`, `services/<pkg>/`), emit
+  // `npm test --workspace=<pkg>` for each unique workspace; otherwise fall
+  // back to the previous unscoped behavior.
+  it('scopes master-rendered final-hard-validation tests to workspaces touched by the spec', () => {
+    const result = generate({
+      spec: spec({
+        description:
+          'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['Tests pass.'],
+        targetFiles: [
+          'packages/backend/src/services/autofix/index.ts',
+          'packages/backend/src/services/remediation-service.ts',
+          'packages/shared/src/autofix.ts',
+        ],
+      }),
+      artifactPath: 'workflows/generated/runtime-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const rendered = artifact(result);
+
+    // Assert against the structured gate command + parsed step body, not
+    // raw rendered text — semantics over formatting. (CodeRabbit feedback
+    // on PR #91.)
+    const gateCommand = gate(rendered, 'final-hard-validation').command;
+    const stepBody = renderedStepCommand(rendered.content, 'final-hard-validation');
+
+    for (const target of [gateCommand, stepBody]) {
+      // Each unique workspace touched by the spec gets its own scoped run.
+      expect(target).toContain("npm test --workspace='packages/backend'");
+      expect(target).toContain("npm test --workspace='packages/shared'");
+      // Unrelated packages are not validated by this workflow's gate.
+      expect(target).not.toContain("npm test --workspace='packages/webapp'");
+      expect(target).not.toContain("npm test --workspace='packages/mobile'");
+      // The unscoped `npm test` whole-suite invocation must not survive
+      // anywhere in the validation surface — that's the exact pattern that
+      // produced the original cross-package failure. (`npm test
+      // --workspace=…` is fine; the negative lookahead allows it.)
+      expect(target).not.toMatch(/(?:^|[\s&|;])npm test(?!\s*--workspace)/);
+    }
+  });
+
+  it('uniqueWorkspacesFromTargetFiles handles npm-scoped workspace paths', () => {
+    // CodeRabbit flagged that the previous regex
+    //   /^((?:packages|apps|services)\/[^\/]+)\//
+    // mis-parsed `packages/@scope/pkg/...` (matched only the `@scope`
+    // segment). The corrected regex allows an optional `@scope/` segment
+    // so scoped workspaces are recognised end-to-end.
+    const result = generate({
+      spec: spec({
+        description: 'Implement small slices across npm-scoped workspaces.',
+        constraints: ['Use independent child workflows.'],
+        acceptanceGates: ['Tests pass.'],
+        targetFiles: [
+          'packages/@agentworkforce/runtime/src/index.ts',
+          'packages/@agentworkforce/runtime/src/policy.ts',
+          'apps/@msd/web/src/index.ts',
+          'services/billing/src/index.ts',
+        ],
+      }),
+      artifactPath: 'workflows/generated/scoped-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const command = gate(artifact(result), 'final-hard-validation').command;
+
+    expect(command).toContain("npm test --workspace='packages/@agentworkforce/runtime'");
+    expect(command).toContain("npm test --workspace='apps/@msd/web'");
+    expect(command).toContain("npm test --workspace='services/billing'");
+    // The previous bug surfaced as `--workspace='packages/@agentworkforce'`
+    // (truncated at the scope segment) — guard against regression.
+    expect(command).not.toContain("npm test --workspace='packages/@agentworkforce'");
+    expect(command).not.toContain("npm test --workspace='apps/@msd'");
+  });
+
+  // Regression: master-rendered final-hard-validation used to hardcode
   // `npx tsc --noEmit`, which dumps the full `tsc --help` text and exits 1
   // when invoked from a monorepo root with no top-level tsconfig.json
   // (npm workspaces with `packages/*/tsconfig.json` layout — common in
