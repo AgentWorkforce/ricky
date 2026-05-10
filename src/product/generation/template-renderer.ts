@@ -1236,13 +1236,37 @@ function describeImplementation(spec: NormalizedWorkflowSpec): string {
   return `Edit declared targets: ${spec.targetFiles.join(', ')}`;
 }
 
-function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
+export function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
   const explicitTestGate = spec.acceptanceGates.find((gate) => /\b(vitest|npm test)\b/i.test(gate.gate));
   if (explicitTestGate) return mapAcceptanceGateToCommand(explicitTestGate.gate);
 
   const testTargets = spec.targetFiles.filter((file) => /\.(test|spec)\.(ts|tsx|js|jsx)$/i.test(file));
   if (testTargets.length > 0) return `npx vitest run ${testTargets.map(shellQuote).join(' ')}`;
+
+  // Workspace-scoped fallback: when target files live under
+  // packages/<pkg>/, apps/<pkg>/, or services/<pkg>/ (the three monorepo
+  // conventions npm/pnpm/yarn workspaces overwhelmingly use), validate by
+  // running `npm test --workspace=<pkg>` for each workspace the spec
+  // touches. Without this, the unscoped `npx vitest run` (or `npm test`)
+  // fallback walks the entire repo's test suite and any pre-existing or
+  // unrelated failure in another package blocks the workflow's
+  // final-hard-validation gate — work no agent in this generated workflow
+  // can sensibly repair because it isn't in the spec's declared scope.
+  const workspaces = uniqueWorkspacesFromTargetFiles(spec.targetFiles);
+  if (workspaces.length > 0) {
+    return workspaces.map((ws) => `npm test --workspace=${shellQuote(ws)}`).join(' && ');
+  }
+
   return 'npx vitest run';
+}
+
+function uniqueWorkspacesFromTargetFiles(files: string[]): string[] {
+  const workspaces = new Set<string>();
+  for (const file of files) {
+    const match = file.match(/^((?:packages|apps|services)\/[^\/]+)\//);
+    if (match) workspaces.add(match[1]);
+  }
+  return [...workspaces].sort();
 }
 
 function mapAcceptanceGateToCommand(gateText: string): string {
