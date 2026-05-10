@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 
 import { DEFAULT_RUN_TIMEOUT_MS } from '../shared/constants.js';
 import type { RunStatus } from '../shared/models/workflow-evidence.js';
@@ -11,6 +12,7 @@ import type {
   CoordinatorResult,
   LifecycleEvent,
   LocalCoordinatorApi,
+  LocalCoordinatorFactoryOptions,
   LocalCoordinatorOptions,
   LogSnippet,
   RunRequest,
@@ -44,6 +46,116 @@ interface TerminalOutcome {
   message: string;
   error?: string;
   data?: Record<string, unknown>;
+}
+
+class ProcessCommandInvocation implements CommandInvocation {
+  readonly exitPromise: Promise<number | null>;
+
+  private readonly stdoutHandlers: Array<(line: string) => void> = [];
+  private readonly stderrHandlers: Array<(line: string) => void> = [];
+  private readonly stdoutHistory: string[] = [];
+  private readonly stderrHistory: string[] = [];
+  private stdoutRemainder = '';
+  private stderrRemainder = '';
+  private settled = false;
+
+  constructor(
+    command: string,
+    args: string[],
+    options: { cwd: string; env?: Record<string, string> },
+  ) {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : process.env,
+    });
+
+    this.exitPromise = new Promise<number | null>((resolve, reject) => {
+      const settle = (cb: () => void): void => {
+        if (this.settled) return;
+        this.settled = true;
+        cb();
+      };
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        this.stdoutRemainder = this.emitBufferedLines(
+          `${this.stdoutRemainder}${chunk.toString('utf8')}`,
+          this.stdoutHistory,
+          this.stdoutHandlers,
+        );
+      });
+
+      child.stderr.on('data', (chunk: Buffer) => {
+        this.stderrRemainder = this.emitBufferedLines(
+          `${this.stderrRemainder}${chunk.toString('utf8')}`,
+          this.stderrHistory,
+          this.stderrHandlers,
+        );
+      });
+
+      child.once('error', (err) => {
+        settle(() => reject(err));
+      });
+
+      child.once('close', (code) => {
+        this.flushRemainders();
+        settle(() => resolve(code));
+      });
+    });
+
+    this.kill = () => {
+      if (!child.killed) child.kill();
+    };
+  }
+
+  kill: () => void;
+
+  onStdout(cb: (line: string) => void): void {
+    this.stdoutHandlers.push(cb);
+    this.stdoutHistory.forEach(cb);
+  }
+
+  onStderr(cb: (line: string) => void): void {
+    this.stderrHandlers.push(cb);
+    this.stderrHistory.forEach(cb);
+  }
+
+  private emitBufferedLines(
+    text: string,
+    history: string[],
+    handlers: Array<(line: string) => void>,
+  ): string {
+    const lines = text.split(/\r?\n/);
+    const remainder = lines.pop() ?? '';
+    for (const line of lines) {
+      history.push(line);
+      handlers.forEach((handler) => handler(line));
+    }
+    return remainder;
+  }
+
+  private flushRemainders(): void {
+    if (this.stdoutRemainder.length > 0) {
+      this.stdoutHistory.push(this.stdoutRemainder);
+      this.stdoutHandlers.forEach((handler) => handler(this.stdoutRemainder));
+      this.stdoutRemainder = '';
+    }
+    if (this.stderrRemainder.length > 0) {
+      this.stderrHistory.push(this.stderrRemainder);
+      this.stderrHandlers.forEach((handler) => handler(this.stderrRemainder));
+      this.stderrRemainder = '';
+    }
+  }
+}
+
+export class ProcessCommandRunner implements CommandRunner {
+  run(command: string, args: string[], options: { cwd: string; env?: Record<string, string> }): CommandInvocation {
+    return new ProcessCommandInvocation(command, args, options);
+  }
+}
+
+export function createLocalCoordinator(options: LocalCoordinatorFactoryOptions = {}): LocalCoordinator {
+  const { runner, ...coordinatorOptions } = options;
+  return new LocalCoordinator(runner ?? new ProcessCommandRunner(), coordinatorOptions);
 }
 
 export class LocalCoordinator implements LocalCoordinatorApi {

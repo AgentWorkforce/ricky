@@ -93,6 +93,11 @@ export interface LocalCoordinatorOptions {
   completedRunLimit?: number;
 }
 
+export interface LocalCoordinatorFactoryOptions extends LocalCoordinatorOptions {
+  /** Override the default local process runner for tests or alternate execution hosts. */
+  runner?: CommandRunner;
+}
+
 export interface CommandInvocationSummary {
   command: string;
   args: string[];

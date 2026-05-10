@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-import { LocalCoordinator } from './local-coordinator.js';
+import { createLocalCoordinator, LocalCoordinator } from './local-coordinator.js';
 import type {
   CommandInvocation,
   CommandRunner,
@@ -1044,6 +1044,65 @@ describe('LocalCoordinator', () => {
       cwd: '/repo',
       env: { RELAYCAST_WORKSPACE: 'test' },
     });
+  });
+
+  it('creates a coordinator that uses the injected runner for generated workflow launches', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = createLocalCoordinator({ runner });
+
+    const resultPromise = coordinator.launch({
+      runId: 'run-factory-injected-runner',
+      workflowFile: 'generated/factory-workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      metadata: { workflowId: 'factory-workflow' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'generated/factory-workflow.yaml', '--json'],
+      { cwd: '/repo', env: { RELAYCAST_WORKSPACE: 'unit-test' } },
+    );
+    expect(invocations).toHaveLength(1);
+    expect(coordinator.getActiveRun('run-factory-injected-runner')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/factory-workflow.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+      metadata: { workflowId: 'factory-workflow' },
+    });
+
+    invocations[0].emitStdout('{"step":"factory-launch","status":"running"}');
+    invocations[0].emitStderr('factory launch warning');
+    invocations[0].complete(0);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('passed');
+    expect(result.exitCode).toBe(0);
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/factory-workflow.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+    expect(result.metadata).toEqual({ workflowId: 'factory-workflow' });
+    expect(result.stdout).toEqual(['{"step":"factory-launch","status":"running"}']);
+    expect(result.stderr).toEqual(['factory launch warning']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+    expect(coordinator.getActiveRun('run-factory-injected-runner')).toBeUndefined();
   });
 
   it('threads retry resume metadata into agent-relay args', async () => {
