@@ -1001,14 +1001,16 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
     'const argv=Array.isArray(args)?args.map(String):[];',
     'const executable=String(command??"");',
     'if((argv[0]==="init"||argv[0]==="pty")&&/(?:^|[/\\\\])agent-relay-broker(?:\\.exe)?$/u.test(executable)&&child.stdout){',
-    // Attach the data listener immediately so the stream enters flowing mode
-    // and libuv keeps draining the kernel pipe. The previous `on("pause", ...)`
-    // hook never fired — Node `Readable` only emits `'pause'` when something
-    // explicitly calls `.pause()`, which nothing does in this code path, so the
-    // stream stayed in paused mode and the broker eventually blocked in
-    // `write()` when the OS pipe buffer filled.
+    // Keep broker stdout drained for the lifetime of the child. Attach a
+    // no-op data listener immediately so startup output can flow, then also
+    // re-resume on explicit pauses because the SDK startup readline closes
+    // after parsing the API URL and that close path can pause init brokers.
+    // Using only `pause` regressed PTY workers during startup; using only an
+    // eager `resume()` regressed init brokers once readline shut down.
+    'const ensureBrokerStdoutFlowing=()=>{child.stdout?.resume();};',
     'child.stdout.on("data",()=>{});',
-    'child.stdout.resume();',
+    'child.stdout.on("pause",ensureBrokerStdoutFlowing);',
+    'ensureBrokerStdoutFlowing();',
     '}',
     'return child;',
     '};',
