@@ -356,12 +356,54 @@ iterate_known_state_dirs() {
   fi
 }
 
+iterate_known_artifact_checkpoints() {
+  local checkpoint_file=""
+
+  shopt -s nullglob
+  for checkpoint_file in "$REPO_ROOT"/.workflow-artifacts/overnight-*/checkpoint.env; do
+    [[ -f "$checkpoint_file" ]] || continue
+    printf '%s\n' "$checkpoint_file"
+  done
+  shopt -u nullglob
+}
+
+iterate_running_artifact_dirs_without_checkpoints() {
+  local artifact_dir=""
+  local status_file=""
+
+  shopt -s nullglob
+  for artifact_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-*; do
+    [[ -d "$artifact_dir" ]] || continue
+    [[ "$artifact_dir" == "$ARTIFACT_DIR" ]] && continue
+    status_file="$artifact_dir/status.txt"
+    [[ -f "$status_file" ]] || continue
+    grep -Eqx 'running|checkpointed' "$status_file" || continue
+    [[ ! -f "$artifact_dir/checkpoint.env" ]] || continue
+    printf '%s\n' "$artifact_dir"
+  done
+  shopt -u nullglob
+}
+
 reconcile_stale_state_dirs() {
   local state_dir=""
+  local checkpoint_file=""
+  local artifact_dir=""
+
   while IFS= read -r state_dir; do
     [[ -d "$state_dir" ]] || continue
     reconcile_stale_state_dir "$state_dir/checkpoint.env"
   done < <(iterate_known_state_dirs)
+
+  while IFS= read -r checkpoint_file; do
+    [[ -f "$checkpoint_file" ]] || continue
+    reconcile_stale_state_dir "$checkpoint_file"
+  done < <(iterate_known_artifact_checkpoints)
+
+  while IFS= read -r artifact_dir; do
+    [[ -d "$artifact_dir" ]] || continue
+    mark_artifact_stale_or_complete "$artifact_dir"
+    log "reconciled orphaned overnight artifact without checkpoint -> $artifact_dir"
+  done < <(iterate_running_artifact_dirs_without_checkpoints)
 }
 
 clear_all_state_checkpoints() {
