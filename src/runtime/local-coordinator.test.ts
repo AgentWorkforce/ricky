@@ -157,6 +157,90 @@ describe('LocalCoordinator', () => {
     expect(result.stderr).toEqual([]);
   });
 
+  it('returns an immediate start handle that tracks running and completed evidence', async () => {
+    const { runner, run, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+    const handle = coordinator.start({
+      workflowFile: 'generated/start-handle-workflow.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      route: { id: 'local-generated', kind: 'local' },
+      metadata: { workflowId: 'start-handle-workflow' },
+    });
+
+    expect(handle.runId).toEqual(expect.any(String));
+    expect(handle.workflowFile).toBe('generated/start-handle-workflow.yaml');
+    expect(handle.cwd).toBe('/repo');
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'generated/start-handle-workflow.yaml', '--json'],
+      { cwd: '/repo', env: { RELAYCAST_WORKSPACE: 'unit-test' } },
+    );
+    expect(handle.getActiveRun()).toMatchObject({
+      runId: handle.runId,
+      workflowFile: 'generated/start-handle-workflow.yaml',
+      cwd: '/repo',
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/start-handle-workflow.yaml', '--json'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+        route: { id: 'local-generated', kind: 'local' },
+      },
+      metadata: { workflowId: 'start-handle-workflow' },
+    });
+    expect(coordinator.getActiveRun(handle.runId)).toEqual(handle.getActiveRun());
+
+    invocations[0].emitStdout('{"step":"launch","status":"running"}');
+    invocations[0].emitStderr('launch warning');
+    invocations[0].complete(0);
+    const result = await handle.result;
+
+    expect(lifecycleEvents).toEqual(result.events);
+    expect(result.runId).toBe(handle.runId);
+    expect(result.status).toBe('passed');
+    expect(result.exitCode).toBe(0);
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/start-handle-workflow.yaml', '--json'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      route: { id: 'local-generated', kind: 'local' },
+    });
+    expect(result.metadata).toEqual({ workflowId: 'start-handle-workflow' });
+    expect(result.stdout).toEqual(['{"step":"launch","status":"running"}']);
+    expect(result.stderr).toEqual(['launch warning']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'completed',
+      status: 'passed',
+      data: { exitCode: 0 },
+    });
+    expect(handle.getActiveRun()).toBeUndefined();
+    expect(coordinator.getRunResult(handle.runId)).toMatchObject({
+      status: 'passed',
+      stdout: ['{"step":"launch","status":"running"}'],
+      stderr: ['launch warning'],
+      invocation: {
+        route: { id: 'local-generated', kind: 'local' },
+      },
+    });
+  });
+
   it('records generated workflow success evidence through the injected runner', async () => {
     const { runner, run, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
@@ -1521,6 +1605,136 @@ describe('LocalCoordinator', () => {
         message: 'generated workflow warning',
       }),
     );
+  });
+
+  it('settles cancellation evidence immediately without waiting for the killed command to exit', async () => {
+    const { runner, invocations } = createRunner();
+    const coordinator = new LocalCoordinator(runner);
+    const lifecycleEvents: LifecycleEvent[] = [];
+    coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+    const launchPromise = coordinator.launch({
+      runId: 'run-cancel-debugger-evidence',
+      workflowFile: 'generated/cancel-evidence.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      extraArgs: ['--json'],
+      metadata: { workflowId: 'cancel-evidence' },
+    });
+    const waitPromise = coordinator.waitForRunResult('run-cancel-debugger-evidence');
+
+    invocations[0].emitStdout('{"step":"review","status":"running"}');
+    invocations[0].emitStderr('review was aborted');
+    coordinator.cancel('run-cancel-debugger-evidence');
+    const [result, waitedResult] = await Promise.all([launchPromise, waitPromise]);
+
+    expect(waitedResult).toEqual(result);
+    expect(invocations[0].killed).toBe(true);
+    expect(lifecycleEvents).toEqual(result.events);
+    expect(result.status).toBe('cancelled');
+    expect(result.exitCode).toBeNull();
+    expect(result.error).toBe('cancelled');
+    expect(result.stdout).toEqual(['{"step":"review","status":"running"}']);
+    expect(result.stderr).toEqual(['review was aborted']);
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/cancel-evidence.yaml', '--json'],
+      cwd: '/repo',
+    });
+    expect(result.metadata).toEqual({ workflowId: 'cancel-evidence' });
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'cancelled',
+    ]);
+    expect(result.events.at(-1)).toMatchObject({
+      kind: 'cancelled',
+      status: 'cancelled',
+      data: { exitCode: null, error: 'cancelled' },
+    });
+    expect(coordinator.getActiveRun('run-cancel-debugger-evidence')).toBeUndefined();
+    expect(coordinator.getRunResult('run-cancel-debugger-evidence')).toMatchObject({
+      status: 'cancelled',
+      exitCode: null,
+      stdout: ['{"step":"review","status":"running"}'],
+      stderr: ['review was aborted'],
+      metadata: { workflowId: 'cancel-evidence' },
+    });
+    expect(vi.getTimerCount()).toBe(0);
+
+    invocations[0].complete(0);
+    invocations[0].emitStdout('late stdout after cancel');
+    invocations[0].emitStderr('late stderr after cancel');
+    await Promise.resolve();
+
+    expect(result.status).toBe('cancelled');
+    expect(result.stdout).toEqual(['{"step":"review","status":"running"}']);
+    expect(result.stderr).toEqual(['review was aborted']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'cancelled',
+    ]);
+  });
+
+  it('uses the injected runner as the only command boundary while exposing the default route evidence', async () => {
+    const invocation = new ManualInvocation();
+    const run = vi.fn((_command: string, _args: string[], _options: CommandRunnerOptions) => invocation);
+    const coordinator = createLocalCoordinator({ runner: { run } });
+
+    const launchPromise = coordinator.launch({
+      runId: 'run-injected-default-boundary',
+      workflowFile: 'generated/default-boundary.yaml',
+      cwd: '/repo',
+      timeoutMs: 5_000,
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(
+      'agent-relay',
+      ['run', 'generated/default-boundary.yaml'],
+      { cwd: '/repo', env: { RELAYCAST_WORKSPACE: 'unit-test' } },
+    );
+    expect(coordinator.getActiveRun('run-injected-default-boundary')).toMatchObject({
+      status: 'running',
+      invocation: {
+        command: 'agent-relay',
+        args: ['run', 'generated/default-boundary.yaml'],
+        cwd: '/repo',
+        env: { RELAYCAST_WORKSPACE: 'unit-test' },
+      },
+    });
+
+    invocation.emitStdout('default route stdout');
+    invocation.emitStderr('default route stderr');
+    invocation.complete(0);
+    const result = await launchPromise;
+
+    expect(result.status).toBe('passed');
+    expect(result.exitCode).toBe(0);
+    expect(result.invocation).toEqual({
+      command: 'agent-relay',
+      args: ['run', 'generated/default-boundary.yaml'],
+      cwd: '/repo',
+      env: { RELAYCAST_WORKSPACE: 'unit-test' },
+    });
+    expect(result.stdout).toEqual(['default route stdout']);
+    expect(result.stderr).toEqual(['default route stderr']);
+    expect(result.events.map((event) => event.kind)).toEqual([
+      'started',
+      'status_change',
+      'stdout',
+      'stderr',
+      'status_change',
+      'completed',
+    ]);
   });
 
   it('records generated workflow active and terminal evidence through only the injected runner', async () => {

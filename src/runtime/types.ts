@@ -12,6 +12,8 @@ export type LifecycleEventKind =
   | 'cancelled'
   | 'error';
 
+export type ExecutionRouteKind = 'local' | 'cloud' | 'custom';
+
 export interface RunRetryMetadata {
   /** One-based attempt number for this run. */
   attempt: number;
@@ -30,6 +32,10 @@ export interface RunRetryMetadata {
 }
 
 export interface ExecutionRoute {
+  /** Stable route identifier for product layers that should not know shell details. */
+  id?: string;
+  /** Runtime family used by higher-level surfaces for routing decisions. */
+  kind?: ExecutionRouteKind;
   /** Underlying executable. Defaults to agent-relay. */
   command?: string;
   /** Arguments before the workflow file. Defaults to ['run']. */
@@ -103,6 +109,12 @@ export interface CommandInvocationSummary {
   args: string[];
   cwd: string;
   env?: Record<string, string>;
+  route?: ExecutionRouteSummary;
+}
+
+export interface ExecutionRouteSummary {
+  id?: string;
+  kind?: ExecutionRouteKind;
 }
 
 export interface LogSnippet {
@@ -149,7 +161,19 @@ export interface ActiveRunSnapshot {
   metadata?: Record<string, unknown>;
 }
 
+export interface RunLaunchHandle {
+  runId: string;
+  workflowFile: string;
+  cwd: string;
+  startedAt: string;
+  result: Promise<CoordinatorResult>;
+  cancel: () => void;
+  monitor: () => AsyncIterable<LifecycleEvent>;
+  getActiveRun: () => ActiveRunSnapshot | undefined;
+}
+
 export interface LocalCoordinatorApi {
+  start(request: RunRequest): RunLaunchHandle;
   launch(request: RunRequest): Promise<CoordinatorResult>;
   on(event: 'lifecycle', cb: (event: LifecycleEvent) => void): void;
   off(event: 'lifecycle', cb: (event: LifecycleEvent) => void): void;

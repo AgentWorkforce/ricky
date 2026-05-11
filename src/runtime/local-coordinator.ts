@@ -15,6 +15,7 @@ import type {
   LocalCoordinatorFactoryOptions,
   LocalCoordinatorOptions,
   LogSnippet,
+  RunLaunchHandle,
   RunRequest,
   RunRetryMetadata,
 } from './types.js';
@@ -172,7 +173,7 @@ export class LocalCoordinator implements LocalCoordinatorApi {
     this.completedRunLimit = normalizeCompletedRunLimit(options.completedRunLimit);
   }
 
-  async launch(request: RunRequest): Promise<CoordinatorResult> {
+  start(request: RunRequest): RunLaunchHandle {
     const runId = request.runId ?? randomUUID();
 
     if (this.activeRuns.has(runId)) {
@@ -197,6 +198,16 @@ export class LocalCoordinator implements LocalCoordinatorApi {
     const resultPromise = new Promise<CoordinatorResult>((resolve) => {
       resolveResult = resolve;
     });
+    const handle: RunLaunchHandle = {
+      runId,
+      workflowFile: request.workflowFile,
+      cwd: request.cwd,
+      startedAt,
+      result: resultPromise,
+      cancel: () => this.cancel(runId),
+      monitor: () => this.monitor(runId),
+      getActiveRun: () => this.getActiveRun(runId),
+    };
 
     const notifyLifecycleObservers = (event: LifecycleEvent): void => {
       for (const listener of this.emitter.listeners('lifecycle')) {
@@ -313,86 +324,90 @@ export class LocalCoordinator implements LocalCoordinatorApi {
       metadata: cloneMetadata(metadata),
     });
 
-    // A lifecycle observer may have cancelled the run during the started
-    // notification above. If the run is already settled, skip spawning.
-    if (settled) return resultPromise;
-
-    transition('running', 'Run entered running state');
-    state.status = status;
-
-    // Re-check after the running transition — an observer may cancel here too.
-    if (settled) return resultPromise;
-
-    try {
-      const invocation = this.runner.run(invocationSummary.command, invocationSummary.args, {
-        cwd: invocationSummary.cwd,
-        env: invocationSummary.env,
-      });
-      state.invocation = invocation;
-
-      invocation.onStdout((line) => {
-        if (settled) return;
-        stdout.push(line);
-        emit('stdout', line, { stream: 'stdout' });
-      });
-
-      invocation.onStderr((line) => {
-        if (settled) return;
-        stderr.push(line);
-        emit('stderr', line, { stream: 'stderr' });
-      });
-
-      timeoutHandle = setTimeout(() => {
-        if (settled) return;
-        const killError = killInvocation(invocation);
-        finish({
-          status: 'timed_out',
-          exitCode: null,
-          eventKind: 'timeout',
-          message: `Run timed out after ${timeoutMs}ms`,
-          error: `timed out after ${timeoutMs}ms`,
-          data: { timeoutMs, ...(killError ? { killError } : {}) },
-        });
-      }, timeoutMs);
-
-      void invocation.exitPromise.then(
-        (exitCode) => {
-          finish({
-            status: exitCode === 0 ? 'passed' : 'failed',
-            exitCode,
-            eventKind: 'completed',
-            message:
-              exitCode === 0
-                ? 'Run completed successfully'
-                : exitCode === null
-                  ? 'Run completed without an exit code'
-                  : `Run completed with exit code ${exitCode}`,
-            error: exitCode === 0 ? undefined : exitErrorMessage(exitCode),
-          });
-        },
-        (err: unknown) => {
-          const message = errorMessage(err);
-          finish({
-            status: 'failed',
-            exitCode: null,
-            eventKind: 'error',
-            message,
-            error: message,
-          });
-        },
-      );
-    } catch (err) {
-      const message = errorMessage(err);
-      finish({
-        status: 'failed',
-        exitCode: null,
-        eventKind: 'error',
-        message,
-        error: message,
-      });
+    if (!settled) {
+      transition('running', 'Run entered running state');
+      state.status = status;
     }
 
-    return resultPromise;
+    // Lifecycle observers can cancel during startup transitions, before a
+    // command process exists. In that case the handle is still useful for the
+    // already-settled result, and no runner should be invoked.
+    if (!settled) {
+      try {
+        const invocation = this.runner.run(invocationSummary.command, invocationSummary.args, {
+          cwd: invocationSummary.cwd,
+          env: invocationSummary.env,
+        });
+        state.invocation = invocation;
+
+        invocation.onStdout((line) => {
+          if (settled) return;
+          stdout.push(line);
+          emit('stdout', line, { stream: 'stdout' });
+        });
+
+        invocation.onStderr((line) => {
+          if (settled) return;
+          stderr.push(line);
+          emit('stderr', line, { stream: 'stderr' });
+        });
+
+        timeoutHandle = setTimeout(() => {
+          if (settled) return;
+          const killError = killInvocation(invocation);
+          finish({
+            status: 'timed_out',
+            exitCode: null,
+            eventKind: 'timeout',
+            message: `Run timed out after ${timeoutMs}ms`,
+            error: `timed out after ${timeoutMs}ms`,
+            data: { timeoutMs, ...(killError ? { killError } : {}) },
+          });
+        }, timeoutMs);
+
+        void invocation.exitPromise.then(
+          (exitCode) => {
+            finish({
+              status: exitCode === 0 ? 'passed' : 'failed',
+              exitCode,
+              eventKind: 'completed',
+              message:
+                exitCode === 0
+                  ? 'Run completed successfully'
+                  : exitCode === null
+                    ? 'Run completed without an exit code'
+                    : `Run completed with exit code ${exitCode}`,
+              error: exitCode === 0 ? undefined : exitErrorMessage(exitCode),
+            });
+          },
+          (err: unknown) => {
+            const message = errorMessage(err);
+            finish({
+              status: 'failed',
+              exitCode: null,
+              eventKind: 'error',
+              message,
+              error: message,
+            });
+          },
+        );
+      } catch (err) {
+        const message = errorMessage(err);
+        finish({
+          status: 'failed',
+          exitCode: null,
+          eventKind: 'error',
+          message,
+          error: message,
+        });
+      }
+    }
+
+    return handle;
+  }
+
+  async launch(request: RunRequest): Promise<CoordinatorResult> {
+    return this.start(request).result;
   }
 
   on(event: 'lifecycle', cb: (event: LifecycleEvent) => void): void {
@@ -503,6 +518,7 @@ export class LocalCoordinator implements LocalCoordinatorApi {
 function buildInvocationSummary(request: RunRequest): CommandInvocationSummary {
   const command = request.route?.command ?? DEFAULT_COMMAND;
   const baseArgs = request.route?.baseArgs ? [...request.route.baseArgs] : [...DEFAULT_BASE_ARGS];
+  const route = buildRouteSummary(request);
   return {
     command,
     args: [
@@ -513,6 +529,15 @@ function buildInvocationSummary(request: RunRequest): CommandInvocationSummary {
     ],
     cwd: request.cwd,
     env: request.env ? { ...request.env } : undefined,
+    ...(route ? { route } : {}),
+  };
+}
+
+function buildRouteSummary(request: RunRequest): CommandInvocationSummary['route'] {
+  if (!request.route?.id && !request.route?.kind) return undefined;
+  return {
+    id: request.route.id,
+    kind: request.route.kind,
   };
 }
 
@@ -589,12 +614,14 @@ function cloneRetry(retry: RunRetryMetadata): RunRetryMetadata {
 }
 
 function cloneInvocationSummary(invocation: CommandInvocationSummary): CommandInvocationSummary {
-  return {
+  const summary: CommandInvocationSummary = {
     command: invocation.command,
     args: [...invocation.args],
     cwd: invocation.cwd,
     env: invocation.env ? { ...invocation.env } : undefined,
   };
+  if (invocation.route) summary.route = { ...invocation.route };
+  return summary;
 }
 
 function cloneCoordinatorResult(result: CoordinatorResult): CoordinatorResult {
