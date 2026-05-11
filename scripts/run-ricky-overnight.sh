@@ -512,24 +512,28 @@ on_exit() {
 
   if [[ "$STATUS_MARKED" != "true" ]]; then
     if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
+      local recovered_status=""
+
       if artifact_runner_logs_show_success "$ARTIFACT_DIR" && ! artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR"; then
         STATUS_REASON="runner completed before harness status flush"
-        echo "complete" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "complete"
+        recovered_status="complete"
       elif artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR"; then
         STATUS_REASON="queue exhausted before harness status flush"
-        local recovered_status
         recovered_status="$(artifact_queue_exhausted_terminal_status "$ARTIFACT_DIR")"
-        echo "$recovered_status" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "$recovered_status"
       else
         STATUS_REASON="process exited unexpectedly"
-        echo "stale" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "stale"
+        recovered_status="stale"
       fi
+
+      echo "$recovered_status" > "$STATUS_FILE"
+      persist_checkpoint
+
+      if [[ "$recovered_status" == "complete" || "$recovered_status" == "complete-with-failures" ]]; then
+        clear_all_state_checkpoints
+        finalize_current_artifact_checkpoint
+      fi
+
+      write_summary "$recovered_status"
     fi
   fi
 
