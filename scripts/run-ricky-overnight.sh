@@ -197,6 +197,21 @@ artifact_checkpoint_has_active_workflow() {
   [[ -n "$current_workflow" ]]
 }
 
+artifact_active_workflow_runner_log_shows_success() {
+  local artifact_dir="$1"
+  local current_index=""
+  local current_workflow=""
+  local runner_log=""
+
+  artifact_checkpoint_read_progress "$artifact_dir" current_index current_workflow || return 1
+  [[ -n "$current_workflow" ]] || return 1
+
+  runner_log="$artifact_dir/runner-$(basename "$current_workflow" .ts).log"
+  [[ -f "$runner_log" ]] || return 1
+
+  grep -Eq 'Workflow "[^"]+" — COMPLETED|\[agent-relay\] runScriptFile: runner .* completed exit=0' "$runner_log"
+}
+
 artifact_queue_exhausted_terminal_status() {
   local artifact_dir="$1"
   local failed_file="$artifact_dir/failed.txt"
@@ -227,12 +242,15 @@ mark_artifact_stale_or_complete() {
   if artifact_runner_logs_show_failure "$artifact_dir"; then
     resolved_status="failed"
     resolved_reason="runner failed before harness status flush"
-  elif artifact_runner_logs_show_success "$artifact_dir" && ! artifact_checkpoint_has_active_workflow "$artifact_dir"; then
-    resolved_status="complete"
-    resolved_reason="runner completed before harness status flush"
   elif artifact_checkpoint_indicates_queue_exhausted "$artifact_dir"; then
     resolved_status="$(artifact_queue_exhausted_terminal_status "$artifact_dir")"
     resolved_reason="queue exhausted before harness status flush"
+  elif artifact_runner_logs_show_success "$artifact_dir" && (
+    ! artifact_checkpoint_has_active_workflow "$artifact_dir" ||
+    artifact_active_workflow_runner_log_shows_success "$artifact_dir"
+  ); then
+    resolved_status="complete"
+    resolved_reason="runner completed before harness status flush"
   fi
 
   printf '%s\n' "$resolved_status" > "$status_file"
