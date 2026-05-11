@@ -1240,8 +1240,14 @@ function rewriteDependsOnStep(content: string, oldStep: string, newStep: string)
 }
 
 function timeoutContinuationPath(content: string, stepId: string): string {
-  if (/\bARTIFACT_DIR\b/.test(content)) return `\${ARTIFACT_DIR}/${stepId}-timeout-continuation.md`;
-  return `.workflow-artifacts/ricky-auto-fix/${stepId}-timeout-continuation.md`;
+  // Use a `-handoff.md` suffix (not `-timeout-continuation.md`) so the lead
+  // step's repaired task does not contain the literal continuation step name
+  // `${stepId}-timeout-continuation`. The SDK's detectLeadWorkerDeadlock
+  // validator does a substring match for downstream step names inside the
+  // lead's task text; embedding the continuation's name in the handoff path
+  // tripped that check and blocked the workflow at validateConfig time.
+  if (/\bARTIFACT_DIR\b/.test(content)) return `\${ARTIFACT_DIR}/${stepId}-handoff.md`;
+  return `.workflow-artifacts/ricky-auto-fix/${stepId}-handoff.md`;
 }
 
 function timeoutValueForContinuation(block: string): string {
