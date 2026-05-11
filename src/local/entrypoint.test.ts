@@ -13,6 +13,7 @@ import type {
   WorkflowArtifactHandoff,
 } from './index.js';
 import { DEFAULT_LOCAL_ROUTE, normalizeRequest, runLocal } from './index.js';
+import { appendCoordinatorLogs } from './entrypoint.js';
 import type {
   CommandInvocation,
   CommandRunner,
@@ -4100,5 +4101,62 @@ describe('runLocal', () => {
 
       expect(result.logs).toContain('[local] spec intake route: execute');
     });
+  });
+});
+
+describe('appendCoordinatorLogs', () => {
+  function buildResult(overrides: Partial<CoordinatorResult> = {}): CoordinatorResult {
+    return {
+      runId: 'run-1',
+      workflowFile: '/tmp/workflow.ts',
+      cwd: '/tmp',
+      status: 'failed',
+      exitCode: 1,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      completedAt: '2026-01-01T00:00:01.000Z',
+      endedAt: '2026-01-01T00:00:01.000Z',
+      durationMs: 1000,
+      stdout: [],
+      stderr: [],
+      stdoutSnippet: { lines: [], totalLines: 0, maxLines: 0, truncated: false },
+      stderrSnippet: { lines: [], totalLines: 0, maxLines: 0, truncated: false },
+      events: [],
+      retry: { attempt: 0, maxAttempts: 1, attempts: [] },
+      invocation: { command: 'node', args: ['workflow.ts'], cwd: '/tmp' },
+      ...overrides,
+    } as CoordinatorResult;
+  }
+
+  it('emits header lines plus prefixed stdout/stderr entries', () => {
+    const logs: string[] = ['preexisting'];
+    appendCoordinatorLogs(
+      logs,
+      buildResult({ stdout: ['hello', 'world'], stderr: ['warn'] }),
+    );
+    expect(logs).toEqual([
+      'preexisting',
+      '[local] runtime status: failed',
+      '[local] runtime command: node workflow.ts',
+      '[stdout] hello',
+      '[stdout] world',
+      '[stderr] warn',
+    ]);
+  });
+
+  // Regression: `arr.push(...big)` and `[...big]` both pass each element as a
+  // function argument, which overflows V8's argument-stack limit (~100k) on
+  // noisy failed runs. A multi-agent failure easily produces > 200k log lines.
+  it('handles 200k stdout/stderr entries without overflowing the call stack', () => {
+    const stdout = Array.from({ length: 200_000 }, (_, i) => `out-${i}`);
+    const stderr = Array.from({ length: 200_000 }, (_, i) => `err-${i}`);
+    const logs: string[] = [];
+
+    expect(() =>
+      appendCoordinatorLogs(logs, buildResult({ stdout, stderr })),
+    ).not.toThrow();
+
+    expect(logs.length).toBe(2 + stdout.length + stderr.length);
+    expect(logs[2]).toBe('[stdout] out-0');
+    expect(logs[logs.length - 1]).toBe('[stderr] err-199999');
   });
 });

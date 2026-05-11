@@ -1272,7 +1272,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         },
       });
 
-      logs.push(...mapCoordinatorLogs(runResult));
+      appendCoordinatorLogs(logs, runResult);
       artifacts.push({
         path: runTarget,
         type: 'text/typescript',
@@ -1679,13 +1679,14 @@ function isExecutableWorkflowPath(path: string): boolean {
   return /(?:^|\/)workflows\/.+\.(?:ts|js)$|\.workflow\.(?:ts|js|yaml|yml)$/i.test(path);
 }
 
-function mapCoordinatorLogs(result: CoordinatorResult): string[] {
-  return [
-    `[local] runtime status: ${result.status}`,
-    `[local] runtime command: ${result.invocation.command} ${result.invocation.args.join(' ')}`,
-    ...result.stdout.map((line) => `[stdout] ${line}`),
-    ...result.stderr.map((line) => `[stderr] ${line}`),
-  ];
+// Appends coordinator log lines onto `target` without spreading large arrays.
+// `arr.push(...big)` and `[...big]` both pass each element as a function argument,
+// which overflows V8's argument-stack limit (~100k entries) for noisy runs.
+export function appendCoordinatorLogs(target: string[], result: CoordinatorResult): void {
+  target.push(`[local] runtime status: ${result.status}`);
+  target.push(`[local] runtime command: ${result.invocation.command} ${result.invocation.args.join(' ')}`);
+  for (const line of result.stdout) target.push(`[stdout] ${line}`);
+  for (const line of result.stderr) target.push(`[stderr] ${line}`);
 }
 
 function stageResponse(
