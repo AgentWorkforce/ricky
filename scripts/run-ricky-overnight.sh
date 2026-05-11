@@ -777,6 +777,32 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave1-runtime/implement-failure-diagnosis-engine/signoff.md \
         'RICKY_FAILURE_DIAGNOSIS_ENGINE_COMPLETE'
       ;;
+    workflows/wave1-runtime/01-local-run-coordinator.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/local-run-coordinator/signoff.md \
+        'LOCAL_COORDINATOR_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/runtime/local-coordinator.test.ts >/dev/null
+      ;;
+    workflows/wave1-runtime/03-workflow-failure-classification.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-failure-classification/signoff.md \
+        'WORKFLOW_FAILURE_CLASSIFICATION_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-failure-classification/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-failure-classification/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/runtime/failure/classifier.test.ts >/dev/null
+      ;;
     workflows/wave2-product/04-workflow-validator-specialist.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave2-product/workflow-validator-specialist/signoff.md \
@@ -917,6 +943,16 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave10-agent-assistant-adoption/executor/signoff.md \
         'WAVE10_AGENT_ASSISTANT_EXECUTOR_COMPLETE'
+      ;;
+    workflows/wave10-agent-assistant-adoption/01-verify-and-close-wave9-docs.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/verify-and-close-wave9-docs/signoff.md \
+        'WAVE9_AGENT_ASSISTANT_DOC_ISSUES_COMPLETE'
+      ;;
+    workflows/wave10-agent-assistant-adoption/04-close-agent-assistant-handoff-issue.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/close-agent-assistant-handoff-issue/signoff.md \
+        'RICKY_AGENT_ASSISTANT_HANDOFF_COMPLETE'
       ;;
     workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts)
       artifact_signoff_has_marker \
