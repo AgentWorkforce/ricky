@@ -325,6 +325,12 @@ describe('runWithAutoFix', () => {
     expect(repaired).toContain("dependsOn: ['implement-tests']");
     expect(repaired).toContain("dependsOn: ['implement-tests-timeout-continuation']");
     expect(repaired).toContain('IMPLEMENT_TESTS_TIMEOUT_CONTINUATION_DONE');
+    // Regression: the handoff filename must not embed the continuation step's
+    // literal name. The SDK's detectLeadWorkerDeadlock validator substring-
+    // matches downstream step names inside the lead's task and refuses to run
+    // the workflow when it hits. See timeoutContinuationPath().
+    expect(repaired).toContain('implement-tests-handoff.md');
+    expect(repaired).not.toContain('implement-tests-timeout-continuation.md');
     expect(result.auto_fix?.attempts[0]).toMatchObject({
       blocker_code: 'INVALID_ARTIFACT',
       failed_step: 'implement-tests',
