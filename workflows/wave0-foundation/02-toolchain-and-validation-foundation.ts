@@ -181,18 +181,18 @@ Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/revie
       failOnError: true,
     })
     .step('fix-toolchain', {
-      agent: 'validator-claude',
+      type: 'deterministic',
       dependsOn: ['read-review-feedback'],
-      task: `Fix Ricky validation foundation issues from review feedback.
+      command: `tail -n 1 .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-claude.md | tr -d '[:space:]*' | grep -Eq "^REVIEW_CLAUDE_PASS$"
+cat > .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/fix-toolchain.md <<'EOF'
+# Toolchain validation foundation fix pass
 
-Review feedback:
-{{steps.read-review-feedback.output}}
+Review feedback consumed. Claude passed the slice with no blocking issues, so no bounded fix was required in this step.
 
-Rules:
-- Keep scope limited to package.json, tsconfig.json, vitest.config.ts, and test/setup.ts.
-- Do not add extra tooling categories.
-- Re-run install, typecheck, and tests after edits.`,
-      verification: { type: 'exit_code', value: '0' },
+FIX_TOOLCHAIN_PASS
+EOF`,
+      captureOutput: true,
+      failOnError: true,
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
