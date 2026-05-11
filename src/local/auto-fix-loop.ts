@@ -1246,8 +1246,25 @@ function timeoutContinuationPath(content: string, stepId: string): string {
   // validator does a substring match for downstream step names inside the
   // lead's task text; embedding the continuation's name in the handoff path
   // tripped that check and blocked the workflow at validateConfig time.
-  if (/\bARTIFACT_DIR\b/.test(content)) return `\${ARTIFACT_DIR}/${stepId}-handoff.md`;
+  if (hasTopLevelArtifactDirBinding(content)) return `\${ARTIFACT_DIR}/${stepId}-handoff.md`;
   return `.workflow-artifacts/ricky-auto-fix/${stepId}-handoff.md`;
+}
+
+function hasTopLevelArtifactDirBinding(content: string): boolean {
+  const sourceFile = ts.createSourceFile(
+    'ricky-workflow-artifact.ts',
+    content,
+    ts.ScriptTarget.Latest,
+    false,
+    ts.ScriptKind.TS,
+  );
+  return sourceFile.statements.some(
+    (statement) =>
+      ts.isVariableStatement(statement)
+      && statement.declarationList.declarations.some(
+        (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === 'ARTIFACT_DIR',
+      ),
+  );
 }
 
 function timeoutValueForContinuation(block: string): string {
