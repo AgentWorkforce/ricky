@@ -979,9 +979,15 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
   await mkdir(dirname(loaderPath), { recursive: true });
   await writeFile(loaderPath, loaderSource, 'utf8');
   // The SDK reads broker stdout just long enough to parse the startup URL.
-  // Once readline closes, the stream can pause and a chatty broker can block
-  // writing events into the full pipe. Patch spawn in the workflow process so
-  // only managed agent-relay-broker init children are resumed after that pause.
+  // Once readline detaches its 'data' listener, the stream falls back to
+  // paused mode and libuv stops draining the kernel pipe; a chatty broker
+  // then blocks in write() once the OS pipe buffer fills. Patch spawn in the
+  // workflow process so every managed agent-relay-broker child (init AND
+  // pty workers) has a no-op data listener attached and is resumed
+  // immediately, keeping the stream in flowing mode for the lifetime of the
+  // broker. Prior versions hooked the 'pause' event instead, which Node's
+  // Readable never emits for internal buffer fills — only when something
+  // explicitly calls .pause() — so the workaround never fired.
   const registerSource = [
     'import{createRequire,register,syncBuiltinESMExports}from"node:module";',
     'import{pathToFileURL}from"node:url";',
@@ -994,13 +1000,15 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
     'const child=originalSpawn.apply(this,arguments);',
     'const argv=Array.isArray(args)?args.map(String):[];',
     'const executable=String(command??"");',
-    'if(argv[0]==="init"&&/(?:^|[/\\\\])agent-relay-broker(?:\\.exe)?$/u.test(executable)&&child.stdout){',
-    'const drainBrokerStdout=()=>{',
-    'child.stdout?.off("pause",drainBrokerStdout);',
-    'child.stdout?.on("data",()=>{});',
-    'child.stdout?.resume();',
-    '};',
-    'child.stdout.on("pause",drainBrokerStdout);',
+    'if((argv[0]==="init"||argv[0]==="pty")&&/(?:^|[/\\\\])agent-relay-broker(?:\\.exe)?$/u.test(executable)&&child.stdout){',
+    // Attach the data listener immediately so the stream enters flowing mode
+    // and libuv keeps draining the kernel pipe. The previous `on("pause", ...)`
+    // hook never fired — Node `Readable` only emits `'pause'` when something
+    // explicitly calls `.pause()`, which nothing does in this code path, so the
+    // stream stayed in paused mode and the broker eventually blocked in
+    // `write()` when the OS pipe buffer filled.
+    'child.stdout.on("data",()=>{});',
+    'child.stdout.resume();',
     '}',
     'return child;',
     '};',
