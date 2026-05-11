@@ -119,24 +119,19 @@ async function main() {
     })
 
     .step('implement-runtime-surface', {
-      agent: 'impl-primary-codex',
+      type: 'deterministic',
       dependsOn: ['lead-plan'],
-      task: `Implement the local run coordinator according to .workflow-artifacts/wave1-runtime/local-run-coordinator/implementation-plan.md.
-
-Own only:
-- src/runtime/types.ts
-- src/runtime/local-coordinator.ts
-
-Requirements:
-- Model the coordinator as Ricky's local execution substrate, not a thin prompt wrapper.
-- Provide an injectable command runner so tests can simulate agent-relay output, errors, and timeouts.
-- Capture run id, workflow path, cwd, started/ended timestamps, status, exit code, stdout/stderr snippets, lifecycle events, and retry metadata.
-- Expose a programmatic API suitable for later spec intake, generation, debugger, and local/BYOH entrypoint workflows.
-- Keep execution routing abstract enough that later Cloud and local surfaces can call it without knowing shell details.
-- Add succinct comments only where lifecycle behavior would otherwise be unclear.
-
-After editing, stop. Do not modify tests in this step.`,
-      verification: { type: 'file_exists', value: 'src/runtime/local-coordinator.ts' },
+      command: [
+        'test -f src/runtime/types.ts',
+        'test -f src/runtime/local-coordinator.ts',
+        'grep -Eq "export\\s+interface\\s+RunRequest" src/runtime/types.ts',
+        'grep -Eq "export\\s+interface\\s+CommandRunner" src/runtime/types.ts',
+        'grep -Eq "export\\s+class\\s+LocalCoordinator" src/runtime/local-coordinator.ts',
+        'grep -Eq "runner\\.run\\(|workflowFile|stdoutSnippet|stderrSnippet" src/runtime/local-coordinator.ts',
+        'echo LOCAL_COORDINATOR_RUNTIME_IMPLEMENTATION_ALREADY_PRESENT',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step('verify-runtime-surface-after-edit', {
@@ -155,27 +150,16 @@ After editing, stop. Do not modify tests in this step.`,
     })
 
     .step('implement-tests', {
-      agent: 'impl-tests-codex',
+      type: 'deterministic',
       dependsOn: ['verify-runtime-surface-after-edit'],
-      task: `Add focused tests for the local run coordinator.
-
-Own only:
-- src/runtime/local-coordinator.test.ts
-
-Required coverage:
-- successful workflow launch records running then completed status
-- failed command records failed status, exit code, and stderr
-- timeout or abort path records timeout/cancelled state without hanging the test suite
-- stdout/stderr and lifecycle events are captured in returned evidence
-- command runner injection prevents real agent-relay invocation in unit tests
-
-Review checklist:
-- Tests assert behavior, not implementation details.
-- Tests are deterministic and do not depend on wall-clock sleeps longer than a tiny fake timer or injected clock.
-- The API remains suitable for generated workflow execution and later debugger analysis.
-
-Do not broaden scope beyond the coordinator files.`,
-      verification: { type: 'file_exists', value: 'src/runtime/local-coordinator.test.ts' },
+      command: [
+        'test -f src/runtime/local-coordinator.test.ts',
+        'grep -Eq "describe|it\\(" src/runtime/local-coordinator.test.ts',
+        'grep -Eq "failed|timeout|stderr|stdout|completed|cancel" src/runtime/local-coordinator.test.ts',
+        'echo LOCAL_COORDINATOR_TEST_IMPLEMENTATION_ALREADY_PRESENT',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .step('verify-tests-after-edit', {

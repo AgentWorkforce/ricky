@@ -77,6 +77,234 @@ describe('LocalCoordinator', () => {
     vi.useRealTimers();
   });
 
+  describe('focused local run coordinator contract', () => {
+    it('records running then completed status for a generated workflow launched through an injected runner', async () => {
+      const { runner, run, invocations } = createRunner();
+      const coordinator = createLocalCoordinator({ runner });
+
+      const resultPromise = coordinator.launch({
+        runId: 'focused-success',
+        workflowFile: 'generated/focused-success.yaml',
+        cwd: '/repo',
+        timeoutMs: 5_000,
+        extraArgs: ['--json'],
+        metadata: { workflowId: 'focused-success' },
+      });
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(run).toHaveBeenCalledWith(
+        'agent-relay',
+        ['run', 'generated/focused-success.yaml', '--json'],
+        { cwd: '/repo', env: undefined },
+      );
+      expect(coordinator.getActiveRun('focused-success')).toMatchObject({
+        status: 'running',
+        invocation: {
+          command: 'agent-relay',
+          args: ['run', 'generated/focused-success.yaml', '--json'],
+          cwd: '/repo',
+        },
+        metadata: { workflowId: 'focused-success' },
+      });
+
+      invocations[0].complete(0);
+      const result = await resultPromise;
+
+      expect(result.status).toBe('passed');
+      expect(result.exitCode).toBe(0);
+      expect(result.events.map((event) => event.kind)).toEqual([
+        'started',
+        'status_change',
+        'status_change',
+        'completed',
+      ]);
+      expect(result.events.map((event) => event.status)).toEqual([
+        'pending',
+        'running',
+        'passed',
+        'passed',
+      ]);
+      expect(coordinator.getActiveRun('focused-success')).toBeUndefined();
+      expect(coordinator.getRunResult('focused-success')).toMatchObject({
+        status: 'passed',
+        exitCode: 0,
+      });
+    });
+
+    it('records failed status, exit code, stderr, and retained evidence for a failed command', async () => {
+      const { runner, invocations } = createRunner();
+      const coordinator = new LocalCoordinator(runner);
+
+      const resultPromise = coordinator.launch({
+        runId: 'focused-failure',
+        workflowFile: 'generated/focused-failure.yaml',
+        cwd: '/repo',
+        timeoutMs: 5_000,
+      });
+
+      invocations[0].emitStderr('compile failed');
+      invocations[0].complete(23);
+      const result = await resultPromise;
+
+      expect(result.status).toBe('failed');
+      expect(result.exitCode).toBe(23);
+      expect(result.error).toBe('exited with code 23');
+      expect(result.stderr).toEqual(['compile failed']);
+      expect(result.stderrSnippet).toMatchObject({
+        lines: ['compile failed'],
+        totalLines: 1,
+        truncated: false,
+      });
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          kind: 'stderr',
+          status: 'running',
+          message: 'compile failed',
+          data: { stream: 'stderr' },
+        }),
+      );
+      expect(coordinator.getRunResult('focused-failure')).toMatchObject({
+        status: 'failed',
+        exitCode: 23,
+        stderr: ['compile failed'],
+      });
+    });
+
+    it('settles timeout and cancellation paths without waiting for command exit', async () => {
+      const { runner, invocations } = createRunner();
+      const coordinator = new LocalCoordinator(runner);
+
+      const timeoutPromise = coordinator.launch({
+        runId: 'focused-timeout',
+        workflowFile: 'generated/focused-timeout.yaml',
+        cwd: '/repo',
+        timeoutMs: 10,
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      const timedOut = await timeoutPromise;
+
+      expect(invocations[0].killed).toBe(true);
+      expect(timedOut.status).toBe('timed_out');
+      expect(timedOut.exitCode).toBeNull();
+      expect(timedOut.events.at(-1)).toMatchObject({
+        kind: 'timeout',
+        status: 'timed_out',
+        data: { exitCode: null, timeoutMs: 10 },
+      });
+
+      const cancelPromise = coordinator.launch({
+        runId: 'focused-cancelled',
+        workflowFile: 'generated/focused-cancelled.yaml',
+        cwd: '/repo',
+        timeoutMs: 5_000,
+      });
+
+      coordinator.cancel('focused-cancelled');
+      const cancelled = await cancelPromise;
+
+      expect(invocations[1].killed).toBe(true);
+      expect(cancelled.status).toBe('cancelled');
+      expect(cancelled.exitCode).toBeNull();
+      expect(cancelled.events.at(-1)).toMatchObject({
+        kind: 'cancelled',
+        status: 'cancelled',
+        data: { exitCode: null, error: 'cancelled' },
+      });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('returns stdout, stderr, snippets, and lifecycle events as evidence for debugger analysis', async () => {
+      const { runner, invocations } = createRunner();
+      const coordinator = new LocalCoordinator(runner);
+      const lifecycleEvents: LifecycleEvent[] = [];
+      coordinator.on('lifecycle', (event) => lifecycleEvents.push(event));
+
+      const resultPromise = coordinator.launch({
+        runId: 'focused-evidence',
+        workflowFile: 'generated/focused-evidence.yaml',
+        cwd: '/repo',
+        timeoutMs: 5_000,
+        logSnippetLineLimit: 1,
+        metadata: { workflowId: 'focused-evidence' },
+      });
+
+      invocations[0].emitStdout('step one started');
+      invocations[0].emitStdout('step two completed');
+      invocations[0].emitStderr('non-fatal warning');
+      invocations[0].complete(0);
+      const result = await resultPromise;
+
+      expect(lifecycleEvents).toEqual(result.events);
+      expect(result.stdout).toEqual(['step one started', 'step two completed']);
+      expect(result.stderr).toEqual(['non-fatal warning']);
+      expect(result.stdoutSnippet).toEqual({
+        lines: ['step two completed'],
+        totalLines: 2,
+        maxLines: 1,
+        truncated: true,
+      });
+      expect(result.stderrSnippet).toEqual({
+        lines: ['non-fatal warning'],
+        totalLines: 1,
+        maxLines: 1,
+        truncated: false,
+      });
+      expect(result.events.map((event) => event.kind)).toEqual([
+        'started',
+        'status_change',
+        'stdout',
+        'stdout',
+        'stderr',
+        'status_change',
+        'completed',
+      ]);
+      expect(result.metadata).toEqual({ workflowId: 'focused-evidence' });
+    });
+
+    it('uses command runner injection as the only process boundary in unit tests', async () => {
+      const invocation = new ManualInvocation();
+      const run = vi.fn(
+        (command: string, args: string[], options: CommandRunnerOptions): CommandInvocation => {
+          expect(command).toBe('agent-relay');
+          expect(args).toEqual(['run', 'generated/injected-boundary.yaml']);
+          expect(options).toEqual({ cwd: '/repo', env: undefined });
+          return invocation;
+        },
+      );
+      const coordinator = createLocalCoordinator({ runner: { run } });
+
+      const resultPromise = coordinator.launch({
+        runId: 'focused-injected-boundary',
+        workflowFile: 'generated/injected-boundary.yaml',
+        cwd: '/repo',
+        timeoutMs: 5_000,
+      });
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(coordinator.getActiveRun('focused-injected-boundary')).toMatchObject({
+        status: 'running',
+        invocation: {
+          command: 'agent-relay',
+          args: ['run', 'generated/injected-boundary.yaml'],
+          cwd: '/repo',
+        },
+      });
+
+      invocation.emitStdout('manual invocation stdout');
+      invocation.complete(0);
+      const result = await resultPromise;
+
+      expect(result.status).toBe('passed');
+      expect(result.stdout).toEqual(['manual invocation stdout']);
+      expect(result.invocation).toEqual({
+        command: 'agent-relay',
+        args: ['run', 'generated/injected-boundary.yaml'],
+        cwd: '/repo',
+      });
+    });
+  });
+
   it('records running then completed status for a successful workflow launch', async () => {
     const { runner, run, invocations } = createRunner();
     const coordinator = new LocalCoordinator(runner);
