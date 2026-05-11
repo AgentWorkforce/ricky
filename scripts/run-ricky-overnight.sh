@@ -558,6 +558,11 @@ append_generated_workflows_to_queue() {
 append_repo_workflows_to_queue() {
   while IFS= read -r workflow_path; do
     [[ -n "$workflow_path" ]] || continue
+
+    if workflow_has_stale_package_targets "$workflow_path"; then
+      continue
+    fi
+
     printf '%s\n' "$workflow_path" >> "$QUEUE_FILE"
   done < <(find workflows -mindepth 2 -maxdepth 2 -type f -name '*.ts' \
     -path 'workflows/wave*/*' | sort)
