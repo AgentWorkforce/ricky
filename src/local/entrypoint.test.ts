@@ -3119,7 +3119,7 @@ describe('runLocal', () => {
   });
 
   it('drains broker stdout after SDK startup so event floods cannot wedge the workflow node', async () => {
-    const { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { chmod, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-broker-drain-repo-'));
@@ -3134,10 +3134,22 @@ describe('runLocal', () => {
       process.env.RICKY_STATE_HOME = stateHome;
       process.env.FAKE_BROKER_PATH = brokerPath;
       await mkdir(join(repo, 'workflows/generated'), { recursive: true });
-      // Give the SDK a real executable named like the broker while keeping the
-      // broker body in the `init` script that Node receives as argv[1].
-      await copyFile(process.execPath, brokerPath);
-      if (process.platform !== 'win32') {
+      // Give the SDK a portable executable named like the broker while keeping
+      // the broker body in the repo-local `init` script that Node receives as
+      // argv[1]. Copying `process.execPath` is not portable on macOS because the
+      // binary depends on sibling dylibs that are not copied with it.
+      if (process.platform === 'win32') {
+        await writeFile(
+          brokerPath,
+          `@echo off\r\n"${process.execPath}" "%CD%\\init" %*\r\n`,
+          'utf8',
+        );
+      } else {
+        await writeFile(
+          brokerPath,
+          `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$PWD/init" "$@"\n`,
+          'utf8',
+        );
         await chmod(brokerPath, 0o755);
       }
       await writeFile(
