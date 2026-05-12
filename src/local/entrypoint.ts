@@ -19,6 +19,7 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
 import { runWithAutoFix } from './auto-fix-loop.js';
+import { isSyntheticStageId } from './synthetic-step-ids.js';
 import { generate, generateWithWorkforcePersona } from '../product/generation/index.js';
 import type { GenerationInput, GenerationResult, RenderedArtifact } from '../product/generation/index.js';
 import { intake } from '../product/spec-intake/index.js';
@@ -160,6 +161,13 @@ export interface LocalExecutionEvidence {
   };
   assertions: Array<{ name: string; status: 'pass' | 'fail' | 'skipped'; detail: string }>;
   workflow_steps?: Array<{ id: string; name: string; status: 'pass' | 'fail' | 'skipped'; duration_ms: number }>;
+}
+
+interface LocalWorkflowStepSnapshot {
+  id: string;
+  name: string;
+  status: 'pass' | 'fail' | 'skipped';
+  duration_ms: number;
 }
 
 export interface LocalExecutionStageResult {
@@ -2143,6 +2151,18 @@ async function createExecutionStageFromCoordinatorResult(
     ...(logs.stderr_path ? [logs.stderr_path] : []),
   ];
   const stepStatus = status === 'success' ? 'pass' : 'fail';
+  const workflowSteps = workflowStepsFromRuntimeOutput([...result.stdout, ...result.stderr], result.durationMs);
+  const completedRealWorkflowSteps = workflowSteps.filter((step) => (
+    step.status === 'pass' && !isSyntheticStageId(step.id)
+  )).length;
+  const fallbackWorkflowSteps: LocalWorkflowStepSnapshot[] = status === 'success'
+    ? [{
+        id: 'runtime-launch',
+        name: 'Local runtime execution',
+        status: stepStatus,
+        duration_ms: result.durationMs,
+      }]
+    : [];
   const outcome = status === 'success'
     ? `Workflow ${result.workflowFile} completed successfully with ${result.stdout.length} stdout line(s) and ${result.stderr.length} stderr line(s).`
     : `Workflow ${result.workflowFile} was blocked during local runtime execution: ${classifiedBlocker?.message ?? result.error ?? result.status}.`;
@@ -2159,8 +2179,8 @@ async function createExecutionStageFromCoordinatorResult(
       started_at: result.startedAt,
       finished_at: result.completedAt,
       duration_ms: result.durationMs,
-      steps_completed: status === 'success' ? 1 : 0,
-      steps_total: 1,
+      steps_completed: workflowSteps.length > 0 ? completedRealWorkflowSteps : status === 'success' ? 1 : 0,
+      steps_total: workflowSteps.length > 0 ? workflowSteps.length : 1,
       ...(runtimeRunId ? { run_id: runtimeRunId } : {}),
     },
     ...(classifiedBlocker ? { blocker: classifiedBlocker } : {}),
@@ -2182,20 +2202,44 @@ async function createExecutionStageFromCoordinatorResult(
           detail: result.exitCode === 0 ? 'Runtime exited with code 0.' : `Runtime exit code: ${result.exitCode ?? 'unknown'}.`,
         },
       ],
-      ...(status === 'success'
-        ? {
-            workflow_steps: [
-              {
-                id: 'runtime-launch',
-                name: 'Local runtime execution',
-                status: stepStatus,
-                duration_ms: result.durationMs,
-              },
-            ],
-          }
+      ...((workflowSteps.length > 0 || fallbackWorkflowSteps.length > 0)
+        ? { workflow_steps: workflowSteps.length > 0 ? workflowSteps : fallbackWorkflowSteps }
         : {}),
     },
   };
+}
+
+/**
+ * Rehydrates workflow step status from the full runtime output before
+ * stdout/stderr are reduced to `logs.tail`, preserving completed-step evidence
+ * for chatty failed runs.
+ */
+function workflowStepsFromRuntimeOutput(
+  lines: string[],
+  durationMs: number,
+): LocalWorkflowStepSnapshot[] {
+  const steps = new Map<string, LocalWorkflowStepSnapshot>();
+  for (const line of lines) {
+    const state = line.match(/^\s*[●✓✗○]\s+(.+?)\s+—\s+(started|completed|skipped|FAILED:\s*(.+))$/);
+    if (!state) continue;
+    const stepId = state[1].trim();
+    const statusText = state[2];
+    const status = statusText === 'completed'
+      ? 'pass'
+      : statusText === 'skipped'
+        ? 'skipped'
+        : statusText.startsWith('FAILED:')
+          ? 'fail'
+          : undefined;
+    if (!status) continue;
+    steps.set(stepId, {
+      id: stepId,
+      name: stepId,
+      status,
+      duration_ms: durationMs,
+    });
+  }
+  return [...steps.values()];
 }
 
 function runtimeRunIdFilePath(cwd: string, workflowId: string): string {

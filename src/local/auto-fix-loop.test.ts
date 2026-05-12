@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -896,6 +898,100 @@ describe('runWithAutoFix', () => {
     expect(result.auto_fix?.escalation).toBeDefined();
   });
 
+  it('uses runtime completed-step count when log-tail step evidence is truncated', async () => {
+    const response = expensiveWorkBlockerResponse('run-1');
+    expect(response.execution?.evidence?.logs.tail).toEqual([
+      '[workflow] FAILED: run aborted (no per-step failure record)',
+    ]);
+
+    const runSingleAttempt = vi.fn().mockResolvedValueOnce(response);
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('repaired workflow')),
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+    expect(result.warnings.some((w) => w.includes('would have restarted the workflow from scratch'))).toBe(true);
+  });
+
+  it('does not emit missing-run-id retry warning when full restart is refused', async () => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(expensiveWorkBlockerResponse(undefined));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('repaired workflow')),
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('would have restarted the workflow from scratch'),
+    ]));
+    expect(result.warnings).not.toContain('Auto-fix retry could not resolve a previous run id; retrying without step-level resume.');
+  });
+
+  it('refuses code-drift root restart when prior real steps completed and no resume anchor exists', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'ricky-drift-restart-'));
+    try {
+      const artifactsDir = join(cwd, '.workflow-artifacts');
+      await mkdir(artifactsDir, { recursive: true });
+      const driftReportPath = join(artifactsDir, 'target-drift.json');
+      await writeFile(driftReportPath, JSON.stringify({
+        verdict: 'DRIFT',
+        findings: [{
+          severity: 'blocker',
+          axis: 'runtime',
+          description: 'Target code drifted from expected behavior.',
+        }],
+      }));
+      const future = new Date(Date.now() + 5_000);
+      await utimes(driftReportPath, future, future);
+
+      const response = expensiveWorkBlockerResponse('run-1');
+      response.execution!.execution.cwd = cwd;
+      const runSingleAttempt = vi.fn().mockResolvedValueOnce(response);
+      const codeDriftRepairer = vi.fn().mockResolvedValue({
+        applied: true,
+        summary: 'patched target code',
+      });
+
+      const result = await runWithAutoFix(baseRequest, {
+        maxAttempts: 3,
+        runSingleAttempt,
+        classifyFailure: fakeClassification,
+        debugWorkflowRun: directDebugger,
+        workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('workflow repair should not run')),
+        codeDriftRepairer,
+        artifactWriter: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(codeDriftRepairer).toHaveBeenCalledTimes(1);
+      expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+      expect(result.auto_fix?.attempts[0]).toMatchObject({
+        applied_fix: {
+          mode: 'code-drift',
+          summary: 'patched target code',
+        },
+        fix_error: expect.stringContaining('would have restarted the workflow from scratch'),
+      });
+      expect(result.warnings).toEqual(expect.arrayContaining([
+        expect.stringContaining('would have restarted the workflow from scratch'),
+      ]));
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('allows full restart when RICKY_AUTO_FIX_ALLOW_FULL_RESTART=1 even after expensive work completed', async () => {
     const previousEnv = process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART;
     process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART = '1';
@@ -1015,7 +1111,7 @@ function blockerResponse(code: LocalClassifiedBlocker['code'], runId: string | u
  * workflow steps completed in the prior attempt, but the run still failed and
  * no concrete failed_step was parsed from evidence.
  */
-function expensiveWorkBlockerResponse(runId: string): LocalResponse {
+function expensiveWorkBlockerResponse(runId: string | undefined): LocalResponse {
   const blocker: LocalClassifiedBlocker = {
     code: 'INVALID_ARTIFACT',
     category: 'workflow_invalid',
@@ -1042,26 +1138,18 @@ function expensiveWorkBlockerResponse(runId: string): LocalResponse {
     execution: {
       stage: 'execute',
       status: 'blocker',
-      execution: execution(runId),
+      execution: {
+        ...execution(runId),
+        steps_completed: 5,
+        steps_total: 7,
+      },
       blocker,
       evidence: {
         outcome_summary: blocker.message,
         // No failed_step field — this is the trigger condition.
         logs: {
-          tail: [
-            '  ● impl-adapters-work — started',
-            '  ✓ impl-adapters-work — completed',
-            '  ● impl-airtable-work — started',
-            '  ✓ impl-airtable-work — completed',
-            '  ● impl-relayfile-work — started',
-            '  ✓ impl-relayfile-work — completed',
-            '  ● self-review-fix — started',
-            '  ✓ self-review-fix — completed',
-            '  ● signoff-r1 — started',
-            '  ✓ signoff-r1 — completed',
-            '[workflow] FAILED: run aborted (no per-step failure record)',
-          ],
-          truncated: false,
+          tail: ['[workflow] FAILED: run aborted (no per-step failure record)'],
+          truncated: true,
         },
         side_effects: { files_written: [], commands_invoked: [] },
         assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],

@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:pa
 import ts from 'typescript';
 
 import type { LocalInvocationRequest } from './request-normalizer.js';
-import type { LocalClassifiedBlocker, LocalResponse } from './entrypoint.js';
+import type { LocalClassifiedBlocker, LocalExecutionEvidence, LocalResponse } from './entrypoint.js';
 import { classifyFailure as defaultClassifyFailure } from '../runtime/failure/classifier.js';
 import type { FailureClassification } from '../runtime/failure/types.js';
 import { debugWorkflowRun as defaultDebugWorkflowRun } from '../product/specialists/debugger/debugger.js';
@@ -135,6 +135,9 @@ function fullRestartExplicitlyAllowed(): boolean {
  * NOT count — those represent broker-level lifecycle, not user steps.
  */
 function workflowDidExpensiveWork(evidence: WorkflowRunEvidence): boolean {
+  if (typeof evidence.completedStepCount === 'number' && evidence.completedStepCount > 0) {
+    return true;
+  }
   return evidence.steps.some(
     (step) => step.status === 'passed' && !isSyntheticStageId(step.stepId),
   );
@@ -301,6 +304,28 @@ export async function runWithAutoFix(
             ...(driftRepair.runId ? { persona_run_id: driftRepair.runId } : {}),
           };
           warnings.push(...(driftRepair.warnings ?? []));
+
+          if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
+            attemptSummary.fix_error = FULL_RESTART_REFUSAL_REASON;
+            warnings.push(FULL_RESTART_REFUSAL_REASON);
+            const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+            escalated.nextActions = [
+              ...escalated.nextActions,
+              FULL_RESTART_REFUSAL_REASON,
+              debuggerResult.summary,
+              ...debuggerResult.recommendation.steps.map((step) => step.description),
+            ];
+            attachEscalationOptions(escalated, {
+              request: currentRequest,
+              response,
+              debuggerResult,
+              reason: FULL_RESTART_REFUSAL_REASON,
+              trackingRunId,
+              artifactPath: resolveArtifactPath(currentRequest, response),
+            });
+            return escalated;
+          }
+
           if (!runId) {
             const warning = 'Auto-fix retry could not resolve a previous run id; retrying without step-level resume.';
             attemptSummary.warning = warning;
@@ -413,14 +438,6 @@ export async function runWithAutoFix(
         };
         warnings.push(...(repair.warnings ?? []));
 
-        if (!runId) {
-          const warning = 'Auto-fix retry could not resolve a previous run id; retrying without step-level resume.';
-          attemptSummary.warning = warning;
-          warnings.push(warning);
-        } else if (!retryOfRunId) {
-          retryOfRunId = runId;
-        }
-
         if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
           attemptSummary.fix_error = FULL_RESTART_REFUSAL_REASON;
           warnings.push(FULL_RESTART_REFUSAL_REASON);
@@ -440,6 +457,14 @@ export async function runWithAutoFix(
             artifactPath: repairedArtifactPath,
           });
           return escalated;
+        }
+
+        if (!runId) {
+          const warning = 'Auto-fix retry could not resolve a previous run id; retrying without step-level resume.';
+          attemptSummary.warning = warning;
+          warnings.push(warning);
+        } else if (!retryOfRunId) {
+          retryOfRunId = runId;
         }
 
         currentRequest = {
@@ -1840,7 +1865,8 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
   const startedAt = execution?.execution.started_at ?? new Date().toISOString();
   const completedAt = execution?.execution.finished_at;
   const tail = execution?.evidence?.logs.tail ?? [];
-  const runtimeSteps = runtimeStepsFromLogTail(tail, startedAt, completedAt);
+  const structuredSteps = workflowStepsFromExecutionEvidence(execution?.evidence?.workflow_steps, startedAt, completedAt);
+  const runtimeSteps = structuredSteps.length > 0 ? structuredSteps : runtimeStepsFromLogTail(tail, startedAt, completedAt);
   const failedStepId = execution?.evidence?.failed_step?.id;
   const failedStepName = execution?.evidence?.failed_step?.name ?? failedStepId ?? 'local runtime';
   const fallbackStep: WorkflowStepEvidence = {
@@ -1873,6 +1899,9 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
     workflowName: execution?.execution.workflow_file ?? response.generation?.artifact?.path ?? 'ricky-local',
     status: response.ok ? 'passed' : 'failed',
     steps,
+    ...(typeof execution?.execution.steps_completed === 'number'
+      ? { completedStepCount: execution.execution.steps_completed }
+      : {}),
     startedAt,
     ...(completedAt ? { completedAt } : {}),
     durationMs: execution?.execution.duration_ms,
@@ -1885,6 +1914,34 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
     narrative: [],
     routing: [],
   };
+}
+
+/**
+ * Converts structured local runtime step snapshots into the shared evidence
+ * model before falling back to parsing human-readable log output.
+ */
+function workflowStepsFromExecutionEvidence(
+  workflowSteps: LocalExecutionEvidence['workflow_steps'] | undefined,
+  startedAt: string,
+  completedAt: string | undefined,
+): WorkflowStepEvidence[] {
+  return (workflowSteps ?? []).map((step) => ({
+    stepId: step.id,
+    stepName: step.name,
+    status: step.status === 'pass' ? 'passed' : step.status === 'fail' ? 'failed' : 'skipped',
+    startedAt,
+    ...(completedAt && (step.status === 'pass' || step.status === 'fail' || step.status === 'skipped')
+      ? { completedAt }
+      : {}),
+    durationMs: step.duration_ms,
+    verifications: [],
+    deterministicGates: [],
+    logs: [],
+    artifacts: [],
+    history: [],
+    retries: [],
+    narrative: [],
+  }));
 }
 
 function runtimeStepsFromLogTail(

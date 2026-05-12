@@ -129,6 +129,8 @@ export interface WorkflowRunEvidence {
   workflowName: string;
   status: RunStatus;
   steps: WorkflowStepEvidence[];
+  /** Runtime-reported count of completed real workflow steps when available. */
+  completedStepCount?: number;
   startedAt: string;
   completedAt?: string;
   durationMs?: number;
