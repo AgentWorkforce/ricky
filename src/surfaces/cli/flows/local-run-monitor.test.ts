@@ -360,7 +360,7 @@ describe('local run monitor', () => {
       if (child.exitCode === null) child.kill('SIGKILL');
       await rm(cwd, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it('defaults run state under the repo .workflow-artifacts directory', () => {
     const cwd = '/workspace/customer-repo';

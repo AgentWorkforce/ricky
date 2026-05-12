@@ -38,6 +38,7 @@ describe('Ricky package layout and npm-default proof', () => {
       'npm-default-package-manifest',
       [
         'package.json packageManager: npm@',
+        'package.json engines.node: >=22.14.0',
         'package.json workspaces declared: false',
         'package-lock.json present: true',
         'alternative lockfiles present: (none)',
@@ -49,6 +50,7 @@ describe('Ricky package layout and npm-default proof', () => {
         '.npmrc exists: true',
         '.nvmrc exists: true',
         '.npmrc declares engine-strict=true: true',
+        '.nvmrc value: 22.14.0',
       ],
     ],
     [
@@ -72,9 +74,10 @@ describe('Ricky package layout and npm-default proof', () => {
     [
       'package-script-allowlist',
       [
-        'required scripts: batch, build, bundle, clean, dev, evals, evals:compare, evals:compile, evals:list, evals:opencode, evals:provider, evals:summary, overnight, prepack, start, test, typecheck',
+        'required scripts: batch, build, bundle, clean, dev, evals, evals:compare, evals:compile, evals:list, evals:opencode, evals:provider, evals:summary, overnight, premerge, prepack, start, test, typecheck',
         'missing required scripts: (none)',
         'unexpected extra scripts: (none)',
+        'premerge runs local auto-fix ladder e2e: true',
       ],
     ],
     [

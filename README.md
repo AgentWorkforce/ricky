@@ -155,6 +155,7 @@ Ricky is a single-package npm repo with a flat `src/` tree. npm is the only supp
 npm install          # install dependencies for the single root package
 npm run typecheck    # typecheck src, tests, workflows, and scripts
 npm test             # bundle the CLI and run the repo test suite + proof tests
+npm run premerge     # run typecheck, full tests, and the local auto-fix ladder e2e
 npm start            # launch the CLI from src/surfaces/cli/commands/cli-main.ts
 ```
 
@@ -164,6 +165,7 @@ npm scripts (canonical ordering matches `package.json`):
 - `npm run build` — alias for `bundle`; produces `dist/ricky.js`
 - `npm run typecheck` — typecheck the flat `src/` tree plus workflows/proofs/scripts
 - `npm test` — bundle the CLI, then run the full test suite and proof tests
+- `npm run premerge` — run typecheck, the full test suite, and `test/local-auto-fix-workflow-failures.e2e.test.ts` as an explicit pre-merge regression gate
 - `npm start` — launch the interactive CLI from `src/surfaces/cli/commands/cli-main.ts`
 - `npm run dev` — alias for `npm start`
 - `npm run evals` — compile and run the Ricky eval suite
@@ -180,7 +182,7 @@ npm scripts (canonical ordering matches `package.json`):
   - checkpoint state lives under `.workflow-artifacts/state/overnight/<queue-mode>/checkpoint.env` (legacy `.workflow-artifacts/overnight-state/...` checkpoints are still imported automatically)
 - `npm run prepack` — build before package packing (runs automatically on `npm pack` and `npm publish`)
 
-Node and npm versions are pinned: `engines.node = ">=20"`, `packageManager = "npm@11.11.0"`, `engine-strict=true` in `.npmrc`, and `.nvmrc = 20`. There is no Yarn, pnpm, or other package-manager surface — npm is the default and only path.
+Node and npm versions are pinned: `engines.node = ">=22.14.0"`, `packageManager = "npm@11.11.0"`, `engine-strict=true` in `.npmrc`, and `.nvmrc = 22.14.0`. There is no Yarn, pnpm, or other package-manager surface — npm is the default and only path.
 
 Note: `prpm.lock` at the repo root is **not** an npm artifact. It tracks AI-agent skills installed under `.agents/skills/` via the `prpm` skill registry, and it is referenced by `test/flat-layout-proof/` to verify that legacy Claude skill mirrors stay removed. Treat it as orthogonal to npm.
 
