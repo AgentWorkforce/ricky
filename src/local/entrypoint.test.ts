@@ -4033,6 +4033,49 @@ describe('runLocal', () => {
       });
       expect(blocked.nextActions).toEqual(blocked.execution?.blocker?.recovery.steps);
     });
+
+    it('preserves completed workflow steps from full runtime output on failed runs', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stdout: [
+          '[workflow 00:00] Executing 4 steps (pattern: pipeline)',
+          '  ● prepare — started',
+          '  ✓ prepare — completed',
+          '  ● implement — started',
+          '  ✓ implement — completed',
+          '  ● verify — started',
+          '  ✗ verify — FAILED: Command failed with exit code 1',
+        ],
+        stderr: ['verification failed'],
+      });
+
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'run workflows/issue-11/failing-after-work.workflow.ts',
+          stageMode: 'run',
+          requestId: 'req-issue-11-failed-steps',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'blocker',
+        execution: {
+          steps_completed: 2,
+          steps_total: 3,
+        },
+        evidence: {
+          workflow_steps: [
+            { id: 'prepare', name: 'prepare', status: 'pass' },
+            { id: 'implement', name: 'implement', status: 'pass' },
+            { id: 'verify', name: 'verify', status: 'fail' },
+          ],
+        },
+      });
+    });
   });
 
   describe('CLI sane defaults — explicit description handoff', () => {
