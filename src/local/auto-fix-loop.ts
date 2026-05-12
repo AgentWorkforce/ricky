@@ -98,6 +98,73 @@ export interface RunWithAutoFixOptions {
 
 const DEFAULT_BACKOFF_MS = 500;
 
+/**
+ * When `failedStep` cannot be parsed from the workflow run's evidence, a retry
+ * that omits `startFromStep` will silently restart the entire workflow from
+ * step 0 (see `relay/packages/sdk/src/workflows/run.ts` — `executeOptions` is
+ * `undefined` unless `startFrom` is set, so `--previous-run-id` alone does
+ * NOT resume).
+ *
+ * For short workflows that's fine; for long multi-agent workflows (e.g. the
+ * proactive-runtime M1–M6 chain) the re-spawned `impl-*` tracks burn hours
+ * per attempt and produce duplicated work even though the prior run's
+ * signoff already emitted "SIGNOFF: COMPLETE".
+ *
+ * Default behavior: refuse to retry blindly from scratch when the workflow
+ * has already produced completed real (non-synthetic) steps and we have no
+ * step-level resume anchor. Escalate to the operator instead.
+ *
+ * Opt back into the old behavior by setting
+ * `RICKY_AUTO_FIX_ALLOW_FULL_RESTART=1` — useful for cheap test workflows or
+ * for failures where the workflow never made meaningful progress (e.g. a
+ * synthetic runtime-launch / local-runtime / runtime-precheck blocker).
+ */
+function fullRestartExplicitlyAllowed(): boolean {
+  const raw = process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART;
+  if (!raw) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
+/**
+ * Returns true when the prior attempt's evidence shows at least one
+ * real workflow step ran to completion. If so, restarting from scratch
+ * would re-spawn that work and is the wrong default.
+ *
+ * Synthetic stage ids (runtime-launch, local-runtime, runtime-precheck) do
+ * NOT count — those represent broker-level lifecycle, not user steps.
+ */
+function workflowDidExpensiveWork(evidence: WorkflowRunEvidence): boolean {
+  return evidence.steps.some(
+    (step) => step.status === 'passed' && !isSyntheticStageId(step.stepId),
+  );
+}
+
+/**
+ * Combined gate: when we have no step-level resume anchor (`failedStep` is
+ * undefined), retrying would silently restart from scratch. Permit it only
+ * when (a) the operator explicitly opted in, or (b) no real work has
+ * completed yet so the cost of a fresh run is low.
+ */
+function safeToRetryWithoutStartFromStep(
+  failedStep: string | undefined,
+  evidence: WorkflowRunEvidence,
+): boolean {
+  if (failedStep) return true;
+  if (fullRestartExplicitlyAllowed()) return true;
+  return !workflowDidExpensiveWork(evidence);
+}
+
+/**
+ * Reason string explaining why we refused to retry from scratch. Kept in one
+ * place so escalation messages and warnings stay aligned.
+ */
+const FULL_RESTART_REFUSAL_REASON =
+  'Auto-fix would have restarted the workflow from scratch (no step-level resume anchor was available), ' +
+  'but the prior attempt already completed real workflow steps. Refusing to discard that work. ' +
+  'Inspect the run, fix the failure manually, and rerun with --start-from <step> --previous-run-id <id>. ' +
+  'Set RICKY_AUTO_FIX_ALLOW_FULL_RESTART=1 to allow a full restart anyway.';
+
 export async function runWithAutoFix(
   request: LocalInvocationRequest,
   options: RunWithAutoFixOptions,
@@ -354,6 +421,27 @@ export async function runWithAutoFix(
           retryOfRunId = runId;
         }
 
+        if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
+          attemptSummary.fix_error = FULL_RESTART_REFUSAL_REASON;
+          warnings.push(FULL_RESTART_REFUSAL_REASON);
+          const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+          escalated.nextActions = [
+            ...escalated.nextActions,
+            FULL_RESTART_REFUSAL_REASON,
+            debuggerResult.summary,
+            ...debuggerResult.recommendation.steps.map((step) => step.description),
+          ];
+          attachEscalationOptions(escalated, {
+            request: currentRequest,
+            response,
+            debuggerResult,
+            reason: FULL_RESTART_REFUSAL_REASON,
+            trackingRunId,
+            artifactPath: repairedArtifactPath,
+          });
+          return escalated;
+        }
+
         currentRequest = {
           ...retryBaseRequest(currentRequest, response, repairedArtifactPath, repair.content),
           autoFix: undefined,
@@ -370,7 +458,7 @@ export async function runWithAutoFix(
       } catch (error) {
         attemptSummary.fix_error = error instanceof Error ? error.message : String(error);
         warnings.push(...warningsFromError(error));
-        if (attempt < maxAttempts) {
+        if (attempt < maxAttempts && safeToRetryWithoutStartFromStep(failedStep, evidence)) {
           const warning = `Workflow repair provider failed; retrying without an artifact rewrite: ${attemptSummary.fix_error}`;
           attemptSummary.warning = warning;
           warnings.push(warning);
@@ -392,6 +480,10 @@ export async function runWithAutoFix(
           };
           onProgress?.(`Workflow repair provider failed; retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
           continue;
+        }
+        if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
+          attemptSummary.warning = FULL_RESTART_REFUSAL_REASON;
+          warnings.push(FULL_RESTART_REFUSAL_REASON);
         }
         const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
         escalated.nextActions = [
@@ -455,6 +547,26 @@ export async function runWithAutoFix(
         trackingRunId,
         artifactPath: resolveArtifactPath(currentRequest, response),
         ...(failedStep ? { failedStep } : {}),
+      });
+      return escalated;
+    }
+
+    if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
+      attemptSummary.fix_error = FULL_RESTART_REFUSAL_REASON;
+      warnings.push(FULL_RESTART_REFUSAL_REASON);
+      const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+      escalated.nextActions = [
+        ...escalated.nextActions,
+        FULL_RESTART_REFUSAL_REASON,
+        ...(response.execution?.blocker?.recovery.steps ?? []),
+      ];
+      attachEscalationOptions(escalated, {
+        request: currentRequest,
+        response,
+        debuggerResult,
+        reason: FULL_RESTART_REFUSAL_REASON,
+        trackingRunId,
+        artifactPath: resolveArtifactPath(currentRequest, response),
       });
       return escalated;
     }

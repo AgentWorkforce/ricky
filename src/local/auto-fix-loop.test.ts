@@ -868,6 +868,62 @@ describe('runWithAutoFix', () => {
     expect(workflowRepairer.mock.calls[0][0].failedStep).toBeUndefined();
   });
 
+  it('escalates instead of restarting from scratch when the prior attempt already completed real steps', async () => {
+    // Regression for the "router loop" bug seen on the proactive-runtime
+    // M2/M3 chain runs: signoff-r1 emitted SIGNOFF: COMPLETE, downstream
+    // fix-r2 or final gates failed, but no concrete failedStep was parsed
+    // from evidence. Ricky used to retry without --start-from, which the
+    // SDK treats as a fresh run, re-spawning all impl-* tracks (hours of
+    // duplicated work). The new policy is: refuse the restart, escalate.
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(expensiveWorkBlockerResponse('run-1'));
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired workflow'));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+    expect(result.auto_fix?.final_status).not.toBe('ok');
+    expect(result.warnings.some((w) => w.includes('would have restarted the workflow from scratch'))).toBe(true);
+    expect(result.auto_fix?.escalation).toBeDefined();
+  });
+
+  it('allows full restart when RICKY_AUTO_FIX_ALLOW_FULL_RESTART=1 even after expensive work completed', async () => {
+    const previousEnv = process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART;
+    process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART = '1';
+    try {
+      const runSingleAttempt = vi
+        .fn()
+        .mockResolvedValueOnce(expensiveWorkBlockerResponse('run-1'))
+        .mockResolvedValueOnce(successResponse('run-2'));
+      const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired workflow'));
+
+      const result = await runWithAutoFix(baseRequest, {
+        maxAttempts: 3,
+        runSingleAttempt,
+        classifyFailure: fakeClassification,
+        debugWorkflowRun: directDebugger,
+        workflowRepairer,
+        artifactWriter: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(runSingleAttempt).toHaveBeenCalledTimes(2);
+      expect(runSingleAttempt.mock.calls[1][0].retry.startFromStep).toBeUndefined();
+    } finally {
+      if (previousEnv === undefined) delete process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART;
+      else process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART = previousEnv;
+    }
+  });
+
 });
 
 describe('isSyntheticStageId', () => {
@@ -946,6 +1002,67 @@ function blockerResponse(code: LocalClassifiedBlocker['code'], runId: string | u
         failed_step: { id: failedStep, name: failedStep },
         exit_code: 1,
         logs: { tail: [`${code} log tail`], truncated: false },
+        side_effects: { files_written: [], commands_invoked: [] },
+        assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
+      },
+    },
+    exitCode: 2,
+  };
+}
+
+/**
+ * Models the proactive-runtime "router loop" symptom: many real (non-synthetic)
+ * workflow steps completed in the prior attempt, but the run still failed and
+ * no concrete failed_step was parsed from evidence.
+ */
+function expensiveWorkBlockerResponse(runId: string): LocalResponse {
+  const blocker: LocalClassifiedBlocker = {
+    code: 'INVALID_ARTIFACT',
+    category: 'workflow_invalid',
+    message: 'Workflow runtime reported failure but Ricky could not identify which step failed.',
+    detected_at: '2026-05-12T00:00:00.000Z',
+    detected_during: 'launch',
+    recovery: {
+      actionable: true,
+      steps: ['Inspect the captured workflow logs to identify the failed step.'],
+    },
+    context: { missing: [], found: [] },
+  };
+  return {
+    ok: false,
+    artifacts: [{ path: 'workflows/generated/foo.ts', content: workflowContent() }],
+    logs: [],
+    warnings: [blocker.message],
+    nextActions: [...blocker.recovery.steps],
+    generation: {
+      stage: 'generate',
+      status: 'ok',
+      artifact: { path: 'workflows/generated/foo.ts', workflow_id: 'wf-1', spec_digest: 'abc' },
+    },
+    execution: {
+      stage: 'execute',
+      status: 'blocker',
+      execution: execution(runId),
+      blocker,
+      evidence: {
+        outcome_summary: blocker.message,
+        // No failed_step field — this is the trigger condition.
+        logs: {
+          tail: [
+            '  ● impl-adapters-work — started',
+            '  ✓ impl-adapters-work — completed',
+            '  ● impl-airtable-work — started',
+            '  ✓ impl-airtable-work — completed',
+            '  ● impl-relayfile-work — started',
+            '  ✓ impl-relayfile-work — completed',
+            '  ● self-review-fix — started',
+            '  ✓ self-review-fix — completed',
+            '  ● signoff-r1 — started',
+            '  ✓ signoff-r1 — completed',
+            '[workflow] FAILED: run aborted (no per-step failure record)',
+          ],
+          truncated: false,
+        },
         side_effects: { files_written: [], commands_invoked: [] },
         assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
       },
