@@ -105,12 +105,12 @@ When generation does not run the artifact, the CLI prints the artifact path plus
 
 ## Proactive Runtime Monitoring
 
-Ricky now exposes a proactive runtime entrypoint at [src/agent.ts](/Users/khaliqgant/Projects/AgentWorkforce/ricky/src/agent.ts). The scheduled agent wakes every 5 minutes with `agent({ schedule: "*/5 * * * *" })`, scans Ricky's persisted background-run state, and posts terminal run updates to `RICKY_MONITOR_CHANNEL` (default `#ricky`).
+Ricky now exposes a proactive runtime entrypoint at [`src/agent.ts`](./src/agent.ts). The scheduled agent wakes every 5 minutes with `agent({ schedule: "*/5 * * * *" })`, scans Ricky's persisted background-run state, and posts terminal run updates to `RICKY_MONITOR_CHANNEL` (default `#ricky`).
 
 Environment knobs for the scheduled agent:
 - `RICKY_WORKSPACE_ID` — Relaycast/relayfile workspace name for the agent runtime. Defaults to `ricky`.
 - `RICKY_MONITOR_CHANNEL` — channel that receives proactive run updates. Defaults to `#ricky`.
-- `RICKY_MONITOR_REPO_ROOT` — repo root whose persisted run-state tree should be monitored. Defaults to the current working directory.
+- `RICKY_MONITOR_REPO_ROOT` — repo root whose persisted run-state tree should be monitored. Defaults to the current working directory. Both `<repo>/.workflow-artifacts/ricky-local-runs/` and the XDG state-home tree are scanned.
 - `RICKY_STATE_HOME` — optional override for the base state directory Ricky already uses for background runs.
 
 Run it locally with:
