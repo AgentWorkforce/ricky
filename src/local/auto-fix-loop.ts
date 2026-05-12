@@ -1866,7 +1866,8 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
   const completedAt = execution?.execution.finished_at;
   const tail = execution?.evidence?.logs.tail ?? [];
   const structuredSteps = workflowStepsFromExecutionEvidence(execution?.evidence?.workflow_steps, startedAt, completedAt);
-  const runtimeSteps = structuredSteps.length > 0 ? structuredSteps : runtimeStepsFromLogTail(tail, startedAt, completedAt);
+  const runtimeSteps = runtimeStepsFromLogTail(tail, startedAt, completedAt);
+  const mergedSteps = mergeWorkflowStepEvidence(structuredSteps, runtimeSteps);
   const failedStepId = execution?.evidence?.failed_step?.id;
   const failedStepName = execution?.evidence?.failed_step?.name ?? failedStepId ?? 'local runtime';
   const fallbackStep: WorkflowStepEvidence = {
@@ -1891,7 +1892,7 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
     narrative: [],
     ...(response.ok ? {} : { error: execution?.blocker?.message ?? response.warnings[0] }),
   };
-  const steps = runtimeSteps.length > 0 ? runtimeSteps : [fallbackStep];
+  const steps = mergedSteps.length > 0 ? mergedSteps : [fallbackStep];
 
   return {
     runId: resolveRunId(response) ?? `ricky-auto-fix-attempt-${attempt}`,
@@ -1942,6 +1943,35 @@ function workflowStepsFromExecutionEvidence(
     retries: [],
     narrative: [],
   }));
+}
+
+function mergeWorkflowStepEvidence(
+  structuredSteps: WorkflowStepEvidence[],
+  runtimeSteps: WorkflowStepEvidence[],
+): WorkflowStepEvidence[] {
+  if (structuredSteps.length === 0) return runtimeSteps;
+  if (runtimeSteps.length === 0) return structuredSteps;
+
+  const runtimeByStepId = new Map(runtimeSteps.map((step) => [step.stepId, step]));
+  const merged = structuredSteps.map((structuredStep) => {
+    const runtimeStep = runtimeByStepId.get(structuredStep.stepId);
+    if (!runtimeStep) return structuredStep;
+    runtimeByStepId.delete(structuredStep.stepId);
+    return {
+      ...runtimeStep,
+      ...structuredStep,
+      verifications: runtimeStep.verifications.length > 0 ? runtimeStep.verifications : structuredStep.verifications,
+      deterministicGates: runtimeStep.deterministicGates.length > 0 ? runtimeStep.deterministicGates : structuredStep.deterministicGates,
+      logs: runtimeStep.logs.length > 0 ? runtimeStep.logs : structuredStep.logs,
+      artifacts: structuredStep.artifacts.length > 0 ? structuredStep.artifacts : runtimeStep.artifacts,
+      history: structuredStep.history.length > 0 ? structuredStep.history : runtimeStep.history,
+      retries: structuredStep.retries.length > 0 ? structuredStep.retries : runtimeStep.retries,
+      narrative: structuredStep.narrative.length > 0 ? structuredStep.narrative : runtimeStep.narrative,
+      ...(structuredStep.error ? { error: structuredStep.error } : runtimeStep.error ? { error: runtimeStep.error } : {}),
+    };
+  });
+
+  return [...merged, ...runtimeByStepId.values()];
 }
 
 function runtimeStepsFromLogTail(
