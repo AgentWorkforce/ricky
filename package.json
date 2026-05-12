@@ -22,7 +22,7 @@
   },
   "packageManager": "npm@11.11.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.14.0"
   },
   "type": "module",
   "bin": {
@@ -42,6 +42,7 @@
     "build": "npm run bundle",
     "typecheck": "tsc --noEmit",
     "test": "npm run bundle && vitest run",
+    "premerge": "npm run typecheck && npm test && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts",
     "evals:compile": "node scripts/evals/compile-ricky-evals.mjs",
     "evals": "npm run evals:compile && node scripts/evals/run-ricky-evals.mjs",
     "evals:provider": "npm run build && npm run evals -- --provider --executor openrouter",
