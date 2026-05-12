@@ -30,6 +30,7 @@ Ricky is designed around co-equal interfaces and onboarding surfaces. Current im
 - **CLI** — implemented as the primary local command surface.
 - **Local / BYOH** — implemented for local workflow generation, artifact execution, background monitoring, and status checks.
 - **Cloud API** — partially implemented for Cloud generation request/response contracts and CLI connection/status flows.
+- **Proactive runtime agent** — implemented for scheduled background-run monitoring via `@agent-relay/agent`.
 - **Slack** — planned; no source handler is currently implemented in this repo.
 - **Web** — planned; no browser surface is currently implemented in this repo.
 
@@ -101,6 +102,22 @@ ricky status --run <run-id>
 ```
 
 When generation does not run the artifact, the CLI prints the artifact path plus foreground and background run commands.
+
+## Proactive Runtime Monitoring
+
+Ricky now exposes a proactive runtime entrypoint at [src/agent.ts](/Users/khaliqgant/Projects/AgentWorkforce/ricky/src/agent.ts). The scheduled agent wakes every 5 minutes with `agent({ schedule: "*/5 * * * *" })`, scans Ricky's persisted background-run state, and posts terminal run updates to `RICKY_MONITOR_CHANNEL` (default `#ricky`).
+
+Environment knobs for the scheduled agent:
+- `RICKY_WORKSPACE_ID` — Relaycast/relayfile workspace name for the agent runtime. Defaults to `ricky`.
+- `RICKY_MONITOR_CHANNEL` — channel that receives proactive run updates. Defaults to `#ricky`.
+- `RICKY_MONITOR_REPO_ROOT` — repo root whose persisted run-state tree should be monitored. Defaults to the current working directory.
+- `RICKY_STATE_HOME` — optional override for the base state directory Ricky already uses for background runs.
+
+Run it locally with:
+
+```sh
+tsx src/agent.ts
+```
 
 ## CLI Onboarding
 
