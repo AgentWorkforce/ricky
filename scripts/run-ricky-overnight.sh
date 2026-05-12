@@ -10,8 +10,10 @@ QUEUE_MODE="${RICKY_OVERNIGHT_QUEUE_MODE:-flight-safe}"
 MAX_WORKFLOWS_PER_INVOCATION="${RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION:-4}"
 IDLE_TIMEOUT_SECONDS="${RICKY_OVERNIGHT_IDLE_TIMEOUT_SECONDS:-900}"
 DEFAULT_MAX_WORKFLOWS_PER_INVOCATION=4
-STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
-GLOBAL_STATE_ROOT="$REPO_ROOT/.workflow-artifacts/overnight-state"
+STATE_NAMESPACE_ROOT="$REPO_ROOT/.workflow-artifacts/state/overnight"
+LEGACY_STATE_NAMESPACE_ROOT="$REPO_ROOT/.workflow-artifacts/overnight-state"
+STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$STATE_NAMESPACE_ROOT/$QUEUE_MODE}"
+GLOBAL_STATE_ROOT="$(dirname "$STATE_ROOT")"
 GLOBAL_LOCK_DIR="$GLOBAL_STATE_ROOT/active.lock"
 GLOBAL_LOCK_FILE="$GLOBAL_LOCK_DIR/lock.env"
 RESUME_FLAG="${1:-}"
@@ -62,6 +64,11 @@ mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT" "$GLOBAL_STATE_ROOT"
 : > "$LOG_FILE"
 : > "$FAILED_FILE"
 : > "$SKIPPED_FILE"
+
+if [[ -z "${RICKY_OVERNIGHT_STATE_DIR:-}" && -d "$LEGACY_STATE_NAMESPACE_ROOT/$QUEUE_MODE" && ! -e "$STATE_ROOT/checkpoint.env" ]]; then
+  mkdir -p "$STATE_ROOT"
+  cp -f "$LEGACY_STATE_NAMESPACE_ROOT/$QUEUE_MODE"/* "$STATE_ROOT"/ 2>/dev/null || true
+fi
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -343,7 +350,7 @@ iterate_known_state_dirs() {
   local state_dir=""
   local emitted_custom_state_dir="false"
 
-  for state_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*; do
+  for state_dir in "$GLOBAL_STATE_ROOT"/*; do
     [[ -d "$state_dir" ]] || continue
     printf '%s\n' "$state_dir"
     if [[ "$state_dir" == "$STATE_ROOT" ]]; then
@@ -356,12 +363,54 @@ iterate_known_state_dirs() {
   fi
 }
 
+iterate_known_artifact_checkpoints() {
+  local checkpoint_file=""
+
+  shopt -s nullglob
+  for checkpoint_file in "$REPO_ROOT"/.workflow-artifacts/overnight-*/checkpoint.env; do
+    [[ -f "$checkpoint_file" ]] || continue
+    printf '%s\n' "$checkpoint_file"
+  done
+  shopt -u nullglob
+}
+
+iterate_running_artifact_dirs_without_checkpoints() {
+  local artifact_dir=""
+  local status_file=""
+
+  shopt -s nullglob
+  for artifact_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-*; do
+    [[ -d "$artifact_dir" ]] || continue
+    [[ "$artifact_dir" == "$ARTIFACT_DIR" ]] && continue
+    status_file="$artifact_dir/status.txt"
+    [[ -f "$status_file" ]] || continue
+    grep -Eqx 'running|checkpointed' "$status_file" || continue
+    [[ ! -f "$artifact_dir/checkpoint.env" ]] || continue
+    printf '%s\n' "$artifact_dir"
+  done
+  shopt -u nullglob
+}
+
 reconcile_stale_state_dirs() {
   local state_dir=""
+  local checkpoint_file=""
+  local artifact_dir=""
+
   while IFS= read -r state_dir; do
     [[ -d "$state_dir" ]] || continue
     reconcile_stale_state_dir "$state_dir/checkpoint.env"
   done < <(iterate_known_state_dirs)
+
+  while IFS= read -r checkpoint_file; do
+    [[ -f "$checkpoint_file" ]] || continue
+    reconcile_stale_state_dir "$checkpoint_file"
+  done < <(iterate_known_artifact_checkpoints)
+
+  while IFS= read -r artifact_dir; do
+    [[ -d "$artifact_dir" ]] || continue
+    mark_artifact_stale_or_complete "$artifact_dir"
+    log "reconciled orphaned overnight artifact without checkpoint -> $artifact_dir"
+  done < <(iterate_running_artifact_dirs_without_checkpoints)
 }
 
 clear_all_state_checkpoints() {
@@ -470,24 +519,28 @@ on_exit() {
 
   if [[ "$STATUS_MARKED" != "true" ]]; then
     if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
+      local recovered_status=""
+
       if artifact_runner_logs_show_success "$ARTIFACT_DIR" && ! artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR"; then
         STATUS_REASON="runner completed before harness status flush"
-        echo "complete" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "complete"
+        recovered_status="complete"
       elif artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR"; then
         STATUS_REASON="queue exhausted before harness status flush"
-        local recovered_status
         recovered_status="$(artifact_queue_exhausted_terminal_status "$ARTIFACT_DIR")"
-        echo "$recovered_status" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "$recovered_status"
       else
         STATUS_REASON="process exited unexpectedly"
-        echo "stale" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "stale"
+        recovered_status="stale"
       fi
+
+      echo "$recovered_status" > "$STATUS_FILE"
+      persist_checkpoint
+
+      if [[ "$recovered_status" == "complete" || "$recovered_status" == "complete-with-failures" ]]; then
+        clear_all_state_checkpoints
+        finalize_current_artifact_checkpoint
+      fi
+
+      write_summary "$recovered_status"
     fi
   fi
 
@@ -512,6 +565,11 @@ append_generated_workflows_to_queue() {
 append_repo_workflows_to_queue() {
   while IFS= read -r workflow_path; do
     [[ -n "$workflow_path" ]] || continue
+
+    if workflow_has_stale_package_targets "$workflow_path"; then
+      continue
+    fi
+
     printf '%s\n' "$workflow_path" >> "$QUEUE_FILE"
   done < <(find workflows -mindepth 2 -maxdepth 2 -type f -name '*.ts' \
     -path 'workflows/wave*/*' | sort)
@@ -582,7 +640,7 @@ prune_tracked_workflow_file_for_repo_state() {
 }
 
 refresh_state_paths() {
-  STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
+  STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$STATE_NAMESPACE_ROOT/$QUEUE_MODE}"
   STATE_FILE="$STATE_ROOT/checkpoint.env"
   STATE_LOG="$STATE_ROOT/latest-run.txt"
   mkdir -p "$STATE_ROOT"
@@ -1157,7 +1215,7 @@ resolve_resume_checkpoint_file() {
     fallback_queue_mode="${fallback_queue_mode//\"/}"
   fi
 
-  for candidate in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*/checkpoint.env; do
+  for candidate in "$GLOBAL_STATE_ROOT"/*/checkpoint.env; do
     [[ -f "$candidate" ]] || continue
     candidate_epoch="$(stat -f '%m' "$candidate" 2>/dev/null || printf '0')"
     if [[ ! "$candidate_epoch" =~ ^[0-9]+$ ]]; then
