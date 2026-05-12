@@ -56,6 +56,17 @@ export interface GenerationInput {
     repairAttempts?: number;
     personaIntentCandidates?: readonly string[];
     resolver?: import('./workforce-persona-writer.js').WorkforcePersonaResolver;
+    /**
+     * Post-write Opus reviewer pass control. `false` disables the pass.
+     * Defaults to enabled when omitted; can also be disabled via the
+     * `RICKY_PERSONA_REVIEW=0` env var.
+     */
+    review?: false | {
+      tier?: string;
+      timeoutSeconds?: number;
+      personaIntentCandidates?: readonly string[];
+      resolver?: import('./workforce-persona-writer.js').WorkforcePersonaResolver;
+    };
   };
 }
 
@@ -213,7 +224,34 @@ export interface WorkforcePersonaGenerationMetadata {
     repoRoot: string;
     relevantFileCount: number;
   };
+  /**
+   * Verdict from the post-write Opus reviewer pass, when the reviewer ran.
+   * `pass` means the reviewer approved the artifact as-is. `fix` means the
+   * writer accepted a structured fix list from the reviewer and ran one
+   * repair attempt against it. `block` means the reviewer rejected the
+   * artifact and Ricky fell back to the deterministic renderer.
+   */
+  review?: WorkforcePersonaReviewSummary;
 }
+
+export type WorkforcePersonaReviewSummary = {
+  verdict: 'pass' | 'fix' | 'block';
+  summary: string;
+  personaId: string;
+  tier: string;
+  harness: string;
+  model: string;
+  selectedIntent: string;
+  runId: string | null;
+  fixes: Array<{
+    severity: 'critical' | 'important' | 'moderate';
+    area: string;
+    finding: string;
+    requestedChange: string;
+  }>;
+  appliedFix: boolean;
+  warnings: string[];
+};
 
 export interface GenerationValidationResult {
   valid: boolean;

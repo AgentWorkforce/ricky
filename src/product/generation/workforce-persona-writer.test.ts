@@ -243,6 +243,7 @@ describe('workforce persona workflow writer', () => {
         targetMode: 'local',
         installSkills: false,
         resolver,
+        review: false,
       },
     });
 
@@ -311,6 +312,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'runtime-master',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -360,6 +362,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'malformed',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -414,6 +417,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'clarify',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -470,6 +474,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'prewrite-repair',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -525,6 +530,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'prewrite-cwd-repair',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -585,6 +591,7 @@ describe('workforce persona workflow writer', () => {
         tier: 'minimum',
         repairAttempts: 4,
         resolver,
+        review: false,
       },
     });
 
@@ -641,6 +648,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'prewrite-fallback',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -776,6 +784,9 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'workforce-writer',
         targetMode: 'local',
         resolver,
+        // Writer-in-isolation test: the post-write reviewer pass is exercised
+        // separately in pipeline-review.test.ts.
+        review: false,
       },
     });
 
@@ -848,6 +859,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'router-tier',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -988,6 +1000,257 @@ describe('workforce persona workflow writer', () => {
       message: expect.stringContaining('does not expose the persona selection API'),
       warnings: [expect.stringContaining('exports: resolvePersona')],
     });
+  });
+});
+
+describe('workforce persona reviewer pass', () => {
+  it('passes the writer artifact through when the reviewer returns verdict=pass', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-pass.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerArtifact = baseGen.artifact!.content;
+
+    const intentCalls: string[] = [];
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      intentCalls.push(intent);
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: intent === 'review' ? 'best' : 'best-value',
+            runtime: { harness: 'claude', model: intent === 'review' ? 'claude-opus-4-7' : 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            if (intent === 'review') {
+              return execution(JSON.stringify({ verdict: 'pass', summary: 'All checks green.', fixes: [] }));
+            }
+            return execution(personaResponse('workflows/generated/reviewer-pass.ts', writerArtifact));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-pass.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-pass',
+        targetMode: 'local',
+        resolver,
+        review: { personaIntentCandidates: ['review'] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(intentCalls).toContain('review');
+    expect(result.workforcePersona?.review).toMatchObject({
+      verdict: 'pass',
+      personaId: 'review',
+      tier: 'best',
+      model: 'claude-opus-4-7',
+      selectedIntent: 'review',
+      appliedFix: false,
+    });
+    expect(result.artifact?.content).toBe(writerArtifact);
+  });
+
+  it('feeds reviewer fixes back to the writer for a single repair attempt when verdict=fix', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-fix.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerFirstArtifact = baseGen.artifact!.content;
+    const writerRepairArtifact = baseGen.artifact!.content.replace(/Persona generated workflow/g, 'Repaired by reviewer feedback');
+    const writerCalls: string[] = [];
+    let reviewerInvocations = 0;
+
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: intent === 'review' ? 'best' : 'best-value',
+            runtime: { harness: 'claude', model: intent === 'review' ? 'claude-opus-4-7' : 'claude-sonnet-4-6' },
+          },
+          sendMessage(task) {
+            if (intent === 'review') {
+              reviewerInvocations += 1;
+              return execution(JSON.stringify({
+                verdict: 'fix',
+                summary: 'Swarm pattern does not match the spec Merge DAG.',
+                fixes: [{
+                  severity: 'critical',
+                  area: 'swarm-pattern',
+                  finding: 'Pipeline serializes parallel tracks.',
+                  requestedChange: 'Switch to a dag pattern with parallel child invocations per Track.',
+                }],
+              }));
+            }
+            const isRepair = task.includes('Ricky pre-write validation failed on your previous artifact.');
+            writerCalls.push(isRepair ? 'writer-repair' : 'writer-first');
+            return execution(personaResponse(
+              'workflows/generated/reviewer-fix.ts',
+              isRepair ? writerRepairArtifact : writerFirstArtifact,
+            ));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-fix.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-fix',
+        targetMode: 'local',
+        resolver,
+        review: { personaIntentCandidates: ['review'] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(reviewerInvocations).toBe(1);
+    expect(writerCalls).toEqual(['writer-first', 'writer-repair']);
+    expect(result.workforcePersona?.review).toMatchObject({
+      verdict: 'fix',
+      appliedFix: true,
+      fixes: [{ severity: 'critical', area: 'swarm-pattern' }],
+    });
+    expect(result.artifact?.content).toBe(writerRepairArtifact);
+  });
+
+  it('returns verdict=block with no fixes and keeps the writer artifact when reviewer output is unparseable', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-block.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerArtifact = baseGen.artifact!.content;
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: intent === 'review' ? 'best' : 'best-value',
+            runtime: { harness: 'claude', model: intent === 'review' ? 'claude-opus-4-7' : 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            if (intent === 'review') {
+              // Reviewer emitted prose with no JSON verdict; pipeline should treat as block.
+              return execution('I looked at the workflow and have concerns but no parseable verdict block.');
+            }
+            return execution(personaResponse('workflows/generated/reviewer-block.ts', writerArtifact));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-block.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-block',
+        targetMode: 'local',
+        resolver,
+        review: { personaIntentCandidates: ['review'] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.workforcePersona?.review).toMatchObject({
+      verdict: 'block',
+      appliedFix: false,
+      fixes: [],
+    });
+    // Block-with-no-fixes path leaves the writer artifact intact.
+    expect(result.artifact?.content).toBe(writerArtifact);
+  });
+
+  it('skips the review pass when workforcePersonaWriter.review is false', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-off.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerArtifact = baseGen.artifact!.content;
+    const intentCalls: string[] = [];
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      intentCalls.push(intent);
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: 'best-value',
+            runtime: { harness: 'claude', model: 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            return execution(personaResponse('workflows/generated/reviewer-off.ts', writerArtifact));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-off.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-off',
+        targetMode: 'local',
+        resolver,
+        review: false,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(intentCalls).not.toContain('review');
+    expect(result.workforcePersona?.review).toBeUndefined();
   });
 });
 
