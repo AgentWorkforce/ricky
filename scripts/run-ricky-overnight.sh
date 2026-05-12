@@ -10,8 +10,10 @@ QUEUE_MODE="${RICKY_OVERNIGHT_QUEUE_MODE:-flight-safe}"
 MAX_WORKFLOWS_PER_INVOCATION="${RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION:-4}"
 IDLE_TIMEOUT_SECONDS="${RICKY_OVERNIGHT_IDLE_TIMEOUT_SECONDS:-900}"
 DEFAULT_MAX_WORKFLOWS_PER_INVOCATION=4
-STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
-GLOBAL_STATE_ROOT="$REPO_ROOT/.workflow-artifacts/overnight-state"
+STATE_NAMESPACE_ROOT="$REPO_ROOT/.workflow-artifacts/state/overnight"
+LEGACY_STATE_NAMESPACE_ROOT="$REPO_ROOT/.workflow-artifacts/overnight-state"
+STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$STATE_NAMESPACE_ROOT/$QUEUE_MODE}"
+GLOBAL_STATE_ROOT="$(dirname "$STATE_ROOT")"
 GLOBAL_LOCK_DIR="$GLOBAL_STATE_ROOT/active.lock"
 GLOBAL_LOCK_FILE="$GLOBAL_LOCK_DIR/lock.env"
 RESUME_FLAG="${1:-}"
@@ -62,6 +64,11 @@ mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT" "$GLOBAL_STATE_ROOT"
 : > "$LOG_FILE"
 : > "$FAILED_FILE"
 : > "$SKIPPED_FILE"
+
+if [[ -z "${RICKY_OVERNIGHT_STATE_DIR:-}" && -d "$LEGACY_STATE_NAMESPACE_ROOT/$QUEUE_MODE" && ! -e "$STATE_ROOT/checkpoint.env" ]]; then
+  mkdir -p "$STATE_ROOT"
+  cp -f "$LEGACY_STATE_NAMESPACE_ROOT/$QUEUE_MODE"/* "$STATE_ROOT"/ 2>/dev/null || true
+fi
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -343,7 +350,7 @@ iterate_known_state_dirs() {
   local state_dir=""
   local emitted_custom_state_dir="false"
 
-  for state_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*; do
+  for state_dir in "$GLOBAL_STATE_ROOT"/*; do
     [[ -d "$state_dir" ]] || continue
     printf '%s\n' "$state_dir"
     if [[ "$state_dir" == "$STATE_ROOT" ]]; then
@@ -633,7 +640,7 @@ prune_tracked_workflow_file_for_repo_state() {
 }
 
 refresh_state_paths() {
-  STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
+  STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$STATE_NAMESPACE_ROOT/$QUEUE_MODE}"
   STATE_FILE="$STATE_ROOT/checkpoint.env"
   STATE_LOG="$STATE_ROOT/latest-run.txt"
   mkdir -p "$STATE_ROOT"
@@ -1208,7 +1215,7 @@ resolve_resume_checkpoint_file() {
     fallback_queue_mode="${fallback_queue_mode//\"/}"
   fi
 
-  for candidate in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*/checkpoint.env; do
+  for candidate in "$GLOBAL_STATE_ROOT"/*/checkpoint.env; do
     [[ -f "$candidate" ]] || continue
     candidate_epoch="$(stat -f '%m' "$candidate" 2>/dev/null || printf '0')"
     if [[ ! "$candidate_epoch" =~ ^[0-9]+$ ]]; then

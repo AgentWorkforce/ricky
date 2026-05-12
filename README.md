@@ -177,7 +177,7 @@ npm scripts (canonical ordering matches `package.json`):
 - `npm run overnight` — run the overnight workflow queue via `scripts/run-ricky-overnight.sh`
   - default queue mode is now `flight-safe`, which only runs the workflows currently classified as unattended-safe
   - default behavior checkpoints after a small bounded chunk (`RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION`, default `4`) and can resume with `bash scripts/run-ricky-overnight.sh --resume`
-  - checkpoint state lives under `.workflow-artifacts/overnight-state/<queue-mode>/checkpoint.env`
+  - checkpoint state lives under `.workflow-artifacts/state/overnight/<queue-mode>/checkpoint.env` (legacy `.workflow-artifacts/overnight-state/...` checkpoints are still imported automatically)
 - `npm run prepack` — build before package packing (runs automatically on `npm pack` and `npm publish`)
 
 Node and npm versions are pinned: `engines.node = ">=20"`, `packageManager = "npm@11.11.0"`, `engine-strict=true` in `.npmrc`, and `.nvmrc = 20`. There is no Yarn, pnpm, or other package-manager surface — npm is the default and only path.

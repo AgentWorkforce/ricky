@@ -471,7 +471,7 @@ Non-interactive execution paths delegate to shell scripts:
 
 These scripts orchestrate multiple CLI invocations, manage workflow queues, and capture per-run artifacts. They are operational wrappers, not part of the core runtime architecture.
 
-The overnight wrapper is intentionally restart-safe rather than monolithic. It checkpoints queue position under `.workflow-artifacts/overnight-state/<queue-mode>/checkpoint.env`, skips missing workflow files instead of burning the whole run, and defaults to small bounded chunks per invocation so an external SIGKILL or host sleep loses at most the current workflow rather than the entire overnight plan.
+The overnight wrapper is intentionally restart-safe rather than monolithic. It checkpoints queue position under `.workflow-artifacts/state/overnight/<queue-mode>/checkpoint.env`, skips missing workflow files instead of burning the whole run, and defaults to small bounded chunks per invocation so an external SIGKILL or host sleep loses at most the current workflow rather than the entire overnight plan. Legacy `.workflow-artifacts/overnight-state/...` checkpoints are migrated forward automatically so the state path no longer collides with `overnight-*` artifact globbing.
 
 ---
 
