@@ -31,6 +31,7 @@
   "files": [
     "dist",
     ".agents/skills",
+    "personas",
     "README.md"
   ],
   "publishConfig": {

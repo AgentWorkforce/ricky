@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,9 +47,31 @@ export interface RickyLocalPersonaRuntime {
   agentsMd?: string;
 }
 
-/** Absolute path to the Ricky-local persona directory inside the repo. */
+const PERSONA_SENTINEL = join('personas', 'agent-relay-workflow.json');
+
+/**
+ * Absolute path to the Ricky-local persona directory. Walks up from this
+ * module's URL looking for a directory that contains the sentinel persona
+ * file. Works under all the layouts Ricky ships in:
+ * - source via tsx (`src/product/generation/...`)
+ * - bundled CLI (`dist/ricky.js` adjacent to `personas/`)
+ * - npm install (`node_modules/@agentworkforce/ricky/dist/ricky.js`)
+ * Falls back to the legacy three-up resolution so tests that mock
+ * `import.meta.url` still get a deterministic path.
+ */
 export function rickyLocalPersonaDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
+  let current = here;
+  // Probe up to 8 parents — covers `dist/ricky.js`, `src/<a>/<b>/<c>.ts`,
+  // and `node_modules/@scope/pkg/dist/<file>`.
+  for (let i = 0; i < 8; i += 1) {
+    if (existsSync(join(current, PERSONA_SENTINEL))) {
+      return join(current, 'personas');
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
   return resolve(here, '..', '..', '..', 'personas');
 }
 
