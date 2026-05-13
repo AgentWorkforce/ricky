@@ -104,6 +104,8 @@ export interface WorkforcePersonaWriterOptions {
   installSkills?: boolean;
   installRoot?: string;
   tier?: string;
+  /** Absolute path to the source spec file when known. The writer task references it so the persona can Read the spec instead of receiving it inline. */
+  specPath?: string;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   onProgress?: (chunk: { stream: 'stdout' | 'stderr'; text: string }) => void;
@@ -221,6 +223,7 @@ export async function writeWorkflowWithWorkforcePersona(
     relevantFiles,
     skillContext: options.skillContext,
     validationFeedback: options.validationFeedback,
+    ...(options.specPath ? { specPath: options.specPath } : {}),
   });
   const promptDigest = digest(task);
   const selection = resolved.context.selection;
@@ -496,6 +499,22 @@ export async function loadWorkforceSelectionModule(importPackage: WorkforcePacka
   );
 }
 
+/**
+ * Soft caps for the persona writer task body. The total task size is the
+ * sum of these caps plus the boilerplate prose; under default values the
+ * task body is well under 200 KB even for the largest specs we have seen
+ * (1.5 MB raw payload, 81 relevant files, ~600 KB validation feedback).
+ *
+ * The hard cap on description (`MAX_DESCRIPTION_BYTES`) is the one that
+ * matters most because the raw spec text is the dominant cost for natural-
+ * language specs; everything else is bounded by per-item caps.
+ */
+const MAX_DESCRIPTION_BYTES = 32 * 1024;
+const MAX_TARGET_CONTEXT_BYTES = 8 * 1024;
+const MAX_RELEVANT_FILE_BYTES = 8 * 1024;
+const MAX_RELEVANT_FILES_TOTAL_BYTES = 96 * 1024;
+const MAX_VALIDATION_FEEDBACK_PREVIOUS_BYTES = 16 * 1024;
+
 export function buildWorkflowPersonaTask(
   spec: NormalizedWorkflowSpec,
   input: {
@@ -506,6 +525,7 @@ export function buildWorkflowPersonaTask(
     relevantFiles: Array<{ path: string; content?: string }>;
     skillContext?: SkillContext;
     validationFeedback?: WorkforcePersonaValidationFeedback;
+    specPath?: string;
   },
 ): string {
   const contract = {
@@ -535,13 +555,28 @@ export function buildWorkflowPersonaTask(
     },
   };
 
+  const summarizedSpec = summarizeSpecForPersona(spec);
+  const summarizedRelevantFiles = summarizeRelevantFilesForPersona(input.relevantFiles);
+
+  const specReference =
+    input.specPath && summarizedSpec.descriptionTruncated
+      ? [
+          `Spec source file (read it directly when you need more detail than the summary below): ${input.specPath}`,
+          `The summarized spec below truncates description and target context for prompt size. Read the spec file for full content.`,
+          '',
+        ]
+      : input.specPath
+        ? [`Spec source file (full content is also included below): ${input.specPath}`, '']
+        : [];
+
   return [
     'Write an Agent Relay workflow artifact for Ricky.',
     'Run as a non-interactive one-shot persona invocation. Return only the response contract.',
     'If the normalized spec has blocking ambiguity or open questions, return needs_clarification with targeted user-facing questions instead of guessing.',
     '',
-    'Normalized spec JSON:',
-    JSON.stringify(spec, null, 2),
+    ...specReference,
+    'Normalized spec JSON (description/targetContext truncated when oversized; raw spec payload elided):',
+    JSON.stringify(summarizedSpec.spec, null, 2),
     '',
     `Workflow name: ${input.workflowName}`,
     `Target mode: ${input.targetMode}`,
@@ -554,13 +589,11 @@ export function buildWorkflowPersonaTask(
       targetMode: input.targetMode,
       repoRoot: input.repoRoot,
       outputPath: input.outputPath,
+      ...(input.specPath ? { specPath: input.specPath } : {}),
     }, null, 2),
     '',
-    'Relevant file context:',
-    safeJson(input.relevantFiles.map((file) => ({
-      path: file.path,
-      content: file.content ?? null,
-    }))),
+    `Relevant file context (${summarizedRelevantFiles.includedCount} of ${input.relevantFiles.length} files; per-file content truncated above ${MAX_RELEVANT_FILE_BYTES} bytes):`,
+    safeJson(summarizedRelevantFiles.files),
     '',
     'Matched Ricky generation skills:',
     renderSkillContextForPersona(input.skillContext),
@@ -611,6 +644,10 @@ function renderValidationFeedbackForPersona(
   feedback: WorkforcePersonaValidationFeedback | undefined,
 ): string[] {
   if (!feedback) return [];
+  const trimmedPreviousContent = truncateText(
+    feedback.previousContent,
+    MAX_VALIDATION_FEEDBACK_PREVIOUS_BYTES,
+  );
   return [
     'Ricky pre-write validation failed on your previous artifact.',
     'Fix every validation issue before returning the complete replacement artifact.',
@@ -627,12 +664,168 @@ function renderValidationFeedbackForPersona(
           '',
         ]
       : []),
-    'Previous rejected artifact:',
+    'Previous rejected artifact (truncated when oversized):',
     '```ts',
-    feedback.previousContent.trimEnd(),
+    trimmedPreviousContent.text.trimEnd(),
     '```',
     '',
   ];
+}
+
+interface SummarizedSpec {
+  spec: NormalizedWorkflowSpec;
+  descriptionTruncated: boolean;
+}
+
+/**
+ * Produces a writer-task-ready clone of the normalized spec with the
+ * raw spec payload elided (it duplicates `description`) and `description`
+ * + `targetContext` truncated when oversized. Keeps every structured
+ * field intact — target files, constraints, evidence requirements, and
+ * acceptance gates are short and are what the persona actually needs to
+ * decompose the workflow.
+ */
+export function summarizeSpecForPersona(spec: NormalizedWorkflowSpec): SummarizedSpec {
+  const description = truncateText(spec.description, MAX_DESCRIPTION_BYTES);
+  const targetContext =
+    typeof spec.targetContext === 'string'
+      ? truncateText(spec.targetContext, MAX_TARGET_CONTEXT_BYTES)
+      : null;
+
+  const elidedSourceSpec = {
+    ...spec.sourceSpec,
+    description: '<<elided: see top-level description field>>',
+    rawPayload: elideRawPayload(spec.sourceSpec.rawPayload),
+  };
+
+  // `desiredAction.summary` and `desiredAction.specText` typically duplicate
+  // the top-level description (see request-normalizer.ts); when the user
+  // passes `--spec-file <large.md>` they grow to the same multi-hundred-KB
+  // size as the spec text. `summary` keeps a short cap because the persona
+  // task lists it separately; `specText` is elided entirely because every
+  // byte of it duplicates `description` for natural-language specs.
+  const SUMMARY_CAP_BYTES = 4 * 1024;
+  const desiredActionSummary = truncateText(spec.desiredAction.summary, SUMMARY_CAP_BYTES);
+  const desiredActionSpecTextElided = typeof spec.desiredAction.specText === 'string';
+
+  const summarized: NormalizedWorkflowSpec = {
+    ...spec,
+    description: description.text,
+    targetContext: targetContext ? targetContext.text : spec.targetContext,
+    desiredAction: {
+      ...spec.desiredAction,
+      summary: desiredActionSummary.text,
+      ...(desiredActionSpecTextElided
+        ? { specText: '<<elided: duplicates description>>' }
+        : {}),
+    },
+    sourceSpec: elidedSourceSpec,
+  };
+
+  return {
+    spec: summarized,
+    descriptionTruncated:
+      description.truncated ||
+      (targetContext?.truncated ?? false) ||
+      desiredActionSummary.truncated,
+  };
+}
+
+type RawSpecPayload = NormalizedWorkflowSpec['sourceSpec']['rawPayload'];
+
+function elideRawPayload(rawPayload: RawSpecPayload): RawSpecPayload {
+  // The raw payload duplicates the spec description on every natural-language
+  // input and adds nothing the persona can act on that the normalized spec
+  // does not already carry; replace its long fields with elision markers so
+  // the kind/surface/requestId metadata stays readable.
+  switch (rawPayload.kind) {
+    case 'natural_language':
+      return {
+        ...rawPayload,
+        text: rawPayloadElisionMarker(rawPayload.text),
+      };
+    case 'structured_json':
+      return {
+        ...rawPayload,
+        data: { '<<elided>>': 'see normalized spec fields' },
+      };
+    case 'mcp':
+      return {
+        ...rawPayload,
+        arguments: { '<<elided>>': 'see normalized spec fields' },
+      };
+    default:
+      return rawPayload;
+  }
+}
+
+function rawPayloadElisionMarker(text: string): string {
+  const size = Buffer.byteLength(text, 'utf8');
+  return `<<elided ${size} bytes of raw spec text — see top-level description and structured spec fields>>`;
+}
+
+interface SummarizedRelevantFiles {
+  files: Array<{ path: string; content: string | null; bytesOmitted?: number; omitted?: true }>;
+  includedCount: number;
+}
+
+/**
+ * Caps the total byte budget of inlined relevant-file contents. Files past
+ * the budget are listed as path-only entries so the persona still sees the
+ * full list, and any individual file body is truncated at
+ * `MAX_RELEVANT_FILE_BYTES`.
+ */
+export function summarizeRelevantFilesForPersona(
+  relevantFiles: Array<{ path: string; content?: string }>,
+): SummarizedRelevantFiles {
+  let totalBytes = 0;
+  let includedCount = 0;
+  const files: SummarizedRelevantFiles['files'] = [];
+  for (const file of relevantFiles) {
+    if (!file.content) {
+      files.push({ path: file.path, content: null });
+      continue;
+    }
+    if (totalBytes >= MAX_RELEVANT_FILES_TOTAL_BYTES) {
+      files.push({ path: file.path, content: null, omitted: true });
+      continue;
+    }
+    const remaining = MAX_RELEVANT_FILES_TOTAL_BYTES - totalBytes;
+    const perFileBudget = Math.min(MAX_RELEVANT_FILE_BYTES, remaining);
+    const trimmed = truncateText(file.content, perFileBudget);
+    totalBytes += Buffer.byteLength(trimmed.text, 'utf8');
+    includedCount += 1;
+    files.push({
+      path: file.path,
+      content: trimmed.text,
+      ...(trimmed.truncated ? { bytesOmitted: trimmed.bytesOmitted } : {}),
+    });
+  }
+  return { files, includedCount };
+}
+
+interface TruncationResult {
+  text: string;
+  truncated: boolean;
+  bytesOmitted: number;
+}
+
+function truncateText(value: string, maxBytes: number): TruncationResult {
+  const buffer = Buffer.from(value, 'utf8');
+  if (buffer.byteLength <= maxBytes) {
+    return { text: value, truncated: false, bytesOmitted: 0 };
+  }
+  const omitted = buffer.byteLength - maxBytes;
+  // Slice on a code-point boundary by re-decoding the trimmed buffer.
+  const headBytes = Math.floor(maxBytes * 0.75);
+  const tailBytes = maxBytes - headBytes;
+  const head = buffer.subarray(0, headBytes).toString('utf8');
+  const tail = buffer.subarray(buffer.byteLength - tailBytes).toString('utf8');
+  return {
+    text: `${head}\n\n<<truncated ${omitted} bytes>>\n\n${tail}`,
+    truncated: true,
+    bytesOmitted: omitted,
+  };
 }
 
 function renderSkillContextForPersona(skillContext: SkillContext | undefined): string {

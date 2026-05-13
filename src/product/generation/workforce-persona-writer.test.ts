@@ -12,6 +12,8 @@ import {
   loadWorkforceSelectionModule,
   parsePersonaWorkflowResponse,
   resolveWorkforcePersonaContextWithModules,
+  summarizeRelevantFilesForPersona,
+  summarizeSpecForPersona,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
 } from './workforce-persona-writer.js';
 
@@ -1000,6 +1002,102 @@ describe('workforce persona workflow writer', () => {
       message: expect.stringContaining('does not expose the persona selection API'),
       warnings: [expect.stringContaining('exports: resolvePersona')],
     });
+  });
+});
+
+describe('workforce persona writer task summarization', () => {
+  it('elides the raw spec payload text on every summarization', () => {
+    const longDescription = 'A'.repeat(50);
+    const summarized = summarizeSpecForPersona(spec({ description: longDescription }));
+    const rawPayload = summarized.spec.sourceSpec.rawPayload;
+    expect(rawPayload.kind).toBe('natural_language');
+    if (rawPayload.kind === 'natural_language') {
+      expect(rawPayload.text).toContain('<<elided');
+      expect(rawPayload.text).not.toContain(longDescription);
+    }
+    expect(summarized.spec.sourceSpec.description).toBe('<<elided: see top-level description field>>');
+  });
+
+  it('preserves description when it fits under the cap and reports truncated=false', () => {
+    const summarized = summarizeSpecForPersona(spec({ description: 'small description body' }));
+    expect(summarized.spec.description).toBe('small description body');
+    expect(summarized.descriptionTruncated).toBe(false);
+  });
+
+  it('truncates oversized descriptions with a head + tail elision marker', () => {
+    const huge = `${'X'.repeat(40_000)}\n--- middle landmark ---\n${'Y'.repeat(40_000)}`;
+    const summarized = summarizeSpecForPersona(spec({ description: huge }));
+    expect(summarized.descriptionTruncated).toBe(true);
+    expect(summarized.spec.description).toContain('<<truncated');
+    // Head from the start AND tail from the end both survive.
+    expect(summarized.spec.description.startsWith('XXXX')).toBe(true);
+    expect(summarized.spec.description.endsWith('YYYY')).toBe(true);
+    // Whole summarized spec must fit under ~64KB even though input was 80KB.
+    const serialized = JSON.stringify(summarized.spec);
+    expect(serialized.length).toBeLessThan(64 * 1024);
+  });
+
+  it('caps relevant file contents per-file and reports per-file omission counts', () => {
+    const big = 'A'.repeat(20_000);
+    const result = summarizeRelevantFilesForPersona([
+      { path: 'a.ts', content: big },
+      { path: 'b.ts', content: 'tiny' },
+    ]);
+    expect(result.includedCount).toBe(2);
+    expect(result.files[0].content).toContain('<<truncated');
+    expect(result.files[0].bytesOmitted).toBeGreaterThan(0);
+    expect(result.files[1].content).toBe('tiny');
+    expect(result.files[1].bytesOmitted).toBeUndefined();
+  });
+
+  it('drops file contents past the total relevant-file budget but keeps the path entry', () => {
+    const big = 'A'.repeat(8 * 1024);
+    const files = Array.from({ length: 30 }, (_, idx) => ({ path: `file-${idx}.ts`, content: big }));
+    const result = summarizeRelevantFilesForPersona(files);
+    expect(result.files).toHaveLength(30);
+    const omitted = result.files.filter((file) => file.omitted === true);
+    expect(omitted.length).toBeGreaterThan(0);
+    omitted.forEach((entry) => expect(entry.content).toBeNull());
+  });
+
+  it('references the spec file by path and notes truncation when description is oversized', () => {
+    const huge = 'A'.repeat(60_000);
+    const task = buildWorkflowPersonaTask(spec({ description: huge }), {
+      workflowName: 'reference-spec-by-path',
+      targetMode: 'local',
+      repoRoot: '/repo',
+      outputPath: 'workflows/generated/reference-spec.ts',
+      relevantFiles: [],
+      specPath: '/repo/docs/plans/big-spec.md',
+    });
+    expect(task).toContain('Spec source file');
+    expect(task).toContain('/repo/docs/plans/big-spec.md');
+    expect(task).toContain('Read the spec file for full content');
+    expect(task).toContain('<<truncated');
+    // Top-level "Normalized spec JSON" wording should reflect the truncation note.
+    expect(task).toContain('description/targetContext truncated when oversized; raw spec payload elided');
+    // Total task body must be well under 200 KB regardless of input size.
+    expect(task.length).toBeLessThan(200 * 1024);
+  });
+
+  it('keeps the original raw spec text out of the writer task body', () => {
+    // Place the sentinel in the middle of an oversized description so that
+    // head/tail truncation excludes it from the inlined description AND so
+    // that raw-payload elision is the only path that could surface it.
+    const sentinel = 'SECRET-RAW-SPEC-SENTINEL';
+    const description = `${'A'.repeat(80_000)}${sentinel}${'B'.repeat(80_000)}`;
+    const task = buildWorkflowPersonaTask(spec({ description }), {
+      workflowName: 'elision',
+      targetMode: 'local',
+      repoRoot: '/repo',
+      outputPath: 'workflows/generated/elision.ts',
+      relevantFiles: [],
+      specPath: '/repo/docs/plans/big-spec.md',
+    });
+    // The unique sentinel must not appear verbatim because both description
+    // and rawPayload.text are summarized/elided.
+    expect(task).not.toContain(sentinel);
+    expect(task).toContain('<<elided');
   });
 });
 

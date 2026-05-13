@@ -113,6 +113,7 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       installSkills: input.workforcePersonaWriter?.installSkills,
       installRoot: input.workforcePersonaWriter?.installRoot,
       tier: input.workforcePersonaWriter?.tier,
+      ...(input.workforcePersonaWriter?.specPath ? { specPath: input.workforcePersonaWriter.specPath } : {}),
       personaIntentCandidates: input.workforcePersonaWriter?.personaIntentCandidates,
       resolver,
       skillContext: baseResult.skillContext,

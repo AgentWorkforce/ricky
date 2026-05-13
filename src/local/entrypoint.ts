@@ -1664,11 +1664,18 @@ function resolveWorkforcePersonaWriterOptions(
   const requestedByMetadata = request.metadata.workflowWriter === 'workforce' || request.metadata.workflow_writer === 'workforce';
   if (!options.workforcePersonaWriter && !requestedByMetadata) return undefined;
 
+  // Thread the original spec file path (when --spec-file was used and the
+  // path is not an executable workflow) so the persona writer can reference
+  // the spec by path instead of inlining the full text into the prompt.
+  const specPath =
+    request.specPath && !isExecutableWorkflowPath(request.specPath) ? request.specPath : undefined;
+
   return {
     ...(options.workforcePersonaWriter || {}),
     repoRoot: cwd,
     targetMode: executionPreference === 'cloud' ? 'cloud' : 'local',
     installRoot: join(localRunStateRoot(cwd), 'workforce-persona-skills'),
+    ...(specPath ? { specPath } : {}),
   };
 }
 

@@ -52,6 +52,8 @@ export interface GenerationInput {
     installSkills?: boolean;
     installRoot?: string;
     tier?: string;
+    /** Absolute path to the original spec file, when --spec-file was used. Lets the writer reference the spec by path instead of inlining it. */
+    specPath?: string;
     /** Maximum pre-write validation repair attempts before falling back to deterministic rendering. */
     repairAttempts?: number;
     personaIntentCandidates?: readonly string[];
