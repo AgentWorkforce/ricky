@@ -42,7 +42,7 @@
     "bundle": "node scripts/bundle-cli.mjs",
     "build": "npm run bundle",
     "typecheck": "tsc --noEmit",
-    "test": "npm run bundle && vitest run",
+    "test": "vitest run",
     "premerge": "npm run typecheck && npm test && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts",
     "evals:compile": "node scripts/evals/compile-ricky-evals.mjs",
     "evals": "npm run evals:compile && node scripts/evals/run-ricky-evals.mjs",

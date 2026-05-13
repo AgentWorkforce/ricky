@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2023",
+    "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
@@ -11,6 +12,12 @@
     "types": ["node", "vitest/globals"],
     "noEmit": true
   },
-  "include": ["src", "test", "workflows", "scripts"],
+  "include": [
+    "src",
+    "test",
+    "workflows",
+    "scripts",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "dist", ".workflow-artifacts", ".agent-relay", ".agent-relay.stale.*", "tmp"]
 }
