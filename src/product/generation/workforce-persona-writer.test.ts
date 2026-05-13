@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,12 +8,17 @@ import { generate, generateWithWorkforcePersona } from './pipeline.js';
 import type { WorkforcePersonaExecution, WorkforcePersonaResolver } from './workforce-persona-writer.js';
 import {
   buildWorkflowPersonaTask,
+  dumpPersonaDebug,
   loadWorkforcePersonaModule,
   loadWorkforceSelectionModule,
   parsePersonaWorkflowResponse,
   resolveWorkforcePersonaContextWithModules,
+  summarizeRelevantFilesForPersona,
+  summarizeSpecForPersona,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
 } from './workforce-persona-writer.js';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 
 const RECEIVED_AT = '2026-04-30T00:00:00.000Z';
 
@@ -119,6 +124,35 @@ describe('workforce persona workflow writer', () => {
         },
       ],
     });
+  });
+
+  it('parses Sonnet output with prose preamble + unclosed ```json fence', () => {
+    // Empirical regression: Claude Sonnet running the agent-relay-workflow
+    // persona emits a one-line preamble plus an opening ```json fence with
+    // no matching closing fence; the JSON payload is otherwise valid.
+    // Captured via the persona-debug dump from the deploy-v1 smoke run.
+    const payload = JSON.stringify({
+      artifact: { path: 'workflows/generated/persona.ts', content: workflowSource() },
+      metadata: { workflowName: 'persona', summary: 'tiny' },
+    });
+    const sonnetShaped = `Now I have enough context. I'll generate the workflow artifact.\n\n\`\`\`json\n${payload}`;
+    const parsed = parsePersonaWorkflowResponse(sonnetShaped, 'workflows/generated/persona.ts');
+    expect(parsed.responseFormat).toBe('structured-json');
+    expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
+    expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
+  });
+
+  it('parses persona output with prose preamble and no fences at all', () => {
+    const payload = JSON.stringify({
+      artifact: { path: 'workflows/generated/persona.ts', content: workflowSource() },
+      metadata: { workflowName: 'persona' },
+    });
+    const parsed = parsePersonaWorkflowResponse(
+      `Here is the workflow you asked for:\n\n${payload}\n\nLet me know if you want me to adjust anything.`,
+      'workflows/generated/persona.ts',
+    );
+    expect(parsed.responseFormat).toBe('structured-json');
+    expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
   });
 
   it('parses fenced TypeScript artifact plus JSON metadata fallback', () => {
@@ -243,6 +277,7 @@ describe('workforce persona workflow writer', () => {
         targetMode: 'local',
         installSkills: false,
         resolver,
+        review: false,
       },
     });
 
@@ -311,6 +346,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'runtime-master',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -360,6 +396,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'malformed',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -414,6 +451,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'clarify',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -470,6 +508,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'prewrite-repair',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -525,6 +564,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'prewrite-cwd-repair',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -585,6 +625,7 @@ describe('workforce persona workflow writer', () => {
         tier: 'minimum',
         repairAttempts: 4,
         resolver,
+        review: false,
       },
     });
 
@@ -641,6 +682,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'prewrite-fallback',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -776,6 +818,9 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'workforce-writer',
         targetMode: 'local',
         resolver,
+        // Writer-in-isolation test: the post-write reviewer pass is exercised
+        // separately in pipeline-review.test.ts.
+        review: false,
       },
     });
 
@@ -848,6 +893,7 @@ describe('workforce persona workflow writer', () => {
         workflowName: 'router-tier',
         targetMode: 'local',
         resolver,
+        review: false,
       },
     });
 
@@ -988,6 +1034,656 @@ describe('workforce persona workflow writer', () => {
       message: expect.stringContaining('does not expose the persona selection API'),
       warnings: [expect.stringContaining('exports: resolvePersona')],
     });
+  });
+});
+
+describe('workforce persona writer task summarization', () => {
+  it('elides the raw spec payload text on every summarization', () => {
+    const longDescription = 'A'.repeat(50);
+    const summarized = summarizeSpecForPersona(spec({ description: longDescription }));
+    const rawPayload = summarized.spec.sourceSpec.rawPayload;
+    expect(rawPayload.kind).toBe('natural_language');
+    if (rawPayload.kind === 'natural_language') {
+      expect(rawPayload.text).toContain('<<elided');
+      expect(rawPayload.text).not.toContain(longDescription);
+    }
+    expect(summarized.spec.sourceSpec.description).toBe('<<elided: see top-level description field>>');
+  });
+
+  it('preserves description when it fits under the cap and reports truncated=false', () => {
+    const summarized = summarizeSpecForPersona(spec({ description: 'small description body' }));
+    expect(summarized.spec.description).toBe('small description body');
+    expect(summarized.descriptionTruncated).toBe(false);
+  });
+
+  it('truncates oversized descriptions with a head + tail elision marker', () => {
+    const huge = `${'X'.repeat(40_000)}\n--- middle landmark ---\n${'Y'.repeat(40_000)}`;
+    const summarized = summarizeSpecForPersona(spec({ description: huge }));
+    expect(summarized.descriptionTruncated).toBe(true);
+    expect(summarized.spec.description).toContain('<<truncated');
+    // Head from the start AND tail from the end both survive.
+    expect(summarized.spec.description.startsWith('XXXX')).toBe(true);
+    expect(summarized.spec.description.endsWith('YYYY')).toBe(true);
+    // Whole summarized spec must fit under ~64KB even though input was 80KB.
+    const serialized = JSON.stringify(summarized.spec);
+    expect(serialized.length).toBeLessThan(64 * 1024);
+  });
+
+  it('caps relevant file contents per-file and reports per-file omission counts', () => {
+    const big = 'A'.repeat(20_000);
+    const result = summarizeRelevantFilesForPersona([
+      { path: 'a.ts', content: big },
+      { path: 'b.ts', content: 'tiny' },
+    ]);
+    expect(result.includedCount).toBe(2);
+    expect(result.files[0].content).toContain('<<truncated');
+    expect(result.files[0].bytesOmitted).toBeGreaterThan(0);
+    expect(result.files[1].content).toBe('tiny');
+    expect(result.files[1].bytesOmitted).toBeUndefined();
+  });
+
+  it('drops file contents past the total relevant-file budget but keeps the path entry', () => {
+    const big = 'A'.repeat(8 * 1024);
+    const files = Array.from({ length: 30 }, (_, idx) => ({ path: `file-${idx}.ts`, content: big }));
+    const result = summarizeRelevantFilesForPersona(files);
+    expect(result.files).toHaveLength(30);
+    const omitted = result.files.filter((file) => file.omitted === true);
+    expect(omitted.length).toBeGreaterThan(0);
+    omitted.forEach((entry) => expect(entry.content).toBeNull());
+  });
+
+  it('references the spec file by path and notes truncation when description is oversized', () => {
+    const huge = 'A'.repeat(60_000);
+    const task = buildWorkflowPersonaTask(spec({ description: huge }), {
+      workflowName: 'reference-spec-by-path',
+      targetMode: 'local',
+      repoRoot: '/repo',
+      outputPath: 'workflows/generated/reference-spec.ts',
+      relevantFiles: [],
+      specPath: '/repo/docs/plans/big-spec.md',
+    });
+    expect(task).toContain('Spec source file');
+    expect(task).toContain('/repo/docs/plans/big-spec.md');
+    expect(task).toContain('Read the spec file for full content');
+    expect(task).toContain('<<truncated');
+    // Top-level "Normalized spec JSON" wording should reflect the truncation note.
+    expect(task).toContain('description/targetContext truncated when oversized; raw spec payload elided');
+    // Total task body must be well under 200 KB regardless of input size.
+    expect(task.length).toBeLessThan(200 * 1024);
+  });
+
+  it('keeps the original raw spec text out of the writer task body', () => {
+    // Place the sentinel in the middle of an oversized description so that
+    // head/tail truncation excludes it from the inlined description AND so
+    // that raw-payload elision is the only path that could surface it.
+    const sentinel = 'SECRET-RAW-SPEC-SENTINEL';
+    const description = `${'A'.repeat(80_000)}${sentinel}${'B'.repeat(80_000)}`;
+    const task = buildWorkflowPersonaTask(spec({ description }), {
+      workflowName: 'elision',
+      targetMode: 'local',
+      repoRoot: '/repo',
+      outputPath: 'workflows/generated/elision.ts',
+      relevantFiles: [],
+      specPath: '/repo/docs/plans/big-spec.md',
+    });
+    // The unique sentinel must not appear verbatim because both description
+    // and rawPayload.text are summarized/elided.
+    expect(task).not.toContain(sentinel);
+    expect(task).toContain('<<elided');
+  });
+});
+
+describe('workforce persona reviewer verdict parsing', () => {
+  it('prefers the LAST ```json fenced verdict over an earlier draft block', async () => {
+    const { parseReviewerVerdict } = await import('./workforce-persona-reviewer.js');
+    const output = [
+      'First, a draft assessment:',
+      '```json',
+      JSON.stringify({ verdict: 'fix', summary: 'draft', fixes: [{ severity: 'critical', area: 'x', finding: 'y', requestedChange: 'z' }] }),
+      '```',
+      '',
+      'After reviewing more carefully, my final verdict:',
+      '```json',
+      JSON.stringify({ verdict: 'pass', summary: 'final approval', fixes: [] }),
+      '```',
+    ].join('\n');
+    const result = parseReviewerVerdict(output);
+    expect(result.verdict).toBe('pass');
+    expect(result.summary).toBe('final approval');
+    expect(result.fixes).toEqual([]);
+  });
+
+  it('ignores ```json blocks that nest inside an audited workflow source', async () => {
+    const { parseReviewerVerdict } = await import('./workforce-persona-reviewer.js');
+    // A reviewer audit response that includes the workflow source the
+    // reviewer is auditing (inside ```ts) MUST NOT pick up any nested
+    // json-looking content from the workflow body. The mdast walker only
+    // returns top-level fenced code blocks with lang=json, so the inner
+    // workflow source is invisible.
+    const output = [
+      'Audit of the generated workflow:',
+      '```ts',
+      'const example = { "verdict": "fix", "summary": "this is INSIDE the workflow source, not a verdict" };',
+      '```',
+      '',
+      'My verdict:',
+      '```json',
+      JSON.stringify({ verdict: 'pass', summary: 'all good', fixes: [] }),
+      '```',
+    ].join('\n');
+    const result = parseReviewerVerdict(output);
+    expect(result.verdict).toBe('pass');
+    expect(result.summary).toBe('all good');
+  });
+
+  it('falls through to trailing balanced-JSON when no fenced block carries a verdict', async () => {
+    const { parseReviewerVerdict } = await import('./workforce-persona-reviewer.js');
+    const output = `I reviewed the workflow and here is my verdict:\n\n${JSON.stringify({ verdict: 'fix', summary: 's', fixes: [{ severity: 'important', area: 'a', finding: 'f', requestedChange: 'r' }] })}`;
+    const result = parseReviewerVerdict(output);
+    expect(result.verdict).toBe('fix');
+    expect(result.fixes).toHaveLength(1);
+  });
+
+  it('synthesizes block verdict when no candidate parses', async () => {
+    const { parseReviewerVerdict } = await import('./workforce-persona-reviewer.js');
+    const result = parseReviewerVerdict('I have opinions but no JSON to share today.');
+    expect(result.verdict).toBe('block');
+    expect(result.summary).toMatch(/Reviewer response did not contain a parseable verdict JSON/);
+    expect(result.fixes).toEqual([]);
+  });
+});
+
+describe('workforce persona reviewer pass', () => {
+  it('passes the writer artifact through when the reviewer returns verdict=pass', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-pass.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerArtifact = baseGen.artifact!.content;
+
+    const intentCalls: string[] = [];
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      intentCalls.push(intent);
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: intent === 'review' ? 'best' : 'best-value',
+            runtime: { harness: 'claude', model: intent === 'review' ? 'claude-opus-4-7' : 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            if (intent === 'review') {
+              return execution(JSON.stringify({ verdict: 'pass', summary: 'All checks green.', fixes: [] }));
+            }
+            return execution(personaResponse('workflows/generated/reviewer-pass.ts', writerArtifact));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-pass.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-pass',
+        targetMode: 'local',
+        resolver,
+        review: { personaIntentCandidates: ['review'] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(intentCalls).toContain('review');
+    expect(result.workforcePersona?.review).toMatchObject({
+      verdict: 'pass',
+      personaId: 'review',
+      tier: 'best',
+      model: 'claude-opus-4-7',
+      selectedIntent: 'review',
+      appliedFix: false,
+    });
+    expect(result.artifact?.content).toBe(writerArtifact);
+  });
+
+  it('feeds reviewer fixes back to the writer for a single repair attempt when verdict=fix', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-fix.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerFirstArtifact = baseGen.artifact!.content;
+    const writerRepairArtifact = baseGen.artifact!.content.replace(/Persona generated workflow/g, 'Repaired by reviewer feedback');
+    const writerCalls: string[] = [];
+    let reviewerInvocations = 0;
+
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: intent === 'review' ? 'best' : 'best-value',
+            runtime: { harness: 'claude', model: intent === 'review' ? 'claude-opus-4-7' : 'claude-sonnet-4-6' },
+          },
+          sendMessage(task) {
+            if (intent === 'review') {
+              reviewerInvocations += 1;
+              return execution(JSON.stringify({
+                verdict: 'fix',
+                summary: 'Swarm pattern does not match the spec Merge DAG.',
+                fixes: [{
+                  severity: 'critical',
+                  area: 'swarm-pattern',
+                  finding: 'Pipeline serializes parallel tracks.',
+                  requestedChange: 'Switch to a dag pattern with parallel child invocations per Track.',
+                }],
+              }));
+            }
+            const isRepair = task.includes('Ricky pre-write validation failed on your previous artifact.');
+            writerCalls.push(isRepair ? 'writer-repair' : 'writer-first');
+            return execution(personaResponse(
+              'workflows/generated/reviewer-fix.ts',
+              isRepair ? writerRepairArtifact : writerFirstArtifact,
+            ));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-fix.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-fix',
+        targetMode: 'local',
+        resolver,
+        review: { personaIntentCandidates: ['review'] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(reviewerInvocations).toBe(1);
+    expect(writerCalls).toEqual(['writer-first', 'writer-repair']);
+    expect(result.workforcePersona?.review).toMatchObject({
+      verdict: 'fix',
+      appliedFix: true,
+      fixes: [{ severity: 'critical', area: 'swarm-pattern' }],
+    });
+    expect(result.artifact?.content).toBe(writerRepairArtifact);
+  });
+
+  it('returns verdict=block with no fixes and keeps the writer artifact when reviewer output is unparseable', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-block.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerArtifact = baseGen.artifact!.content;
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: intent === 'review' ? 'best' : 'best-value',
+            runtime: { harness: 'claude', model: intent === 'review' ? 'claude-opus-4-7' : 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            if (intent === 'review') {
+              // Reviewer emitted prose with no JSON verdict; pipeline should treat as block.
+              return execution('I looked at the workflow and have concerns but no parseable verdict block.');
+            }
+            return execution(personaResponse('workflows/generated/reviewer-block.ts', writerArtifact));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-block.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-block',
+        targetMode: 'local',
+        resolver,
+        review: { personaIntentCandidates: ['review'] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.workforcePersona?.review).toMatchObject({
+      verdict: 'block',
+      appliedFix: false,
+      fixes: [],
+    });
+    // Block-with-no-fixes path leaves the writer artifact intact.
+    expect(result.artifact?.content).toBe(writerArtifact);
+  });
+
+  it('skips the review pass when workforcePersonaWriter.review is false', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-off.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerArtifact = baseGen.artifact!.content;
+    const intentCalls: string[] = [];
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      intentCalls.push(intent);
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: 'best-value',
+            runtime: { harness: 'claude', model: 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            return execution(personaResponse('workflows/generated/reviewer-off.ts', writerArtifact));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-off.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-off',
+        targetMode: 'local',
+        resolver,
+        review: false,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(intentCalls).not.toContain('review');
+    expect(result.workforcePersona?.review).toBeUndefined();
+  });
+
+  it('records verdict=block + non-empty fixes WITHOUT triggering a writer repair', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-block-with-fixes.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerArtifact = baseGen.artifact!.content;
+    const writerCalls: string[] = [];
+
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: intent === 'review' ? 'best' : 'best-value',
+            runtime: { harness: 'claude', model: intent === 'review' ? 'claude-opus-4-7' : 'claude-sonnet-4-6' },
+          },
+          sendMessage(task) {
+            if (intent === 'review') {
+              // `block` + non-empty fixes: pipeline must record the verdict
+              // but not feed the fixes back into a writer repair attempt.
+              return execution(JSON.stringify({
+                verdict: 'block',
+                summary: 'Spec is planning-only but writer produced implementation work.',
+                fixes: [{ severity: 'critical', area: 'scope', finding: 'Spec drift', requestedChange: 'Stop and re-scope.' }],
+              }));
+            }
+            const isRepair = task.includes('Ricky pre-write validation failed on your previous artifact.');
+            writerCalls.push(isRepair ? 'writer-repair' : 'writer-first');
+            return execution(personaResponse('workflows/generated/reviewer-block-with-fixes.ts', writerArtifact));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-block-with-fixes.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-block-with-fixes',
+        targetMode: 'local',
+        resolver,
+        review: { personaIntentCandidates: ['review'] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    // Writer must have been called exactly once — `block` short-circuits
+    // the repair attempt.
+    expect(writerCalls).toEqual(['writer-first']);
+    expect(result.workforcePersona?.review).toMatchObject({
+      verdict: 'block',
+      appliedFix: false,
+      fixes: [{ severity: 'critical', area: 'scope' }],
+    });
+    expect(result.artifact?.content).toBe(writerArtifact);
+  });
+
+  it('records verdict=error when the reviewer pass itself throws', async () => {
+    const baseGen = generate({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-crashed.ts',
+    });
+    expect(baseGen.success).toBe(true);
+    const writerArtifact = baseGen.artifact!.content;
+
+    const resolver: WorkforcePersonaResolver = async (intents) => {
+      const intent = intents[0];
+      if (intent === 'review') {
+        // Simulate a reviewer-side crash (e.g. resolver/harness failure).
+        // The pipeline catch block must mark the verdict as `error`, not
+        // `pass` — otherwise downstream automation misreads "reviewer
+        // crashed" as "reviewer approved."
+        throw new Error('synthetic reviewer harness failure');
+      }
+      return {
+        source: 'package',
+        intent,
+        warnings: [],
+        context: {
+          selection: {
+            personaId: intent,
+            tier: 'best-value',
+            runtime: { harness: 'claude', model: 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            return execution(personaResponse('workflows/generated/reviewer-crashed.ts', writerArtifact));
+          },
+        },
+      };
+    };
+
+    const result = await generateWithWorkforcePersona({
+      spec: spec({
+        description: 'Implement a strict Agent Relay workflow with tests and review.',
+        targetFiles: ['src/product/generation/pipeline.ts'],
+      }),
+      artifactPath: 'workflows/generated/reviewer-crashed.ts',
+      workforcePersonaWriter: {
+        repoRoot: '/repo',
+        workflowName: 'reviewer-crashed',
+        targetMode: 'local',
+        resolver,
+        review: { personaIntentCandidates: ['review'] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.workforcePersona?.review).toMatchObject({
+      verdict: 'error',
+      appliedFix: false,
+      fixes: [],
+    });
+    expect(result.workforcePersona?.review?.summary).toContain('synthetic reviewer harness failure');
+    expect(result.artifact?.content).toBe(writerArtifact);
+  });
+});
+
+describe('persona debug dump', () => {
+  function dumpInputs(repoRoot: string, overrides: Partial<{ reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success'; output: string; promptDigest: string }> = {}) {
+    return {
+      kind: 'writer' as const,
+      reason: overrides.reason ?? 'parse-error',
+      repoRoot,
+      promptDigest: overrides.promptDigest ?? 'a'.repeat(64),
+      task: 'task body',
+      result: {
+        status: 'completed' as const,
+        output: overrides.output ?? 'free-form sonnet prose',
+        stderr: '',
+        exitCode: 0,
+        durationMs: 4242,
+        workflowRunId: 'debug-dump-run',
+        stepName: 'agent-relay-workflow',
+      },
+      selection: {
+        personaId: 'agent-relay-workflow',
+        tier: 'best-value',
+        runtime: { harness: 'claude' as const, model: 'claude-sonnet-4-6' },
+      },
+      resolved: {
+        source: 'package' as const,
+        intent: 'agent-relay-workflow',
+        warnings: ['Ricky-local Claude persona override resolved for intent "agent-relay-workflow" at tier "best-value".'],
+        context: {
+          selection: {
+            personaId: 'agent-relay-workflow',
+            tier: 'best-value',
+            runtime: { harness: 'claude' as const, model: 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            throw new Error('not invoked in debug-dump tests');
+          },
+        },
+      },
+      outputPath: 'workflows/generated/dump.ts',
+    };
+  }
+
+  let repoRoot: string | undefined;
+  afterEach(async () => {
+    if (repoRoot) {
+      await import('node:fs/promises').then(({ rm }) => rm(repoRoot!, { recursive: true, force: true }));
+      repoRoot = undefined;
+    }
+  });
+
+  it('writes output.raw.txt, task.prompt.txt, and meta.json on the parse-error path', async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-dump-'));
+    await dumpPersonaDebug(dumpInputs(repoRoot, { reason: 'parse-error', output: 'verbatim sonnet output' }));
+
+    const dir = join(repoRoot, '.workflow-artifacts', 'ricky-persona-debug', 'writer', `${'a'.repeat(16)}-parse-error`);
+    expect(existsSync(dir)).toBe(true);
+    const raw = await readFile(join(dir, 'output.raw.txt'), 'utf8');
+    const task = await readFile(join(dir, 'task.prompt.txt'), 'utf8');
+    const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')) as Record<string, unknown>;
+
+    expect(raw).toBe('verbatim sonnet output');
+    expect(task).toBe('task body');
+    expect(meta).toMatchObject({
+      kind: 'writer',
+      reason: 'parse-error',
+      outputPath: 'workflows/generated/dump.ts',
+      selection: { personaId: 'agent-relay-workflow', tier: 'best-value', harness: 'claude', model: 'claude-sonnet-4-6' },
+      result: { status: 'completed', exitCode: 0, durationMs: 4242 },
+      resolverIntent: 'agent-relay-workflow',
+    });
+  });
+
+  it('skips the success-path dump unless RICKY_PERSONA_DEBUG=1', async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-dump-'));
+    const originalFlag = process.env.RICKY_PERSONA_DEBUG;
+    delete process.env.RICKY_PERSONA_DEBUG;
+    try {
+      await dumpPersonaDebug(dumpInputs(repoRoot, { reason: 'success' }));
+      const dir = join(repoRoot, '.workflow-artifacts', 'ricky-persona-debug', 'writer', `${'a'.repeat(16)}-success`);
+      expect(existsSync(dir)).toBe(false);
+    } finally {
+      if (originalFlag !== undefined) process.env.RICKY_PERSONA_DEBUG = originalFlag;
+    }
+  });
+
+  it('records the success-path dump when RICKY_PERSONA_DEBUG=1', async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-dump-'));
+    const originalFlag = process.env.RICKY_PERSONA_DEBUG;
+    process.env.RICKY_PERSONA_DEBUG = '1';
+    try {
+      await dumpPersonaDebug(dumpInputs(repoRoot, { reason: 'success' }));
+      const dir = join(repoRoot, '.workflow-artifacts', 'ricky-persona-debug', 'writer', `${'a'.repeat(16)}-success`);
+      expect(existsSync(dir)).toBe(true);
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.RICKY_PERSONA_DEBUG;
+      } else {
+        process.env.RICKY_PERSONA_DEBUG = originalFlag;
+      }
+    }
+  });
+
+  it('silently swallows dump errors when the repo root is unwritable', async () => {
+    // /nonexistent-ricky-test-root cannot be created without root; the helper
+    // must not throw or noisily log to stderr by default.
+    await expect(
+      dumpPersonaDebug({
+        ...dumpInputs('/nonexistent-ricky-test-root-' + Date.now(), { reason: 'parse-error' }),
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 

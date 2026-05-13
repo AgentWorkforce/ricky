@@ -10,6 +10,7 @@ import type {
   RenderedArtifact,
   SkillContext,
   WorkflowExecutionRoute,
+  WorkforcePersonaGenerationMetadata,
 } from './types.js';
 import { selectPattern } from './pattern-selector.js';
 import { refineWithLlm } from './refine-with-llm.js';
@@ -23,7 +24,15 @@ import {
   WorkforcePersonaClarificationError,
   WorkforcePersonaWriterError,
   type WorkforcePersonaPrewriteRepairAttempt,
+  type WorkforcePersonaResolver,
 } from './workforce-persona-writer.js';
+import { createRickyLocalPersonaResolver } from './ricky-local-persona-resolver.js';
+import {
+  renderReviewFixesForWriter,
+  reviewWorkflowWithWorkforcePersona,
+  type WorkforcePersonaReviewResult,
+} from './workforce-persona-reviewer.js';
+import type { WorkforcePersonaReviewSummary } from './types.js';
 
 const DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 4;
 const MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 8;
@@ -93,6 +102,7 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
     (input.spec.executionPreference === 'cloud' ? 'cloud' : 'local');
 
   try {
+    const resolver: WorkforcePersonaResolver = input.workforcePersonaWriter?.resolver ?? createRickyLocalPersonaResolver();
     const writerOptions = {
       repoRoot: input.workforcePersonaWriter?.repoRoot ?? process.cwd(),
       workflowName: input.workforcePersonaWriter?.workflowName ?? artifact.workflowId,
@@ -103,8 +113,9 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       installSkills: input.workforcePersonaWriter?.installSkills,
       installRoot: input.workforcePersonaWriter?.installRoot,
       tier: input.workforcePersonaWriter?.tier,
+      ...(input.workforcePersonaWriter?.specPath ? { specPath: input.workforcePersonaWriter.specPath } : {}),
       personaIntentCandidates: input.workforcePersonaWriter?.personaIntentCandidates,
-      resolver: input.workforcePersonaWriter?.resolver,
+      resolver,
       skillContext: baseResult.skillContext,
     };
     const personaResult = await writeWorkflowWithWorkforcePersona(input.spec, writerOptions);
@@ -165,6 +176,27 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       };
     }
 
+    let reviewSummary: WorkforcePersonaReviewSummary | undefined;
+    if (workforcePersonaReviewEnabled(input)) {
+      const reviewOutcome = await runWorkforcePersonaReviewPass(input, {
+        baseWriterOptions: writerOptions,
+        baseArtifact: artifact,
+        baseSkillContext: baseResult.skillContext,
+        basePatternDecision: baseResult.patternDecision,
+        normalizedSpec: input.spec,
+        previousRepairAttempts,
+        currentArtifact: finalArtifact,
+        currentValidation: validation,
+        currentPersonaMetadata: finalPersonaMetadata,
+      });
+      if (reviewOutcome) {
+        finalArtifact = reviewOutcome.finalArtifact;
+        validation = reviewOutcome.validation;
+        finalPersonaMetadata = reviewOutcome.personaMetadata;
+        reviewSummary = reviewOutcome.reviewSummary;
+      }
+    }
+
     const plannedChecks = buildPlannedChecks(finalArtifact, input.dryRunEnabled !== false);
 
     return {
@@ -177,7 +209,9 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
         .filter((check) => check.stage !== 'dry_run')
         .map((check) => check.command),
       executionRoute: resolveExecutionRoute(input.spec, finalArtifact),
-      workforcePersona: finalPersonaMetadata,
+      workforcePersona: reviewSummary
+        ? { ...finalPersonaMetadata, review: reviewSummary }
+        : finalPersonaMetadata,
     };
   } catch (error) {
     if (error instanceof WorkforcePersonaClarificationError) {
@@ -251,6 +285,190 @@ function resolvePrewriteRepairAttempts(value: number | undefined): number {
   if (value === undefined) return DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS;
   if (!Number.isFinite(value)) return DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS;
   return Math.max(0, Math.min(MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS, Math.floor(value)));
+}
+
+function workforcePersonaReviewEnabled(input: GenerationInput): boolean {
+  const writerOptions = input.workforcePersonaWriter;
+  if (writerOptions === false || writerOptions == null) return false;
+  if (writerOptions.review === false) return false;
+  const envFlag = process.env.RICKY_PERSONA_REVIEW;
+  if (envFlag !== undefined) {
+    const normalized = envFlag.trim().toLowerCase();
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  }
+  return true;
+}
+
+interface WorkforcePersonaReviewPassInputs {
+  baseWriterOptions: Parameters<typeof writeWorkflowWithWorkforcePersona>[1];
+  baseArtifact: RenderedArtifact;
+  baseSkillContext: SkillContext;
+  basePatternDecision: PatternDecision;
+  normalizedSpec: GenerationInput['spec'];
+  previousRepairAttempts: WorkforcePersonaPrewriteRepairAttempt[];
+  currentArtifact: RenderedArtifact;
+  currentValidation: GenerationValidationResult;
+  currentPersonaMetadata: WorkforcePersonaGenerationMetadata;
+}
+
+interface WorkforcePersonaReviewPassResult {
+  finalArtifact: RenderedArtifact;
+  validation: GenerationValidationResult;
+  personaMetadata: WorkforcePersonaGenerationMetadata;
+  reviewSummary: WorkforcePersonaReviewSummary;
+}
+
+async function runWorkforcePersonaReviewPass(
+  input: GenerationInput,
+  inputs: WorkforcePersonaReviewPassInputs,
+): Promise<WorkforcePersonaReviewPassResult | null> {
+  const writerOptions = input.workforcePersonaWriter;
+  if (writerOptions === false || writerOptions == null) return null;
+  const reviewOptions = writerOptions.review === undefined ? {} : writerOptions.review;
+  if (reviewOptions === false) return null;
+
+  // Reviewer resolver precedence: explicit `review.resolver` overrides
+  // everything; otherwise reuse the writer's custom resolver when the
+  // caller provided one (so tests and integration callers do not need to
+  // wire two parallel resolver mocks). Falls back to the Ricky-local
+  // Claude resolver when neither is supplied.
+  const reviewResolver = reviewOptions.resolver ?? inputs.baseWriterOptions.resolver;
+
+  let review: WorkforcePersonaReviewResult;
+  try {
+    review = await reviewWorkflowWithWorkforcePersona(inputs.normalizedSpec, {
+      repoRoot: inputs.baseWriterOptions.repoRoot,
+      outputPath: inputs.baseArtifact.artifactPath,
+      artifactContent: inputs.currentArtifact.content,
+      workflowName: inputs.baseWriterOptions.workflowName ?? inputs.baseArtifact.workflowId,
+      ...(reviewOptions.tier !== undefined ? { tier: reviewOptions.tier } : {}),
+      ...(reviewOptions.timeoutSeconds !== undefined ? { timeoutSeconds: reviewOptions.timeoutSeconds } : {}),
+      ...(reviewOptions.personaIntentCandidates ? { personaIntentCandidates: reviewOptions.personaIntentCandidates } : {}),
+      ...(reviewResolver ? { resolver: reviewResolver } : {}),
+      ...(writerOptions.installRoot !== undefined ? { installRoot: writerOptions.installRoot } : {}),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      finalArtifact: inputs.currentArtifact,
+      validation: inputs.currentValidation,
+      personaMetadata: appendPersonaWarning(
+        inputs.currentPersonaMetadata,
+        `Workforce persona review pass skipped: ${message}`,
+      ),
+      reviewSummary: {
+        // Reviewer pass crashed — surface as `error` so downstream
+        // automation (and humans reading the JSON) can tell "the reviewer
+        // never ran" from "the reviewer ran and approved." Synthesizing
+        // `pass` here would be a false approval signal.
+        verdict: 'error',
+        summary: `Reviewer pass was skipped after error: ${message}`,
+        personaId: 'unresolved',
+        tier: 'unknown',
+        harness: 'unknown',
+        model: 'unknown',
+        selectedIntent: 'review',
+        runId: null,
+        fixes: [],
+        appliedFix: false,
+        warnings: [message],
+      },
+    };
+  }
+
+  const reviewSummary: WorkforcePersonaReviewSummary = {
+    verdict: review.verdict,
+    summary: review.summary,
+    personaId: review.metadata.personaId,
+    tier: review.metadata.tier,
+    harness: review.metadata.harness,
+    model: review.metadata.model,
+    selectedIntent: review.metadata.selectedIntent,
+    runId: review.metadata.runId,
+    fixes: review.fixes,
+    appliedFix: false,
+    warnings: review.metadata.warnings,
+  };
+
+  // Skip the repair attempt when:
+  //   - verdict is `pass` (no fixes requested),
+  //   - verdict is `block` (the reviewer rejected the artifact outright; per
+  //     the contract documented on `WorkforcePersonaReviewSummary`, Ricky
+  //     keeps the writer artifact and records the verdict rather than trying
+  //     to repair what the reviewer called fundamentally wrong), or
+  //   - `fixes` is empty (a `fix` verdict without actionable items has
+  //     nothing the writer can act on).
+  if (review.verdict === 'pass' || review.verdict === 'block' || review.fixes.length === 0) {
+    return {
+      finalArtifact: inputs.currentArtifact,
+      validation: inputs.currentValidation,
+      personaMetadata: inputs.currentPersonaMetadata,
+      reviewSummary,
+    };
+  }
+
+  // Verdict is `fix` with a non-empty fix list: feed the structured fix
+  // list back into a single writer repair attempt.
+  const fixErrors = renderReviewFixesForWriter(review);
+  let appliedArtifact = inputs.currentArtifact;
+  let appliedValidation = inputs.currentValidation;
+  let appliedMetadata = inputs.currentPersonaMetadata;
+
+  try {
+    const repairResult = await writeWorkflowWithWorkforcePersona(inputs.normalizedSpec, {
+      ...inputs.baseWriterOptions,
+      validationFeedback: {
+        errors: fixErrors,
+        previousContent: appliedArtifact.content,
+        previousAttempts: inputs.previousRepairAttempts,
+      },
+    });
+    const repairedArtifact = applyPersonaArtifactToRenderedArtifact(inputs.baseArtifact, repairResult);
+    const repairedValidation = validateGeneratedArtifact(
+      repairedArtifact,
+      inputs.basePatternDecision,
+      inputs.baseSkillContext,
+      inputs.normalizedSpec,
+    );
+
+    if (repairedValidation.valid) {
+      appliedArtifact = repairedArtifact;
+      appliedValidation = repairedValidation;
+      appliedMetadata = {
+        ...repairResult.metadata,
+        warnings: [
+          ...repairResult.metadata.warnings,
+          `Workforce persona reviewer (${review.metadata.model}) returned ${review.fixes.length} fix(es); writer repair attempt applied them.`,
+        ],
+      };
+      reviewSummary.appliedFix = true;
+    } else {
+      appliedMetadata = appendPersonaWarning(
+        inputs.currentPersonaMetadata,
+        `Workforce persona reviewer fix attempt did not satisfy deterministic validation; kept the original writer artifact.`,
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appliedMetadata = appendPersonaWarning(
+      inputs.currentPersonaMetadata,
+      `Workforce persona reviewer fix attempt failed: ${message}.`,
+    );
+  }
+
+  return {
+    finalArtifact: appliedArtifact,
+    validation: appliedValidation,
+    personaMetadata: appliedMetadata,
+    reviewSummary,
+  };
+}
+
+function appendPersonaWarning(
+  metadata: WorkforcePersonaGenerationMetadata,
+  warning: string,
+): WorkforcePersonaGenerationMetadata {
+  return { ...metadata, warnings: [...metadata.warnings, warning] };
 }
 
 function workforcePersonaTierForRepairAttempt(tier: string | undefined, repairAttempt: number): string | undefined {

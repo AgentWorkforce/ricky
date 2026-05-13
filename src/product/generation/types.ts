@@ -52,10 +52,23 @@ export interface GenerationInput {
     installSkills?: boolean;
     installRoot?: string;
     tier?: string;
+    /** Absolute path to the original spec file, when --spec-file was used. Lets the writer reference the spec by path instead of inlining it. */
+    specPath?: string;
     /** Maximum pre-write validation repair attempts before falling back to deterministic rendering. */
     repairAttempts?: number;
     personaIntentCandidates?: readonly string[];
     resolver?: import('./workforce-persona-writer.js').WorkforcePersonaResolver;
+    /**
+     * Post-write Opus reviewer pass control. `false` disables the pass.
+     * Defaults to enabled when omitted; can also be disabled via the
+     * `RICKY_PERSONA_REVIEW=0` env var.
+     */
+    review?: false | {
+      tier?: string;
+      timeoutSeconds?: number;
+      personaIntentCandidates?: readonly string[];
+      resolver?: import('./workforce-persona-writer.js').WorkforcePersonaResolver;
+    };
   };
 }
 
@@ -213,7 +226,46 @@ export interface WorkforcePersonaGenerationMetadata {
     repoRoot: string;
     relevantFileCount: number;
   };
+  /**
+   * Verdict from the post-write Opus reviewer pass, when the reviewer ran.
+   *
+   * - `pass`: the reviewer approved the artifact; Ricky shipped the
+   *   writer's output as-is.
+   * - `fix`: the reviewer returned a structured fix list; Ricky ran one
+   *   writer repair attempt against it. `appliedFix` records whether the
+   *   repair actually passed deterministic validation.
+   * - `block`: the reviewer rejected the artifact as fundamentally wrong.
+   *   Ricky kept the writer's output and recorded the verdict in metadata
+   *   for the operator — it does NOT fall back to the deterministic
+   *   renderer (that fallback only triggers when deterministic pre-write
+   *   validation cannot be repaired).
+   * - `error`: the reviewer pass itself failed (resolver error, harness
+   *   timeout, parser exception). Distinct from `block` so downstream
+   *   automation does not misread "reviewer crashed" as "reviewer
+   *   approved." The writer artifact is kept and the failure is surfaced
+   *   via `warnings`.
+   */
+  review?: WorkforcePersonaReviewSummary;
 }
+
+export type WorkforcePersonaReviewSummary = {
+  verdict: 'pass' | 'fix' | 'block' | 'error';
+  summary: string;
+  personaId: string;
+  tier: string;
+  harness: string;
+  model: string;
+  selectedIntent: string;
+  runId: string | null;
+  fixes: Array<{
+    severity: 'critical' | 'important' | 'moderate';
+    area: string;
+    finding: string;
+    requestedChange: string;
+  }>;
+  appliedFix: boolean;
+  warnings: string[];
+};
 
 export interface GenerationValidationResult {
   valid: boolean;
