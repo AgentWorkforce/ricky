@@ -911,9 +911,70 @@ export function parsePersonaWorkflowResponse(
     return validateFencedResponse(tsFence, metadata, expectedPath);
   }
 
+  // Tolerant fallback: Claude Sonnet has been observed to emit a prose
+  // preamble plus a ```json opening fence without a matching closing fence,
+  // which defeats both the direct-JSON and fenced-block matchers above. As
+  // a last resort, walk the response looking for the first balanced JSON
+  // object and treat that as the structured response. Picks up:
+  //   - "preamble text\n```json\n{ ... }"   (unclosed fence)
+  //   - "preamble text\n{ ... }"            (no fence at all)
+  //   - "{ ... }\ntrailing prose"           (trailing prose after JSON)
+  const embedded = extractFirstBalancedJsonObject(output);
+  if (embedded) {
+    const clarification = parseClarificationResponse(embedded);
+    if (clarification) return { metadata: {}, responseFormat: 'needs-clarification', clarification };
+    return validateStructuredResponse(embedded, expectedPath, 'structured-json', options);
+  }
+
   throw new WorkforcePersonaWriterError(
     'Workforce persona response must be structured JSON or include fenced TypeScript artifact and JSON metadata blocks.',
   );
+}
+
+/**
+ * Walks `text` looking for the first top-level balanced `{ ... }` object
+ * and parses it. String literals (including nested escape sequences) and
+ * the brace-tracking are handled inline so the scanner is not confused by
+ * a `}` that appears inside a JSON string value (e.g. the embedded
+ * TypeScript source the writer returns inside `artifact.content`).
+ *
+ * Returns the parsed object or `null` when no balanced object exists or
+ * the candidate substring is not valid JSON.
+ */
+export function extractFirstBalancedJsonObject(text: string): Record<string, unknown> | null {
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== '{') continue;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        if (inString) escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = text.slice(start, i + 1);
+          const parsed = parseJsonObject(candidate);
+          if (parsed) return parsed;
+          break; // Candidate did not parse; resume scan from the next `{`.
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function parseClarificationResponse(value: Record<string, unknown>): ClarificationRequest | null {

@@ -126,6 +126,35 @@ describe('workforce persona workflow writer', () => {
     });
   });
 
+  it('parses Sonnet output with prose preamble + unclosed ```json fence', () => {
+    // Empirical regression: Claude Sonnet running the agent-relay-workflow
+    // persona emits a one-line preamble plus an opening ```json fence with
+    // no matching closing fence; the JSON payload is otherwise valid.
+    // Captured via the persona-debug dump from the deploy-v1 smoke run.
+    const payload = JSON.stringify({
+      artifact: { path: 'workflows/generated/persona.ts', content: workflowSource() },
+      metadata: { workflowName: 'persona', summary: 'tiny' },
+    });
+    const sonnetShaped = `Now I have enough context. I'll generate the workflow artifact.\n\n\`\`\`json\n${payload}`;
+    const parsed = parsePersonaWorkflowResponse(sonnetShaped, 'workflows/generated/persona.ts');
+    expect(parsed.responseFormat).toBe('structured-json');
+    expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
+    expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
+  });
+
+  it('parses persona output with prose preamble and no fences at all', () => {
+    const payload = JSON.stringify({
+      artifact: { path: 'workflows/generated/persona.ts', content: workflowSource() },
+      metadata: { workflowName: 'persona' },
+    });
+    const parsed = parsePersonaWorkflowResponse(
+      `Here is the workflow you asked for:\n\n${payload}\n\nLet me know if you want me to adjust anything.`,
+      'workflows/generated/persona.ts',
+    );
+    expect(parsed.responseFormat).toBe('structured-json');
+    expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
+  });
+
   it('parses fenced TypeScript artifact plus JSON metadata fallback', () => {
     const parsed = parsePersonaWorkflowResponse([
       '```ts',
