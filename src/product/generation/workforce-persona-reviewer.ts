@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { Code, Node, Parent, Root } from 'mdast';
+
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import {
   dumpPersonaDebug,
@@ -11,7 +14,21 @@ import { createRickyLocalPersonaResolver } from './ricky-local-persona-resolver.
 
 const DEFAULT_REVIEW_INTENT_CANDIDATES = ['review'] as const;
 
-export type WorkforcePersonaReviewVerdict = 'pass' | 'fix' | 'block';
+/**
+ * Reviewer verdict values.
+ *
+ * - `pass`: artifact approved; pipeline ships the writer's output as-is.
+ * - `fix`: artifact has actionable fixes; pipeline feeds them back into one
+ *   writer repair attempt.
+ * - `block`: artifact is fundamentally wrong; pipeline keeps the writer's
+ *   output and records the verdict in metadata for the operator.
+ * - `error`: the reviewer pass itself failed (resolver error, harness
+ *   timeout, parser exception). Distinct from `block` so downstream
+ *   automation does not misread "the reviewer crashed" as "the reviewer
+ *   reviewed and approved." Only ever produced by the pipeline catch path,
+ *   never emitted by the reviewer persona itself.
+ */
+export type WorkforcePersonaReviewVerdict = 'pass' | 'fix' | 'block' | 'error';
 
 export type WorkforcePersonaReviewSeverity = 'critical' | 'important' | 'moderate';
 
@@ -193,32 +210,52 @@ function buildReviewerTask(spec: NormalizedWorkflowSpec, options: WorkforcePerso
 }
 
 /**
- * Extracts the reviewer verdict from the persona response. Accepts the
- * verdict JSON either on its own (the response is a JSON object) or as
- * the last fenced ` ```json ` block, or as the last balanced JSON object
- * in the response. Falls back to `block` with a synthetic summary when no
- * verdict can be parsed.
+ * Extracts the reviewer verdict from the persona response.
+ *
+ * Resolution order, picked to favor the model's final-line answer over any
+ * earlier draft work:
+ * 1. Walk the response as Markdown via `mdast-util-from-markdown` and collect
+ *    every fenced ` ```json ` code block. Try the LAST block first, then
+ *    earlier blocks — Sonnet has been observed to emit one or more draft
+ *    verdict JSONs followed by its final verdict, and the final block is
+ *    what the persona system prompt says is authoritative.
+ * 2. If no fenced block carried a valid verdict, scan the raw text from the
+ *    end looking for the last balanced `{ ... }` object. This catches
+ *    "prose plus unfenced JSON on the final line."
+ * 3. Direct-parse the entire trimmed output as a JSON object. This catches
+ *    the strict-contract case where the model returned only `{ ... }`.
+ *
+ * Falls back to `verdict: 'block'` with a canned summary when no candidate
+ * carries a recognized verdict so the pipeline can record an auditable
+ * failure rather than crashing or silently approving.
+ *
+ * Why mdast rather than a regex over raw text: `output.match(/```json[…]```/)`
+ * picks the first match and can match across nested fences inside the
+ * inlined workflow source the reviewer is auditing. The CLAUDE.md
+ * "grammar-aware parsers, not regex" rule applies directly here — see the
+ * `markdown-target-files.ts` precedent for the same pattern.
  */
 export function parseReviewerVerdict(output: string): {
   verdict: WorkforcePersonaReviewVerdict;
   summary: string;
   fixes: WorkforcePersonaReviewFix[];
 } {
-  const candidates = [
-    extractFencedJson(output),
-    extractTrailingJsonObject(output),
-    safeParse(output.trim()),
-  ];
+  const fencedCandidates = extractFencedJsonBlocksLastFirst(output);
+  for (const candidate of fencedCandidates) {
+    const verdict = toVerdict(candidate);
+    if (verdict) return verdict;
+  }
 
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const verdict = candidate.verdict;
-    if (verdict !== 'pass' && verdict !== 'fix' && verdict !== 'block') continue;
-    const summary = typeof candidate.summary === 'string' ? candidate.summary : '';
-    const fixes = Array.isArray(candidate.fixes)
-      ? candidate.fixes.flatMap((entry: unknown) => normalizeFix(entry))
-      : [];
-    return { verdict, summary, fixes };
+  const trailing = extractTrailingJsonObject(output);
+  if (trailing) {
+    const verdict = toVerdict(trailing);
+    if (verdict) return verdict;
+  }
+
+  const direct = safeParse(output.trim());
+  if (direct) {
+    const verdict = toVerdict(direct);
+    if (verdict) return verdict;
   }
 
   return {
@@ -228,15 +265,61 @@ export function parseReviewerVerdict(output: string): {
   };
 }
 
-function extractFencedJson(output: string): Record<string, unknown> | null {
-  const match = output.match(/```json\s*([\s\S]*?)```/i);
-  if (!match) return null;
-  return safeParse(match[1].trim());
+function toVerdict(
+  candidate: Record<string, unknown>,
+): { verdict: WorkforcePersonaReviewVerdict; summary: string; fixes: WorkforcePersonaReviewFix[] } | null {
+  const verdict = candidate.verdict;
+  // Reviewer-persona vocabulary only — `'error'` is reserved for the
+  // pipeline catch path on the reviewer-pass-itself-crashed channel.
+  if (verdict !== 'pass' && verdict !== 'fix' && verdict !== 'block') return null;
+  const summary = typeof candidate.summary === 'string' ? candidate.summary : '';
+  const fixes = Array.isArray(candidate.fixes)
+    ? candidate.fixes.flatMap((entry: unknown) => normalizeFix(entry))
+    : [];
+  return { verdict, summary, fixes };
+}
+
+/**
+ * Returns the parsed contents of every fenced ` ```json ` block in the
+ * response, ordered LAST-block-first so callers can prefer the model's
+ * final answer over earlier drafts. Walks the mdast tree rather than
+ * regex-matching raw text so fenced blocks nested inside the workflow
+ * source the reviewer is auditing do not get confused with verdict
+ * blocks.
+ */
+export function extractFencedJsonBlocksLastFirst(output: string): Record<string, unknown>[] {
+  let tree: Root;
+  try {
+    tree = fromMarkdown(output);
+  } catch {
+    return [];
+  }
+  const blocks: Record<string, unknown>[] = [];
+  walkMdast(tree, (node) => {
+    if (node.type !== 'code') return;
+    const code = node as Code;
+    if (typeof code.lang !== 'string') return;
+    if (code.lang.toLowerCase() !== 'json') return;
+    const parsed = safeParse(code.value);
+    if (parsed) blocks.push(parsed);
+  });
+  return blocks.reverse();
+}
+
+function walkMdast(node: Node, visit: (node: Node) => void): void {
+  visit(node);
+  const parent = node as Partial<Parent>;
+  if (!Array.isArray(parent.children)) return;
+  for (const child of parent.children) walkMdast(child, visit);
 }
 
 function extractTrailingJsonObject(output: string): Record<string, unknown> | null {
   const trimmed = output.trim();
-  // Walk back from the end looking for a balanced object.
+  // Walk back from the end looking for a balanced object so we honor the
+  // reviewer's "JSON on the final line" contract even when there are no
+  // fences at all (e.g. when the model returned the verdict as raw JSON
+  // appended after prose, or when fences were unbalanced and so missed
+  // by the mdast parser).
   let depth = 0;
   let endIndex = -1;
   for (let i = trimmed.length - 1; i >= 0; i -= 1) {

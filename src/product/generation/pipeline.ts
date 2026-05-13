@@ -357,7 +357,11 @@ async function runWorkforcePersonaReviewPass(
         `Workforce persona review pass skipped: ${message}`,
       ),
       reviewSummary: {
-        verdict: 'pass',
+        // Reviewer pass crashed — surface as `error` so downstream
+        // automation (and humans reading the JSON) can tell "the reviewer
+        // never ran" from "the reviewer ran and approved." Synthesizing
+        // `pass` here would be a false approval signal.
+        verdict: 'error',
         summary: `Reviewer pass was skipped after error: ${message}`,
         personaId: 'unresolved',
         tier: 'unknown',
@@ -386,7 +390,15 @@ async function runWorkforcePersonaReviewPass(
     warnings: review.metadata.warnings,
   };
 
-  if (review.verdict === 'pass' || review.fixes.length === 0) {
+  // Skip the repair attempt when:
+  //   - verdict is `pass` (no fixes requested),
+  //   - verdict is `block` (the reviewer rejected the artifact outright; per
+  //     the contract documented on `WorkforcePersonaReviewSummary`, Ricky
+  //     keeps the writer artifact and records the verdict rather than trying
+  //     to repair what the reviewer called fundamentally wrong), or
+  //   - `fixes` is empty (a `fix` verdict without actionable items has
+  //     nothing the writer can act on).
+  if (review.verdict === 'pass' || review.verdict === 'block' || review.fixes.length === 0) {
     return {
       finalArtifact: inputs.currentArtifact,
       validation: inputs.currentValidation,
@@ -395,8 +407,8 @@ async function runWorkforcePersonaReviewPass(
     };
   }
 
-  // Verdict is `fix` (or `block` with fixes): feed the structured fix list
-  // back into a single writer repair attempt.
+  // Verdict is `fix` with a non-empty fix list: feed the structured fix
+  // list back into a single writer repair attempt.
   const fixErrors = renderReviewFixesForWriter(review);
   let appliedArtifact = inputs.currentArtifact;
   let appliedValidation = inputs.currentValidation;

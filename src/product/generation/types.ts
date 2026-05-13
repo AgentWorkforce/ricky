@@ -228,16 +228,28 @@ export interface WorkforcePersonaGenerationMetadata {
   };
   /**
    * Verdict from the post-write Opus reviewer pass, when the reviewer ran.
-   * `pass` means the reviewer approved the artifact as-is. `fix` means the
-   * writer accepted a structured fix list from the reviewer and ran one
-   * repair attempt against it. `block` means the reviewer rejected the
-   * artifact and Ricky fell back to the deterministic renderer.
+   *
+   * - `pass`: the reviewer approved the artifact; Ricky shipped the
+   *   writer's output as-is.
+   * - `fix`: the reviewer returned a structured fix list; Ricky ran one
+   *   writer repair attempt against it. `appliedFix` records whether the
+   *   repair actually passed deterministic validation.
+   * - `block`: the reviewer rejected the artifact as fundamentally wrong.
+   *   Ricky kept the writer's output and recorded the verdict in metadata
+   *   for the operator — it does NOT fall back to the deterministic
+   *   renderer (that fallback only triggers when deterministic pre-write
+   *   validation cannot be repaired).
+   * - `error`: the reviewer pass itself failed (resolver error, harness
+   *   timeout, parser exception). Distinct from `block` so downstream
+   *   automation does not misread "reviewer crashed" as "reviewer
+   *   approved." The writer artifact is kept and the failure is surfaced
+   *   via `warnings`.
    */
   review?: WorkforcePersonaReviewSummary;
 }
 
 export type WorkforcePersonaReviewSummary = {
-  verdict: 'pass' | 'fix' | 'block';
+  verdict: 'pass' | 'fix' | 'block' | 'error';
   summary: string;
   personaId: string;
   tier: string;
