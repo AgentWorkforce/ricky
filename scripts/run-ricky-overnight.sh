@@ -565,11 +565,6 @@ append_generated_workflows_to_queue() {
 append_repo_workflows_to_queue() {
   while IFS= read -r workflow_path; do
     [[ -n "$workflow_path" ]] || continue
-
-    if workflow_has_stale_package_targets "$workflow_path"; then
-      continue
-    fi
-
     printf '%s\n' "$workflow_path" >> "$QUEUE_FILE"
   done < <(find workflows -mindepth 2 -maxdepth 2 -type f -name '*.ts' \
     -path 'workflows/wave*/*' | sort)
@@ -1943,6 +1938,8 @@ if (( QUEUE_TOTAL == 0 )); then
 
   if [[ -s "$FAILED_FILE" ]]; then
     mark_status "complete-with-failures" "restored checkpoint contained failed workflows; queue is now exhausted after repo-state filtering"
+  elif (( LAST_FILTER_REMOVED_STALE > 0 )) && (( LAST_FILTER_REMOVED_STALE + LAST_FILTER_REMOVED_MISSING == LAST_FILTER_REMOVED_TOTAL )); then
+    mark_status "blocked" "queue exhausted because remaining workflows are migration-blocked or missing: stale=${LAST_FILTER_REMOVED_STALE}, missing=${LAST_FILTER_REMOVED_MISSING}"
   elif (( LAST_FILTER_REMOVED_STALE > 0 )); then
     mark_status "complete" "queue exhausted after repo-state filtering: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
   else
