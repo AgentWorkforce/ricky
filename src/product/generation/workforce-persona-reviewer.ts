@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import {
+  dumpPersonaDebug,
   WorkforcePersonaWriterError,
   type WorkforcePersonaResolver,
   type WorkforcePersonaSendOptions,
@@ -101,7 +102,21 @@ export async function reviewWorkflowWithWorkforcePersona(
   });
 
   const [result, runId] = await Promise.all([run, run.runId.catch(() => null)]);
+  const dumpDebug = (reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success') =>
+    dumpPersonaDebug({
+      kind: 'reviewer',
+      reason,
+      repoRoot: options.repoRoot,
+      promptDigest,
+      task,
+      result,
+      selection,
+      resolved,
+      outputPath: options.outputPath,
+    });
+
   if (result.status !== 'completed') {
+    await dumpDebug('noncompletion');
     throw new WorkforcePersonaWriterError(
       `Workforce persona reviewer did not complete: ${result.status}.`,
       [...resolved.warnings, result.stderr].filter(Boolean),
@@ -109,6 +124,13 @@ export async function reviewWorkflowWithWorkforcePersona(
   }
 
   const verdict = parseReviewerVerdict(result.output);
+  // Reviewer's parser never throws — an unparseable response degrades to a
+  // `block` verdict with the canned summary below. Detect that exact
+  // synthetic case so dumps land in the parse-error directory only when
+  // the parser actually fell through (not for a legitimate `block` from
+  // the model).
+  const synthesizedBlockSummary = 'Reviewer response did not contain a parseable verdict JSON; treating as block.';
+  await dumpDebug(verdict.summary === synthesizedBlockSummary ? 'parse-error' : 'success');
   return {
     ...verdict,
     raw: result.output,

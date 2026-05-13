@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,7 @@ import { generate, generateWithWorkforcePersona } from './pipeline.js';
 import type { WorkforcePersonaExecution, WorkforcePersonaResolver } from './workforce-persona-writer.js';
 import {
   buildWorkflowPersonaTask,
+  dumpPersonaDebug,
   loadWorkforcePersonaModule,
   loadWorkforceSelectionModule,
   parsePersonaWorkflowResponse,
@@ -16,6 +17,8 @@ import {
   summarizeSpecForPersona,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
 } from './workforce-persona-writer.js';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 
 const RECEIVED_AT = '2026-04-30T00:00:00.000Z';
 
@@ -1349,6 +1352,118 @@ describe('workforce persona reviewer pass', () => {
     expect(result.success).toBe(true);
     expect(intentCalls).not.toContain('review');
     expect(result.workforcePersona?.review).toBeUndefined();
+  });
+});
+
+describe('persona debug dump', () => {
+  function dumpInputs(repoRoot: string, overrides: Partial<{ reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success'; output: string; promptDigest: string }> = {}) {
+    return {
+      kind: 'writer' as const,
+      reason: overrides.reason ?? 'parse-error',
+      repoRoot,
+      promptDigest: overrides.promptDigest ?? 'a'.repeat(64),
+      task: 'task body',
+      result: {
+        status: 'completed' as const,
+        output: overrides.output ?? 'free-form sonnet prose',
+        stderr: '',
+        exitCode: 0,
+        durationMs: 4242,
+        workflowRunId: 'debug-dump-run',
+        stepName: 'agent-relay-workflow',
+      },
+      selection: {
+        personaId: 'agent-relay-workflow',
+        tier: 'best-value',
+        runtime: { harness: 'claude' as const, model: 'claude-sonnet-4-6' },
+      },
+      resolved: {
+        source: 'package' as const,
+        intent: 'agent-relay-workflow',
+        warnings: ['Ricky-local Claude persona override resolved for intent "agent-relay-workflow" at tier "best-value".'],
+        context: {
+          selection: {
+            personaId: 'agent-relay-workflow',
+            tier: 'best-value',
+            runtime: { harness: 'claude' as const, model: 'claude-sonnet-4-6' },
+          },
+          sendMessage() {
+            throw new Error('not invoked in debug-dump tests');
+          },
+        },
+      },
+      outputPath: 'workflows/generated/dump.ts',
+    };
+  }
+
+  let repoRoot: string | undefined;
+  afterEach(async () => {
+    if (repoRoot) {
+      await import('node:fs/promises').then(({ rm }) => rm(repoRoot!, { recursive: true, force: true }));
+      repoRoot = undefined;
+    }
+  });
+
+  it('writes output.raw.txt, task.prompt.txt, and meta.json on the parse-error path', async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-dump-'));
+    await dumpPersonaDebug(dumpInputs(repoRoot, { reason: 'parse-error', output: 'verbatim sonnet output' }));
+
+    const dir = join(repoRoot, '.workflow-artifacts', 'ricky-persona-debug', 'writer', `${'a'.repeat(16)}-parse-error`);
+    expect(existsSync(dir)).toBe(true);
+    const raw = await readFile(join(dir, 'output.raw.txt'), 'utf8');
+    const task = await readFile(join(dir, 'task.prompt.txt'), 'utf8');
+    const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')) as Record<string, unknown>;
+
+    expect(raw).toBe('verbatim sonnet output');
+    expect(task).toBe('task body');
+    expect(meta).toMatchObject({
+      kind: 'writer',
+      reason: 'parse-error',
+      outputPath: 'workflows/generated/dump.ts',
+      selection: { personaId: 'agent-relay-workflow', tier: 'best-value', harness: 'claude', model: 'claude-sonnet-4-6' },
+      result: { status: 'completed', exitCode: 0, durationMs: 4242 },
+      resolverIntent: 'agent-relay-workflow',
+    });
+  });
+
+  it('skips the success-path dump unless RICKY_PERSONA_DEBUG=1', async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-dump-'));
+    const originalFlag = process.env.RICKY_PERSONA_DEBUG;
+    delete process.env.RICKY_PERSONA_DEBUG;
+    try {
+      await dumpPersonaDebug(dumpInputs(repoRoot, { reason: 'success' }));
+      const dir = join(repoRoot, '.workflow-artifacts', 'ricky-persona-debug', 'writer', `${'a'.repeat(16)}-success`);
+      expect(existsSync(dir)).toBe(false);
+    } finally {
+      if (originalFlag !== undefined) process.env.RICKY_PERSONA_DEBUG = originalFlag;
+    }
+  });
+
+  it('records the success-path dump when RICKY_PERSONA_DEBUG=1', async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-dump-'));
+    const originalFlag = process.env.RICKY_PERSONA_DEBUG;
+    process.env.RICKY_PERSONA_DEBUG = '1';
+    try {
+      await dumpPersonaDebug(dumpInputs(repoRoot, { reason: 'success' }));
+      const dir = join(repoRoot, '.workflow-artifacts', 'ricky-persona-debug', 'writer', `${'a'.repeat(16)}-success`);
+      expect(existsSync(dir)).toBe(true);
+    } finally {
+      if (originalFlag === undefined) {
+        delete process.env.RICKY_PERSONA_DEBUG;
+      } else {
+        process.env.RICKY_PERSONA_DEBUG = originalFlag;
+      }
+    }
+  });
+
+  it('silently swallows dump errors when the repo root is unwritable', async () => {
+    // /nonexistent-ricky-test-root cannot be created without root; the helper
+    // must not throw or noisily log to stderr by default.
+    await expect(
+      dumpPersonaDebug({
+        ...dumpInputs('/nonexistent-ricky-test-root-' + Date.now(), { reason: 'parse-error' }),
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 

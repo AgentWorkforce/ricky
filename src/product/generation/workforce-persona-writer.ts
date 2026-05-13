@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import type { ClarificationQuestion, ClarificationRequest, NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { RenderedArtifact, SkillContext, WorkflowExecutionTarget } from './types.js';
@@ -250,22 +250,44 @@ export async function writeWorkflowWithWorkforcePersona(
     run,
     run.runId.catch(() => null),
   ]);
+  const dumpDebug = (reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success') =>
+    dumpPersonaDebug({
+      kind: 'writer',
+      reason,
+      repoRoot: options.repoRoot,
+      promptDigest,
+      task,
+      result,
+      selection,
+      resolved,
+      outputPath: options.outputPath,
+    });
+
   if (result.status !== 'completed') {
+    await dumpDebug('noncompletion');
     throw new WorkforcePersonaWriterError(
       `Workforce persona writer did not complete: ${result.status}.`,
       [...resolved.warnings, result.stderr].filter(Boolean),
     );
   }
 
-  const parsed = parsePersonaWorkflowResponse(result.output, options.outputPath, {
-    repoRoot: options.repoRoot,
-  });
+  let parsed: ParsedPersonaResponse;
+  try {
+    parsed = parsePersonaWorkflowResponse(result.output, options.outputPath, {
+      repoRoot: options.repoRoot,
+    });
+  } catch (error) {
+    await dumpDebug('parse-error');
+    throw error;
+  }
   if (parsed.clarification) {
     throw new WorkforcePersonaClarificationError(parsed.clarification.questions, resolved.warnings);
   }
   if (!parsed.content) {
+    await dumpDebug('no-content');
     throw new WorkforcePersonaWriterError('Workforce persona response did not include workflow artifact content.');
   }
+  await dumpDebug('success');
   const responseFormat = parsed.responseFormat as WorkforcePersonaWriterMetadata['responseFormat'];
   return {
     artifact: {
@@ -1311,4 +1333,108 @@ function safeReadSkillText(path: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export interface PersonaDebugDumpInput {
+  /** Which persona pass produced the output — keeps writer and reviewer dumps separate on disk. */
+  kind: 'writer' | 'reviewer';
+  /** Coarse reason for the dump so the operator can tell parse failures from non-completions at a glance. */
+  reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success';
+  repoRoot: string;
+  /** SHA-256 digest of the task prompt, used as the dump directory name so repeated runs against the same prompt overwrite a single entry. */
+  promptDigest: string;
+  /** The full task prompt that was sent to the harness; written so the operator can replay the spawn outside Ricky. */
+  task: string;
+  result: WorkforcePersonaExecutionResult;
+  selection: WorkforcePersonaSelection;
+  resolved: ResolvedWorkforcePersonaContext;
+  /** Artifact path Ricky asked the persona to produce; recorded in the dump metadata for cross-referencing with the run state. */
+  outputPath: string;
+}
+
+/**
+ * Persists the raw persona output, the prompt that produced it, and the
+ * selection metadata under `<repoRoot>/.workflow-artifacts/ricky-persona-debug/`
+ * so operators can inspect what a Workforce persona actually returned when
+ * the parser rejected it (or when explicit debug capture is requested via
+ * `RICKY_PERSONA_DEBUG=1`).
+ *
+ * - On every failure path (`noncompletion` / `parse-error` / `no-content`)
+ *   the dump is always written so failed runs are self-debuggable.
+ * - On the `success` path the dump only runs when `RICKY_PERSONA_DEBUG=1`
+ *   is set, so green production runs do not litter the artifact tree.
+ *
+ * Dump layout (one directory per `(kind, promptDigest)` pair):
+ * - `output.raw.txt`   — the persona's stdout as captured by harness-kit
+ * - `task.prompt.txt`  — the task body that was sent to the persona
+ * - `meta.json`        — selection, status, exit code, stderr, durationMs
+ *
+ * Failures inside this helper are swallowed and surfaced through stderr —
+ * the dump is debugging telemetry; it must never mask the original
+ * writer/reviewer error.
+ */
+export async function dumpPersonaDebug(input: PersonaDebugDumpInput): Promise<void> {
+  if (input.reason === 'success' && process.env.RICKY_PERSONA_DEBUG !== '1') {
+    return;
+  }
+  try {
+    const dir = join(
+      input.repoRoot,
+      '.workflow-artifacts',
+      'ricky-persona-debug',
+      input.kind,
+      `${input.promptDigest.slice(0, 16)}-${input.reason}`,
+    );
+    await mkdir(dir, { recursive: true });
+    await Promise.all([
+      writeFile(join(dir, 'output.raw.txt'), input.result.output ?? '', 'utf8'),
+      writeFile(join(dir, 'task.prompt.txt'), input.task, 'utf8'),
+      writeFile(
+        join(dir, 'meta.json'),
+        JSON.stringify(
+          {
+            kind: input.kind,
+            reason: input.reason,
+            outputPath: input.outputPath,
+            selection: {
+              personaId: input.selection.personaId,
+              tier: input.selection.tier,
+              harness: input.selection.runtime.harness,
+              model: input.selection.runtime.model,
+            },
+            result: {
+              status: input.result.status,
+              exitCode: input.result.exitCode,
+              durationMs: input.result.durationMs,
+              workflowRunId: input.result.workflowRunId,
+              stepName: input.result.stepName,
+              stderr: input.result.stderr,
+            },
+            resolverIntent: input.resolved.intent,
+            resolverWarnings: input.resolved.warnings,
+            promptDigest: input.promptDigest,
+            recordedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      ),
+    ]);
+    if (process.env.RICKY_PERSONA_DEBUG_VERBOSE === '1' || input.reason !== 'success') {
+      // Surface the dump location so the operator can find it without
+      // grepping the artifacts tree; success dumps are silent unless
+      // explicitly opted into via the verbose flag.
+      // eslint-disable-next-line no-console
+      console.error(`[ricky] persona ${input.kind} debug dump → ${dir}`);
+    }
+  } catch (error) {
+    if (process.env.RICKY_PERSONA_DEBUG_VERBOSE === '1') {
+      // Dump failures are typically permission/path issues in tests and other
+      // non-real-repo callers. Stay quiet unless the operator explicitly
+      // asked for verbose debug telemetry.
+      // eslint-disable-next-line no-console
+      console.error(`[ricky] failed to persist persona debug dump: ${errorMessage(error)}`);
+    }
+  }
 }
