@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@agent-assistant/turn-context": "^0.4.31",
+    "@agent-relay/agent": "^6.0.18",
     "@agent-relay/cloud": "^6.0.15",
     "@agent-relay/sdk": "^6.0.15",
     "@agentworkforce/harness-kit": "^0.19.0",
