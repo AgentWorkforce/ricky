@@ -1242,7 +1242,16 @@ function describeImplementation(spec: NormalizedWorkflowSpec): string {
  * Resolution order:
  *
  *   1. Explicit `vitest`/`npm test` acceptance gate → `mapAcceptanceGateToCommand`.
- *   2. Test-file targets in `spec.targetFiles` → `npx vitest run <files>`.
+ *   2. Test-file targets in `spec.targetFiles` that are reachable from the
+ *      generated workflow's cwd → `npx vitest run <files>`. Cross-repo
+ *      paths (e.g. `../sibling-repo/...` or `sibling-repo/packages/...`
+ *      where the first segment is not a recognized in-repo source root)
+ *      are dropped because the generated workflow runs in a single
+ *      repo's cwd and vitest's include glob cannot reach them. Without
+ *      this filter, a spec that legitimately spans multiple repos
+ *      produces a `final-hard-validation` gate that always fails with
+ *      "No test files found, exit 1", and the auto-fix loop burns its
+ *      budget chasing a phantom artifact path.
  *   3. Source-file targets that live under monorepo workspaces
  *      (`packages/<pkg>/`, `apps/<pkg>/`, `services/<pkg>/`, including
  *      scoped `packages/@scope/<pkg>/` layouts) → one
@@ -1259,15 +1268,55 @@ export function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
   const explicitTestGate = spec.acceptanceGates.find((gate) => /\b(vitest|npm test)\b/i.test(gate.gate));
   if (explicitTestGate) return mapAcceptanceGateToCommand(explicitTestGate.gate);
 
-  const testTargets = spec.targetFiles.filter((file) => /\.(test|spec)\.(ts|tsx|js|jsx)$/i.test(file));
+  const localTargetFiles = spec.targetFiles.filter(isLocalRepoPath);
+  const testTargets = localTargetFiles.filter((file) => /\.(test|spec)\.(ts|tsx|js|jsx)$/i.test(file));
   if (testTargets.length > 0) return `npx vitest run ${testTargets.map(shellQuote).join(' ')}`;
 
-  const workspaces = uniqueWorkspacesFromTargetFiles(spec.targetFiles);
+  const workspaces = uniqueWorkspacesFromTargetFiles(localTargetFiles);
   if (workspaces.length > 0) {
     return workspaces.map((ws) => `npm test --workspace=${shellQuote(ws)}`).join(' && ');
   }
 
   return 'npx vitest run';
+}
+
+const IN_REPO_SOURCE_ROOTS = new Set([
+  'packages',
+  'apps',
+  'services',
+  'src',
+  'lib',
+  'libs',
+  'tests',
+  'test',
+  'e2e',
+  'integration-tests',
+]);
+
+/**
+ * Heuristic: is this target file path reachable from the generated
+ * workflow's cwd (the repo the workflow ships in)?
+ *
+ * Cross-repo targets are rejected so they don't end up in the vitest
+ * invocation or in the workspace inference. Two forms are treated as
+ * cross-repo:
+ *
+ *   - Parent-dir escapes (`../sibling-repo/...`, `./../...`).
+ *   - Paths whose first segment is not a recognized in-repo source root
+ *     (e.g. `relayfile-adapters/packages/...` — the leading
+ *     `relayfile-adapters/` is a sibling repo directory, not a JS/TS
+ *     workspace root that vitest's include glob can reach).
+ *
+ * Root-level files with no `/` (e.g. `tsconfig.json`, `index.test.ts`)
+ * are treated as local — vitest can resolve them from the cwd.
+ */
+function isLocalRepoPath(file: string): boolean {
+  if (file.startsWith('../') || file.startsWith('./../') || file.includes('/../')) return false;
+  const normalized = file.replace(/^\.\//, '');
+  const firstSegment = normalized.split('/')[0];
+  if (!firstSegment) return false;
+  if (!normalized.includes('/')) return true;
+  return IN_REPO_SOURCE_ROOTS.has(firstSegment);
 }
 
 /**

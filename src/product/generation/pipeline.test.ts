@@ -108,6 +108,54 @@ describe('workflow generation pipeline', () => {
     }
   });
 
+  // Regression: a spec that names test files in a *sibling repo* (e.g.
+  // `relayfile-adapters/packages/core/src/digest-contract.test.ts` while
+  // the workflow ships in the `relayfile` repo) used to render that path
+  // straight into the final-hard-validation vitest invocation. The
+  // generated workflow runs in a single repo's cwd, so vitest's include
+  // glob `packages/**/*.test.ts` cannot reach a path under another
+  // repo's directory, and the file doesn't exist locally anyway → vitest
+  // exits 1 with "No test files found". The auto-fix loop then burns
+  // its full budget (INVALID_ARTIFACT × maxAttempts) chasing a phantom
+  // artifact path it cannot reach because it operates on the workflow
+  // cwd only. The renderer now filters cross-repo paths out of the test
+  // target list before constructing the vitest command, falling through
+  // to the workspace-aware path for any local source targets that
+  // remain.
+  it('drops cross-repo paths from master-rendered final-hard-validation test invocation', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workspace primitives across relayfile and relayfile-adapters.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['Tests pass.'],
+        targetFiles: [
+          // Local — should drive the workspace-aware command.
+          'packages/core/src/digest.ts',
+          'packages/core/src/digest.test.ts',
+          // Cross-repo — must be filtered out before deriveTestCommand
+          // builds the vitest invocation.
+          'relayfile-adapters/packages/core/src/digest-contract.ts',
+          'relayfile-adapters/packages/core/src/digest-contract.test.ts',
+          '../relayfile-adapters/packages/core/src/digest-contract.test.ts',
+        ],
+      }),
+      artifactPath: 'workflows/generated/workspace-primitives-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const rendered = artifact(result);
+    const gateCommand = gate(rendered, 'final-hard-validation').command;
+    const stepBody = renderedStepCommand(rendered.content, 'final-hard-validation');
+
+    for (const target of [gateCommand, stepBody]) {
+      // The local test path is still validated.
+      expect(target).toContain("npx vitest run 'packages/core/src/digest.test.ts'");
+      // The sibling-repo path must NOT survive into the vitest call —
+      // otherwise vitest exits 1 with "No test files found".
+      expect(target).not.toContain('relayfile-adapters/packages/core/src/digest-contract.test.ts');
+      expect(target).not.toContain('../relayfile-adapters');
+    }
+  });
+
   it('uniqueWorkspacesFromTargetFiles handles npm-scoped workspace paths', () => {
     // CodeRabbit flagged that the previous regex
     //   /^((?:packages|apps|services)\/[^\/]+)\//
