@@ -1938,8 +1938,10 @@ if (( QUEUE_TOTAL == 0 )); then
 
   if [[ -s "$FAILED_FILE" ]]; then
     mark_status "complete-with-failures" "restored checkpoint contained failed workflows; queue is now exhausted after repo-state filtering"
-  elif (( LAST_FILTER_REMOVED_STALE > 0 )) || (( LAST_FILTER_REMOVED_MISSING > 0 )); then
-    mark_status "blocked" "queue exhausted because remaining workflows are migration-blocked or missing: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
+  elif (( LAST_FILTER_REMOVED_MISSING > 0 )); then
+    mark_status "blocked" "queue exhausted because remaining workflows are missing: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
+  elif (( LAST_FILTER_REMOVED_STALE > 0 )); then
+    mark_status "complete" "queue exhausted after filtering stale migration-blocked workflows: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
   else
     mark_status "complete" "queue exhausted with no actionable workflows after repo-state filtering"
   fi
