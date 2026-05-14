@@ -1819,7 +1819,10 @@ describe('cliMain', () => {
     const originalRunId = process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
     const runId = 'ricky-local-detached-child';
     const localExecutor = {
-      execute: vi.fn().mockResolvedValue(stagedLocalResult()),
+      execute: vi.fn(async () => {
+        expect(process.env.RICKY_DETACHED_BACKGROUND_RUN_ID).toBeUndefined();
+        return stagedLocalResult();
+      }),
     };
 
     process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = runId;
@@ -1849,6 +1852,42 @@ describe('cliMain', () => {
         process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = originalRunId;
       }
       await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('does not let an inherited detached run id force nested no-run commands to execute', async () => {
+    const originalRunId = process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
+    const runner = vi.fn().mockResolvedValue(
+      fakeInteractiveResult({
+        ok: true,
+        localResult: stagedLocalResult({ execution: undefined }),
+      }),
+    );
+    const localExecutor = {
+      execute: vi.fn().mockResolvedValue(stagedLocalResult()),
+    };
+
+    process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = 'ricky-local-inherited-parent';
+    try {
+      const result = await cliMain({
+        argv: ['local', '--spec', 'build a workflow', '--no-run'],
+        runInteractive: runner,
+        localExecutor,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(runner).toHaveBeenCalledOnce();
+      expect(localExecutor.execute).not.toHaveBeenCalled();
+      expect(runner.mock.calls[0][0].handoff).toMatchObject({
+        stageMode: 'generate',
+        cliMetadata: expect.objectContaining({ handoff: 'inline-spec' }),
+      });
+    } finally {
+      if (originalRunId === undefined) {
+        delete process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
+      } else {
+        process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = originalRunId;
+      }
     }
   });
 

@@ -713,6 +713,17 @@ function shouldLaunchDetachedBackgroundRun(parsed: ParsedArgs, cliHandoff: RawHa
   );
 }
 
+function shouldRunDetachedBackgroundChild(parsed: ParsedArgs, cliHandoff: RawHandoff): boolean {
+  return Boolean(
+    parsed.command === 'run' &&
+    parsed.runRequested === true &&
+    parsed.foreground === true &&
+    parsed.noRun !== true &&
+    parsed.mode !== 'cloud' &&
+    process.env[DETACHED_BACKGROUND_RUN_ID_ENV],
+  );
+}
+
 async function launchDetachedBackgroundRun(
   argv: string[],
   parsed: ParsedArgs,
@@ -771,6 +782,7 @@ async function runDetachedBackgroundChild(
     };
   }
   const cwd = resolveInvocationRoot(deps.cwd);
+  delete process.env[DETACHED_BACKGROUND_RUN_ID_ENV];
   const finalState = await startLocalRunMonitor({
     cwd,
     artifactPath: backgroundArtifactPathFor(parsed, cliHandoff),
@@ -1864,7 +1876,7 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     };
   }
 
-  if (cliHandoff && process.env[DETACHED_BACKGROUND_RUN_ID_ENV]) {
+  if (cliHandoff && shouldRunDetachedBackgroundChild(parsed, cliHandoff)) {
     return runDetachedBackgroundChild(parsed, cliHandoff, deps);
   }
 
