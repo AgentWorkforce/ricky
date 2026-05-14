@@ -20,7 +20,7 @@ Compact execution rules for agents writing Ricky workflows.
 14. Load repo-local `.env.local`/`.env` before `.run(...)` without overwriting exported values, and fail fast with `MISSING_ENV_VAR: NAME` for required env vars before long-running agent steps.
 15. For generation tasks, read `workflows/meta/spec/generated-workflow-template.md` before authoring.
 16. Set `.channel()`, `.pattern()`, `.maxConcurrency()`, and `.timeout()` explicitly; add `.onError()` for long-running or multi-agent workflows.
-17. Prefer named roles over generic numbering. Default implementation team shape is `lead-claude`, `impl-primary-codex`, `impl-tests-codex`, `reviewer-claude`, `reviewer-codex`, and `validator-claude`; doc/spec workflows may use `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer.
+17. Prefer named roles over generic numbering. Default serious implementation shape is one or more small squads with `lead-claude`, `impl-<scope>-codex`, `shadow-<scope>-claude` or `shadow-<scope>-codex`, optional `validator-<scope>-claude`, then `final-reviewer-claude` and `final-reviewer-codex`; doc/spec workflows may use `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer.
 18. State the expected branch naming pattern and whether PR creation is in or out of scope; use `ricky/<wave-or-meta>-<workflow-slug>` by default unless a local spec narrows it.
 19. Use scoped change detection after implementation steps with `git diff --name-only` and `git ls-files --others --exclude-standard` limited to declared file targets.
 20. Write final signoff artifacts under `.workflow-artifacts/` for significant implementation or generation workflows.
@@ -28,6 +28,7 @@ Compact execution rules for agents writing Ricky workflows.
 22. For convention-only workflows, keep edits inside declared convention files and preserve `CLAUDE.md` as a symlink to `AGENTS.md` unless the contract explicitly says otherwise.
 23. For convention-only workflows, check each declared file exists, run grep or structural checks for the required terms, verify `CLAUDE.md -> AGENTS.md` when `CLAUDE.md` is in scope, and use scoped change detection limited to declared convention files.
 24. For convention-update workflows, read the operator plan artifact when provided and keep wording specific enough for grep checks, structural checks, dry-run output, review artifacts, or scoped diff review.
+25. For serious implementation workflows, default to implementer self-reflection, live shadow feedback, fresh independent review, implementer repair, dual final review, fresh fix agents for final-review findings, post-fix self-reflection, and post-fix re-review before signoff. If the spec requires another workflow shape, preserve those safety properties in the alternative.
 
 ## Must-not
 
@@ -42,6 +43,7 @@ Compact execution rules for agents writing Ricky workflows.
 9. Do not use repo-wide `git diff --quiet` as the change-detection gate when unrelated work may be present.
 10. Do not edit package metadata, runtime configuration, product source, generated wave workflows, or product specs from a convention-only workflow.
 11. Do not add broad prose that cannot be checked by deterministic gates or reviewer inspection.
+12. Do not collapse shadow review, implementer self-reflection, independent review, final dual review, and repair into one vague review step for serious implementation work unless the spec explicitly justifies a lighter workflow shape and deterministic evidence still covers the risk.
 
 ## Default reliability pattern
 
@@ -54,6 +56,24 @@ Compact execution rules for agents writing Ricky workflows.
 7. Re-review on the fixed state.
 8. Re-run deterministic gates.
 9. Final sign-off.
+
+## Default Serious Implementation Squad Loop
+
+Use this loop when the workflow changes runtime behavior, generated workflows, user-visible behavior, shared execution contracts, or anything that needs high confidence:
+
+1. Read specs, standards, AGENTS.md / CLAUDE.md, recent related docs, and declared file targets deterministically.
+2. Split work into one or more 2-3 agent squads with non-overlapping scopes.
+3. Each squad has an implementer and a shadow reviewer; add a validation/test owner only when tests or proof are a distinct deliverable.
+4. The shadow reviewer follows work in real time, reads actual files, watches for spec drift, and gives concise feedback before the implementer exits.
+5. The implementer writes `.workflow-artifacts/<slug>/<scope>-self-reflection.md` covering changed files, spec coverage, tests/proofs, repo-rule alignment, and remaining risks.
+6. A fresh self-review agent reads the final files, AGENTS.md / CLAUDE.md, recent local conventions, and the self-reflection artifact. It writes findings to disk.
+7. The implementer repairs valid findings, then deterministic gates run or rerun from captured output.
+8. After squads converge, `final-reviewer-claude` and `final-reviewer-codex` review independently.
+9. The final reviewers compare notes and write one merged final review artifact.
+10. Fresh fix agents address final-review findings. Those fix agents self-reflect, and the final reviewers re-check the post-fix state.
+11. Sign off only when the spec is fully satisfied by post-fix review and deterministic evidence, or write a blocker artifact with exact evidence.
+
+Small documentation or convention workflows may use the lighter reliability pattern. Serious implementation workflows should use the full squad loop by default, while still allowing another deliberate swarm/workflow shape when the spec calls for it and the same safety properties remain covered.
 
 ## 80-to-100 Validation Ladder
 

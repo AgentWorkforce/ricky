@@ -55,6 +55,49 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('Do not open an interactive Claude, Codex, or OpenCode terminal UI');
   });
 
+  it('injects Ricky repo-local workflow policy files into the persona task', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'ricky-persona-policy-'));
+    mkdirSync(join(repoRoot, 'docs/workflows'), { recursive: true });
+    mkdirSync(join(repoRoot, 'workflows/shared'), { recursive: true });
+    mkdirSync(join(repoRoot, 'workflows/meta/spec'), { recursive: true });
+    writeFileSync(
+      join(repoRoot, 'docs/workflows/WORKFLOW_STANDARDS.md'),
+      '# Standards\n\nRequire shadowed squad review loop.\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(repoRoot, 'workflows/shared/WORKFLOW_AUTHORING_RULES.md'),
+      '# Rules\n\nRequire live shadow feedback.\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(repoRoot, 'workflows/meta/spec/generated-workflow-template.md'),
+      '# Template\n\nRequire final-reviewer-claude and final-reviewer-codex.\n',
+      'utf8',
+    );
+
+    try {
+      const task = buildWorkflowPersonaTask(spec(), {
+        workflowName: 'policy-context',
+        targetMode: 'local',
+        repoRoot,
+        outputPath: 'workflows/generated/policy-context.ts',
+        relevantFiles: [],
+      });
+
+      expect(task).toContain('Ricky repo-local workflow policy context');
+      expect(task).toContain('# docs/workflows/WORKFLOW_STANDARDS.md');
+      expect(task).toContain('Require shadowed squad review loop.');
+      expect(task).toContain('# workflows/shared/WORKFLOW_AUTHORING_RULES.md');
+      expect(task).toContain('Require live shadow feedback.');
+      expect(task).toContain('# workflows/meta/spec/generated-workflow-template.md');
+      expect(task).toContain('Require final-reviewer-claude and final-reviewer-codex.');
+      expect(task).not.toContain('MISSING: Ricky workflow policy file');
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it('defaults to the Agent Relay workflow-writing persona when harness-kit exposes runnable APIs', async () => {
     const calls: string[] = [];
     const resolved = await resolveWorkforcePersonaContextWithModules(

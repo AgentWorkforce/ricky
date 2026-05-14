@@ -215,22 +215,49 @@ Ricky workflows should prefer named roles over generic worker numbering.
 Examples:
 - `lead-claude`
 - `writer-codex`
+- `impl-auth-codex`
+- `shadow-auth-claude`
 - `reviewer-claude`
 - `reviewer-codex`
 - `validator-claude`
 
-For interactive implementation workflows, the NightCTO-style split is usually the right default:
+For serious implementation workflows, use a shadowed squad review loop by default:
 - lead
-- implementer primary
-- implementer tests
-- reviewer claude
-- reviewer codex
-- validator
+- one or more scoped implementers
+- one shadow reviewer per active implementation scope
+- optional validation/test owner per scope when proof is a separate deliverable
+- final reviewer claude
+- final reviewer codex
+- fresh fix agents for final-review findings
 
 For standards/spec workflows, a lighter shape is fine:
 - lead
 - author
 - reviewer
+
+### 6.3 Shadowed squad review loop
+
+Ricky should treat serious implementation work as squad-based by default, not as a single implementer followed by one broad review.
+
+The default squad is 2-3 agents:
+- implementer: owns a tight file/subsystem scope
+- shadow reviewer: follows progress in real time, checks the spec and repo rules, reads actual files, and flags drift early
+- optional validation owner: owns tests, dry-run proof, fixtures, or local smoke evidence when that work is substantial
+
+Required loop:
+1. deterministic context read
+2. lead splits work into bounded squads with non-overlapping file targets
+3. squads implement in parallel with live shadow feedback
+4. implementers write self-reflection artifacts under `.workflow-artifacts/`
+5. fresh independent self-review agents read the actual final files, AGENTS.md / CLAUDE.md, recent local conventions, and related rules
+6. implementers repair valid review findings
+7. deterministic validation gates run from captured output
+8. final Claude and Codex reviewers review independently
+9. final reviewers compare notes and write a merged final review artifact
+10. fresh fix agents address final-review findings, self-reflect, and hand the fixed state back for post-fix review
+11. final signoff happens only after post-fix review and deterministic gates prove the spec is complete, or a blocker artifact records exact evidence
+
+This loop is the default for workflows that change runtime behavior, generated workflows, user-visible behavior, shared execution contracts, or any workflow whose failure would mislead future generated work. Ricky may choose another swarm or workflow shape when the spec's dependency graph, risk, or scope clearly calls for it, but the alternative must preserve the same safety properties: implementer self-reflection, fresh independent review, post-fix review, and deterministic evidence. Smaller documentation/spec/convention workflows may use the lighter lead-author-reviewer shape when their verification is deterministic and scoped.
 
 ---
 
@@ -289,7 +316,8 @@ When possible, use a reviewer that is distinct from the writer.
 Preferred review shapes:
 - writer = codex, reviewer = claude
 - writer = claude, reviewer = codex
-- for critical workflows, both
+- for critical workflows, both Claude and Codex as final reviewers
+- for serious implementation workflows, shadow review and implementer self-reflection happen before final review
 
 ### 8.3 Review outputs should be materialized
 
