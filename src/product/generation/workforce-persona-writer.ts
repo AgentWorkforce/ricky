@@ -536,6 +536,13 @@ const MAX_TARGET_CONTEXT_BYTES = 8 * 1024;
 const MAX_RELEVANT_FILE_BYTES = 8 * 1024;
 const MAX_RELEVANT_FILES_TOTAL_BYTES = 96 * 1024;
 const MAX_VALIDATION_FEEDBACK_PREVIOUS_BYTES = 16 * 1024;
+const MAX_POLICY_FILE_BYTES = 24 * 1024;
+
+const RICKY_WORKFLOW_POLICY_FILES = [
+  'docs/workflows/WORKFLOW_STANDARDS.md',
+  'workflows/shared/WORKFLOW_AUTHORING_RULES.md',
+  'workflows/meta/spec/generated-workflow-template.md',
+] as const;
 
 export function buildWorkflowPersonaTask(
   spec: NormalizedWorkflowSpec,
@@ -579,6 +586,7 @@ export function buildWorkflowPersonaTask(
 
   const summarizedSpec = summarizeSpecForPersona(spec);
   const summarizedRelevantFiles = summarizeRelevantFilesForPersona(input.relevantFiles);
+  const rickyPolicyContext = renderRickyWorkflowPolicyContext(input.repoRoot);
 
   const specReference =
     input.specPath && summarizedSpec.descriptionTruncated
@@ -616,6 +624,9 @@ export function buildWorkflowPersonaTask(
     '',
     `Relevant file context (${summarizedRelevantFiles.includedCount} of ${input.relevantFiles.length} files; per-file content truncated above ${MAX_RELEVANT_FILE_BYTES} bytes):`,
     safeJson(summarizedRelevantFiles.files),
+    '',
+    'Ricky repo-local workflow policy context:',
+    rickyPolicyContext,
     '',
     'Matched Ricky generation skills:',
     renderSkillContextForPersona(input.skillContext),
@@ -660,6 +671,24 @@ export function buildWorkflowPersonaTask(
     'Structured response contract:',
     JSON.stringify(contract, null, 2),
   ].join('\n');
+}
+
+function renderRickyWorkflowPolicyContext(repoRoot: string): string {
+  return RICKY_WORKFLOW_POLICY_FILES.map((path) => {
+    const absolute = resolve(repoRoot, path);
+    const content = safeReadPolicyFile(absolute);
+    return content
+      ? `# ${path}\n${content}`
+      : `# ${path}\nMISSING: Ricky workflow policy file was not found at ${absolute}.`;
+  }).join('\n\n');
+}
+
+function safeReadPolicyFile(path: string): string | null {
+  try {
+    return truncateText(readFileSync(path, 'utf8'), MAX_POLICY_FILE_BYTES).text;
+  } catch {
+    return null;
+  }
 }
 
 function renderValidationFeedbackForPersona(

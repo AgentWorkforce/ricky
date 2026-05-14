@@ -175,6 +175,27 @@ If it failed, use this output to assign and fix issues, then rerun the command u
 ```
 
 
+### Default For Serious Implementation: Shadowed Squad Review Loop
+
+- implementer: owns a tight file/subsystem scope and writes the change
+- shadow reviewer: follows the implementer in real time, checks drift against the spec, and leaves feedback early
+- optional validation owner: owns tests, dry-run proof, or fixture coverage when that is a separate deliverable
+- Deterministically read the spec, AGENTS.md / CLAUDE.md, workflow standards, recent local docs, and declared file targets.
+- Lead splits work into bounded squads with non-overlapping ownership.
+- Squads run in parallel. The shadow reads actual files and channel updates, then posts feedback while the implementer is still active.
+- Each implementer writes a self-reflection artifact before external review. It must answer: what changed, what spec items are satisfied, what tests/proofs ran, what risks remain, and how the work follows repo rules.
+- A fresh self-review agent reads the post-implementation files, recent local conventions, AGENTS.md / CLAUDE.md, and related rules. It should not rely on the implementer's summary.
+- The implementer gets that feedback and performs a repair pass.
+- Deterministic gates run with captured output. Red output goes to a repair owner, then the same gate reruns.
+- A final review team of two agents, normally Claude and Codex, reviews independently. They then compare notes and write one merged final review artifact.
+- Fresh fix agents address final-review findings, self-reflect, and hand back to the final reviewers.
+- Final signoff only happens after post-fix review and final deterministic gates prove the spec is complete, or a blocker artifact explains why it cannot be completed.
+- Critical TypeScript rules:
+- Check the project's `package.json` for `"type": "module"` — if ESM, use `import` and top-level `await`. If CJS, use `require()` and wrap in `async function main()`.
+- `agent-relay run <file.ts>` executes the file as a standalone subprocess — it does NOT inspect exports. The file MUST call `.run()`.
+- Use `.run({ cwd: process.cwd() })` — `createWorkflowRenderer` does not exist
+- Validate with `--dry-run` before running: `agent-relay run --dry-run workflow.ts`
+
 ### ⚡ Parallelism — Design for Speed
 
 #### Cross-Workflow Parallelism: Wave Planning
@@ -1033,7 +1054,7 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 | Agents receiving noisy cross-channel messages during focused work | Use `relay.mute({ agent, channel })` to silence non-primary channels without leaving them |
 | Hardcoding all channels at spawn time | Use `agent.subscribe()` / `agent.unsubscribe()` for dynamic channel membership post-spawn |
 | Using `preset: 'worker'` for Codex in *interactive team* patterns when coordination is needed | Codex interactive mode works fine with PTY channel injection. Drop the preset for interactive team patterns (keep it for one-shot DAG workers where clean stdout matters) |
-| Separate reviewer agent from lead in interactive team | Merge lead + reviewer into one interactive Claude agent — reviews between rounds, fewer agents |
+| Unnecessary separate reviewer agent in a small interactive team | For low-risk work, merge lead + reviewer into one interactive Claude agent; for serious implementation or Ricky-style workflows, keep reviewer/shadow/final review roles distinct |
 | Not printing PR URL after `createGitHubStep({ action: 'createPR' })` | Capture `html_url` with `output: { mode: 'data', format: 'json', path: 'html_url' }` and echo or write it in a final deterministic step |
 | Workflow ending without worktree + PR for cross-repo changes | Add `setup-worktree` at start and `push-and-pr` + `cleanup-worktree` at end |
 
