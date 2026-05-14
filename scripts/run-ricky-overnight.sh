@@ -611,6 +611,11 @@ LAST_FILTER_REMOVED_TOTAL=0
 LAST_FILTER_REMOVED_MISSING=0
 LAST_FILTER_REMOVED_STALE=0
 LAST_FILTER_REMOVED_SATISFIED=0
+EXPANDED_PROBE_QUEUE_EXHAUSTED=false
+EXPANDED_PROBE_REMOVED_TOTAL=0
+EXPANDED_PROBE_REMOVED_MISSING=0
+EXPANDED_PROBE_REMOVED_STALE=0
+EXPANDED_PROBE_REMOVED_SATISFIED=0
 
 prune_tracked_workflow_file_for_repo_state() {
   local workflow_file="$1"
@@ -700,6 +705,12 @@ fallback_to_expanded_queue_when_flight_safe_exhausted() {
   local original_queue_mode="$QUEUE_MODE"
   local expanded_queue_count=0
 
+  EXPANDED_PROBE_QUEUE_EXHAUSTED=false
+  EXPANDED_PROBE_REMOVED_TOTAL=0
+  EXPANDED_PROBE_REMOVED_MISSING=0
+  EXPANDED_PROBE_REMOVED_STALE=0
+  EXPANDED_PROBE_REMOVED_SATISFIED=0
+
   if [[ "$QUEUE_MODE" != "flight-safe" ]]; then
     return 0
   fi
@@ -714,11 +725,17 @@ fallback_to_expanded_queue_when_flight_safe_exhausted() {
   write_queue
   filter_queue_for_repo_state
   expanded_queue_count="$(queue_count)"
+  EXPANDED_PROBE_REMOVED_TOTAL="$LAST_FILTER_REMOVED_TOTAL"
+  EXPANDED_PROBE_REMOVED_MISSING="$LAST_FILTER_REMOVED_MISSING"
+  EXPANDED_PROBE_REMOVED_STALE="$LAST_FILTER_REMOVED_STALE"
+  EXPANDED_PROBE_REMOVED_SATISFIED="$LAST_FILTER_REMOVED_SATISFIED"
 
   if (( expanded_queue_count > 0 )); then
     log "promoting overnight queue mode to expanded for this invocation (${expanded_queue_count} actionable workflows remain)"
     return 0
   fi
+
+  EXPANDED_PROBE_QUEUE_EXHAUSTED=true
 
   QUEUE_MODE="$original_queue_mode"
   refresh_state_paths
@@ -1938,6 +1955,22 @@ done < "$QUEUE_FILE"
 QUEUE_TOTAL="${#QUEUE_ITEMS[@]}"
 
 if (( QUEUE_TOTAL == 0 )); then
+  effective_removed_missing="$LAST_FILTER_REMOVED_MISSING"
+  effective_removed_stale="$LAST_FILTER_REMOVED_STALE"
+  effective_removed_satisfied="$LAST_FILTER_REMOVED_SATISFIED"
+  effective_removed_total="$LAST_FILTER_REMOVED_TOTAL"
+
+  if [[ "$EXPANDED_PROBE_QUEUE_EXHAUSTED" == "true" ]]; then
+    effective_removed_missing="$EXPANDED_PROBE_REMOVED_MISSING"
+    effective_removed_stale="$EXPANDED_PROBE_REMOVED_STALE"
+    effective_removed_satisfied="$EXPANDED_PROBE_REMOVED_SATISFIED"
+    effective_removed_total="$EXPANDED_PROBE_REMOVED_TOTAL"
+    LAST_FILTER_REMOVED_MISSING="$effective_removed_missing"
+    LAST_FILTER_REMOVED_STALE="$effective_removed_stale"
+    LAST_FILTER_REMOVED_SATISFIED="$effective_removed_satisfied"
+    LAST_FILTER_REMOVED_TOTAL="$effective_removed_total"
+  fi
+
   CURRENT_PASS="$PASSES"
   CURRENT_INDEX=0
   CURRENT_WORKFLOW=""
@@ -1945,10 +1978,10 @@ if (( QUEUE_TOTAL == 0 )); then
 
   if [[ -s "$FAILED_FILE" ]]; then
     mark_status "complete-with-failures" "restored checkpoint contained failed workflows; queue is now exhausted after repo-state filtering"
-  elif (( LAST_FILTER_REMOVED_MISSING > 0 )); then
-    mark_status "blocked" "queue exhausted because remaining workflows are missing: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
-  elif (( LAST_FILTER_REMOVED_STALE > 0 )); then
-    mark_status "complete" "queue exhausted after filtering stale migration-blocked workflows: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
+  elif (( effective_removed_missing > 0 )); then
+    mark_status "blocked" "queue exhausted because remaining workflows are missing: stale=${effective_removed_stale}, satisfied=${effective_removed_satisfied}, missing=${effective_removed_missing}"
+  elif (( effective_removed_stale > 0 )); then
+    mark_status "blocked" "queue exhausted because remaining workflows are migration-blocked: stale=${effective_removed_stale}, satisfied=${effective_removed_satisfied}, missing=${effective_removed_missing}"
   else
     mark_status "complete" "queue exhausted with no actionable workflows after repo-state filtering"
   fi
