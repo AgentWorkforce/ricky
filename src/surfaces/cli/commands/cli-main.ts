@@ -22,7 +22,12 @@ import type {
 } from '../../../cloud/api/workflow-schedules.js';
 import type { ConnectProviderOptions, ConnectProviderResult, StoredAuth, WhoAmIResponse } from '@agent-relay/cloud';
 import type { LocalRunMonitorState } from '../flows/local-run-monitor.js';
-import { legacyLocalRunStatePath, localRunStatePath } from '../flows/local-run-monitor.js';
+import {
+  initializeLocalRunMonitorState,
+  legacyLocalRunStatePath,
+  localRunStatePath,
+  startLocalRunMonitor,
+} from '../flows/local-run-monitor.js';
 import type {
   CloudAgentReadiness,
   CloudImplementationAgent,
@@ -32,6 +37,7 @@ import type {
 } from '../flows/cloud-workflow-flow.js';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ora from 'ora';
@@ -131,6 +137,18 @@ export type CliProgressSpinnerFactory = (options: {
   text: string;
   stream: NodeJS.WritableStream;
 }) => CliProgressSpinner;
+export type DetachedProcessSpawner = (
+  command: string,
+  args: string[],
+  options: {
+    cwd: string;
+    detached: boolean;
+    stdio: 'ignore';
+    env: NodeJS.ProcessEnv;
+  },
+) => Pick<ChildProcess, 'unref'>;
+
+const DETACHED_BACKGROUND_RUN_ID_ENV = 'RICKY_DETACHED_BACKGROUND_RUN_ID';
 
 // ---------------------------------------------------------------------------
 // Injectable dependencies
@@ -159,6 +177,8 @@ export interface CliMainDeps extends InteractiveCliDeps {
   connectTimeoutMs?: number;
   /** Spinner factory override for focused progress tests. */
   createProgressSpinner?: CliProgressSpinnerFactory;
+  /** Detached background process spawner override for deterministic CLI tests. */
+  spawnDetachedProcess?: DetachedProcessSpawner;
   /** Cloud workflow scheduling override for deterministic schedule command tests. */
   scheduleWorkflow?: RickyScheduleWorkflow;
   /** Cloud workflow schedule listing override for deterministic schedule command tests. */
@@ -681,6 +701,108 @@ function cliPackageRoot(): string {
 
 function resolveSpecFilePath(specFile: string, invocationRoot: string): string {
   return isAbsolute(specFile) ? specFile : resolve(invocationRoot, specFile);
+}
+
+function shouldLaunchDetachedBackgroundRun(parsed: ParsedArgs, cliHandoff: RawHandoff | undefined): boolean {
+  return Boolean(
+    cliHandoff &&
+    parsed.command === 'run' &&
+    parsed.runRequested === true &&
+    parsed.background === true &&
+    parsed.mode !== 'cloud',
+  );
+}
+
+async function launchDetachedBackgroundRun(
+  argv: string[],
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff,
+  deps: CliMainDeps,
+): Promise<CliMainResult> {
+  const cwd = resolveInvocationRoot(deps.cwd);
+  const artifactPath = backgroundArtifactPathFor(parsed, cliHandoff);
+  const runningState = await initializeLocalRunMonitorState({
+    cwd,
+    artifactPath,
+    mode: 'background',
+  });
+  const command = process.execPath;
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    return {
+      exitCode: 1,
+      output: renderCliArgumentRecovery(['Could not start background run: Ricky entrypoint path is unavailable.']),
+    };
+  }
+  const childArgs = [entrypoint, ...backgroundChildArgs(argv)];
+  const spawner = deps.spawnDetachedProcess ?? ((command, args, options) => spawn(command, args, options));
+  const child = spawner(command, childArgs, {
+    cwd,
+    detached: true,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      [DETACHED_BACKGROUND_RUN_ID_ENV]: runningState.runId,
+    },
+  });
+  child.unref();
+
+  return {
+    exitCode: 0,
+    output: renderDetachedBackgroundRunStarted(runningState),
+  };
+}
+
+function backgroundChildArgs(argv: string[]): string[] {
+  const args = argv.filter((arg) => arg !== '--background');
+  return args.includes('--foreground') ? args : [...args, '--foreground'];
+}
+
+async function runDetachedBackgroundChild(
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff,
+  deps: CliMainDeps,
+): Promise<CliMainResult> {
+  const runId = process.env[DETACHED_BACKGROUND_RUN_ID_ENV]?.trim();
+  if (!runId) {
+    return {
+      exitCode: 1,
+      output: renderCliArgumentRecovery([`${DETACHED_BACKGROUND_RUN_ID_ENV} is empty.`]),
+    };
+  }
+  const cwd = resolveInvocationRoot(deps.cwd);
+  const finalState = await startLocalRunMonitor({
+    cwd,
+    artifactPath: backgroundArtifactPathFor(parsed, cliHandoff),
+    handoff: cliHandoff,
+    mode: 'foreground',
+    autoFixAttempts: parsed.autoFix,
+    localOptions: deps.localExecutor ? { executor: deps.localExecutor } : undefined,
+    runIdFactory: () => runId,
+  });
+  return {
+    exitCode: finalState.status === 'completed' ? 0 : 1,
+    output: [],
+  };
+}
+
+function backgroundArtifactPathFor(parsed: ParsedArgs, cliHandoff: RawHandoff): string {
+  if (parsed.artifact) return parsed.artifact;
+  if (parsed.workflowName) return defaultArtifactPathForWorkflowName(parsed.workflowName);
+  if (cliHandoff.source === 'workflow-artifact') return cliHandoff.artifactPath;
+  return 'workflows/generated/background-run.ts';
+}
+
+function renderDetachedBackgroundRunStarted(state: LocalRunMonitorState): string[] {
+  return [
+    'Ricky background run',
+    '',
+    `Workflow run id: ${state.runId}`,
+    `Status: ${state.status}`,
+    `Status command: ${state.reattachCommand}`,
+    `Logs: ${state.logPath}`,
+    `Evidence: ${state.evidencePath}`,
+  ];
 }
 
 class CloudPowerUserSetupError extends Error {
@@ -1740,6 +1862,14 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
       exitCode: 1,
       output: renderCliArgumentRecovery([`Could not read spec handoff: ${message}`]),
     };
+  }
+
+  if (cliHandoff && process.env[DETACHED_BACKGROUND_RUN_ID_ENV]) {
+    return runDetachedBackgroundChild(parsed, cliHandoff, deps);
+  }
+
+  if (shouldLaunchDetachedBackgroundRun(parsed, cliHandoff)) {
+    return launchDetachedBackgroundRun(argv, parsed, cliHandoff!, deps);
   }
 
   // Default: run interactive session

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { InteractiveCliResult } from '../entrypoint/interactive-cli.js';
 import type { OnboardingResult } from '../cli/onboarding.js';
 import type { LocalResponse } from '../../../local/entrypoint.js';
-import { cliMain, parseArgs, renderHelp, type CliProgressSpinner } from './cli-main.js';
+import { cliMain, parseArgs, renderHelp, type CliProgressSpinner, type DetachedProcessSpawner } from './cli-main.js';
 
 // ---------------------------------------------------------------------------
 // parseArgs
@@ -1752,7 +1752,7 @@ describe('cliMain', () => {
     );
 
     await cliMain({
-      argv: ['local', '--spec', 'build a workflow', '--run', '--background', '--yes'],
+      argv: ['local', '--spec', 'build a workflow', '--background', '--yes'],
       runInteractive: runner,
     });
     await cliMain({
@@ -1767,6 +1767,89 @@ describe('cliMain', () => {
     expect(runner.mock.calls[1][0].handoff.cliMetadata).toMatchObject({
       runMode: 'foreground',
     });
+  });
+
+  it('detaches power-user background generate-and-run before local generation', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-detached-parent-'));
+    const unref = vi.fn();
+    const spawnDetachedProcess = vi.fn<DetachedProcessSpawner>(() => ({ unref }));
+    const runInteractive = vi.fn();
+
+    try {
+      const result = await cliMain({
+        argv: ['workflow', '--spec-file', './custom-digest-functions-spec.md', '--run', '--background', '--best-judgement'],
+        cwd: repo,
+        readFileText: vi.fn().mockResolvedValue('build the custom digest functions workflow'),
+        runInteractive,
+        spawnDetachedProcess,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(runInteractive).not.toHaveBeenCalled();
+      expect(spawnDetachedProcess).toHaveBeenCalledOnce();
+      const [, childArgs, options] = spawnDetachedProcess.mock.calls[0];
+      expect(childArgs).toContain('--foreground');
+      expect(childArgs).not.toContain('--background');
+      expect(options).toMatchObject({
+        cwd: repo,
+        detached: true,
+        stdio: 'ignore',
+      });
+      expect(options.env.RICKY_DETACHED_BACKGROUND_RUN_ID).toMatch(/^ricky-local-/);
+      expect(unref).toHaveBeenCalledOnce();
+      const output = result.output.join('\n');
+      expect(output).toContain('Ricky background run');
+      expect(output).toContain('Status: running');
+      expect(output).toContain('Status command: ricky status --run');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('runs a detached background child under the parent run id', async () => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-detached-child-'));
+    const originalRunId = process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
+    const runId = 'ricky-local-detached-child';
+    const localExecutor = {
+      execute: vi.fn().mockResolvedValue(stagedLocalResult()),
+    };
+
+    process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = runId;
+    try {
+      const result = await cliMain({
+        argv: ['workflow', '--spec-file', './custom-digest-functions-spec.md', '--run', '--foreground', '--best-judgement'],
+        cwd: repo,
+        readFileText: vi.fn().mockResolvedValue('build the custom digest functions workflow'),
+        localExecutor,
+        runInteractive: vi.fn(),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toEqual([]);
+      expect(localExecutor.execute).toHaveBeenCalledOnce();
+      const statePath = join(repo, '.workflow-artifacts', 'ricky-local-runs', runId, 'state.json');
+      const state = JSON.parse(await readFile(statePath, 'utf8'));
+      expect(state).toMatchObject({
+        runId,
+        status: 'completed',
+        reattachCommand: `ricky status --run ${runId}`,
+      });
+    } finally {
+      if (originalRunId === undefined) {
+        delete process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
+      } else {
+        process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = originalRunId;
+      }
+      await rm(repo, { recursive: true, force: true });
+    }
   });
 
   it('uses a TTY spinner for foreground local progress and stops before the final summary', async () => {
@@ -1892,6 +1975,9 @@ describe('cliMain', () => {
   });
 
   it('does not attach spinner progress for JSON, quiet, non-TTY, background, or ordinary injected output streams', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
     const cases = [
       { argv: ['run', 'workflows/generated/issue-3.ts', '--json'], isTTY: true, output: undefined, create: true },
       { argv: ['run', 'workflows/generated/issue-3.ts', '--quiet'], isTTY: true, output: undefined, create: true },
@@ -1903,18 +1989,33 @@ describe('cliMain', () => {
     for (const testCase of cases) {
       const createProgressSpinner = vi.fn();
       const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ localResult: stagedLocalResult() }));
+      const isBackground = testCase.argv.includes('--background');
+      const repo = isBackground ? await mkdtemp(join(tmpdir(), 'ricky-spinner-background-')) : undefined;
+      const unref = vi.fn();
+      const spawnDetachedProcess = vi.fn<DetachedProcessSpawner>(() => ({ unref }));
 
-      await cliMain({
-        argv: testCase.argv,
-        isTTY: testCase.isTTY,
-        ...(testCase.output ? { output: testCase.output } : {}),
-        ...(testCase.create ? { createProgressSpinner } : {}),
-        runInteractive: runner,
-      });
+      try {
+        await cliMain({
+          argv: testCase.argv,
+          isTTY: testCase.isTTY,
+          ...(repo ? { cwd: repo } : {}),
+          ...(testCase.output ? { output: testCase.output } : {}),
+          ...(testCase.create ? { createProgressSpinner } : {}),
+          ...(isBackground ? { spawnDetachedProcess } : {}),
+          runInteractive: runner,
+        });
 
-      expect(runner.mock.calls[0][0].localProgress).toBeUndefined();
-      expect(runner.mock.calls[0][0].localRuntimeOutput).toBeUndefined();
-      expect(createProgressSpinner).not.toHaveBeenCalled();
+        if (isBackground) {
+          expect(runner).not.toHaveBeenCalled();
+          expect(spawnDetachedProcess).toHaveBeenCalledOnce();
+        } else {
+          expect(runner.mock.calls[0][0].localProgress).toBeUndefined();
+          expect(runner.mock.calls[0][0].localRuntimeOutput).toBeUndefined();
+        }
+        expect(createProgressSpinner).not.toHaveBeenCalled();
+      } finally {
+        if (repo) await rm(repo, { recursive: true, force: true });
+      }
     }
   });
 
