@@ -43,6 +43,28 @@ export interface LocalRunMonitorOptions {
 }
 
 export async function startLocalRunMonitor(options: LocalRunMonitorOptions): Promise<LocalRunMonitorState> {
+  const runningState = await initializeLocalRunMonitorState(options);
+  const handoff = withSafeRunOptions(options.handoff, options.autoFixAttempts, runningState.runId);
+  await options.onMonitorStarted?.(runningState);
+
+  if (options.mode === 'background') {
+    void executeLocalRunMonitor(options, handoff, runningState).catch(async (error: unknown) => {
+      try {
+        await persistFailedRunState(runningState, error);
+      } catch {
+        // The monitor has no caller in background mode. Best-effort persistence
+        // already failed, so avoid surfacing an unhandled rejection.
+      }
+    });
+    return runningState;
+  }
+
+  return executeLocalRunMonitor(options, handoff, runningState);
+}
+
+export async function initializeLocalRunMonitorState(
+  options: Pick<LocalRunMonitorOptions, 'cwd' | 'artifactPath' | 'mode' | 'stateRoot' | 'runIdFactory'>,
+): Promise<LocalRunMonitorState> {
   const runId = options.runIdFactory
     ? options.runIdFactory({ artifactPath: options.artifactPath, mode: options.mode })
     : `ricky-local-${randomUUID()}`;
@@ -67,24 +89,9 @@ export async function startLocalRunMonitor(options: LocalRunMonitorOptions): Pro
   };
   await persistState(initialState);
 
-  const handoff = withSafeRunOptions(options.handoff, options.autoFixAttempts, runId);
   const runningState = { ...initialState, status: 'running' as const };
   await persistState(runningState);
-  await options.onMonitorStarted?.(runningState);
-
-  if (options.mode === 'background') {
-    void executeLocalRunMonitor(options, handoff, runningState).catch(async (error: unknown) => {
-      try {
-        await persistFailedRunState(runningState, error);
-      } catch {
-        // The monitor has no caller in background mode. Best-effort persistence
-        // already failed, so avoid surfacing an unhandled rejection.
-      }
-    });
-    return runningState;
-  }
-
-  return executeLocalRunMonitor(options, handoff, runningState);
+  return runningState;
 }
 
 export function localWorkflowArtifactDir(cwd: string, runId: string): string {
