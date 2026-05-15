@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { repairWorkflowDeterministically, runWithAutoFix } from './auto-fix-loop.js';
+import { repairWorkflowDeterministically, resolveSafeResumeAnchor, runWithAutoFix } from './auto-fix-loop.js';
 import type { LocalClassifiedBlocker, LocalResponse } from './entrypoint.js';
 import type { LocalInvocationRequest } from './request-normalizer.js';
 import type { FailureClassification } from '../runtime/failure/types.js';
@@ -1071,6 +1071,60 @@ describe('isSyntheticStageId', () => {
     expect(isSyntheticStageId('aggregate-drift')).toBe(false);
     expect(isSyntheticStageId(undefined)).toBe(false);
     expect(isSyntheticStageId('')).toBe(false);
+  });
+});
+
+describe('resolveSafeResumeAnchor', () => {
+  // Mirrors the generated child-workflow shape that caused the
+  // final-review-pass-gate infinite-retry loop: agent steps produce review
+  // artifacts, then a deterministic gate greps them.
+  const reviewGateWorkflow = `import { workflow } from '@agent-relay/sdk/workflows';
+const wf = workflow('child')
+  .step("prepare-context", { type: "deterministic", command: "echo prep" })
+  .step("implement-slice", { agent: "impl-codex", dependsOn: ["prepare-context"], task: "do work" })
+  .step("review-claude", { agent: "reviewer-claude", dependsOn: ["implement-slice"], task: "review" })
+  .step("final-fix-codex", { agent: "validator-codex", dependsOn: ["review-claude"], task: "final fix" })
+  .step("final-review-pass-gate", { type: "deterministic", dependsOn: ["final-fix-codex"], command: "grep -F MARKER artifact.md" })
+  .step("final-signoff", { type: "deterministic", dependsOn: ["final-review-pass-gate"], command: "echo done" });
+`;
+
+  it('moves the anchor off a deterministic gate to its nearest upstream agent producer', () => {
+    expect(resolveSafeResumeAnchor('final-review-pass-gate', reviewGateWorkflow)).toBe('final-fix-codex');
+  });
+
+  it('leaves an agent step as its own resume anchor', () => {
+    expect(resolveSafeResumeAnchor('review-claude', reviewGateWorkflow)).toBe('review-claude');
+  });
+
+  it('keeps the anchor when the failed step is the gate but the chain is purely deterministic', () => {
+    const deterministicOnly = `import { workflow } from '@agent-relay/sdk/workflows';
+const wf = workflow('det')
+  .step("build", { type: "deterministic", command: "make" })
+  .step("verify", { type: "deterministic", dependsOn: ["build"], command: "test -f out" });
+`;
+    expect(resolveSafeResumeAnchor('verify', deterministicOnly)).toBe('verify');
+  });
+
+  it('returns the failed step unchanged when content is missing or unparseable', () => {
+    expect(resolveSafeResumeAnchor('final-review-pass-gate', undefined)).toBe('final-review-pass-gate');
+    expect(resolveSafeResumeAnchor('final-review-pass-gate', '')).toBe('final-review-pass-gate');
+    expect(resolveSafeResumeAnchor(undefined, reviewGateWorkflow)).toBeUndefined();
+  });
+
+  it('returns the failed step unchanged when it is not a known step', () => {
+    expect(resolveSafeResumeAnchor('does-not-exist', reviewGateWorkflow)).toBe('does-not-exist');
+  });
+
+  it('does not treat step ids embedded in shell command HEREDOCs as real steps', () => {
+    // The grep below references "final-review-pass-gate" inside a command
+    // string; the AST keeps string-literal contents inert so it is not
+    // mistaken for a step definition.
+    const withHeredoc = `import { workflow } from '@agent-relay/sdk/workflows';
+const wf = workflow('child')
+  .step("implement", { agent: "impl-codex", task: "work" })
+  .step("gate", { type: "deterministic", dependsOn: ["implement"], command: "echo .step(\\"final-review-pass-gate\\", {}) && grep MARKER f" });
+`;
+    expect(resolveSafeResumeAnchor('gate', withHeredoc)).toBe('implement');
   });
 });
 
