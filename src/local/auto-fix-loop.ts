@@ -159,6 +159,199 @@ function safeToRetryWithoutStartFromStep(
   return !workflowDidExpensiveWork(evidence);
 }
 
+interface WorkflowStepNode {
+  id: string;
+  /**
+   * True when the step regenerates its own output on every run (agent steps,
+   * and any non-deterministic step type). False only for step types the SDK
+   * treats as broker-free and pure: `deterministic`, `worktree`, `integration`
+   * (see `@agent-relay/sdk` runner `requiresBroker`). Deterministic gates that
+   * validate artifacts written by upstream agent steps are the failure mode
+   * this guards: resuming `--start-from <gate>` skips the agent producers, so
+   * the gate's input is never regenerated and it fails forever.
+   */
+  regeneratesOutput: boolean;
+  dependsOn: string[];
+  order: number;
+}
+
+/**
+ * Parse `workflow.step("id", { ... })` builder calls from a generated workflow
+ * artifact into a step-dependency graph. Uses the TypeScript AST (per AGENTS.md
+ * "Source-Text Analysis: Use Grammar-Aware Parsers, Not Regex") so step ids
+ * embedded in shell `command` HEREDOCs or `task` prose don't get mistaken for
+ * real steps. Returns null when the artifact has no recognizable steps.
+ */
+function parseWorkflowStepGraph(content: string): Map<string, WorkflowStepNode> | null {
+  let sourceFile: ts.SourceFile;
+  try {
+    sourceFile = ts.createSourceFile(
+      'ricky-workflow-artifact.ts',
+      content,
+      ts.ScriptTarget.Latest,
+      false,
+      ts.ScriptKind.TS,
+    );
+  } catch {
+    return null;
+  }
+
+  const steps = new Map<string, WorkflowStepNode>();
+  let order = 0;
+  const nonRegeneratingTypes = new Set(['deterministic', 'worktree', 'integration']);
+
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'step'
+      && node.arguments.length >= 2
+      && ts.isStringLiteralLike(node.arguments[0])
+      && ts.isObjectLiteralExpression(node.arguments[1])
+    ) {
+      const id = node.arguments[0].text;
+      const config = node.arguments[1];
+      let hasAgent = false;
+      let stepType: string | undefined;
+      let dependsOn: string[] = [];
+      for (const prop of config.properties) {
+        if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
+        const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)
+          ? prop.name.text
+          : undefined;
+        if (key === 'agent') hasAgent = true;
+        if (key === 'type' && ts.isStringLiteralLike(prop.initializer)) {
+          stepType = prop.initializer.text;
+        }
+        if (key === 'dependsOn' && ts.isArrayLiteralExpression(prop.initializer)) {
+          dependsOn = prop.initializer.elements
+            .filter(ts.isStringLiteralLike)
+            .map((element) => element.text);
+        }
+      }
+      // A step regenerates output unless it is explicitly one of the pure
+      // SDK step types AND not an agent step. Default-unknown → treat as
+      // regenerating (safe: resuming there re-runs it).
+      const regeneratesOutput = hasAgent
+        || stepType === undefined
+        || !nonRegeneratingTypes.has(stepType);
+      if (!steps.has(id)) {
+        steps.set(id, { id, regeneratesOutput, dependsOn, order: order++ });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return steps.size > 0 ? steps : null;
+}
+
+/**
+ * Choose a safe `--start-from` anchor for an auto-fix retry.
+ *
+ * Resuming directly from `failedStep` is correct only when re-running that
+ * step alone can succeed. It cannot when `failedStep` is a deterministic gate
+ * that validates an artifact produced by an upstream agent step: resuming
+ * from the gate skips the agent producer, the artifact is never regenerated,
+ * and the gate fails identically every attempt (the
+ * `final-review-pass-gate` infinite-retry loop). In that case, anchor the
+ * resume at the *nearest* upstream agent step the gate transitively depends
+ * on so the producing step re-runs and regenerates the gate's input; earlier
+ * artifacts persist on disk between runs so they need not be recomputed.
+ *
+ * Returns `failedStep` unchanged when it is itself a regenerating step, when
+ * its whole dependency chain is pure/deterministic (recompute is safe), or
+ * when the workflow graph cannot be parsed.
+ */
+/**
+ * Extract the literal source text of a step's config object —
+ * `.step("<id>", { ... })` → the `{ ... }` span — via the TypeScript AST.
+ * Used to detect whether a repair actually rewrote the failed step.
+ */
+function extractStepConfigText(content: string, stepId: string): string | null {
+  let sourceFile: ts.SourceFile;
+  try {
+    sourceFile = ts.createSourceFile(
+      'ricky-workflow-artifact.ts',
+      content,
+      ts.ScriptTarget.Latest,
+      false,
+      ts.ScriptKind.TS,
+    );
+  } catch {
+    return null;
+  }
+  let found: string | null = null;
+  const visit = (node: ts.Node): void => {
+    if (found !== null) return;
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'step'
+      && node.arguments.length >= 2
+      && ts.isStringLiteralLike(node.arguments[0])
+      && node.arguments[0].text === stepId
+      && ts.isObjectLiteralExpression(node.arguments[1])
+    ) {
+      found = node.arguments[1].getText(sourceFile);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+/**
+ * True when a repair rewrote the failed step's own definition. When the gate
+ * step itself was the bug (e.g. the `lead-plan-gate` marker-append logic) the
+ * repair fixes it in place and resuming `--start-from <gate>` is correct —
+ * the resume-anchor downgrade must NOT fire in that case.
+ */
+function failedStepRepaired(
+  failedStep: string,
+  oldContent: string | undefined,
+  newContent: string | undefined,
+): boolean {
+  if (!oldContent || !newContent) return false;
+  const before = extractStepConfigText(oldContent, failedStep);
+  const after = extractStepConfigText(newContent, failedStep);
+  if (before === null || after === null) return false;
+  return before !== after;
+}
+
+export function resolveSafeResumeAnchor(
+  failedStep: string | undefined,
+  workflowContent: string | undefined,
+): string | undefined {
+  if (!failedStep || !workflowContent) return failedStep;
+  const graph = parseWorkflowStepGraph(workflowContent);
+  if (!graph) return failedStep;
+  const failed = graph.get(failedStep);
+  if (!failed) return failedStep;
+  if (failed.regeneratesOutput) return failedStep;
+
+  const seen = new Set<string>([failedStep]);
+  let frontier = [...failed.dependsOn];
+  while (frontier.length > 0) {
+    const nearestAgent = frontier
+      .map((id) => graph.get(id))
+      .filter((node): node is WorkflowStepNode => Boolean(node) && node!.regeneratesOutput)
+      // Prefer the most-recently-declared producer when several sit at the
+      // same dependency distance — it is the closest to the gate.
+      .sort((a, b) => b.order - a.order)[0];
+    if (nearestAgent) return nearestAgent.id;
+    const next: string[] = [];
+    for (const id of frontier) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const node = graph.get(id);
+      if (node) next.push(...node.dependsOn);
+    }
+    frontier = next;
+  }
+  return failedStep;
+}
+
 /**
  * Reason string explaining why we refused to retry from scratch. Kept in one
  * place so escalation messages and warnings stay aligned.
@@ -468,6 +661,22 @@ export async function runWithAutoFix(
           retryOfRunId = runId;
         }
 
+        // If the repair rewrote the failed step itself, the fix lives in that
+        // step — resume from it. Only when the repair left the failed step
+        // untouched (e.g. it made downstream validation non-terminal but did
+        // not fix a gate whose input comes from a skipped upstream agent
+        // step) do we downgrade the anchor to the artifact's producer.
+        const personaResumeAnchor =
+          failedStep && failedStepRepaired(failedStep, repairTarget.artifactContent, repair.content)
+            ? failedStep
+            : resolveSafeResumeAnchor(failedStep, repair.content);
+        if (personaResumeAnchor !== failedStep && failedStep) {
+          warnings.push(
+            `Auto-fix resume anchor moved from "${failedStep}" to "${personaResumeAnchor}": ` +
+            `"${failedStep}" validates artifacts produced by an upstream agent step that a ` +
+            `direct --start-from would skip.`,
+          );
+        }
         currentRequest = {
           ...retryBaseRequest(currentRequest, response, repairedArtifactPath, repair.content),
           autoFix: undefined,
@@ -475,11 +684,11 @@ export async function runWithAutoFix(
             attempt: attempt + 1,
             maxAttempts,
             ...(runId ? { previousRunId: runId, retryOfRunId: retryOfRunId ?? runId } : {}),
-            ...(failedStep ? { startFromStep: failedStep } : {}),
+            ...(personaResumeAnchor ? { startFromStep: personaResumeAnchor } : {}),
             reason: `auto-fix retry after Workforce workflow persona repair for ${blockerCode ?? 'local failure'}`,
           },
         };
-        onProgress?.(`Retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
+        onProgress?.(`Retrying workflow${personaResumeAnchor ? ` from ${personaResumeAnchor}` : ''}...`);
         continue;
       } catch (error) {
         attemptSummary.fix_error = error instanceof Error ? error.message : String(error);
@@ -493,6 +702,14 @@ export async function runWithAutoFix(
           } else if (!retryOfRunId) {
             retryOfRunId = runId;
           }
+          const providerFailResumeAnchor = resolveSafeResumeAnchor(failedStep, repairTarget.artifactContent);
+          if (providerFailResumeAnchor !== failedStep && failedStep) {
+            warnings.push(
+              `Auto-fix resume anchor moved from "${failedStep}" to "${providerFailResumeAnchor}": ` +
+              `"${failedStep}" validates artifacts produced by an upstream agent step that a ` +
+              `direct --start-from would skip.`,
+            );
+          }
           currentRequest = {
             ...retryBaseRequest(currentRequest, response),
             autoFix: undefined,
@@ -500,11 +717,11 @@ export async function runWithAutoFix(
               attempt: attempt + 1,
               maxAttempts,
               ...(runId ? { previousRunId: runId, retryOfRunId: retryOfRunId ?? runId } : {}),
-              ...(failedStep ? { startFromStep: failedStep } : {}),
+              ...(providerFailResumeAnchor ? { startFromStep: providerFailResumeAnchor } : {}),
               reason: `auto-fix retry after workflow repair provider failure for ${blockerCode ?? 'local failure'}`,
             },
           };
-          onProgress?.(`Workflow repair provider failed; retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
+          onProgress?.(`Workflow repair provider failed; retrying workflow${providerFailResumeAnchor ? ` from ${providerFailResumeAnchor}` : ''}...`);
           continue;
         }
         if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
@@ -605,6 +822,19 @@ export async function runWithAutoFix(
       retryOfRunId = runId;
     }
 
+    // The direct-repair path is only reached for V1 environment/binary
+    // blockers, after the workflow-repair branch has already returned. No
+    // workflow artifact content is in scope here, so the anchor stays as the
+    // failed step (the review-gate skip-loop is handled by the workflow-repair
+    // sites above, which do carry artifact content).
+    const directResumeAnchor = resolveSafeResumeAnchor(failedStep, undefined);
+    if (directResumeAnchor !== failedStep && failedStep) {
+      warnings.push(
+        `Auto-fix resume anchor moved from "${failedStep}" to "${directResumeAnchor}": ` +
+        `"${failedStep}" validates artifacts produced by an upstream agent step that a ` +
+        `direct --start-from would skip.`,
+      );
+    }
     currentRequest = {
       ...retryBaseRequest(currentRequest, response),
       autoFix: undefined,
@@ -612,11 +842,11 @@ export async function runWithAutoFix(
         attempt: attempt + 1,
         maxAttempts,
         ...(runId ? { previousRunId: runId, retryOfRunId: retryOfRunId ?? runId } : {}),
-        ...(failedStep ? { startFromStep: failedStep } : {}),
+        ...(directResumeAnchor ? { startFromStep: directResumeAnchor } : {}),
         reason: `auto-fix retry after ${blockerCode ?? 'local failure'}`,
       },
     };
-    onProgress?.(`Retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
+    onProgress?.(`Retrying workflow${directResumeAnchor ? ` from ${directResumeAnchor}` : ''}...`);
   }
 
   return withAutoFix(lastResponse ?? failedBeforeAttempt(request), maxAttempts, attempts, 'error', warnings, trackingRunId);
