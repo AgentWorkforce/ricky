@@ -6,12 +6,18 @@
  */
 
 import type {
+  EvidenceOutcome,
   EvidenceSummary,
   WorkflowRunEvidence,
   WorkflowStepEvidence,
   DeterministicGateResult,
+  DeterministicGateAudit,
+  EvidenceCommandReference,
+  EvidenceOutputSnippet,
+  FixLoopAttemptEvidence,
+  NarrativeAuditRecord,
   VerificationResult,
-} from '../../shared/models/workflow-evidence.js';
+} from '../evidence/types.js';
 import { summarizeEvidence } from '../evidence/capture.js';
 import {
   type FailureClassification,
@@ -54,6 +60,8 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
 // ── Step overflow threshold ──────────────────────────────────────────
 
 export const RETRY_OVERFLOW_THRESHOLD = 5;
+export const STEP_VERIFICATION_OVERFLOW_THRESHOLD = 10;
+export const WORKFLOW_STEP_OVERFLOW_THRESHOLD = 10;
 
 // ── Public API ───────────────────────────────────────────────────────
 
@@ -64,11 +72,16 @@ export const RETRY_OVERFLOW_THRESHOLD = 5;
  * and a summary indicating no failure).
  */
 export function classifyFailure(evidence: WorkflowRunEvidence): FailureClassification;
+export function classifyFailure(outcome: EvidenceOutcome): FailureClassification;
 export function classifyFailure(summary: EvidenceSummary): FailureClassification;
 export function classifyFailure(summary: PlainValidationSummary): FailureClassification;
 export function classifyFailure(input: FailureClassifierInput): FailureClassification {
   if (typeof input === 'string') {
     return classifyFromPlainSummary(input);
+  }
+
+  if (isEvidenceOutcome(input)) {
+    return classifyFromOutcome(input);
   }
 
   if (isEvidenceSummary(input)) {
@@ -77,6 +90,53 @@ export function classifyFailure(input: FailureClassifierInput): FailureClassific
 
   const summary = summarizeEvidence(input);
   return classifyWithFullEvidence(summary, input);
+}
+
+// ── Internal classification from structured evidence outcome ─────────
+
+function classifyFromOutcome(outcome: EvidenceOutcome): FailureClassification {
+  const summary = summaryWithOutcomeMessage(outcome);
+
+  if (isCleanPass(summary)) {
+    return noFailure(summary);
+  }
+
+  if (summary.runStatus === 'running' || summary.runStatus === 'pending') {
+    return stillRunning(summary);
+  }
+
+  const signals: EvidenceSignal[] = [];
+  const detected: FailureClass[] = [];
+
+  if (detectOutcomeTimeout(outcome, signals)) {
+    detected.push(FailureClass.Timeout);
+  }
+
+  if (detectOutcomeEnvironmentError(outcome, signals)) {
+    detected.push(FailureClass.EnvironmentError);
+  }
+
+  if (detectDeadlock(summary, signals)) {
+    detected.push(FailureClass.Deadlock);
+  }
+
+  if (detectOutcomeStepOverflow(outcome, signals)) {
+    detected.push(FailureClass.StepOverflow);
+  }
+
+  if (detectOutcomeAgentDrift(outcome, signals)) {
+    detected.push(FailureClass.AgentDrift);
+  }
+
+  if (detectOutcomeVerificationFailure(outcome, signals)) {
+    detected.push(FailureClass.VerificationFailure);
+  }
+
+  if (detected.length === 0) {
+    return unknownFailure(summary, signals);
+  }
+
+  return buildClassification(detected[0], detected.slice(1), signals, summary);
 }
 
 /**
@@ -213,6 +273,15 @@ function classifyFromSummaryOnly(summary: EvidenceSummary): FailureClassificatio
   }
 
   // Step overflow from summary
+  if (summary.totalSteps > WORKFLOW_STEP_OVERFLOW_THRESHOLD) {
+    signals.push({
+      observation: `${summary.totalSteps} workflow steps exceeds threshold of ${WORKFLOW_STEP_OVERFLOW_THRESHOLD}`,
+      source: 'step-overflow:run-summary',
+      strength: Confidence.Medium,
+    });
+    detected.push(FailureClass.StepOverflow);
+  }
+
   if (summary.retryCount >= RETRY_OVERFLOW_THRESHOLD && summary.totalSteps > 0) {
     signals.push({
       observation: `${summary.retryCount} retries across ${summary.totalSteps} steps`,
@@ -269,7 +338,7 @@ function classifyFromPlainSummary(summaryText: PlainValidationSummary): FailureC
     detected.push(FailureClass.Deadlock);
   }
 
-  if (/\b(step overflow|retry budget|retries exhausted|max attempts|too many attempts|retry storm)\b/i.test(text)) {
+  if (/\b(step overflow|retry budget|retries exhausted|max attempts|too many attempts|too many checks|too many verifications|oversized step|retry storm)\b/i.test(text)) {
     signals.push(plainSignal(`Plain summary indicates step overflow: ${truncate(text, 120)}`, Confidence.Medium));
     detected.push(FailureClass.StepOverflow);
   }
@@ -431,9 +500,7 @@ function detectStepOverflow(
   evidence: WorkflowRunEvidence,
   signals: EvidenceSignal[],
 ): boolean {
-  if (summary.retryCount < RETRY_OVERFLOW_THRESHOLD) {
-    return false;
-  }
+  let found = false;
 
   // Track whether we added a step-level retry signal locally
   let addedStepSignal = false;
@@ -447,21 +514,42 @@ function detectStepOverflow(
         strength: Confidence.High,
       });
       addedStepSignal = true;
+      found = true;
     }
+
+    const verificationCount = totalStepVerificationCount(step);
+    if (verificationCount > STEP_VERIFICATION_OVERFLOW_THRESHOLD) {
+      signals.push({
+        observation: `Step "${step.stepName}" has ${verificationCount} verification checks, exceeding threshold of ${STEP_VERIFICATION_OVERFLOW_THRESHOLD}`,
+        source: `step-overflow:step:${step.stepId}/verifications`,
+        strength: Confidence.Medium,
+      });
+      found = true;
+    }
+  }
+
+  if (summary.totalSteps > WORKFLOW_STEP_OVERFLOW_THRESHOLD) {
+    signals.push({
+      observation: `${summary.totalSteps} workflow steps exceeds threshold of ${WORKFLOW_STEP_OVERFLOW_THRESHOLD}`,
+      source: 'step-overflow:run-summary',
+      strength: Confidence.Medium,
+    });
+    found = true;
   }
 
   // Only add the distributed retry summary signal if we didn't add any
   // step-level retry signal. This avoids depending on unrelated earlier
   // signals in the shared array.
-  if (!addedStepSignal) {
+  if (summary.retryCount >= RETRY_OVERFLOW_THRESHOLD && !addedStepSignal) {
     signals.push({
       observation: `${summary.retryCount} total retries across ${summary.totalSteps} steps exceeds threshold of ${RETRY_OVERFLOW_THRESHOLD}`,
       source: 'step-overflow:run-summary',
       strength: Confidence.Medium,
     });
+    found = true;
   }
 
-  return true;
+  return found;
 }
 
 function detectAgentDrift(
@@ -548,6 +636,104 @@ function detectVerificationFailure(
 }
 
 // ── Helper functions ─────────────────────────────────────────────────
+
+function isEvidenceOutcome(input: FailureClassifierInput): input is EvidenceOutcome {
+  return typeof input === 'object' && input !== null && 'statusClass' in input && 'summary' in input && 'failureKind' in input;
+}
+
+function summaryWithOutcomeMessage(outcome: EvidenceOutcome): EvidenceSummary {
+  return {
+    ...outcome.summary,
+    firstError: outcome.failureMessage ?? outcome.summary.firstError,
+  };
+}
+
+function detectOutcomeTimeout(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  if (outcome.status === 'timed_out' || outcome.failureKind === 'timeout') {
+    signals.push({ observation: `Run status is ${outcome.status}`, source: 'run-level', strength: Confidence.High });
+    found = true;
+  }
+  if (outcome.timedOutStepIds.length > 0) {
+    signals.push({
+      observation: `${outcome.timedOutStepIds.length} steps timed out: ${outcome.timedOutStepIds.join(', ')}`,
+      source: 'run-summary',
+      strength: Confidence.High,
+    });
+    found = true;
+  }
+  return found;
+}
+
+function detectOutcomeEnvironmentError(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  const texts = [
+    outcome.failureMessage,
+    ...outcome.commands.flatMap((command) => textFields(command.command, command.stdoutExcerpt, command.stderrExcerpt, command.outputExcerpt)),
+    ...outcome.outputSnippets.map((snippet) => snippet.text),
+    ...outcome.deterministicGates.flatMap((gate) => gate.outputSnippets.map((snippet) => snippet.text)),
+  ].filter((value): value is string => Boolean(value));
+  for (const text of texts) {
+    if (matchesEnvironmentPattern(text)) {
+      signals.push({ observation: `Outcome text matches environment error: ${truncate(text, 120)}`, source: 'run-level', strength: Confidence.High });
+      found = true;
+      break;
+    }
+  }
+  return found;
+}
+
+function detectOutcomeStepOverflow(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  if (outcome.retryExhaustedStepIds.length >= RETRY_OVERFLOW_THRESHOLD) {
+    signals.push({
+      observation: `${outcome.retryExhaustedStepIds.length} steps exhausted retries: ${outcome.retryExhaustedStepIds.join(', ')}`,
+      source: 'step-overflow:run-summary',
+      strength: Confidence.High,
+    });
+    found = true;
+  }
+  if (outcome.summary.retryCount >= RETRY_OVERFLOW_THRESHOLD || outcome.summary.totalSteps > WORKFLOW_STEP_OVERFLOW_THRESHOLD) {
+    signals.push({
+      observation: `Outcome summary exceeded workflow retry/step thresholds (${outcome.summary.retryCount} retries, ${outcome.summary.totalSteps} steps)`,
+      source: 'step-overflow:run-summary',
+      strength: Confidence.Medium,
+    });
+    found = true;
+  }
+  return found;
+}
+
+function detectOutcomeAgentDrift(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  if (outcome.narrative.length >= 2 && outcome.artifacts.length === 0 && outcome.failedStepIds.length > 0) {
+    signals.push({
+      observation: `Repeated narrative without repo proof across failed steps: ${outcome.failedStepIds.join(', ')}`,
+      source: 'run-level',
+      strength: Confidence.Medium,
+    });
+    return true;
+  }
+  return false;
+}
+
+function detectOutcomeVerificationFailure(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  for (const gate of outcome.deterministicGates) {
+    if (!gate.passed) {
+      signals.push({ observation: `Gate "${gate.gateName}" failed`, source: `gate:${gate.gateName}`, strength: Confidence.High });
+      found = true;
+    }
+  }
+  if (!found && outcome.failureKind === 'verification') {
+    signals.push({
+      observation: outcome.failureMessage ?? 'Outcome reported verification failure',
+      source: 'run-level',
+      strength: Confidence.High,
+    });
+    found = true;
+  }
+  return found;
+}
 
 function isEvidenceSummary(input: WorkflowRunEvidence | EvidenceSummary): input is EvidenceSummary {
   return (
@@ -734,6 +920,14 @@ function stepHasPassingExecution(step: WorkflowStepEvidence): boolean {
   return false;
 }
 
+function totalStepVerificationCount(step: WorkflowStepEvidence): number {
+  return (
+    step.verifications.length +
+    step.deterministicGates.reduce((count, gate) => count + gate.verifications.length, 0) +
+    step.retries.reduce((count, retry) => count + (retry.verifications?.length ?? 0), 0)
+  );
+}
+
 function truncate(s: string, maxLen: number): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen - 3) + '...';
@@ -801,6 +995,7 @@ function unknownFailure(
   summary: EvidenceSummary,
   signals: EvidenceSignal[],
 ): FailureClassification {
+  const normalizedSignals = uniqueSignals(signals);
   return {
     category: FailureClass.Unknown,
     failureClass: FailureClass.Unknown,
@@ -809,8 +1004,8 @@ function unknownFailure(
     nextAction: NextAction.Escalate,
     suggestedNextAction: NextAction.Escalate,
     summary: `Run "${summary.workflowName}" failed but no deterministic classification matched (${summary.failedSteps} failed steps)`,
-    signals,
-    matchedSignals: signals,
+    signals: normalizedSignals,
+    matchedSignals: normalizedSignals,
     secondaryClasses: [],
     isMixedFailure: false,
   };
@@ -888,10 +1083,17 @@ const CLASS_CONFIG: Record<FailureClass, ClassConfig> = {
   },
 
   [FailureClass.StepOverflow]: {
-    severity: (s) => (s.retryCount >= RETRY_OVERFLOW_THRESHOLD * 2 ? Severity.High : Severity.Medium),
+    severity: (s) =>
+      s.retryCount >= RETRY_OVERFLOW_THRESHOLD * 2 || s.totalSteps > STEP_VERIFICATION_OVERFLOW_THRESHOLD
+        ? Severity.High
+        : Severity.Medium,
     nextAction: NextAction.Escalate,
-    summarize: (s) =>
-      `Run "${s.workflowName}" exhausted retry budget — ${s.retryCount} retries across ${s.totalSteps} steps`,
+    summarize: (s) => {
+      if (s.retryCount > 0) {
+        return `Run "${s.workflowName}" exhausted retry budget — ${s.retryCount} retries across ${s.totalSteps} steps`;
+      }
+      return `Run "${s.workflowName}" exceeded step size budget — ${s.totalSteps} steps require debugger review`;
+    },
   },
 
   [FailureClass.Unknown]: {

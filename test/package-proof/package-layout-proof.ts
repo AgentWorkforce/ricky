@@ -93,10 +93,12 @@ const REQUIRED_PACKAGE_SCRIPTS = [
   'build',
   'typecheck',
   'test',
+  'premerge',
   'start',
   'dev',
   'evals',
   'evals:compile',
+  'evals:provider',
   'evals:opencode',
   'evals:list',
   'evals:summary',
@@ -410,20 +412,37 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
         const required = [...REQUIRED_PACKAGE_SCRIPTS].sort();
         const missing = required.filter((name) => typeof scripts[name] !== 'string' || (scripts[name] as string).length === 0);
         const extra = declared.filter((name) => !required.includes(name as (typeof REQUIRED_PACKAGE_SCRIPTS)[number]));
+        const premerge = typeof scripts.premerge === 'string' ? scripts.premerge : '';
+        const premergeRunsTypecheck = premerge.includes('npm run typecheck');
+        const premergeRunsFullSuite = premerge.includes('npm test');
+        const premergeRunsAutoFixLadder = premerge.includes('test/local-auto-fix-workflow-failures.e2e.test.ts');
 
         return result(
           'package-script-allowlist',
-          [missing.length === 0, extra.length === 0],
+          [
+            missing.length === 0,
+            extra.length === 0,
+            premergeRunsTypecheck,
+            premergeRunsFullSuite,
+            premergeRunsAutoFixLadder,
+          ],
           [
             `required scripts: ${required.join(', ')}`,
             `declared scripts: ${declared.join(', ')}`,
             `missing required scripts: ${missing.join(', ') || '(none)'}`,
             `unexpected extra scripts: ${extra.join(', ') || '(none)'}`,
+            `package.json scripts.premerge: ${premerge || '(missing)'}`,
+            `premerge runs typecheck: ${premergeRunsTypecheck}`,
+            `premerge runs full test suite: ${premergeRunsFullSuite}`,
+            `premerge runs local auto-fix ladder e2e: ${premergeRunsAutoFixLadder}`,
           ],
           [],
           [
             ...missing.map((name) => `Missing required npm script: ${name}`),
             ...extra.map((name) => `Unexpected npm script not in canonical allowlist: ${name}`),
+            ...(premergeRunsTypecheck ? [] : ['package.json scripts.premerge does not run npm run typecheck']),
+            ...(premergeRunsFullSuite ? [] : ['package.json scripts.premerge does not run npm test']),
+            ...(premergeRunsAutoFixLadder ? [] : ['package.json scripts.premerge does not run the local auto-fix workflow ladder e2e']),
           ],
         );
       },

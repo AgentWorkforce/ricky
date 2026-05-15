@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -93,8 +95,8 @@ describe('runWithAutoFix', () => {
   it('passes failed repair history into the next workflow repair attempt', async () => {
     const runSingleAttempt = vi
       .fn()
-      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'))
-      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-2', 'runtime-launch'))
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'install-deps'))
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-2', 'install-deps'))
       .mockResolvedValueOnce(successResponse('run-3'));
     const workflowRepairer = vi
       .fn()
@@ -123,7 +125,7 @@ describe('runWithAutoFix', () => {
         retryAttempt: 2,
         outcome: expect.objectContaining({
           status: 'blocker',
-          failedStep: 'runtime-launch',
+          failedStep: 'install-deps',
           blockerCode: 'MISSING_ENV_VAR',
           runId: 'run-2',
           debuggerSummary: 'Set TEST_TOKEN before retrying.',
@@ -325,6 +327,12 @@ describe('runWithAutoFix', () => {
     expect(repaired).toContain("dependsOn: ['implement-tests']");
     expect(repaired).toContain("dependsOn: ['implement-tests-timeout-continuation']");
     expect(repaired).toContain('IMPLEMENT_TESTS_TIMEOUT_CONTINUATION_DONE');
+    // Regression: the handoff filename must not embed the continuation step's
+    // literal name. The SDK's detectLeadWorkerDeadlock validator substring-
+    // matches downstream step names inside the lead's task and refuses to run
+    // the workflow when it hits. See timeoutContinuationPath().
+    expect(repaired).toContain('implement-tests-handoff.md');
+    expect(repaired).not.toContain('implement-tests-timeout-continuation.md');
     expect(result.auto_fix?.attempts[0]).toMatchObject({
       blocker_code: 'INVALID_ARTIFACT',
       failed_step: 'implement-tests',
@@ -521,7 +529,7 @@ describe('runWithAutoFix', () => {
   it('uses the persona repair path even when the debugger recommends guided repair', async () => {
     const runSingleAttempt = vi
       .fn()
-      .mockResolvedValueOnce(blockerResponse('INVALID_ARTIFACT', 'run-1', 'runtime-launch'))
+      .mockResolvedValueOnce(blockerResponse('INVALID_ARTIFACT', 'run-1', 'install-deps'))
       .mockResolvedValueOnce(successResponse('run-2'));
     const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('guided repair workflow'));
 
@@ -542,7 +550,7 @@ describe('runWithAutoFix', () => {
   it('repairs missing environment prerequisites in the workflow artifact before retrying', async () => {
     const runSingleAttempt = vi
       .fn()
-      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'))
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', 'install-deps'))
       .mockResolvedValueOnce(successResponse('run-2'));
     const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired env workflow'));
 
@@ -557,7 +565,7 @@ describe('runWithAutoFix', () => {
 
     expect(runSingleAttempt).toHaveBeenCalledTimes(2);
     expect(workflowRepairer).toHaveBeenCalledWith(expect.objectContaining({
-      failedStep: 'runtime-launch',
+      failedStep: 'install-deps',
       runId: 'run-1',
       response: expect.objectContaining({
         execution: expect.objectContaining({
@@ -568,7 +576,7 @@ describe('runWithAutoFix', () => {
     expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
       previousRunId: 'run-1',
       retryOfRunId: 'run-1',
-      startFromStep: 'runtime-launch',
+      startFromStep: 'install-deps',
     });
     expect(result.ok).toBe(true);
     expect(result.auto_fix).toMatchObject({
@@ -607,6 +615,119 @@ describe('runWithAutoFix', () => {
     expect(repair?.content).toContain('loadRickyWorkflowEnv();');
     expect(repair?.content).toContain('assertRickyWorkflowEnv(["TEST_TOKEN"]);');
     expect(repair?.content).toContain('MISSING_ENV_VAR:');
+  });
+
+  // Regression: assertRickyWorkflowEnv used to throw at module-load time
+  // unconditionally, before the SDK had a chance to honour --start-from.
+  // That made resuming with --start-from impossible if the resumed step
+  // didn't actually need the missing env var (the upstream-only step did,
+  // but it was being skipped). The injected helper now warns-and-continues
+  // when process.env.START_FROM is set so resumed steps can run and any
+  // step that genuinely needs a missing value still fails with its own
+  // signal at the point of use.
+  it('injects an env-assert helper that honors START_FROM for --start-from resumes', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/foo.ts',
+      artifactContent: workflowContent(),
+      evidence: missingEnvEvidence(),
+      response: blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'),
+    });
+
+    expect(repair?.applied).toBe(true);
+    // Resume signal acknowledged.
+    expect(repair?.content).toContain('process.env.START_FROM');
+    // Warn-and-continue path uses console.warn rather than throwing so the
+    // SDK can proceed to the resumed step.
+    expect(repair?.content).toMatch(/console\.warn\([^)]*Skipping env-var assertion/);
+    expect(repair?.content).toMatch(/--start-from active/);
+    // The non-resume path still throws fast — preserves the original
+    // contract for first-run invocations.
+    expect(repair?.content).toContain('throw new Error(`MISSING_ENV_VAR:');
+  });
+
+  // Regression: when a master-rendered workflow embeds a `node --input-type=module`
+  // HEREDOC inside a .step({ command: ... }) string, the embedded shell text
+  // contains the literal substring `from 'node:fs'`. The previous import-detection
+  // used `content.includes("from 'node:fs'")`, which the embedded string fooled
+  // — Ricky then injected `loadRickyWorkflowEnv` (which references
+  // `rickyWorkflowFs` and `rickyWorkflowPath`) without adding the
+  // `import * as rickyWorkflowFs from 'node:fs'` alias at module top level. The
+  // resulting workflow ReferenceError'd at module load and Auto-fix burned
+  // 7/7 attempts on UNSUPPORTED_RUNTIME at runtime-launch. Detection must
+  // match an actual top-level `import * as <alias> from '<module>'` line.
+  it('adds the rickyWorkflow* alias imports even when the workflow embeds `from \'node:fs\'` inside a .step command HEREDOC', () => {
+    const masterRenderedContentWithEmbeddedImports = [
+      "import { workflow } from '@agent-relay/sdk/workflows';",
+      '',
+      '// RICKY_MASTER_EXECUTOR_WORKFLOW',
+      'async function main() {',
+      '  await workflow("ricky-master")',
+      '    .step("materialize-children", {',
+      '      type: "deterministic",',
+      // Mirrors master-workflow-renderer.ts:138-149 — the master renderer emits
+      // a node --input-type=module HEREDOC as a string inside a step command.
+      // That string literally contains `from \'node:fs\'` and `from \'node:path\'`.
+      '      command: "node --input-type=module <<\'NODE\'\\nimport { mkdirSync, writeFileSync } from \'node:fs\';\\nimport { dirname } from \'node:path\';\\nNODE",',
+      '      captureOutput: true,',
+      '      failOnError: true,',
+      '    })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+    ].join('\n');
+
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/master.ts',
+      artifactContent: masterRenderedContentWithEmbeddedImports,
+      evidence: missingEnvEvidence(),
+      response: blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'),
+    });
+
+    expect(repair?.applied).toBe(true);
+    // Aliases must be added at module top level despite the embedded
+    // HEREDOC string containing `from 'node:fs'` / `from 'node:path'`.
+    expect(repair?.content).toMatch(/^import \* as rickyWorkflowFs from 'node:fs';/m);
+    expect(repair?.content).toMatch(/^import \* as rickyWorkflowPath from 'node:path';/m);
+    expect(repair?.content).toContain('RICKY_WORKFLOW_ENV_LOADER');
+    // The HEREDOC is preserved unchanged.
+    expect(repair?.content).toContain("import { mkdirSync, writeFileSync } from 'node:fs';");
+  });
+
+  it('recognizes already-present rickyWorkflow* alias imports declared via multi-line statement and skips re-injection', () => {
+    // Multi-line import shapes are not handled by line-anchored regex/preamble
+    // checks but are trivially correct under an AST walk. If the AST detection
+    // misses the existing import, the injection logic would add a duplicate
+    // alias, which TypeScript's strip-types loader rejects with
+    // SyntaxError: Identifier 'rickyWorkflowFs' has already been declared.
+    const contentWithMultiLineExistingAlias = [
+      "import { workflow } from '@agent-relay/sdk/workflows';",
+      "import * as",
+      '  rickyWorkflowFs',
+      "  from 'node:fs';",
+      "import * as rickyWorkflowPath from 'node:path';",
+      '',
+      '// RICKY_WORKFLOW_ENV_LOADER',
+      'function loadRickyWorkflowEnv() { /* already injected */ }',
+      '',
+      'async function main() {',
+      '  loadRickyWorkflowEnv();',
+      '  await workflow("foo").run({ cwd: process.cwd() });',
+      '}',
+    ].join('\n');
+
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/already-injected.ts',
+      artifactContent: contentWithMultiLineExistingAlias,
+      evidence: missingEnvEvidence(),
+      response: blockerResponse('MISSING_ENV_VAR', 'run-1', 'runtime-launch'),
+    });
+
+    // No second `import * as rickyWorkflowFs` statement should appear.
+    const fsAliasMatches = (repair?.content ?? contentWithMultiLineExistingAlias)
+      .match(/import\s+\*\s+as\s+rickyWorkflowFs\b/g);
+    expect(fsAliasMatches).toHaveLength(1);
+    const pathAliasMatches = (repair?.content ?? contentWithMultiLineExistingAlias)
+      .match(/import\s+\*\s+as\s+rickyWorkflowPath\b/g);
+    expect(pathAliasMatches).toHaveLength(1);
   });
 
   it('routes semantic workflow failures to persona repair instead of deterministic repair', async () => {
@@ -718,6 +839,205 @@ describe('runWithAutoFix', () => {
     expect(runSingleAttempt.mock.calls[1][0].retry.previousRunId).toBeUndefined();
     expect(result.warnings).toContain('Auto-fix retry could not resolve a previous run id; retrying without step-level resume.');
   });
+
+  it.each([
+    ['runtime-launch'],
+    ['local-runtime'],
+    ['runtime-precheck'],
+  ])('does not forward synthetic stage id %s as startFromStep on retry', async (syntheticId) => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(blockerResponse('MISSING_ENV_VAR', 'run-1', syntheticId))
+      .mockResolvedValueOnce(successResponse('run-2'));
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired workflow'));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(runSingleAttempt).toHaveBeenCalledTimes(2);
+    expect(runSingleAttempt.mock.calls[1][0].retry).toMatchObject({
+      attempt: 2,
+      previousRunId: 'run-1',
+    });
+    expect(runSingleAttempt.mock.calls[1][0].retry.startFromStep).toBeUndefined();
+    expect(workflowRepairer.mock.calls[0][0].failedStep).toBeUndefined();
+  });
+
+  it('escalates instead of restarting from scratch when the prior attempt already completed real steps', async () => {
+    // Regression for the "router loop" bug seen on the proactive-runtime
+    // M2/M3 chain runs: signoff-r1 emitted SIGNOFF: COMPLETE, downstream
+    // fix-r2 or final gates failed, but no concrete failedStep was parsed
+    // from evidence. Ricky used to retry without --start-from, which the
+    // SDK treats as a fresh run, re-spawning all impl-* tracks (hours of
+    // duplicated work). The new policy is: refuse the restart, escalate.
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(expensiveWorkBlockerResponse('run-1'));
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired workflow'));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer,
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+    expect(result.auto_fix?.final_status).not.toBe('ok');
+    expect(result.warnings.some((w) => w.includes('would have restarted the workflow from scratch'))).toBe(true);
+    expect(result.auto_fix?.escalation).toBeDefined();
+  });
+
+  it('uses runtime completed-step count when log-tail step evidence is truncated', async () => {
+    const response = expensiveWorkBlockerResponse('run-1');
+    expect(response.execution?.evidence?.logs.tail).toEqual([
+      '[workflow] FAILED: run aborted (no per-step failure record)',
+    ]);
+
+    const runSingleAttempt = vi.fn().mockResolvedValueOnce(response);
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('repaired workflow')),
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+    expect(result.warnings.some((w) => w.includes('would have restarted the workflow from scratch'))).toBe(true);
+  });
+
+  it('does not emit missing-run-id retry warning when full restart is refused', async () => {
+    const runSingleAttempt = vi
+      .fn()
+      .mockResolvedValueOnce(expensiveWorkBlockerResponse(undefined));
+
+    const result = await runWithAutoFix(baseRequest, {
+      maxAttempts: 3,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('repaired workflow')),
+      artifactWriter: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('would have restarted the workflow from scratch'),
+    ]));
+    expect(result.warnings).not.toContain('Auto-fix retry could not resolve a previous run id; retrying without step-level resume.');
+  });
+
+  it('refuses code-drift root restart when prior real steps completed and no resume anchor exists', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'ricky-drift-restart-'));
+    try {
+      const artifactsDir = join(cwd, '.workflow-artifacts');
+      await mkdir(artifactsDir, { recursive: true });
+      const driftReportPath = join(artifactsDir, 'target-drift.json');
+      await writeFile(driftReportPath, JSON.stringify({
+        verdict: 'DRIFT',
+        findings: [{
+          severity: 'blocker',
+          axis: 'runtime',
+          description: 'Target code drifted from expected behavior.',
+        }],
+      }));
+      const future = new Date(Date.now() + 5_000);
+      await utimes(driftReportPath, future, future);
+
+      const response = expensiveWorkBlockerResponse('run-1');
+      response.execution!.execution.cwd = cwd;
+      const runSingleAttempt = vi.fn().mockResolvedValueOnce(response);
+      const codeDriftRepairer = vi.fn().mockResolvedValue({
+        applied: true,
+        summary: 'patched target code',
+      });
+
+      const result = await runWithAutoFix(baseRequest, {
+        maxAttempts: 3,
+        runSingleAttempt,
+        classifyFailure: fakeClassification,
+        debugWorkflowRun: directDebugger,
+        workflowRepairer: vi.fn().mockResolvedValue(workflowRepair('workflow repair should not run')),
+        codeDriftRepairer,
+        artifactWriter: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(codeDriftRepairer).toHaveBeenCalledTimes(1);
+      expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+      expect(result.auto_fix?.attempts[0]).toMatchObject({
+        applied_fix: {
+          mode: 'code-drift',
+          summary: 'patched target code',
+        },
+        fix_error: expect.stringContaining('would have restarted the workflow from scratch'),
+      });
+      expect(result.warnings).toEqual(expect.arrayContaining([
+        expect.stringContaining('would have restarted the workflow from scratch'),
+      ]));
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('allows full restart when RICKY_AUTO_FIX_ALLOW_FULL_RESTART=1 even after expensive work completed', async () => {
+    const previousEnv = process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART;
+    process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART = '1';
+    try {
+      const runSingleAttempt = vi
+        .fn()
+        .mockResolvedValueOnce(expensiveWorkBlockerResponse('run-1'))
+        .mockResolvedValueOnce(successResponse('run-2'));
+      const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('repaired workflow'));
+
+      const result = await runWithAutoFix(baseRequest, {
+        maxAttempts: 3,
+        runSingleAttempt,
+        classifyFailure: fakeClassification,
+        debugWorkflowRun: directDebugger,
+        workflowRepairer,
+        artifactWriter: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(runSingleAttempt).toHaveBeenCalledTimes(2);
+      expect(runSingleAttempt.mock.calls[1][0].retry.startFromStep).toBeUndefined();
+    } finally {
+      if (previousEnv === undefined) delete process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART;
+      else process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART = previousEnv;
+    }
+  });
+
+});
+
+describe('isSyntheticStageId', () => {
+  it('matches the runtime-launch / local-runtime / runtime-precheck labels', async () => {
+    const { isSyntheticStageId, SYNTHETIC_LOCAL_STAGE_IDS } = await import('./synthetic-step-ids.js');
+    expect(isSyntheticStageId('runtime-launch')).toBe(true);
+    expect(isSyntheticStageId('local-runtime')).toBe(true);
+    expect(isSyntheticStageId('runtime-precheck')).toBe(true);
+    expect(SYNTHETIC_LOCAL_STAGE_IDS.size).toBe(3);
+  });
+
+  it('does not match real workflow step ids', async () => {
+    const { isSyntheticStageId } = await import('./synthetic-step-ids.js');
+    expect(isSyntheticStageId('install-deps')).toBe(false);
+    expect(isSyntheticStageId('aggregate-drift')).toBe(false);
+    expect(isSyntheticStageId(undefined)).toBe(false);
+    expect(isSyntheticStageId('')).toBe(false);
+  });
 });
 
 function successResponse(runId: string): LocalResponse {
@@ -778,6 +1098,59 @@ function blockerResponse(code: LocalClassifiedBlocker['code'], runId: string | u
         failed_step: { id: failedStep, name: failedStep },
         exit_code: 1,
         logs: { tail: [`${code} log tail`], truncated: false },
+        side_effects: { files_written: [], commands_invoked: [] },
+        assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
+      },
+    },
+    exitCode: 2,
+  };
+}
+
+/**
+ * Models the proactive-runtime "router loop" symptom: many real (non-synthetic)
+ * workflow steps completed in the prior attempt, but the run still failed and
+ * no concrete failed_step was parsed from evidence.
+ */
+function expensiveWorkBlockerResponse(runId: string | undefined): LocalResponse {
+  const blocker: LocalClassifiedBlocker = {
+    code: 'INVALID_ARTIFACT',
+    category: 'workflow_invalid',
+    message: 'Workflow runtime reported failure but Ricky could not identify which step failed.',
+    detected_at: '2026-05-12T00:00:00.000Z',
+    detected_during: 'launch',
+    recovery: {
+      actionable: true,
+      steps: ['Inspect the captured workflow logs to identify the failed step.'],
+    },
+    context: { missing: [], found: [] },
+  };
+  return {
+    ok: false,
+    artifacts: [{ path: 'workflows/generated/foo.ts', content: workflowContent() }],
+    logs: [],
+    warnings: [blocker.message],
+    nextActions: [...blocker.recovery.steps],
+    generation: {
+      stage: 'generate',
+      status: 'ok',
+      artifact: { path: 'workflows/generated/foo.ts', workflow_id: 'wf-1', spec_digest: 'abc' },
+    },
+    execution: {
+      stage: 'execute',
+      status: 'blocker',
+      execution: {
+        ...execution(runId),
+        steps_completed: 5,
+        steps_total: 7,
+      },
+      blocker,
+      evidence: {
+        outcome_summary: blocker.message,
+        // No failed_step field — this is the trigger condition.
+        logs: {
+          tail: ['[workflow] FAILED: run aborted (no per-step failure record)'],
+          truncated: true,
+        },
         side_effects: { files_written: [], commands_invoked: [] },
         assertions: [{ name: 'runtime_exit_code', status: 'fail', detail: blocker.message }],
       },

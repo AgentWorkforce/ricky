@@ -5,6 +5,7 @@ import {
   DEFAULT_RETRY_MAX_ATTEMPTS,
 } from '../../shared/constants.js';
 import { planMasterExecution, type ChildWorkflowPlan, type MasterExecutionPlan } from '../orchestration/index.js';
+import { deriveTestCommand } from './template-renderer.js';
 import type {
   DeterministicGate,
   PatternDecision,
@@ -26,6 +27,27 @@ interface RenderedMasterWorkflow {
   artifact: RenderedArtifact;
   plan: MasterExecutionPlan;
 }
+
+// Workspace-aware typecheck: prefer the project's own `npm run typecheck`
+// script when one exists (the right thing for monorepos like
+// `npm run typecheck -ws` or custom build pipelines), and fall back to
+// `npx tsc --noEmit` when the project is a flat single-tsconfig repo.
+//
+// Without this guard, `npx tsc --noEmit` invoked from a monorepo root with
+// no top-level tsconfig.json (npm workspaces, packages/*/tsconfig.json
+// layout — common in MSD-style repos) finds neither input files nor a
+// config and dumps the full `tsc --help` text on stdout while exiting 1.
+// The auto-fix loop then "repairs" the workflow 7×, all failing identically
+// because the workflow command is correct in general — just wrong for this
+// repo shape.
+//
+// `npm pkg get scripts.typecheck` returns `"<command>"` when the script
+// exists and `{}` when it does not (npm v7.20.0+, shipped with Node 16+).
+// We compare against the literal `{}` so the snippet is portable across
+// any package layout. The substring `npx tsc --noEmit` is preserved so
+// downstream tools and human readers still recognize the intent.
+const TYPECHECK_COMMAND =
+  'if [ "$(npm pkg get scripts.typecheck 2>/dev/null)" != "{}" ]; then npm run typecheck; else npx tsc --noEmit; fi';
 
 const MASTER_EXPLICIT_PATTERN =
   /\b(master executor|master orchestration|smaller workflows|child workflows|several workflows|multiple workflows|break(?:ing)? (?:it )?(?:out|up)|divvy|decompos(?:e|ition)|workflow waves?)\b/i;
@@ -61,7 +83,7 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
   });
   const channel = `wf-ricky-${slug}`;
   const tasks = buildMasterTasks(plan);
-  const gates = buildMasterGates(artifactsDir, plan);
+  const gates = buildMasterGates(artifactsDir, plan, input.spec);
   const skillApplicationEvidence = buildMasterSkillEvidence(input.skills);
   const toolSelections = buildMasterToolSelections(plan);
   const content = renderMasterSource({
@@ -261,8 +283,8 @@ function renderMasterSource(input: {
     '      dependsOn: ["review-child-evidence"],',
     `      command: ${literal([
       'set -e',
-      'npx tsc --noEmit',
-      'npm test',
+      TYPECHECK_COMMAND,
+      deriveTestCommand(input.spec),
       'git diff --name-only',
       `grep -F RICKY_MASTER_REVIEW_READY ${shellQuote(`${input.artifactsDir}/review-codex.md`)}`,
       'echo RICKY_MASTER_FINAL_VALIDATION_READY',
@@ -336,8 +358,10 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     `    .onError(${repairAwareOnError('validator-claude')})`,
     '    .agent("lead-claude", { cli: "claude", interactive: false, role: "Plans this bounded child workflow slice.", retries: 1 })',
     '    .agent("impl-codex", { cli: "codex", role: "Implements only this child workflow slice and its declared file scope.", retries: 2 })',
+    '    .agent("reviewer-claude", { cli: "claude", preset: "reviewer", role: "First-pass fresh-eyes reviewer for scope, evidence, and product fit.", retries: 1 })',
     '    .agent("reviewer-codex", { cli: "codex", preset: "reviewer", role: "Reviews code, tests, deterministic gates, and PR/result evidence.", retries: 1 })',
     '    .agent("validator-claude", { cli: "claude", preset: "worker", role: "Runs the 80-to-100 fix loop and writes final signoff.", retries: 2 })',
+    '    .agent("validator-codex", { cli: "codex", preset: "worker", role: "Runs the Codex review-fix loop and verifies final readiness.", retries: 2 })',
     '    .step("prepare-context", {',
     '      type: "deterministic",',
     `      command: ${literal([
@@ -378,37 +402,131 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     '      captureOutput: true,',
     '      failOnError: false,',
     '    })',
-    '    .step("review-codex", {',
-    '      agent: "reviewer-codex",',
+    '    .step("review-claude", {',
+    '      agent: "reviewer-claude",',
     '      dependsOn: ["initial-soft-validation"],',
     `      task: ${templateLiteral([
-      'Review this child slice against the lead plan and validation output.',
-      `Write ${artifactsDir}/review-codex.md with PASS or FAIL and end with RICKY_CHILD_REVIEW_READY.`,
+      'Fresh-eyes review this child slice against the lead plan, actual files, diff, and validation output.',
+      'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
+      `Write ${artifactsDir}/review-claude.md ending with RICKY_CHILD_CLAUDE_REVIEW_READY.`,
     ].join('\n'))},`,
-    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/review-codex.md`)} },`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/review-claude.md`)} },`,
     '    })',
     '    .step("fix-loop", {',
     '      agent: "validator-claude",',
-    '      dependsOn: ["review-codex"],',
+    '      dependsOn: ["review-claude", "initial-soft-validation"],',
     `      task: ${templateLiteral([
-      'Run the 80-to-100 fix loop for this child slice.',
-      'Fix only failures from validation or review within the declared scope.',
+      'Run the Claude 80-to-100 review-fix loop for this child slice.',
+      `Read ${artifactsDir}/review-claude.md and the initial validation output.`,
+      'Fix every valid finding within the declared scope; add or update tests/proofs for testable findings.',
+      `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
       `Write ${artifactsDir}/fix-loop-report.md ending with RICKY_CHILD_FIX_LOOP_READY.`,
     ].join('\n'))},`,
     `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/fix-loop-report.md`)} },`,
     '    })',
-    '    .step("final-hard-validation", {',
+    '    .step("post-fix-validation", {',
     '      type: "deterministic",',
     '      dependsOn: ["fix-loop"],',
+    `      command: ${literal(`${validationCommand} 2>&1 | tail -160`)},`,
+    '      captureOutput: true,',
+    '      failOnError: false,',
+    '    })',
+    '    .step("final-review-claude", {',
+    '      agent: "reviewer-claude",',
+    '      dependsOn: ["post-fix-validation"],',
+    `      task: ${templateLiteral([
+      'Re-review the fixed child state from scratch.',
+      'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
+      `Write ${artifactsDir}/final-review-claude.md ending with RICKY_CHILD_CLAUDE_FINAL_REVIEW_READY.`,
+    ].join('\n'))},`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/final-review-claude.md`)} },`,
+    '    })',
+    '    .step("final-fix-claude", {',
+    '      agent: "validator-claude",',
+    '      dependsOn: ["final-review-claude"],',
+    `      task: ${templateLiteral([
+      `Read ${artifactsDir}/final-review-claude.md.`,
+      'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
+      `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
+      `Write ${artifactsDir}/claude-final-fix.md ending with RICKY_CHILD_CLAUDE_FINAL_FIX_READY.`,
+    ].join('\n'))},`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/claude-final-fix.md`)} },`,
+    '    })',
+    '    .step("review-codex", {',
+    '      agent: "reviewer-codex",',
+    '      dependsOn: ["final-fix-claude"],',
+    `      task: ${templateLiteral([
+      'Second-pass fresh-eyes review after the Claude loop. Read the actual files, diff, review artifacts, and validation evidence.',
+      'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
+      `Write ${artifactsDir}/review-codex.md ending with RICKY_CHILD_CODEX_REVIEW_READY.`,
+    ].join('\n'))},`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/review-codex.md`)} },`,
+    '    })',
+    '    .step("fix-loop-codex", {',
+    '      agent: "validator-codex",',
+    '      dependsOn: ["review-codex"],',
+    `      task: ${templateLiteral([
+      `Read ${artifactsDir}/review-codex.md.`,
+      'Fix every valid Codex finding and add or update tests/proofs for testable findings.',
+      `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
+      `Write ${artifactsDir}/codex-fix-loop-report.md ending with RICKY_CHILD_CODEX_FIX_LOOP_READY.`,
+    ].join('\n'))},`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/codex-fix-loop-report.md`)} },`,
+    '    })',
+    '    .step("post-codex-fix-validation", {',
+    '      type: "deterministic",',
+    '      dependsOn: ["fix-loop-codex"],',
+    `      command: ${literal(`${validationCommand} 2>&1 | tail -160`)},`,
+    '      captureOutput: true,',
+    '      failOnError: false,',
+    '    })',
+    '    .step("final-review-codex", {',
+    '      agent: "reviewer-codex",',
+    '      dependsOn: ["post-codex-fix-validation"],',
+    `      task: ${templateLiteral([
+      'Final Codex fresh-eyes review after Codex fixes.',
+      'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
+      `Write ${artifactsDir}/final-review-codex.md ending with RICKY_CHILD_CODEX_FINAL_REVIEW_READY.`,
+    ].join('\n'))},`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/final-review-codex.md`)} },`,
+    '    })',
+    '    .step("final-fix-codex", {',
+    '      agent: "validator-codex",',
+    '      dependsOn: ["final-review-codex"],',
+    `      task: ${templateLiteral([
+      `Read ${artifactsDir}/final-review-codex.md.`,
+      'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
+      `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
+      `Write ${artifactsDir}/codex-final-fix.md ending with RICKY_CHILD_CODEX_FINAL_FIX_READY.`,
+    ].join('\n'))},`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/codex-final-fix.md`)} },`,
+    '    })',
+    '    .step("final-review-pass-gate", {',
+    '      type: "deterministic",',
+    '      dependsOn: ["final-fix-codex"],',
+    `      command: ${literal([
+      'set -e',
+      `grep -F RICKY_CHILD_CLAUDE_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/claude-final-fix.md`)}`,
+      `grep -F RICKY_CHILD_CODEX_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/codex-final-fix.md`)}`,
+      `test ! -f ${shellQuote(`${artifactsDir}/BLOCKED_NO_COMMIT.md`)}`,
+      'echo RICKY_CHILD_FRESH_EYES_LOOP_READY',
+    ].join('\n'))},`,
+    '      captureOutput: true,',
+    '      failOnError: true,',
+    '    })',
+    '    .step("final-hard-validation", {',
+    '      type: "deterministic",',
+    '      dependsOn: ["final-review-pass-gate"],',
     `      command: ${literal([
       'set -e',
       validationCommand,
       'git diff --name-only',
-      `grep -F RICKY_CHILD_REVIEW_READY ${shellQuote(`${artifactsDir}/review-codex.md`)}`,
+      `grep -F RICKY_CHILD_CLAUDE_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/claude-final-fix.md`)}`,
+      `grep -F RICKY_CHILD_CODEX_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/codex-final-fix.md`)}`,
       'echo RICKY_CHILD_FINAL_VALIDATION_READY',
     ].join('\n'))},`,
     '      captureOutput: true,',
-    '      failOnError: false,',
+    '      failOnError: true,',
     '    })',
     '    .step("final-signoff", {',
     '      type: "deterministic",',
@@ -457,16 +575,17 @@ function buildMasterTasks(plan: MasterExecutionPlan): WorkflowTask[] {
   ];
 }
 
-function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan): DeterministicGate[] {
+function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan, spec: NormalizedWorkflowSpec): DeterministicGate[] {
+  const testCommand = deriveTestCommand(spec);
   return [
     gate('skill-boundary-metadata-gate', `test -f ${artifactsDir}/skill-application-boundary.json`, 'file_exists', true, ['prepare-context'], 'pre_review'),
     gate('lead-plan-gate', `grep -F RICKY_MASTER_LEAD_PLAN_READY ${artifactsDir}/lead-plan.md`, 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('child-workflow-file-gate', plan.children.map((child) => `test -f ${child.workflowFilePath}`).join(' && '), 'file_exists', true, ['materialize-child-workflows'], 'pre_review'),
-    gate('initial-soft-validation', 'npx tsc --noEmit 2>&1 | tail -160', 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
+    gate('initial-soft-validation', `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
     gate('final-review-pass-gate', `grep -F RICKY_MASTER_REVIEW_READY ${artifactsDir}/review-codex.md`, 'output_contains', true, ['review-child-evidence'], 'final'),
-    gate('final-hard-validation', 'npx tsc --noEmit && npm test', 'exit_code', true, ['final-review-pass-gate'], 'final'),
+    gate('final-hard-validation', `{ ${TYPECHECK_COMMAND}; } && ${testCommand}`, 'exit_code', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', 'git diff --name-only', 'output_contains', true, ['final-hard-validation'], 'final'),
-    gate('regression-gate', 'npm test', 'exit_code', true, ['git-diff-gate'], 'regression'),
+    gate('regression-gate', testCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
   ];
 }
 

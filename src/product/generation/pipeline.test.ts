@@ -50,12 +50,182 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).not.toMatch(/^\s*command: "set -e\\nricky run .*--no-auto-fix/m);
     expect(rendered.content).toContain('MASTER_EXECUTOR_RESULT_READY');
     expect(rendered.content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
-    expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"master-lead\", repairRetries: 2 })");
-    expect(rendered.content.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(rendered.content).toContain('review-claude');
+    expect(rendered.content).toContain('final-fix-codex');
+    expect(rendered.content).toContain('RICKY_CHILD_FRESH_EYES_LOOP_READY');
+    expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"master-lead\", repairRetries: 2 })");
+    expect(rendered.content.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(rendered.content.replace(/\\+"/g, '"')).toMatch(
-      /\.step\("final-hard-validation"[\s\S]*?failOnError: false,[\s\S]*?\.step\("final-signoff"/,
+      /\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/,
     );
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
+  });
+
+  // Regression: master-rendered final-hard-validation used to hardcode
+  // `npm test`, which walks the entire repo's test suite from the cwd.
+  // For monorepo specs that scope work to a few `packages/<pkg>/` files,
+  // any pre-existing or transient failure in an *unrelated* workspace
+  // package then blocks the workflow's final gate — work no agent in the
+  // generated workflow can sensibly repair because it isn't in the spec's
+  // declared scope. The renderer now derives the test command from the
+  // spec's targetFiles: when those targets share workspace prefixes
+  // (`packages/<pkg>/`, `apps/<pkg>/`, `services/<pkg>/`), emit
+  // `npm test --workspace=<pkg>` for each unique workspace; otherwise fall
+  // back to the previous unscoped behavior.
+  it('scopes master-rendered final-hard-validation tests to workspaces touched by the spec', () => {
+    const result = generate({
+      spec: spec({
+        description:
+          'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['Tests pass.'],
+        targetFiles: [
+          'packages/backend/src/services/autofix/index.ts',
+          'packages/backend/src/services/remediation-service.ts',
+          'packages/shared/src/autofix.ts',
+        ],
+      }),
+      artifactPath: 'workflows/generated/runtime-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const rendered = artifact(result);
+
+    // Assert against the structured gate command + parsed step body, not
+    // raw rendered text — semantics over formatting. (CodeRabbit feedback
+    // on PR #91.)
+    const gateCommand = gate(rendered, 'final-hard-validation').command;
+    const stepBody = renderedStepCommand(rendered.content, 'final-hard-validation');
+
+    for (const target of [gateCommand, stepBody]) {
+      // Each unique workspace touched by the spec gets its own scoped run.
+      expect(target).toContain("npm test --workspace='packages/backend'");
+      expect(target).toContain("npm test --workspace='packages/shared'");
+      // Unrelated packages are not validated by this workflow's gate.
+      expect(target).not.toContain("npm test --workspace='packages/webapp'");
+      expect(target).not.toContain("npm test --workspace='packages/mobile'");
+      // The unscoped `npm test` whole-suite invocation must not survive
+      // anywhere in the validation surface — that's the exact pattern that
+      // produced the original cross-package failure. (`npm test
+      // --workspace=…` is fine; the negative lookahead allows it.)
+      expect(target).not.toMatch(/(?:^|[\s&|;])npm test(?!\s*--workspace)/);
+    }
+  });
+
+  // Regression: a spec that names test files in a *sibling repo* (e.g.
+  // `relayfile-adapters/packages/core/src/digest-contract.test.ts` while
+  // the workflow ships in the `relayfile` repo) used to render that path
+  // straight into the final-hard-validation vitest invocation. The
+  // generated workflow runs in a single repo's cwd, so vitest's include
+  // glob `packages/**/*.test.ts` cannot reach a path under another
+  // repo's directory, and the file doesn't exist locally anyway → vitest
+  // exits 1 with "No test files found". The auto-fix loop then burns
+  // its full budget (INVALID_ARTIFACT × maxAttempts) chasing a phantom
+  // artifact path it cannot reach because it operates on the workflow
+  // cwd only. The renderer now filters cross-repo paths out of the test
+  // target list before constructing the vitest command, falling through
+  // to the workspace-aware path for any local source targets that
+  // remain.
+  it('drops cross-repo paths from master-rendered final-hard-validation test invocation', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workspace primitives across relayfile and relayfile-adapters.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['Tests pass.'],
+        targetFiles: [
+          // Local — should drive the workspace-aware command.
+          'packages/core/src/digest.ts',
+          'packages/core/src/digest.test.ts',
+          // Cross-repo — must be filtered out before deriveTestCommand
+          // builds the vitest invocation.
+          'relayfile-adapters/packages/core/src/digest-contract.ts',
+          'relayfile-adapters/packages/core/src/digest-contract.test.ts',
+          '../relayfile-adapters/packages/core/src/digest-contract.test.ts',
+        ],
+      }),
+      artifactPath: 'workflows/generated/workspace-primitives-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const rendered = artifact(result);
+    const gateCommand = gate(rendered, 'final-hard-validation').command;
+    const stepBody = renderedStepCommand(rendered.content, 'final-hard-validation');
+
+    for (const target of [gateCommand, stepBody]) {
+      // The local test path is still validated.
+      expect(target).toContain("npx vitest run 'packages/core/src/digest.test.ts'");
+      // The sibling-repo path must NOT survive into the vitest call —
+      // otherwise vitest exits 1 with "No test files found".
+      expect(target).not.toContain('relayfile-adapters/packages/core/src/digest-contract.test.ts');
+      expect(target).not.toContain('../relayfile-adapters');
+    }
+  });
+
+  it('uniqueWorkspacesFromTargetFiles handles npm-scoped workspace paths', () => {
+    // CodeRabbit flagged that the previous regex
+    //   /^((?:packages|apps|services)\/[^\/]+)\//
+    // mis-parsed `packages/@scope/pkg/...` (matched only the `@scope`
+    // segment). The corrected regex allows an optional `@scope/` segment
+    // so scoped workspaces are recognised end-to-end.
+    const result = generate({
+      spec: spec({
+        description: 'Implement small slices across npm-scoped workspaces.',
+        constraints: ['Use independent child workflows.'],
+        acceptanceGates: ['Tests pass.'],
+        targetFiles: [
+          'packages/@agentworkforce/runtime/src/index.ts',
+          'packages/@agentworkforce/runtime/src/policy.ts',
+          'apps/@msd/web/src/index.ts',
+          'services/billing/src/index.ts',
+        ],
+      }),
+      artifactPath: 'workflows/generated/scoped-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const command = gate(artifact(result), 'final-hard-validation').command;
+
+    expect(command).toContain("npm test --workspace='packages/@agentworkforce/runtime'");
+    expect(command).toContain("npm test --workspace='apps/@msd/web'");
+    expect(command).toContain("npm test --workspace='services/billing'");
+    // The previous bug surfaced as `--workspace='packages/@agentworkforce'`
+    // (truncated at the scope segment) — guard against regression.
+    expect(command).not.toContain("npm test --workspace='packages/@agentworkforce'");
+    expect(command).not.toContain("npm test --workspace='apps/@msd'");
+  });
+
+  // Regression: master-rendered final-hard-validation used to hardcode
+  // `npx tsc --noEmit`, which dumps the full `tsc --help` text and exits 1
+  // when invoked from a monorepo root with no top-level tsconfig.json
+  // (npm workspaces with `packages/*/tsconfig.json` layout — common in
+  // MSD-style repos). The auto-fix loop then "repaired" the workflow 7×,
+  // all failing identically because the workflow command was correct in
+  // general — just wrong for that repo shape. The renderer now emits a
+  // workspace-aware shell snippet that prefers `npm run typecheck` when the
+  // project defines that script and falls back to `npx tsc --noEmit`
+  // otherwise. The fallback path keeps `npx tsc --noEmit` as a literal
+  // substring so downstream tests, evidence capture, and human readers
+  // still recognize the intent.
+  it('emits a workspace-aware typecheck command in master-rendered final-hard-validation', () => {
+    const result = generate({
+      spec: spec({
+        description:
+          'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['npm test'],
+      }),
+      artifactPath: 'workflows/generated/runtime-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const rendered = artifact(result).content;
+
+    // The final-hard-validation step body must include both branches of the
+    // workspace-aware fallback so monorepos and flat repos both succeed.
+    expect(rendered).toContain('npm pkg get scripts.typecheck');
+    expect(rendered).toContain('npm run typecheck');
+    expect(rendered).toContain('npx tsc --noEmit');
+
+    // The bare `npx tsc --noEmit` (without the conditional guard) must not
+    // appear as the first command after `set -e` in any rendered .step body.
+    // That pattern is what would dump the tsc help text in monorepo roots.
+    expect(rendered).not.toMatch(/command: "set -e\\nnpx tsc --noEmit\\n/);
   });
 
   it('uses a master workflow for broad target-file specs and leaves narrow specs on the existing renderer', () => {
@@ -131,9 +301,14 @@ describe('workflow generation pipeline', () => {
       expect.arrayContaining([
         expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-claude' }),
         expect.objectContaining({ id: 'implement-artifact', agentRole: 'impl-primary-codex' }),
-        expect.objectContaining({ id: 'fix-loop', name: '80-to-100 fix loop' }),
-        expect.objectContaining({ id: 'final-review-claude' }),
-        expect.objectContaining({ id: 'final-review-codex' }),
+        expect.objectContaining({ id: 'review-claude', agentRole: 'reviewer-claude', dependsOn: ['initial-soft-validation'] }),
+        expect.objectContaining({ id: 'fix-loop', agentRole: 'validator-claude', dependsOn: ['review-claude', 'initial-soft-validation'] }),
+        expect.objectContaining({ id: 'final-review-claude', agentRole: 'reviewer-claude', dependsOn: ['post-fix-validation'] }),
+        expect.objectContaining({ id: 'final-fix-claude', agentRole: 'validator-claude', dependsOn: ['final-review-claude'] }),
+        expect.objectContaining({ id: 'review-codex', agentRole: 'reviewer-codex', dependsOn: ['final-fix-claude'] }),
+        expect.objectContaining({ id: 'fix-loop-codex', agentRole: 'validator-codex', dependsOn: ['review-codex'] }),
+        expect.objectContaining({ id: 'final-review-codex', agentRole: 'reviewer-codex', dependsOn: ['post-codex-fix-validation'] }),
+        expect.objectContaining({ id: 'final-fix-codex', agentRole: 'validator-codex', dependsOn: ['final-review-codex'] }),
         expect.objectContaining({ id: 'final-signoff', dependsOn: ['regression-gate'] }),
       ]),
     );
@@ -141,9 +316,10 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
     expect(artifact.content).toContain('.agent("validator-claude"');
-    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(artifact.content).toContain('.agent("validator-codex"');
+    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(artifact.content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
-    expect(artifact.content).toContain('80-to-100 fix loop');
+    expect(artifact.content).toContain('80-to-100 review-fix loop');
     expect(artifact.content).toContain('deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion');
     expect(artifact.content).toContain('If using rg, guard it with command -v rg');
     expect(artifact.content).toContain('Generated workflow quality');
@@ -180,7 +356,7 @@ describe('workflow generation pipeline', () => {
     expect(gate(artifact, 'final-review-pass-gate')).toMatchObject({
       stage: 'final',
       failOnError: true,
-      dependsOn: ['final-review-claude', 'final-review-codex'],
+      dependsOn: ['final-fix-codex'],
     });
     expect(result.validation).toMatchObject({
       valid: true,
@@ -195,7 +371,7 @@ describe('workflow generation pipeline', () => {
       ]),
     );
     expect(result.validation.issues).toEqual([]);
-    expect(artifact.content).toMatch(/80-to-100 fix loop/i);
+    expect(artifact.content).toMatch(/80-to-100 review-fix loop/i);
     expect(artifact.content).toContain('final-review');
   });
 
@@ -371,26 +547,24 @@ describe('workflow generation pipeline', () => {
       expect.arrayContaining([
         expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-codex' }),
         expect.objectContaining({ id: 'implement-artifact', agentRole: 'author-codex' }),
-        expect.objectContaining({ id: 'review-claude', dependsOn: ['initial-soft-validation'] }),
-        expect.objectContaining({
-          id: 'review-codex',
-          agentRole: 'deterministic',
-          name: 'Codex structural marker gate',
-          dependsOn: ['initial-soft-validation'],
-        }),
+        expect.objectContaining({ id: 'review-claude', agentRole: 'reviewer-claude', dependsOn: ['initial-soft-validation'] }),
+        expect.objectContaining({ id: 'fix-loop', agentRole: 'validator-claude', dependsOn: ['review-claude', 'initial-soft-validation'] }),
+        expect.objectContaining({ id: 'final-fix-claude', agentRole: 'validator-claude', dependsOn: ['final-review-claude'] }),
+        expect.objectContaining({ id: 'review-codex', agentRole: 'reviewer-codex', dependsOn: ['final-fix-claude'] }),
+        expect.objectContaining({ id: 'final-fix-codex', agentRole: 'validator-codex', dependsOn: ['final-review-codex'] }),
       ]),
     );
     expect(artifact.content).toContain('.agent("lead-codex", { cli: "codex", interactive: false');
     expect(artifact.content).toContain('.agent("reviewer-codex", { cli: "codex", preset: "reviewer"');
-    expect(artifact.content).not.toContain('.agent("reviewer-claude"');
+    expect(artifact.content).toContain('.agent("reviewer-claude", { cli: "claude", preset: "reviewer"');
     expect(artifact.content).toContain('.agent("validator-codex", { cli: "codex", preset: "worker"');
+    expect(artifact.content).toContain('.agent("validator-claude", { cli: "claude", preset: "worker"');
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
-    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-codex\", repairRetries: 2 })");
+    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-codex\", repairRetries: 2 })");
     expect(artifact.content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
-    expect(artifact.content).toContain('Codex structural marker gate');
-    expect(artifact.content).toContain('must not be presented as independent review evidence');
-    expect(artifact.content).toContain('Substantive review evidence comes from the Claude review steps plus deterministic validation gates');
+    expect(artifact.content).toContain('verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED');
+    expect(artifact.content).toContain('review-codex.md');
     expect(artifact.content).toContain('docs/release-readiness.md');
     expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
@@ -401,15 +575,16 @@ describe('workflow generation pipeline', () => {
         }),
         expect.objectContaining({
           stepId: 'review-claude',
-          agent: 'reviewer-codex',
+          agent: 'reviewer-claude',
           concurrency: 1,
         }),
       ]),
     );
-    expect(result.toolSelection.selections).not.toEqual(
+    expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           stepId: 'review-codex',
+          agent: 'reviewer-codex',
         }),
       ]),
     );
@@ -540,6 +715,69 @@ describe('workflow generation pipeline', () => {
     });
     expect(gate(artifact, 'git-diff-gate').command).toContain('git ls-files --others --exclude-standard');
     expect(result.validation.issues).toEqual([]);
+  });
+
+  it('requires the mandatory Claude-then-Codex fresh-eyes review/fix loop', () => {
+    const loopSpec = spec({
+      description: 'Implement one helper change and add a focused Vitest unit test.',
+      targetFiles: ['src/product/generation/template-renderer.ts', 'src/product/generation/pipeline.test.ts'],
+      acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+    });
+    const result = generate({
+      spec: loopSpec,
+      artifactPath: 'workflows/generated/fresh-eyes-loop.ts',
+    });
+    const base = artifact(result);
+
+    const loopOrder = [
+      '.step("review-claude"',
+      '.step("fix-loop"',
+      '.step("final-review-claude"',
+      '.step("final-fix-claude"',
+      '.step("review-codex"',
+      '.step("fix-loop-codex"',
+      '.step("final-review-codex"',
+      '.step("final-fix-codex"',
+      '.step("final-review-pass-gate"',
+      '.step("final-hard-validation"',
+    ].map((needle) => base.content.indexOf(needle));
+    expect(loopOrder.every((index) => index >= 0)).toBe(true);
+    expect(loopOrder.every((index, position) => position === 0 || index > loopOrder[position - 1])).toBe(true);
+    expect(base.content).toContain('verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED');
+    expect(base.content).toContain('add or update appropriate tests, fixtures, assertions, or deterministic proofs');
+    expect(gate(base, 'post-codex-fix-validation')).toMatchObject({
+      dependsOn: ['codex-fix-loop-report-gate'],
+      failOnError: false,
+      stage: 'post_fix',
+    });
+    expect(gate(base, 'final-review-pass-gate')).toMatchObject({
+      dependsOn: ['final-fix-codex'],
+      stage: 'final',
+    });
+
+    const oldParallelShape = {
+      ...base,
+      tasks: base.tasks.map((task) =>
+        task.id === 'review-codex'
+          ? { ...task, dependsOn: ['initial-soft-validation'] }
+          : task.id === 'final-review-codex'
+            ? { ...task, dependsOn: ['post-fix-validation'] }
+            : task,
+      ),
+      gates: base.gates.map((candidate) =>
+        candidate.name === 'final-review-pass-gate'
+          ? { ...candidate, dependsOn: ['final-review-claude', 'final-review-codex'] }
+          : candidate,
+      ),
+    };
+    const validation = validateGeneratedArtifact(oldParallelShape, result.patternDecision, result.skillContext, loopSpec);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'MANDATORY_FRESH_EYES_LOOP_MISSING' }),
+      ]),
+    );
   });
 
   it('requires the runtime run call itself to pass explicit cwd, ignoring embedded examples', () => {
@@ -1017,8 +1255,8 @@ describe('workflow generation pipeline', () => {
     const artifact = result.artifact!;
     const passGate = artifact.gates.find((g) => g.name === 'final-review-pass-gate')!;
 
-    const claudePathMatch = artifact.content.match(/Write\s+(\S+\/final-review-claude\.md)/);
-    const codexPathMatch = artifact.content.match(/Write\s+(\S+\/final-review-codex\.md)/);
+    const claudePathMatch = artifact.content.match(/write\s+(\S+\/claude-final-fix\.md)/i);
+    const codexPathMatch = artifact.content.match(/write\s+(\S+\/codex-final-fix\.md)/i);
     expect(claudePathMatch).not.toBeNull();
     expect(codexPathMatch).not.toBeNull();
 
@@ -1051,12 +1289,16 @@ describe('workflow generation pipeline', () => {
       dependsOn: ['final-signoff'],
     });
     const consistencyGate = gate(artifact, 'final-artifact-consistency-gate');
-    expect(consistencyGate.command).toContain("['review-feedback.md', read('review-feedback.md')]");
+    expect(consistencyGate.command).toContain("['review-claude.md', read('review-claude.md')]");
     expect(consistencyGate.command).toContain("['fix-loop-report.md', read('fix-loop-report.md')]");
     expect(consistencyGate.command).toContain("['final-review-claude.md', read('final-review-claude.md')]");
+    expect(consistencyGate.command).toContain("['claude-final-fix.md', read('claude-final-fix.md')]");
+    expect(consistencyGate.command).toContain("['review-codex.md', read('review-codex.md')]");
+    expect(consistencyGate.command).toContain("['codex-fix-loop-report.md', read('codex-fix-loop-report.md')]");
+    expect(consistencyGate.command).toContain("['final-review-codex.md', read('final-review-codex.md')]");
+    expect(consistencyGate.command).toContain("['codex-final-fix.md', read('codex-final-fix.md')]");
     expect(consistencyGate.command).toContain("['signoff.md', read('signoff.md')]");
-    expect(consistencyGate.command).not.toContain("['final-review-codex.md', read('final-review-codex.md')]");
-    expect(consistencyGate.command).toContain('FINAL_REVIEW_CODEX_PASS');
+    expect(consistencyGate.command).toContain('CODEX_FINAL_FIX_COMPLETE');
   });
 
   it('no-target code workflow file gate validates manifest contents, not source-shape grep', () => {
@@ -1304,7 +1546,7 @@ describe('workflow generation pipeline', () => {
     });
     expect(result.patternDecision.specSignals).toContain('choosing-swarm-patterns skill loaded');
     expect(result.patternDecision.reason).toMatch(/choosing-swarm-patterns/i);
-    expect(artifact(result).content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-codex\", repairRetries: 2 })");
+    expect(artifact(result).content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-codex\", repairRetries: 2 })");
     expect(artifact(result).content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
   });
 
@@ -1321,8 +1563,8 @@ describe('workflow generation pipeline', () => {
     const weakArtifact = {
       ...baseArtifact,
       content: baseArtifact.content.replace(
-        ".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })",
-        ".onError('retry', { maxRetries: 2, retryDelayMs: 1000 })",
+        ".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })",
+        ".onError('retry', { maxRetries: 2, retryDelayMs: 10000 })",
       ),
     };
 

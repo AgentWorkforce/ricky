@@ -12,6 +12,8 @@ export type LifecycleEventKind =
   | 'cancelled'
   | 'error';
 
+export type ExecutionRouteKind = 'local' | 'cloud' | 'custom';
+
 export interface RunRetryMetadata {
   /** One-based attempt number for this run. */
   attempt: number;
@@ -30,6 +32,10 @@ export interface RunRetryMetadata {
 }
 
 export interface ExecutionRoute {
+  /** Stable route identifier for product layers that should not know shell details. */
+  id?: string;
+  /** Runtime family used by higher-level surfaces for routing decisions. */
+  kind?: ExecutionRouteKind;
   /** Underlying executable. Defaults to agent-relay. */
   command?: string;
   /** Arguments before the workflow file. Defaults to ['run']. */
@@ -93,11 +99,22 @@ export interface LocalCoordinatorOptions {
   completedRunLimit?: number;
 }
 
+export interface LocalCoordinatorFactoryOptions extends LocalCoordinatorOptions {
+  /** Override the default local process runner for tests or alternate execution hosts. */
+  runner?: CommandRunner;
+}
+
 export interface CommandInvocationSummary {
   command: string;
   args: string[];
   cwd: string;
   env?: Record<string, string>;
+  route?: ExecutionRouteSummary;
+}
+
+export interface ExecutionRouteSummary {
+  id?: string;
+  kind?: ExecutionRouteKind;
 }
 
 export interface LogSnippet {
@@ -118,6 +135,8 @@ export interface CoordinatorResult {
   /** Alias for consumers that model run lifecycle as start/end. */
   endedAt: string;
   durationMs: number;
+  /** Normalized timeout guard applied to this local runtime invocation. */
+  timeoutMs?: number;
   stdout: string[];
   stderr: string[];
   stdoutSnippet: LogSnippet;
@@ -135,7 +154,35 @@ export interface ActiveRunSnapshot {
   cwd: string;
   status: RunStatus;
   startedAt: string;
+  /** Normalized timeout guard currently protecting this active run. */
+  timeoutMs?: number;
   retry: RunRetryMetadata;
   invocation: CommandInvocationSummary;
   metadata?: Record<string, unknown>;
+}
+
+export interface RunLaunchHandle {
+  runId: string;
+  workflowFile: string;
+  cwd: string;
+  startedAt: string;
+  result: Promise<CoordinatorResult>;
+  cancel: () => void;
+  monitor: () => AsyncIterable<LifecycleEvent>;
+  getActiveRun: () => ActiveRunSnapshot | undefined;
+}
+
+export interface LocalCoordinatorApi {
+  start(request: RunRequest): RunLaunchHandle;
+  launch(request: RunRequest): Promise<CoordinatorResult>;
+  on(event: 'lifecycle', cb: (event: LifecycleEvent) => void): void;
+  off(event: 'lifecycle', cb: (event: LifecycleEvent) => void): void;
+  monitor(runId?: string): AsyncIterable<LifecycleEvent>;
+  cancel(runId: string): void;
+  getActiveRun(runId: string): ActiveRunSnapshot | undefined;
+  listActiveRuns(): ActiveRunSnapshot[];
+  getRunResult(runId: string): CoordinatorResult | undefined;
+  listRunResults(): CoordinatorResult[];
+  /** Resolve once an active run settles; returns undefined when the run is unknown. */
+  waitForRunResult(runId: string): Promise<CoordinatorResult | undefined>;
 }

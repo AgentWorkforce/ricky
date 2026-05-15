@@ -3,14 +3,16 @@ import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import ts from 'typescript';
 
 import type { LocalInvocationRequest } from './request-normalizer.js';
-import type { LocalClassifiedBlocker, LocalResponse } from './entrypoint.js';
+import type { LocalClassifiedBlocker, LocalExecutionEvidence, LocalResponse } from './entrypoint.js';
 import { classifyFailure as defaultClassifyFailure } from '../runtime/failure/classifier.js';
 import type { FailureClassification } from '../runtime/failure/types.js';
 import { debugWorkflowRun as defaultDebugWorkflowRun } from '../product/specialists/debugger/debugger.js';
 import type { DebuggerResult } from '../product/specialists/debugger/types.js';
 import type { WorkflowRunEvidence, WorkflowStepEvidence } from '../shared/models/workflow-evidence.js';
+import { isSyntheticStageId } from './synthetic-step-ids.js';
 import { repairWorkflowWithWorkforcePersona } from '../product/generation/workforce-persona-repairer.js';
 import type { WorkforcePersonaRepairAttempt } from '../product/generation/workforce-persona-repairer.js';
 import {
@@ -95,6 +97,76 @@ export interface RunWithAutoFixOptions {
 }
 
 const DEFAULT_BACKOFF_MS = 500;
+
+/**
+ * When `failedStep` cannot be parsed from the workflow run's evidence, a retry
+ * that omits `startFromStep` will silently restart the entire workflow from
+ * step 0 (see `relay/packages/sdk/src/workflows/run.ts` — `executeOptions` is
+ * `undefined` unless `startFrom` is set, so `--previous-run-id` alone does
+ * NOT resume).
+ *
+ * For short workflows that's fine; for long multi-agent workflows (e.g. the
+ * proactive-runtime M1–M6 chain) the re-spawned `impl-*` tracks burn hours
+ * per attempt and produce duplicated work even though the prior run's
+ * signoff already emitted "SIGNOFF: COMPLETE".
+ *
+ * Default behavior: refuse to retry blindly from scratch when the workflow
+ * has already produced completed real (non-synthetic) steps and we have no
+ * step-level resume anchor. Escalate to the operator instead.
+ *
+ * Opt back into the old behavior by setting
+ * `RICKY_AUTO_FIX_ALLOW_FULL_RESTART=1` — useful for cheap test workflows or
+ * for failures where the workflow never made meaningful progress (e.g. a
+ * synthetic runtime-launch / local-runtime / runtime-precheck blocker).
+ */
+function fullRestartExplicitlyAllowed(): boolean {
+  const raw = process.env.RICKY_AUTO_FIX_ALLOW_FULL_RESTART;
+  if (!raw) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
+/**
+ * Returns true when the prior attempt's evidence shows at least one
+ * real workflow step ran to completion. If so, restarting from scratch
+ * would re-spawn that work and is the wrong default.
+ *
+ * Synthetic stage ids (runtime-launch, local-runtime, runtime-precheck) do
+ * NOT count — those represent broker-level lifecycle, not user steps.
+ */
+function workflowDidExpensiveWork(evidence: WorkflowRunEvidence): boolean {
+  if (typeof evidence.completedStepCount === 'number' && evidence.completedStepCount > 0) {
+    return true;
+  }
+  return evidence.steps.some(
+    (step) => step.status === 'passed' && !isSyntheticStageId(step.stepId),
+  );
+}
+
+/**
+ * Combined gate: when we have no step-level resume anchor (`failedStep` is
+ * undefined), retrying would silently restart from scratch. Permit it only
+ * when (a) the operator explicitly opted in, or (b) no real work has
+ * completed yet so the cost of a fresh run is low.
+ */
+function safeToRetryWithoutStartFromStep(
+  failedStep: string | undefined,
+  evidence: WorkflowRunEvidence,
+): boolean {
+  if (failedStep) return true;
+  if (fullRestartExplicitlyAllowed()) return true;
+  return !workflowDidExpensiveWork(evidence);
+}
+
+/**
+ * Reason string explaining why we refused to retry from scratch. Kept in one
+ * place so escalation messages and warnings stay aligned.
+ */
+const FULL_RESTART_REFUSAL_REASON =
+  'Auto-fix would have restarted the workflow from scratch (no step-level resume anchor was available), ' +
+  'but the prior attempt already completed real workflow steps. Refusing to discard that work. ' +
+  'Inspect the run, fix the failure manually, and rerun with --start-from <step> --previous-run-id <id>. ' +
+  'Set RICKY_AUTO_FIX_ALLOW_FULL_RESTART=1 to allow a full restart anyway.';
 
 export async function runWithAutoFix(
   request: LocalInvocationRequest,
@@ -232,6 +304,28 @@ export async function runWithAutoFix(
             ...(driftRepair.runId ? { persona_run_id: driftRepair.runId } : {}),
           };
           warnings.push(...(driftRepair.warnings ?? []));
+
+          if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
+            attemptSummary.fix_error = FULL_RESTART_REFUSAL_REASON;
+            warnings.push(FULL_RESTART_REFUSAL_REASON);
+            const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+            escalated.nextActions = [
+              ...escalated.nextActions,
+              FULL_RESTART_REFUSAL_REASON,
+              debuggerResult.summary,
+              ...debuggerResult.recommendation.steps.map((step) => step.description),
+            ];
+            attachEscalationOptions(escalated, {
+              request: currentRequest,
+              response,
+              debuggerResult,
+              reason: FULL_RESTART_REFUSAL_REASON,
+              trackingRunId,
+              artifactPath: resolveArtifactPath(currentRequest, response),
+            });
+            return escalated;
+          }
+
           if (!runId) {
             const warning = 'Auto-fix retry could not resolve a previous run id; retrying without step-level resume.';
             attemptSummary.warning = warning;
@@ -344,6 +438,27 @@ export async function runWithAutoFix(
         };
         warnings.push(...(repair.warnings ?? []));
 
+        if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
+          attemptSummary.fix_error = FULL_RESTART_REFUSAL_REASON;
+          warnings.push(FULL_RESTART_REFUSAL_REASON);
+          const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+          escalated.nextActions = [
+            ...escalated.nextActions,
+            FULL_RESTART_REFUSAL_REASON,
+            debuggerResult.summary,
+            ...debuggerResult.recommendation.steps.map((step) => step.description),
+          ];
+          attachEscalationOptions(escalated, {
+            request: currentRequest,
+            response,
+            debuggerResult,
+            reason: FULL_RESTART_REFUSAL_REASON,
+            trackingRunId,
+            artifactPath: repairedArtifactPath,
+          });
+          return escalated;
+        }
+
         if (!runId) {
           const warning = 'Auto-fix retry could not resolve a previous run id; retrying without step-level resume.';
           attemptSummary.warning = warning;
@@ -368,7 +483,7 @@ export async function runWithAutoFix(
       } catch (error) {
         attemptSummary.fix_error = error instanceof Error ? error.message : String(error);
         warnings.push(...warningsFromError(error));
-        if (attempt < maxAttempts) {
+        if (attempt < maxAttempts && safeToRetryWithoutStartFromStep(failedStep, evidence)) {
           const warning = `Workflow repair provider failed; retrying without an artifact rewrite: ${attemptSummary.fix_error}`;
           attemptSummary.warning = warning;
           warnings.push(warning);
@@ -390,6 +505,10 @@ export async function runWithAutoFix(
           };
           onProgress?.(`Workflow repair provider failed; retrying workflow${failedStep ? ` from ${failedStep}` : ''}...`);
           continue;
+        }
+        if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
+          attemptSummary.warning = FULL_RESTART_REFUSAL_REASON;
+          warnings.push(FULL_RESTART_REFUSAL_REASON);
         }
         const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
         escalated.nextActions = [
@@ -453,6 +572,26 @@ export async function runWithAutoFix(
         trackingRunId,
         artifactPath: resolveArtifactPath(currentRequest, response),
         ...(failedStep ? { failedStep } : {}),
+      });
+      return escalated;
+    }
+
+    if (!safeToRetryWithoutStartFromStep(failedStep, evidence)) {
+      attemptSummary.fix_error = FULL_RESTART_REFUSAL_REASON;
+      warnings.push(FULL_RESTART_REFUSAL_REASON);
+      const escalated = withAutoFix(response, maxAttempts, attempts, attemptSummary.status, warnings, trackingRunId);
+      escalated.nextActions = [
+        ...escalated.nextActions,
+        FULL_RESTART_REFUSAL_REASON,
+        ...(response.execution?.blocker?.recovery.steps ?? []),
+      ];
+      attachEscalationOptions(escalated, {
+        request: currentRequest,
+        response,
+        debuggerResult,
+        reason: FULL_RESTART_REFUSAL_REASON,
+        trackingRunId,
+        artifactPath: resolveArtifactPath(currentRequest, response),
       });
       return escalated;
     }
@@ -699,11 +838,23 @@ function injectWorkflowEnvLoader(content: string, requiredEnvVars: string[]): st
   let next = content;
   let changed = false;
 
-  if (!next.includes("from 'node:fs'") && !next.includes('from "node:fs"')) {
+  // We must check that the *aliases* loadRickyWorkflowEnv references are
+  // already imported, not just that the module name appears anywhere in the
+  // file. The master workflow renderer emits real `import { mkdirSync,
+  // writeFileSync } from 'node:fs'` strings inside shell HEREDOCs in
+  // .step({ command: ... }) calls — that's a string literal, not a module
+  // import, but a substring check for `from 'node:fs'` matches it and
+  // silently skips adding `import * as rickyWorkflowFs from 'node:fs'`.
+  // The injected loadRickyWorkflowEnv body then ReferenceErrors at module
+  // load time. hasRickyWorkflowAliasImport uses the TypeScript AST to walk
+  // module-scope ImportDeclaration nodes so string-literal contents are
+  // structurally inert and the alias detection is independent of source
+  // formatting.
+  if (!hasRickyWorkflowAliasImport(next, 'rickyWorkflowFs', 'node:fs')) {
     next = insertAfterWorkflowImport(next, "import * as rickyWorkflowFs from 'node:fs';");
     changed = true;
   }
-  if (!next.includes("from 'node:path'") && !next.includes('from "node:path"')) {
+  if (!hasRickyWorkflowAliasImport(next, 'rickyWorkflowPath', 'node:path')) {
     next = insertAfterWorkflowImport(next, "import * as rickyWorkflowPath from 'node:path';");
     changed = true;
   }
@@ -741,6 +892,45 @@ function insertAfterWorkflowImport(content: string, importLine: string): string 
   return `${importLine}\n${content}`;
 }
 
+function hasRickyWorkflowAliasImport(content: string, alias: string, moduleName: string): boolean {
+  // Walk module-scope ImportDeclaration nodes via the TypeScript AST and
+  // look for `import * as <alias> from '<moduleName>'`. Using the parser
+  // (rather than substring or regex matching on the raw source) makes
+  // detection structural: contents inside StringLiteral /
+  // NoSubstitutionTemplateLiteral / TemplateExpression nodes are inert, so
+  // shell HEREDOCs in .step({ command: ... }) bodies that embed
+  // `import { ... } from 'node:fs'` as part of a `node --input-type=module`
+  // script no longer fool us into skipping the real top-level alias import.
+  // Comments are also inert. Multi-line imports, alternate quoting, and
+  // imports placed lower in the file all just work because the parser owns
+  // the lexical structure instead of us simulating it with regex.
+  let sourceFile: ts.SourceFile;
+  try {
+    sourceFile = ts.createSourceFile(
+      'ricky-workflow-artifact.ts',
+      content,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ false,
+      ts.ScriptKind.TS,
+    );
+  } catch {
+    // Unparseable artifacts fall through and get the alias re-injected so
+    // the helpers always have their imports. The real syntax error will
+    // surface at runtime via the strip-types loader.
+    return false;
+  }
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== moduleName) continue;
+    const namedBindings = statement.importClause?.namedBindings;
+    if (!namedBindings || !ts.isNamespaceImport(namedBindings)) continue;
+    if (namedBindings.name.text === alias) return true;
+  }
+  return false;
+}
+
 function insertBeforeMain(content: string, helper: string): string {
   if (content.includes('async function main()')) {
     return content.replace(/\nasync function main\(\)/, `\n${helper}\n\nasync function main()`);
@@ -769,9 +959,19 @@ function loadRickyWorkflowEnv(cwd = process.cwd()) {
 
 function assertRickyWorkflowEnv(names: string[]): void {
   const missing = names.filter((name) => !process.env[name]);
-  if (missing.length > 0) {
-    throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
+  if (missing.length === 0) return;
+  // When the workflow is being resumed via --start-from, the SDK sets
+  // process.env.START_FROM. Skipped upstream steps may have been the
+  // ones that needed these env vars; the resumed steps may not. Warn
+  // instead of failing fast so the resume can proceed and any step that
+  // actually needs a missing value will fail naturally with its own
+  // signal. Without this, --start-from on a workflow whose missing env
+  // var isn't in the resumed step's path is unrecoverable from the CLI.
+  if (process.env.START_FROM) {
+    console.warn(\`[ricky] Skipping env-var assertion (--start-from active): missing \${missing.join(', ')}. Resumed steps that actually need these will fail with their own error.\`);
+    return;
   }
+  throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
 }
 
 function unquoteRickyWorkflowEnvValue(value: string): string {
@@ -786,9 +986,12 @@ function unquoteRickyWorkflowEnvValue(value: string): string {
 function rickyWorkflowEnvAssertSource(): string {
   return `function assertRickyWorkflowEnv(names: string[]): void {
   const missing = names.filter((name) => !process.env[name]);
-  if (missing.length > 0) {
-    throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
+  if (missing.length === 0) return;
+  if (process.env.START_FROM) {
+    console.warn(\`[ricky] Skipping env-var assertion (--start-from active): missing \${missing.join(', ')}. Resumed steps that actually need these will fail with their own error.\`);
+    return;
   }
+  throw new Error(\`MISSING_ENV_VAR: \${missing.join(', ')}. Add missing values to .env.local or export them before rerunning.\`);
 }`;
 }
 
@@ -1187,8 +1390,31 @@ function rewriteDependsOnStep(content: string, oldStep: string, newStep: string)
 }
 
 function timeoutContinuationPath(content: string, stepId: string): string {
-  if (/\bARTIFACT_DIR\b/.test(content)) return `\${ARTIFACT_DIR}/${stepId}-timeout-continuation.md`;
-  return `.workflow-artifacts/ricky-auto-fix/${stepId}-timeout-continuation.md`;
+  // Use a `-handoff.md` suffix (not `-timeout-continuation.md`) so the lead
+  // step's repaired task does not contain the literal continuation step name
+  // `${stepId}-timeout-continuation`. The SDK's detectLeadWorkerDeadlock
+  // validator does a substring match for downstream step names inside the
+  // lead's task text; embedding the continuation's name in the handoff path
+  // tripped that check and blocked the workflow at validateConfig time.
+  if (hasTopLevelArtifactDirBinding(content)) return `\${ARTIFACT_DIR}/${stepId}-handoff.md`;
+  return `.workflow-artifacts/ricky-auto-fix/${stepId}-handoff.md`;
+}
+
+function hasTopLevelArtifactDirBinding(content: string): boolean {
+  const sourceFile = ts.createSourceFile(
+    'ricky-workflow-artifact.ts',
+    content,
+    ts.ScriptTarget.Latest,
+    false,
+    ts.ScriptKind.TS,
+  );
+  return sourceFile.statements.some(
+    (statement) =>
+      ts.isVariableStatement(statement)
+      && statement.declarationList.declarations.some(
+        (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === 'ARTIFACT_DIR',
+      ),
+  );
 }
 
 function timeoutValueForContinuation(block: string): string {
@@ -1628,7 +1854,10 @@ function resolveRunId(response: LocalResponse): string | undefined {
 }
 
 function failedStepFromEvidence(evidence: WorkflowRunEvidence): string | undefined {
-  return evidence.steps.find((step) => step.status === 'failed')?.stepId;
+  const real = evidence.steps.find(
+    (step) => step.status === 'failed' && !isSyntheticStageId(step.stepId),
+  );
+  return real?.stepId;
 }
 
 function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: number): WorkflowRunEvidence {
@@ -1636,7 +1865,9 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
   const startedAt = execution?.execution.started_at ?? new Date().toISOString();
   const completedAt = execution?.execution.finished_at;
   const tail = execution?.evidence?.logs.tail ?? [];
+  const structuredSteps = workflowStepsFromExecutionEvidence(execution?.evidence?.workflow_steps, startedAt, completedAt);
   const runtimeSteps = runtimeStepsFromLogTail(tail, startedAt, completedAt);
+  const mergedSteps = mergeWorkflowStepEvidence(structuredSteps, runtimeSteps);
   const failedStepId = execution?.evidence?.failed_step?.id;
   const failedStepName = execution?.evidence?.failed_step?.name ?? failedStepId ?? 'local runtime';
   const fallbackStep: WorkflowStepEvidence = {
@@ -1661,7 +1892,7 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
     narrative: [],
     ...(response.ok ? {} : { error: execution?.blocker?.message ?? response.warnings[0] }),
   };
-  const steps = runtimeSteps.length > 0 ? runtimeSteps : [fallbackStep];
+  const steps = mergedSteps.length > 0 ? mergedSteps : [fallbackStep];
 
   return {
     runId: resolveRunId(response) ?? `ricky-auto-fix-attempt-${attempt}`,
@@ -1669,6 +1900,9 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
     workflowName: execution?.execution.workflow_file ?? response.generation?.artifact?.path ?? 'ricky-local',
     status: response.ok ? 'passed' : 'failed',
     steps,
+    ...(typeof execution?.execution.steps_completed === 'number'
+      ? { completedStepCount: execution.execution.steps_completed }
+      : {}),
     startedAt,
     ...(completedAt ? { completedAt } : {}),
     durationMs: execution?.execution.duration_ms,
@@ -1681,6 +1915,63 @@ function localResponseToWorkflowRunEvidence(response: LocalResponse, attempt: nu
     narrative: [],
     routing: [],
   };
+}
+
+/**
+ * Converts structured local runtime step snapshots into the shared evidence
+ * model before falling back to parsing human-readable log output.
+ */
+function workflowStepsFromExecutionEvidence(
+  workflowSteps: LocalExecutionEvidence['workflow_steps'] | undefined,
+  startedAt: string,
+  completedAt: string | undefined,
+): WorkflowStepEvidence[] {
+  return (workflowSteps ?? []).map((step) => ({
+    stepId: step.id,
+    stepName: step.name,
+    status: step.status === 'pass' ? 'passed' : step.status === 'fail' ? 'failed' : 'skipped',
+    startedAt,
+    ...(completedAt && (step.status === 'pass' || step.status === 'fail' || step.status === 'skipped')
+      ? { completedAt }
+      : {}),
+    durationMs: step.duration_ms,
+    verifications: [],
+    deterministicGates: [],
+    logs: [],
+    artifacts: [],
+    history: [],
+    retries: [],
+    narrative: [],
+  }));
+}
+
+function mergeWorkflowStepEvidence(
+  structuredSteps: WorkflowStepEvidence[],
+  runtimeSteps: WorkflowStepEvidence[],
+): WorkflowStepEvidence[] {
+  if (structuredSteps.length === 0) return runtimeSteps;
+  if (runtimeSteps.length === 0) return structuredSteps;
+
+  const runtimeByStepId = new Map(runtimeSteps.map((step) => [step.stepId, step]));
+  const merged = structuredSteps.map((structuredStep) => {
+    const runtimeStep = runtimeByStepId.get(structuredStep.stepId);
+    if (!runtimeStep) return structuredStep;
+    runtimeByStepId.delete(structuredStep.stepId);
+    return {
+      ...runtimeStep,
+      ...structuredStep,
+      verifications: runtimeStep.verifications.length > 0 ? runtimeStep.verifications : structuredStep.verifications,
+      deterministicGates: runtimeStep.deterministicGates.length > 0 ? runtimeStep.deterministicGates : structuredStep.deterministicGates,
+      logs: runtimeStep.logs.length > 0 ? runtimeStep.logs : structuredStep.logs,
+      artifacts: structuredStep.artifacts.length > 0 ? structuredStep.artifacts : runtimeStep.artifacts,
+      history: structuredStep.history.length > 0 ? structuredStep.history : runtimeStep.history,
+      retries: structuredStep.retries.length > 0 ? structuredStep.retries : runtimeStep.retries,
+      narrative: structuredStep.narrative.length > 0 ? structuredStep.narrative : runtimeStep.narrative,
+      ...(structuredStep.error ? { error: structuredStep.error } : runtimeStep.error ? { error: runtimeStep.error } : {}),
+    };
+  });
+
+  return [...merged, ...runtimeByStepId.values()];
 }
 
 function runtimeStepsFromLogTail(

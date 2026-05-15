@@ -211,9 +211,10 @@ Current docs sometimes describe a future or intended runtime composition more st
 
 `docs/architecture/ricky-runtime-architecture.md` says Ricky is composed on top of many `@agent-assistant/*` packages and that Ricky should never duplicate what Agent Assistant already provides.
 
-That is a good target, but it is not fully reflected in the current repo/package graph. The root `package.json` currently shows only one direct shared dependency:
+That is a good target, but it is not fully reflected as broad `@agent-assistant/*` runtime composition in the current repo/package graph. The current direct evidence is narrow:
 
-- `@agent-relay/sdk`
+- `@agent-relay/sdk` as the workflow runtime and authoring substrate
+- `@agent-assistant/turn-context` as a targeted request/turn envelope adoption slice
 
 So the architecture docs should be read as **target architecture / intended composition**, not as a literal audit of already-landed package reuse.
 

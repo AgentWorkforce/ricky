@@ -127,10 +127,12 @@ Non-goals:
 - Do not add unrelated scripts.
 - Do not add bundlers or framework-specific configs.
 - Do not add runtime-specific dependencies outside the validation foundation.
+- Do not broaden Vitest exclusions to hide existing E2E or proof suites just to make the foundation look green.
 
 Verification:
 - Keep the setup small and deterministic.
 - Make \`npx tsc --noEmit\` and \`npx vitest run\` honest first-run contracts for the repo.
+- Preserve direct executability of representative heavier suites by keeping \`test/local-auto-fix-workflow-failures.e2e.test.ts\` and \`src/local/proof/local-entrypoint-proof.test.ts\` runnable via explicit \`npx vitest run <file>\` invocation.
 - Stop after writing the toolchain files.`,
       verification: { type: 'exit_code', value: '0' },
     })
@@ -155,7 +157,7 @@ Verification:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['post-implementation-file-gate'],
-      command: 'npm install && npx tsc --noEmit && npx vitest run',
+      command: 'npm install && npx tsc --noEmit && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && npx vitest run',
       captureOutput: true,
       failOnError: false,
     })
@@ -181,18 +183,18 @@ Write .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/revie
       failOnError: true,
     })
     .step('fix-toolchain', {
-      agent: 'validator-claude',
+      type: 'deterministic',
       dependsOn: ['read-review-feedback'],
-      task: `Fix Ricky validation foundation issues from review feedback.
+      command: `tail -n 1 .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/review-claude.md | tr -d '[:space:]*' | grep -Eq "^REVIEW_CLAUDE_PASS$"
+cat > .workflow-artifacts/wave0-foundation/toolchain-validation-foundation/fix-toolchain.md <<'EOF'
+# Toolchain validation foundation fix pass
 
-Review feedback:
-{{steps.read-review-feedback.output}}
+Review feedback consumed. Claude passed the slice with no blocking issues, so no bounded fix was required in this step.
 
-Rules:
-- Keep scope limited to package.json, tsconfig.json, vitest.config.ts, and test/setup.ts.
-- Do not add extra tooling categories.
-- Re-run install, typecheck, and tests after edits.`,
-      verification: { type: 'exit_code', value: '0' },
+FIX_TOOLCHAIN_PASS
+EOF`,
+      captureOutput: true,
+      failOnError: true,
     })
     .step('post-fix-verification-gate', {
       type: 'deterministic',
@@ -212,7 +214,7 @@ Rules:
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npm install && npx tsc --noEmit && npx vitest run',
+      command: 'npm install && npx tsc --noEmit && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && npx vitest run',
       captureOutput: true,
       failOnError: false,
     })
@@ -241,7 +243,7 @@ Confirm prior findings are fixed or explicitly non-blocking. Write .workflow-art
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm install && npx tsc --noEmit && npx vitest run',
+      command: 'npm install && npx tsc --noEmit && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && npx vitest run',
       captureOutput: true,
       failOnError: true,
     })

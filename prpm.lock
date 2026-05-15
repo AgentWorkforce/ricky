@@ -3,23 +3,19 @@
   "lockfileVersion": 1,
   "packages": {
     "@agent-relay/choosing-swarm-patterns#codex": {
-      "version": "1.1.2",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fchoosing-swarm-patterns/1.1.2.tar.gz",
-      "integrity": "sha256-1620ad2b76a65aabb522d8432592da191d4194b7e7539e06a6fb086a1690fbef",
+      "version": "1.1.3",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fchoosing-swarm-patterns/1.1.3.tar.gz",
+      "integrity": "sha256-dda87add4ded4c5e81b50af06c80af1a20e43b9437c310cb652674d341828ef5",
       "format": "codex",
       "subtype": "skill",
       "sourceFormat": "claude",
       "sourceSubtype": "skill",
-      "installedPath": ".agents/skills/choosing-swarm-patterns/SKILL.md",
-      "fromCollection": {
-        "name_slug": "agent-relay-starter",
-        "version": "1.0.3"
-      }
+      "installedPath": ".agents/skills/choosing-swarm-patterns/SKILL.md"
     },
     "@agent-relay/writing-agent-relay-workflows#codex": {
-      "version": "1.6.2",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.2.tar.gz",
-      "integrity": "sha256-2394f6b0cd6ef65e871720646d23b9406a2193a314bd82e1f9a6eb0416c672ed",
+      "version": "1.6.10",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.10.tar.gz",
+      "integrity": "sha256-02bcf8c4c7705c80b5985f8c43f833ecae2b9601b17cbed289ad96496cae02fd",
       "format": "codex",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -48,18 +44,14 @@
       }
     },
     "@agent-relay/relay-80-100-workflow#codex": {
-      "version": "1.0.0",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.0.tar.gz",
-      "integrity": "sha256-b0e70fc43fa009f6cd9d8ae965f6e318b6b4724fb34c6378233ef3a4bd09cfb9",
+      "version": "1.0.5",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.5.tar.gz",
+      "integrity": "sha256-3f4c2209ea6ee46aaa03299bb1cb365ce9bafc80ca5fccbcc2c0003a6a1ca2b7",
       "format": "codex",
       "subtype": "skill",
       "sourceFormat": "claude",
       "sourceSubtype": "skill",
-      "installedPath": ".agents/skills/relay-80-100-workflow/SKILL.md",
-      "fromCollection": {
-        "name_slug": "agent-relay-starter",
-        "version": "1.0.3"
-      }
+      "installedPath": ".agents/skills/relay-80-100-workflow/SKILL.md"
     },
     "@agent-workforce/trail-snippet#claude:AGENTS.md": {
       "version": "1.1.2",
@@ -83,17 +75,27 @@
       }
     },
     "@agent-relay/writing-agent-relay-workflows#claude": {
-      "version": "1.6.2",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.2.tar.gz",
-      "integrity": "sha256-2394f6b0cd6ef65e871720646d23b9406a2193a314bd82e1f9a6eb0416c672ed",
+      "version": "1.6.10",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.10.tar.gz",
+      "integrity": "sha256-02bcf8c4c7705c80b5985f8c43f833ecae2b9601b17cbed289ad96496cae02fd",
       "format": "claude",
       "subtype": "skill",
       "sourceFormat": "claude",
       "sourceSubtype": "skill",
       "installedPath": ".claude/skills/writing-agent-relay-workflows/SKILL.md"
+    },
+    "@agent-relay/relay-80-100-workflow#claude": {
+      "version": "1.0.5",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.5.tar.gz",
+      "integrity": "sha256-3f4c2209ea6ee46aaa03299bb1cb365ce9bafc80ca5fccbcc2c0003a6a1ca2b7",
+      "format": "claude",
+      "subtype": "skill",
+      "sourceFormat": "claude",
+      "sourceSubtype": "skill",
+      "installedPath": ".claude/skills/relay-80-100-workflow/SKILL.md"
     }
   },
-  "generated": "2026-05-07T12:22:44.425Z",
+  "generated": "2026-05-15T10:28:14.631Z",
   "collections": {
     "agent-relay-starter": {
       "name_slug": "agent-relay-starter",

@@ -11,6 +11,7 @@ import type {
 } from './types.js';
 
 import type { Confidence } from '../../runtime/failure/types.js';
+import { extractTargetFilesFromMarkdown, looksLikeRealPath } from './markdown-target-files.js';
 
 interface ExtractedFields {
   description: string;
@@ -114,7 +115,10 @@ const MCP_TOOL_INTENTS: Record<string, IntentKind> = {
   'ricky.workflow.execute': 'execute',
 };
 
-const PATH_PATTERN = /(?:^|\s)([./~]?[\w@.-]+(?:\/[\w@.-]+)+(?:\.[A-Za-z0-9]+)?)/g;
+// Plain-text path scan, used as a defensive fallback for non-markdown-shaped
+// inputs (Slack messages, raw JSON description blobs). For markdown specs the
+// AST-based extractor in `./markdown-target-files.ts` is the source of truth.
+const PATH_PATTERN = /(?:^|[\s`'"(\[<])([./~]?[\w@.-]+(?:\/[\w@.-]+)+(?:\.[A-Za-z0-9]+)?)/g;
 const DESCRIPTION_KEYS = [
   'description',
   'prompt',
@@ -849,12 +853,20 @@ function extractTargetContext(text: string): string | undefined {
 }
 
 function extractTargetFiles(text: string): string[] {
+  const fromAst = extractTargetFilesFromMarkdown(text);
+  if (fromAst.length > 0) return fromAst;
+  // Fallback for non-markdown inputs (Slack one-liners, MCP description blobs).
+  // The AST extractor returns [] when the input has no inline-code spans and no
+  // Target Files section, so we fall through to a plain-text scan that still
+  // applies `looksLikeRealPath` to suppress prose noise like `base/head`.
   const paths: string[] = [];
   for (const match of text.matchAll(PATH_PATTERN)) {
     const candidate = match[1];
-    if (candidate && !candidate.startsWith('http')) {
-      paths.push(candidate.replace(/[),.;:]$/, ''));
-    }
+    if (!candidate) continue;
+    const cleaned = candidate.replace(/[`'")\],.;:]+$/, '');
+    if (!cleaned || cleaned.startsWith('http')) continue;
+    if (!looksLikeRealPath(cleaned)) continue;
+    paths.push(cleaned);
   }
   return dedupe(paths);
 }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import type { ClarificationQuestion, ClarificationRequest, NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { RenderedArtifact, SkillContext, WorkflowExecutionTarget } from './types.js';
@@ -14,7 +14,6 @@ export const WORKFORCE_PERSONA_INTENT_CANDIDATES = [
   'architecture-plan',
   'documentation',
 ] as const;
-export const DEFAULT_WORKFORCE_PERSONA_TIER = 'best';
 
 export interface WorkforcePersonaRuntime {
   harness: string;
@@ -105,6 +104,8 @@ export interface WorkforcePersonaWriterOptions {
   installSkills?: boolean;
   installRoot?: string;
   tier?: string;
+  /** Absolute path to the source spec file when known. The writer task references it so the persona can Read the spec instead of receiving it inline. */
+  specPath?: string;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   onProgress?: (chunk: { stream: 'stdout' | 'stderr'; text: string }) => void;
@@ -222,6 +223,7 @@ export async function writeWorkflowWithWorkforcePersona(
     relevantFiles,
     skillContext: options.skillContext,
     validationFeedback: options.validationFeedback,
+    ...(options.specPath ? { specPath: options.specPath } : {}),
   });
   const promptDigest = digest(task);
   const selection = resolved.context.selection;
@@ -248,22 +250,44 @@ export async function writeWorkflowWithWorkforcePersona(
     run,
     run.runId.catch(() => null),
   ]);
+  const dumpDebug = (reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success') =>
+    dumpPersonaDebug({
+      kind: 'writer',
+      reason,
+      repoRoot: options.repoRoot,
+      promptDigest,
+      task,
+      result,
+      selection,
+      resolved,
+      outputPath: options.outputPath,
+    });
+
   if (result.status !== 'completed') {
+    await dumpDebug('noncompletion');
     throw new WorkforcePersonaWriterError(
       `Workforce persona writer did not complete: ${result.status}.`,
       [...resolved.warnings, result.stderr].filter(Boolean),
     );
   }
 
-  const parsed = parsePersonaWorkflowResponse(result.output, options.outputPath, {
-    repoRoot: options.repoRoot,
-  });
+  let parsed: ParsedPersonaResponse;
+  try {
+    parsed = parsePersonaWorkflowResponse(result.output, options.outputPath, {
+      repoRoot: options.repoRoot,
+    });
+  } catch (error) {
+    await dumpDebug('parse-error');
+    throw error;
+  }
   if (parsed.clarification) {
     throw new WorkforcePersonaClarificationError(parsed.clarification.questions, resolved.warnings);
   }
   if (!parsed.content) {
+    await dumpDebug('no-content');
     throw new WorkforcePersonaWriterError('Workforce persona response did not include workflow artifact content.');
   }
+  await dumpDebug('success');
   const responseFormat = parsed.responseFormat as WorkforcePersonaWriterMetadata['responseFormat'];
   return {
     artifact: {
@@ -338,7 +362,7 @@ export async function resolveWorkforcePersonaContextWithModules(
       const selectionModule = await loadSelectionModule();
       warnings.push(...selectionModule.warnings);
       try {
-        const selected = selectionModule.module.usePersona(intent, selectionOptions(options));
+        const selected = selectionModule.module.usePersona(intent, metadataSelectionOptions(options));
         if (isUsablePersonaContext(selected)) {
           return {
             source: 'package',
@@ -401,7 +425,7 @@ export async function resolveWorkforcePersonaContextWithModules(
     try {
       const selectionModule = await loadSelectionModule();
       warnings.push(...selectionModule.warnings);
-      const context = selectionModule.module.usePersona(intent, selectionOptions(options));
+      const context = selectionModule.module.usePersona(intent, runnableSelectionFallbackOptions(options));
       if (isUsablePersonaContext(context)) {
         return {
           source: selectionModule.source,
@@ -416,7 +440,32 @@ export async function resolveWorkforcePersonaContextWithModules(
       }
       warnings.push(`Workforce usePersona(${intent}) returned unusable selection metadata.`);
     } catch (error) {
-      warnings.push(`Workforce selection metadata for ${intent} failed: ${errorMessage(error)}`);
+      const retry = retryWithoutInstallRoot(error, options);
+      if (retry) {
+        warnings.push(retry.warning);
+        try {
+          const selectionModule = await loadSelectionModule();
+          warnings.push(...selectionModule.warnings);
+          const context = selectionModule.module.usePersona(intent, metadataSelectionOptions(options));
+          if (isUsablePersonaContext(context)) {
+            return {
+              source: selectionModule.source,
+              intent,
+              context,
+              warnings,
+            };
+          }
+          if (selectionFromPersonaResult(context)) {
+            warnings.push(`Workforce usePersona(${intent}) without installRoot resolved metadata but did not provide a runnable sendMessage API.`);
+            continue;
+          }
+          warnings.push(`Workforce usePersona(${intent}) without installRoot returned unusable selection metadata.`);
+        } catch (retryError) {
+          warnings.push(`Workforce usePersona(${intent}) without installRoot failed: ${errorMessage(retryError)}`);
+        }
+      } else {
+        warnings.push(`Workforce selection metadata for ${intent} failed: ${errorMessage(error)}`);
+      }
     }
   }
 
@@ -472,6 +521,29 @@ export async function loadWorkforceSelectionModule(importPackage: WorkforcePacka
   );
 }
 
+/**
+ * Soft caps for the persona writer task body. The total task size is the
+ * sum of these caps plus the boilerplate prose; under default values the
+ * task body is well under 200 KB even for the largest specs we have seen
+ * (1.5 MB raw payload, 81 relevant files, ~600 KB validation feedback).
+ *
+ * The hard cap on description (`MAX_DESCRIPTION_BYTES`) is the one that
+ * matters most because the raw spec text is the dominant cost for natural-
+ * language specs; everything else is bounded by per-item caps.
+ */
+const MAX_DESCRIPTION_BYTES = 32 * 1024;
+const MAX_TARGET_CONTEXT_BYTES = 8 * 1024;
+const MAX_RELEVANT_FILE_BYTES = 8 * 1024;
+const MAX_RELEVANT_FILES_TOTAL_BYTES = 96 * 1024;
+const MAX_VALIDATION_FEEDBACK_PREVIOUS_BYTES = 16 * 1024;
+const MAX_POLICY_FILE_BYTES = 24 * 1024;
+
+const RICKY_WORKFLOW_POLICY_FILES = [
+  'docs/workflows/WORKFLOW_STANDARDS.md',
+  'workflows/shared/WORKFLOW_AUTHORING_RULES.md',
+  'workflows/meta/spec/generated-workflow-template.md',
+] as const;
+
 export function buildWorkflowPersonaTask(
   spec: NormalizedWorkflowSpec,
   input: {
@@ -482,6 +554,7 @@ export function buildWorkflowPersonaTask(
     relevantFiles: Array<{ path: string; content?: string }>;
     skillContext?: SkillContext;
     validationFeedback?: WorkforcePersonaValidationFeedback;
+    specPath?: string;
   },
 ): string {
   const contract = {
@@ -511,13 +584,29 @@ export function buildWorkflowPersonaTask(
     },
   };
 
+  const summarizedSpec = summarizeSpecForPersona(spec);
+  const summarizedRelevantFiles = summarizeRelevantFilesForPersona(input.relevantFiles);
+  const rickyPolicyContext = renderRickyWorkflowPolicyContext(input.repoRoot);
+
+  const specReference =
+    input.specPath && summarizedSpec.descriptionTruncated
+      ? [
+          `Spec source file (read it directly when you need more detail than the summary below): ${input.specPath}`,
+          `The summarized spec below truncates description and target context for prompt size. Read the spec file for full content.`,
+          '',
+        ]
+      : input.specPath
+        ? [`Spec source file (full content is also included below): ${input.specPath}`, '']
+        : [];
+
   return [
     'Write an Agent Relay workflow artifact for Ricky.',
     'Run as a non-interactive one-shot persona invocation. Return only the response contract.',
     'If the normalized spec has blocking ambiguity or open questions, return needs_clarification with targeted user-facing questions instead of guessing.',
     '',
-    'Normalized spec JSON:',
-    JSON.stringify(spec, null, 2),
+    ...specReference,
+    'Normalized spec JSON (description/targetContext truncated when oversized; raw spec payload elided):',
+    JSON.stringify(summarizedSpec.spec, null, 2),
     '',
     `Workflow name: ${input.workflowName}`,
     `Target mode: ${input.targetMode}`,
@@ -530,13 +619,14 @@ export function buildWorkflowPersonaTask(
       targetMode: input.targetMode,
       repoRoot: input.repoRoot,
       outputPath: input.outputPath,
+      ...(input.specPath ? { specPath: input.specPath } : {}),
     }, null, 2),
     '',
-    'Relevant file context:',
-    safeJson(input.relevantFiles.map((file) => ({
-      path: file.path,
-      content: file.content ?? null,
-    }))),
+    `Relevant file context (${summarizedRelevantFiles.includedCount} of ${input.relevantFiles.length} files; per-file content truncated above ${MAX_RELEVANT_FILE_BYTES} bytes):`,
+    safeJson(summarizedRelevantFiles.files),
+    '',
+    'Ricky repo-local workflow policy context:',
+    rickyPolicyContext,
     '',
     'Matched Ricky generation skills:',
     renderSkillContextForPersona(input.skillContext),
@@ -583,10 +673,32 @@ export function buildWorkflowPersonaTask(
   ].join('\n');
 }
 
+function renderRickyWorkflowPolicyContext(repoRoot: string): string {
+  return RICKY_WORKFLOW_POLICY_FILES.map((path) => {
+    const absolute = resolve(repoRoot, path);
+    const content = safeReadPolicyFile(absolute);
+    return content
+      ? `# ${path}\n${content}`
+      : `# ${path}\nMISSING: Ricky workflow policy file was not found at ${absolute}.`;
+  }).join('\n\n');
+}
+
+function safeReadPolicyFile(path: string): string | null {
+  try {
+    return truncateText(readFileSync(path, 'utf8'), MAX_POLICY_FILE_BYTES).text;
+  } catch {
+    return null;
+  }
+}
+
 function renderValidationFeedbackForPersona(
   feedback: WorkforcePersonaValidationFeedback | undefined,
 ): string[] {
   if (!feedback) return [];
+  const trimmedPreviousContent = truncateText(
+    feedback.previousContent,
+    MAX_VALIDATION_FEEDBACK_PREVIOUS_BYTES,
+  );
   return [
     'Ricky pre-write validation failed on your previous artifact.',
     'Fix every validation issue before returning the complete replacement artifact.',
@@ -603,12 +715,168 @@ function renderValidationFeedbackForPersona(
           '',
         ]
       : []),
-    'Previous rejected artifact:',
+    'Previous rejected artifact (truncated when oversized):',
     '```ts',
-    feedback.previousContent.trimEnd(),
+    trimmedPreviousContent.text.trimEnd(),
     '```',
     '',
   ];
+}
+
+interface SummarizedSpec {
+  spec: NormalizedWorkflowSpec;
+  descriptionTruncated: boolean;
+}
+
+/**
+ * Produces a writer-task-ready clone of the normalized spec with the
+ * raw spec payload elided (it duplicates `description`) and `description`
+ * + `targetContext` truncated when oversized. Keeps every structured
+ * field intact — target files, constraints, evidence requirements, and
+ * acceptance gates are short and are what the persona actually needs to
+ * decompose the workflow.
+ */
+export function summarizeSpecForPersona(spec: NormalizedWorkflowSpec): SummarizedSpec {
+  const description = truncateText(spec.description, MAX_DESCRIPTION_BYTES);
+  const targetContext =
+    typeof spec.targetContext === 'string'
+      ? truncateText(spec.targetContext, MAX_TARGET_CONTEXT_BYTES)
+      : null;
+
+  const elidedSourceSpec = {
+    ...spec.sourceSpec,
+    description: '<<elided: see top-level description field>>',
+    rawPayload: elideRawPayload(spec.sourceSpec.rawPayload),
+  };
+
+  // `desiredAction.summary` and `desiredAction.specText` typically duplicate
+  // the top-level description (see request-normalizer.ts); when the user
+  // passes `--spec-file <large.md>` they grow to the same multi-hundred-KB
+  // size as the spec text. `summary` keeps a short cap because the persona
+  // task lists it separately; `specText` is elided entirely because every
+  // byte of it duplicates `description` for natural-language specs.
+  const SUMMARY_CAP_BYTES = 4 * 1024;
+  const desiredActionSummary = truncateText(spec.desiredAction.summary, SUMMARY_CAP_BYTES);
+  const desiredActionSpecTextElided = typeof spec.desiredAction.specText === 'string';
+
+  const summarized: NormalizedWorkflowSpec = {
+    ...spec,
+    description: description.text,
+    targetContext: targetContext ? targetContext.text : spec.targetContext,
+    desiredAction: {
+      ...spec.desiredAction,
+      summary: desiredActionSummary.text,
+      ...(desiredActionSpecTextElided
+        ? { specText: '<<elided: duplicates description>>' }
+        : {}),
+    },
+    sourceSpec: elidedSourceSpec,
+  };
+
+  return {
+    spec: summarized,
+    descriptionTruncated:
+      description.truncated ||
+      (targetContext?.truncated ?? false) ||
+      desiredActionSummary.truncated,
+  };
+}
+
+type RawSpecPayload = NormalizedWorkflowSpec['sourceSpec']['rawPayload'];
+
+function elideRawPayload(rawPayload: RawSpecPayload): RawSpecPayload {
+  // The raw payload duplicates the spec description on every natural-language
+  // input and adds nothing the persona can act on that the normalized spec
+  // does not already carry; replace its long fields with elision markers so
+  // the kind/surface/requestId metadata stays readable.
+  switch (rawPayload.kind) {
+    case 'natural_language':
+      return {
+        ...rawPayload,
+        text: rawPayloadElisionMarker(rawPayload.text),
+      };
+    case 'structured_json':
+      return {
+        ...rawPayload,
+        data: { '<<elided>>': 'see normalized spec fields' },
+      };
+    case 'mcp':
+      return {
+        ...rawPayload,
+        arguments: { '<<elided>>': 'see normalized spec fields' },
+      };
+    default:
+      return rawPayload;
+  }
+}
+
+function rawPayloadElisionMarker(text: string): string {
+  const size = Buffer.byteLength(text, 'utf8');
+  return `<<elided ${size} bytes of raw spec text — see top-level description and structured spec fields>>`;
+}
+
+interface SummarizedRelevantFiles {
+  files: Array<{ path: string; content: string | null; bytesOmitted?: number; omitted?: true }>;
+  includedCount: number;
+}
+
+/**
+ * Caps the total byte budget of inlined relevant-file contents. Files past
+ * the budget are listed as path-only entries so the persona still sees the
+ * full list, and any individual file body is truncated at
+ * `MAX_RELEVANT_FILE_BYTES`.
+ */
+export function summarizeRelevantFilesForPersona(
+  relevantFiles: Array<{ path: string; content?: string }>,
+): SummarizedRelevantFiles {
+  let totalBytes = 0;
+  let includedCount = 0;
+  const files: SummarizedRelevantFiles['files'] = [];
+  for (const file of relevantFiles) {
+    if (!file.content) {
+      files.push({ path: file.path, content: null });
+      continue;
+    }
+    if (totalBytes >= MAX_RELEVANT_FILES_TOTAL_BYTES) {
+      files.push({ path: file.path, content: null, omitted: true });
+      continue;
+    }
+    const remaining = MAX_RELEVANT_FILES_TOTAL_BYTES - totalBytes;
+    const perFileBudget = Math.min(MAX_RELEVANT_FILE_BYTES, remaining);
+    const trimmed = truncateText(file.content, perFileBudget);
+    totalBytes += Buffer.byteLength(trimmed.text, 'utf8');
+    includedCount += 1;
+    files.push({
+      path: file.path,
+      content: trimmed.text,
+      ...(trimmed.truncated ? { bytesOmitted: trimmed.bytesOmitted } : {}),
+    });
+  }
+  return { files, includedCount };
+}
+
+interface TruncationResult {
+  text: string;
+  truncated: boolean;
+  bytesOmitted: number;
+}
+
+function truncateText(value: string, maxBytes: number): TruncationResult {
+  const buffer = Buffer.from(value, 'utf8');
+  if (buffer.byteLength <= maxBytes) {
+    return { text: value, truncated: false, bytesOmitted: 0 };
+  }
+  const omitted = buffer.byteLength - maxBytes;
+  // Slice on a code-point boundary by re-decoding the trimmed buffer.
+  const headBytes = Math.floor(maxBytes * 0.75);
+  const tailBytes = maxBytes - headBytes;
+  const head = buffer.subarray(0, headBytes).toString('utf8');
+  const tail = buffer.subarray(buffer.byteLength - tailBytes).toString('utf8');
+  return {
+    text: `${head}\n\n<<truncated ${omitted} bytes>>\n\n${tail}`,
+    truncated: true,
+    bytesOmitted: omitted,
+  };
 }
 
 function renderSkillContextForPersona(skillContext: SkillContext | undefined): string {
@@ -672,9 +940,70 @@ export function parsePersonaWorkflowResponse(
     return validateFencedResponse(tsFence, metadata, expectedPath);
   }
 
+  // Tolerant fallback: Claude Sonnet has been observed to emit a prose
+  // preamble plus a ```json opening fence without a matching closing fence,
+  // which defeats both the direct-JSON and fenced-block matchers above. As
+  // a last resort, walk the response looking for the first balanced JSON
+  // object and treat that as the structured response. Picks up:
+  //   - "preamble text\n```json\n{ ... }"   (unclosed fence)
+  //   - "preamble text\n{ ... }"            (no fence at all)
+  //   - "{ ... }\ntrailing prose"           (trailing prose after JSON)
+  const embedded = extractFirstBalancedJsonObject(output);
+  if (embedded) {
+    const clarification = parseClarificationResponse(embedded);
+    if (clarification) return { metadata: {}, responseFormat: 'needs-clarification', clarification };
+    return validateStructuredResponse(embedded, expectedPath, 'structured-json', options);
+  }
+
   throw new WorkforcePersonaWriterError(
     'Workforce persona response must be structured JSON or include fenced TypeScript artifact and JSON metadata blocks.',
   );
+}
+
+/**
+ * Walks `text` looking for the first top-level balanced `{ ... }` object
+ * and parses it. String literals (including nested escape sequences) and
+ * the brace-tracking are handled inline so the scanner is not confused by
+ * a `}` that appears inside a JSON string value (e.g. the embedded
+ * TypeScript source the writer returns inside `artifact.content`).
+ *
+ * Returns the parsed object or `null` when no balanced object exists or
+ * the candidate substring is not valid JSON.
+ */
+export function extractFirstBalancedJsonObject(text: string): Record<string, unknown> | null {
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== '{') continue;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        if (inString) escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = text.slice(start, i + 1);
+          const parsed = parseJsonObject(candidate);
+          if (parsed) return parsed;
+          break; // Candidate did not parse; resume scan from the next `{`.
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function parseClarificationResponse(value: Record<string, unknown>): ClarificationRequest | null {
@@ -978,7 +1307,15 @@ function runnableSelectionOptions(
     : undefined;
 }
 
-function selectionOptions(
+function metadataSelectionOptions(
+  options: { tier?: string; installRoot?: string },
+): WorkforceSelectionOptions | undefined {
+  const resolved: WorkforceSelectionOptions = {};
+  if (options.tier) resolved.tier = options.tier;
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
+function runnableSelectionFallbackOptions(
   options: { tier?: string; installRoot?: string },
 ): WorkforceSelectionOptions | undefined {
   const resolved: WorkforceSelectionOptions = {};
@@ -993,7 +1330,8 @@ function selectionFromPersonaResult(value: unknown): unknown {
 }
 
 function personaResolverOptions(options: { tier?: string; installRoot?: string }): { tier?: string; installRoot?: string } {
-  const resolved: { tier?: string; installRoot?: string } = { tier: options.tier ?? DEFAULT_WORKFORCE_PERSONA_TIER };
+  const resolved: { tier?: string; installRoot?: string } = {};
+  if (options.tier) resolved.tier = options.tier;
   if (options.installRoot) resolved.installRoot = options.installRoot;
   return resolved;
 }
@@ -1085,4 +1423,108 @@ function safeReadSkillText(path: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export interface PersonaDebugDumpInput {
+  /** Which persona pass produced the output — keeps writer and reviewer dumps separate on disk. */
+  kind: 'writer' | 'reviewer';
+  /** Coarse reason for the dump so the operator can tell parse failures from non-completions at a glance. */
+  reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success';
+  repoRoot: string;
+  /** SHA-256 digest of the task prompt, used as the dump directory name so repeated runs against the same prompt overwrite a single entry. */
+  promptDigest: string;
+  /** The full task prompt that was sent to the harness; written so the operator can replay the spawn outside Ricky. */
+  task: string;
+  result: WorkforcePersonaExecutionResult;
+  selection: WorkforcePersonaSelection;
+  resolved: ResolvedWorkforcePersonaContext;
+  /** Artifact path Ricky asked the persona to produce; recorded in the dump metadata for cross-referencing with the run state. */
+  outputPath: string;
+}
+
+/**
+ * Persists the raw persona output, the prompt that produced it, and the
+ * selection metadata under `<repoRoot>/.workflow-artifacts/ricky-persona-debug/`
+ * so operators can inspect what a Workforce persona actually returned when
+ * the parser rejected it (or when explicit debug capture is requested via
+ * `RICKY_PERSONA_DEBUG=1`).
+ *
+ * - On every failure path (`noncompletion` / `parse-error` / `no-content`)
+ *   the dump is always written so failed runs are self-debuggable.
+ * - On the `success` path the dump only runs when `RICKY_PERSONA_DEBUG=1`
+ *   is set, so green production runs do not litter the artifact tree.
+ *
+ * Dump layout (one directory per `(kind, promptDigest)` pair):
+ * - `output.raw.txt`   — the persona's stdout as captured by harness-kit
+ * - `task.prompt.txt`  — the task body that was sent to the persona
+ * - `meta.json`        — selection, status, exit code, stderr, durationMs
+ *
+ * Failures inside this helper are swallowed and surfaced through stderr —
+ * the dump is debugging telemetry; it must never mask the original
+ * writer/reviewer error.
+ */
+export async function dumpPersonaDebug(input: PersonaDebugDumpInput): Promise<void> {
+  if (input.reason === 'success' && process.env.RICKY_PERSONA_DEBUG !== '1') {
+    return;
+  }
+  try {
+    const dir = join(
+      input.repoRoot,
+      '.workflow-artifacts',
+      'ricky-persona-debug',
+      input.kind,
+      `${input.promptDigest.slice(0, 16)}-${input.reason}`,
+    );
+    await mkdir(dir, { recursive: true });
+    await Promise.all([
+      writeFile(join(dir, 'output.raw.txt'), input.result.output ?? '', 'utf8'),
+      writeFile(join(dir, 'task.prompt.txt'), input.task, 'utf8'),
+      writeFile(
+        join(dir, 'meta.json'),
+        JSON.stringify(
+          {
+            kind: input.kind,
+            reason: input.reason,
+            outputPath: input.outputPath,
+            selection: {
+              personaId: input.selection.personaId,
+              tier: input.selection.tier,
+              harness: input.selection.runtime.harness,
+              model: input.selection.runtime.model,
+            },
+            result: {
+              status: input.result.status,
+              exitCode: input.result.exitCode,
+              durationMs: input.result.durationMs,
+              workflowRunId: input.result.workflowRunId,
+              stepName: input.result.stepName,
+              stderr: input.result.stderr,
+            },
+            resolverIntent: input.resolved.intent,
+            resolverWarnings: input.resolved.warnings,
+            promptDigest: input.promptDigest,
+            recordedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      ),
+    ]);
+    if (process.env.RICKY_PERSONA_DEBUG_VERBOSE === '1' || input.reason !== 'success') {
+      // Surface the dump location so the operator can find it without
+      // grepping the artifacts tree; success dumps are silent unless
+      // explicitly opted into via the verbose flag.
+      // eslint-disable-next-line no-console
+      console.error(`[ricky] persona ${input.kind} debug dump → ${dir}`);
+    }
+  } catch (error) {
+    if (process.env.RICKY_PERSONA_DEBUG_VERBOSE === '1') {
+      // Dump failures are typically permission/path issues in tests and other
+      // non-real-repo callers. Stay quiet unless the operator explicitly
+      // asked for verbose debug telemetry.
+      // eslint-disable-next-line no-console
+      console.error(`[ricky] failed to persist persona debug dump: ${errorMessage(error)}`);
+    }
+  }
 }

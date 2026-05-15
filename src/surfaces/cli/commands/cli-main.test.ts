@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { InteractiveCliResult } from '../entrypoint/interactive-cli.js';
 import type { OnboardingResult } from '../cli/onboarding.js';
 import type { LocalResponse } from '../../../local/entrypoint.js';
-import { cliMain, parseArgs, renderHelp, type CliProgressSpinner } from './cli-main.js';
+import { cliMain, parseArgs, renderHelp, type CliProgressSpinner, type DetachedProcessSpawner } from './cli-main.js';
 
 // ---------------------------------------------------------------------------
 // parseArgs
@@ -64,6 +64,13 @@ describe('parseArgs', () => {
       command: 'run',
       stdin: true,
       ...RUN_DEFAULTS,
+    });
+    expect(parseArgs(['local', '--spec', 'build a workflow', '--best-judgement'])).toMatchObject({
+      command: 'run',
+      surface: 'local',
+      mode: 'local',
+      spec: 'build a workflow',
+      bestJudgement: true,
     });
   });
 
@@ -353,6 +360,43 @@ describe('parseArgs', () => {
       connectTarget: 'linear',
     });
   });
+
+  it('parses schedule commands', () => {
+    expect(parseArgs([
+      'schedule',
+      'workflows/generated/package-checks.ts',
+      '--cron',
+      '0 9 * * 1',
+      '--name',
+      'Package checks',
+      '--timezone',
+      'America/New_York',
+    ])).toMatchObject({
+      command: 'schedule',
+      surface: 'schedule',
+      artifact: 'workflows/generated/package-checks.ts',
+      cronExpression: '0 9 * * 1',
+      workflowName: 'Package checks',
+      timezone: 'America/New_York',
+    });
+    expect(parseArgs(['schedule', 'workflows/generated/package-checks.ts', '--at', '2026-05-10T09:00:00Z'])).toMatchObject({
+      command: 'schedule',
+      scheduledAt: '2026-05-10T09:00:00Z',
+    });
+    expect(parseArgs(['schedule', 'list', '--json'])).toEqual({
+      command: 'schedules',
+      surface: 'schedule',
+      json: true,
+    });
+    expect(parseArgs(['schedules', '--json'])).toEqual({
+      command: 'schedules',
+      surface: 'schedule',
+      json: true,
+    });
+    expect(parseArgs(['schedule', 'workflows/generated/package-checks.ts'])).toMatchObject({
+      errors: ['schedule requires --cron or --at.'],
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -375,6 +419,7 @@ describe('renderHelp', () => {
     expect(helpText).toContain('ricky --mode local --spec <text>');
     expect(helpText).toContain('ricky --mode local --spec-file <path>');
     expect(helpText).toContain('ricky --mode local --stdin');
+    expect(helpText).toContain('--best-judgement');
     expect(helpText).toContain(
       'ricky --mode local --spec "generate a workflow for package checks"',
     );
@@ -392,6 +437,8 @@ describe('renderHelp', () => {
     expect(helpText).not.toContain('ricky workflow --spec-file <path> --mode cloud --run');
     expect(helpText).toContain('ricky run <path> --background');
     expect(helpText).toContain('ricky run <path> --cloud');
+    expect(helpText).toContain('ricky schedule <artifact> --cron "0 * * * *"');
+    expect(helpText).toContain('ricky schedules');
     expect(helpText).toContain('ricky run <artifact> --start-from <step>');
     expect(helpText).toContain('ricky status --run <run-id>');
     expect(helpText).toContain('Without --run:  artifact path on disk');
@@ -1059,6 +1106,26 @@ describe('cliMain', () => {
     });
   });
 
+  it('threads best-judgement clarification handling through generated handoffs', async () => {
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    await cliMain({
+      argv: ['--mode', 'local', '--spec', 'build a workflow', '--best-judgement'],
+      cwd: '/repo-root',
+      runInteractive: runner,
+    });
+
+    expect(runner.mock.calls[0][0].handoff).toMatchObject({
+      source: 'cli',
+      stageMode: 'generate',
+      bestJudgement: true,
+      cliMetadata: {
+        handoff: 'inline-spec',
+        bestJudgement: true,
+      },
+    });
+  });
+
   it('honors explicit auto-fix and refinement disable in generated handoffs', async () => {
     const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
 
@@ -1685,7 +1752,7 @@ describe('cliMain', () => {
     );
 
     await cliMain({
-      argv: ['local', '--spec', 'build a workflow', '--run', '--background', '--yes'],
+      argv: ['local', '--spec', 'build a workflow', '--background', '--yes'],
       runInteractive: runner,
     });
     await cliMain({
@@ -1700,6 +1767,128 @@ describe('cliMain', () => {
     expect(runner.mock.calls[1][0].handoff.cliMetadata).toMatchObject({
       runMode: 'foreground',
     });
+  });
+
+  it('detaches power-user background generate-and-run before local generation', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-detached-parent-'));
+    const unref = vi.fn();
+    const spawnDetachedProcess = vi.fn<DetachedProcessSpawner>(() => ({ unref }));
+    const runInteractive = vi.fn();
+
+    try {
+      const result = await cliMain({
+        argv: ['workflow', '--spec-file', './custom-digest-functions-spec.md', '--run', '--background', '--best-judgement'],
+        cwd: repo,
+        readFileText: vi.fn().mockResolvedValue('build the custom digest functions workflow'),
+        runInteractive,
+        spawnDetachedProcess,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(runInteractive).not.toHaveBeenCalled();
+      expect(spawnDetachedProcess).toHaveBeenCalledOnce();
+      const [, childArgs, options] = spawnDetachedProcess.mock.calls[0];
+      expect(childArgs).toContain('--foreground');
+      expect(childArgs).not.toContain('--background');
+      expect(options).toMatchObject({
+        cwd: repo,
+        detached: true,
+        stdio: 'ignore',
+      });
+      expect(options.env.RICKY_DETACHED_BACKGROUND_RUN_ID).toMatch(/^ricky-local-/);
+      expect(unref).toHaveBeenCalledOnce();
+      const output = result.output.join('\n');
+      expect(output).toContain('Ricky background run');
+      expect(output).toContain('Status: running');
+      expect(output).toContain('Status command: ricky status --run');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('runs a detached background child under the parent run id', async () => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-detached-child-'));
+    const originalRunId = process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
+    const runId = 'ricky-local-detached-child';
+    const localExecutor = {
+      execute: vi.fn(async () => {
+        expect(process.env.RICKY_DETACHED_BACKGROUND_RUN_ID).toBeUndefined();
+        return stagedLocalResult();
+      }),
+    };
+
+    process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = runId;
+    try {
+      const result = await cliMain({
+        argv: ['workflow', '--spec-file', './custom-digest-functions-spec.md', '--run', '--foreground', '--best-judgement'],
+        cwd: repo,
+        readFileText: vi.fn().mockResolvedValue('build the custom digest functions workflow'),
+        localExecutor,
+        runInteractive: vi.fn(),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toEqual([]);
+      expect(localExecutor.execute).toHaveBeenCalledOnce();
+      const statePath = join(repo, '.workflow-artifacts', 'ricky-local-runs', runId, 'state.json');
+      const state = JSON.parse(await readFile(statePath, 'utf8'));
+      expect(state).toMatchObject({
+        runId,
+        status: 'completed',
+        reattachCommand: `ricky status --run ${runId}`,
+      });
+    } finally {
+      if (originalRunId === undefined) {
+        delete process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
+      } else {
+        process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = originalRunId;
+      }
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('does not let an inherited detached run id force nested no-run commands to execute', async () => {
+    const originalRunId = process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
+    const runner = vi.fn().mockResolvedValue(
+      fakeInteractiveResult({
+        ok: true,
+        localResult: stagedLocalResult({ execution: undefined }),
+      }),
+    );
+    const localExecutor = {
+      execute: vi.fn().mockResolvedValue(stagedLocalResult()),
+    };
+
+    process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = 'ricky-local-inherited-parent';
+    try {
+      const result = await cliMain({
+        argv: ['local', '--spec', 'build a workflow', '--no-run'],
+        runInteractive: runner,
+        localExecutor,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(runner).toHaveBeenCalledOnce();
+      expect(localExecutor.execute).not.toHaveBeenCalled();
+      expect(runner.mock.calls[0][0].handoff).toMatchObject({
+        stageMode: 'generate',
+        cliMetadata: expect.objectContaining({ handoff: 'inline-spec' }),
+      });
+    } finally {
+      if (originalRunId === undefined) {
+        delete process.env.RICKY_DETACHED_BACKGROUND_RUN_ID;
+      } else {
+        process.env.RICKY_DETACHED_BACKGROUND_RUN_ID = originalRunId;
+      }
+    }
   });
 
   it('uses a TTY spinner for foreground local progress and stops before the final summary', async () => {
@@ -1825,6 +2014,9 @@ describe('cliMain', () => {
   });
 
   it('does not attach spinner progress for JSON, quiet, non-TTY, background, or ordinary injected output streams', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
     const cases = [
       { argv: ['run', 'workflows/generated/issue-3.ts', '--json'], isTTY: true, output: undefined, create: true },
       { argv: ['run', 'workflows/generated/issue-3.ts', '--quiet'], isTTY: true, output: undefined, create: true },
@@ -1836,18 +2028,33 @@ describe('cliMain', () => {
     for (const testCase of cases) {
       const createProgressSpinner = vi.fn();
       const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({ localResult: stagedLocalResult() }));
+      const isBackground = testCase.argv.includes('--background');
+      const repo = isBackground ? await mkdtemp(join(tmpdir(), 'ricky-spinner-background-')) : undefined;
+      const unref = vi.fn();
+      const spawnDetachedProcess = vi.fn<DetachedProcessSpawner>(() => ({ unref }));
 
-      await cliMain({
-        argv: testCase.argv,
-        isTTY: testCase.isTTY,
-        ...(testCase.output ? { output: testCase.output } : {}),
-        ...(testCase.create ? { createProgressSpinner } : {}),
-        runInteractive: runner,
-      });
+      try {
+        await cliMain({
+          argv: testCase.argv,
+          isTTY: testCase.isTTY,
+          ...(repo ? { cwd: repo } : {}),
+          ...(testCase.output ? { output: testCase.output } : {}),
+          ...(testCase.create ? { createProgressSpinner } : {}),
+          ...(isBackground ? { spawnDetachedProcess } : {}),
+          runInteractive: runner,
+        });
 
-      expect(runner.mock.calls[0][0].localProgress).toBeUndefined();
-      expect(runner.mock.calls[0][0].localRuntimeOutput).toBeUndefined();
-      expect(createProgressSpinner).not.toHaveBeenCalled();
+        if (isBackground) {
+          expect(runner).not.toHaveBeenCalled();
+          expect(spawnDetachedProcess).toHaveBeenCalledOnce();
+        } else {
+          expect(runner.mock.calls[0][0].localProgress).toBeUndefined();
+          expect(runner.mock.calls[0][0].localRuntimeOutput).toBeUndefined();
+        }
+        expect(createProgressSpinner).not.toHaveBeenCalled();
+      } finally {
+        if (repo) await rm(repo, { recursive: true, force: true });
+      }
     }
   });
 
@@ -2638,6 +2845,69 @@ describe('cliMain', () => {
     });
     expect(connect.exitCode).toBe(0);
     expect(connect.output).toEqual(['Ricky connect cloud: connected.']);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('schedules a cloud workflow without invoking the interactive runner', async () => {
+    const runner = vi.fn();
+    const scheduleWorkflow = vi.fn().mockResolvedValue({
+      schedule: {
+        id: 'sched-1',
+        name: 'Package checks',
+        scheduleType: 'cron',
+        cronExpression: '0 9 * * 1',
+        timezone: 'UTC',
+        status: 'active',
+      },
+    });
+
+    const result = await cliMain({
+      argv: [
+        'schedule',
+        'workflows/generated/package-checks.ts',
+        '--cron',
+        '0 9 * * 1',
+        '--name',
+        'Package checks',
+      ],
+      runInteractive: runner,
+      scheduleWorkflow,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(scheduleWorkflow).toHaveBeenCalledWith('workflows/generated/package-checks.ts', {
+      name: 'Package checks',
+      cronExpression: '0 9 * * 1',
+    });
+    expect(result.output.join('\n')).toContain('Ricky cloud schedule created');
+    expect(result.output.join('\n')).toContain('sched-1');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('lists cloud workflow schedules without invoking the interactive runner', async () => {
+    const runner = vi.fn();
+    const listWorkflowSchedules = vi.fn().mockResolvedValue({
+      schedules: [
+        {
+          id: 'sched-1',
+          name: 'Package checks',
+          scheduleType: 'cron',
+          cronExpression: '0 9 * * 1',
+          status: 'active',
+        },
+      ],
+    });
+
+    const result = await cliMain({
+      argv: ['schedules', '--json'],
+      runInteractive: runner,
+      listWorkflowSchedules,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.output.join('\n'))).toMatchObject({
+      schedules: [{ id: 'sched-1', name: 'Package checks' }],
+    });
     expect(runner).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 
 import { DEFAULT_RUN_TIMEOUT_MS } from '../shared/constants.js';
 import type { RunStatus } from '../shared/models/workflow-evidence.js';
@@ -10,8 +11,11 @@ import type {
   CommandRunner,
   CoordinatorResult,
   LifecycleEvent,
+  LocalCoordinatorApi,
+  LocalCoordinatorFactoryOptions,
   LocalCoordinatorOptions,
   LogSnippet,
+  RunLaunchHandle,
   RunRequest,
   RunRetryMetadata,
 } from './types.js';
@@ -28,6 +32,7 @@ interface ActiveRunState {
   status: RunStatus;
   startedAt: string;
   startedMs: number;
+  timeoutMs: number;
   retry: RunRetryMetadata;
   invocationSummary: CommandInvocationSummary;
   metadata?: Record<string, unknown>;
@@ -44,10 +49,121 @@ interface TerminalOutcome {
   data?: Record<string, unknown>;
 }
 
-export class LocalCoordinator {
+class ProcessCommandInvocation implements CommandInvocation {
+  readonly exitPromise: Promise<number | null>;
+
+  private readonly stdoutHandlers: Array<(line: string) => void> = [];
+  private readonly stderrHandlers: Array<(line: string) => void> = [];
+  private readonly stdoutHistory: string[] = [];
+  private readonly stderrHistory: string[] = [];
+  private stdoutRemainder = '';
+  private stderrRemainder = '';
+  private settled = false;
+
+  constructor(
+    command: string,
+    args: string[],
+    options: { cwd: string; env?: Record<string, string> },
+  ) {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : process.env,
+    });
+
+    this.exitPromise = new Promise<number | null>((resolve, reject) => {
+      const settle = (cb: () => void): void => {
+        if (this.settled) return;
+        this.settled = true;
+        cb();
+      };
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        this.stdoutRemainder = this.emitBufferedLines(
+          `${this.stdoutRemainder}${chunk.toString('utf8')}`,
+          this.stdoutHistory,
+          this.stdoutHandlers,
+        );
+      });
+
+      child.stderr.on('data', (chunk: Buffer) => {
+        this.stderrRemainder = this.emitBufferedLines(
+          `${this.stderrRemainder}${chunk.toString('utf8')}`,
+          this.stderrHistory,
+          this.stderrHandlers,
+        );
+      });
+
+      child.once('error', (err) => {
+        settle(() => reject(err));
+      });
+
+      child.once('close', (code) => {
+        this.flushRemainders();
+        settle(() => resolve(code));
+      });
+    });
+
+    this.kill = () => {
+      if (!child.killed) child.kill();
+    };
+  }
+
+  kill: () => void;
+
+  onStdout(cb: (line: string) => void): void {
+    this.stdoutHandlers.push(cb);
+    this.stdoutHistory.forEach(cb);
+  }
+
+  onStderr(cb: (line: string) => void): void {
+    this.stderrHandlers.push(cb);
+    this.stderrHistory.forEach(cb);
+  }
+
+  private emitBufferedLines(
+    text: string,
+    history: string[],
+    handlers: Array<(line: string) => void>,
+  ): string {
+    const lines = text.split(/\r?\n/);
+    const remainder = lines.pop() ?? '';
+    for (const line of lines) {
+      history.push(line);
+      handlers.forEach((handler) => handler(line));
+    }
+    return remainder;
+  }
+
+  private flushRemainders(): void {
+    if (this.stdoutRemainder.length > 0) {
+      this.stdoutHistory.push(this.stdoutRemainder);
+      this.stdoutHandlers.forEach((handler) => handler(this.stdoutRemainder));
+      this.stdoutRemainder = '';
+    }
+    if (this.stderrRemainder.length > 0) {
+      this.stderrHistory.push(this.stderrRemainder);
+      this.stderrHandlers.forEach((handler) => handler(this.stderrRemainder));
+      this.stderrRemainder = '';
+    }
+  }
+}
+
+export class ProcessCommandRunner implements CommandRunner {
+  run(command: string, args: string[], options: { cwd: string; env?: Record<string, string> }): CommandInvocation {
+    return new ProcessCommandInvocation(command, args, options);
+  }
+}
+
+export function createLocalCoordinator(options: LocalCoordinatorFactoryOptions = {}): LocalCoordinator {
+  const { runner, ...coordinatorOptions } = options;
+  return new LocalCoordinator(runner ?? new ProcessCommandRunner(), coordinatorOptions);
+}
+
+export class LocalCoordinator implements LocalCoordinatorApi {
   private readonly emitter = new EventEmitter();
   private readonly activeRuns = new Map<string, ActiveRunState>();
   private readonly completedRuns = new Map<string, CoordinatorResult>();
+  private readonly runResultWaiters = new Map<string, Array<(result: CoordinatorResult) => void>>();
   private readonly completedRunLimit: number;
 
   constructor(
@@ -57,7 +173,7 @@ export class LocalCoordinator {
     this.completedRunLimit = normalizeCompletedRunLimit(options.completedRunLimit);
   }
 
-  async launch(request: RunRequest): Promise<CoordinatorResult> {
+  start(request: RunRequest): RunLaunchHandle {
     const runId = request.runId ?? randomUUID();
 
     if (this.activeRuns.has(runId)) {
@@ -71,6 +187,7 @@ export class LocalCoordinator {
     const events: LifecycleEvent[] = [];
     const retry = normalizeRetry(request.retry);
     const invocationSummary = buildInvocationSummary(request);
+    const metadata = cloneMetadata(request.metadata);
     const snippetLimit = request.logSnippetLineLimit ?? DEFAULT_SNIPPET_LINE_LIMIT;
     const timeoutMs = normalizeTimeout(request.timeoutMs);
     let status: RunStatus = 'pending';
@@ -81,11 +198,21 @@ export class LocalCoordinator {
     const resultPromise = new Promise<CoordinatorResult>((resolve) => {
       resolveResult = resolve;
     });
+    const handle: RunLaunchHandle = {
+      runId,
+      workflowFile: request.workflowFile,
+      cwd: request.cwd,
+      startedAt,
+      result: resultPromise,
+      cancel: () => this.cancel(runId),
+      monitor: () => this.monitor(runId),
+      getActiveRun: () => this.getActiveRun(runId),
+    };
 
     const notifyLifecycleObservers = (event: LifecycleEvent): void => {
       for (const listener of this.emitter.listeners('lifecycle')) {
         try {
-          (listener as (event: LifecycleEvent) => void)(event);
+          (listener as (event: LifecycleEvent) => void)(cloneLifecycleEvent(event));
         } catch {
           // Observer failures must not break coordinator settlement or leak active state.
         }
@@ -145,6 +272,7 @@ export class LocalCoordinator {
         completedAt,
         endedAt: completedAt,
         durationMs: Math.max(0, completedMs - startedMs),
+        timeoutMs,
         stdout,
         stderr,
         stdoutSnippet: buildSnippet(stdout, snippetLimit),
@@ -152,11 +280,12 @@ export class LocalCoordinator {
         events,
         retry,
         invocation: invocationSummary,
-        metadata: request.metadata,
+        metadata,
         error: outcome.error,
       };
 
       this.recordCompletedRun(result);
+      this.resolveRunResultWaiters(result);
       resolveResult(result);
     };
 
@@ -167,9 +296,10 @@ export class LocalCoordinator {
       status,
       startedAt,
       startedMs,
+      timeoutMs,
       retry,
       invocationSummary,
-      metadata: request.metadata,
+      metadata,
       cancel: () => {
         if (settled) return;
         const killError = state.invocation ? killInvocation(state.invocation) : undefined;
@@ -188,91 +318,96 @@ export class LocalCoordinator {
     emit('started', 'Run started', {
       workflowFile: request.workflowFile,
       cwd: request.cwd,
+      timeoutMs,
       invocation: invocationSummary,
       retry,
-      metadata: request.metadata,
+      metadata: cloneMetadata(metadata),
     });
 
-    // A lifecycle observer may have cancelled the run during the started
-    // notification above. If the run is already settled, skip spawning.
-    if (settled) return resultPromise;
-
-    transition('running', 'Run entered running state');
-    state.status = status;
-
-    // Re-check after the running transition — an observer may cancel here too.
-    if (settled) return resultPromise;
-
-    try {
-      const invocation = this.runner.run(invocationSummary.command, invocationSummary.args, {
-        cwd: invocationSummary.cwd,
-        env: invocationSummary.env,
-      });
-      state.invocation = invocation;
-
-      invocation.onStdout((line) => {
-        if (settled) return;
-        stdout.push(line);
-        emit('stdout', line, { stream: 'stdout' });
-      });
-
-      invocation.onStderr((line) => {
-        if (settled) return;
-        stderr.push(line);
-        emit('stderr', line, { stream: 'stderr' });
-      });
-
-      timeoutHandle = setTimeout(() => {
-        if (settled) return;
-        const killError = killInvocation(invocation);
-        finish({
-          status: 'timed_out',
-          exitCode: null,
-          eventKind: 'timeout',
-          message: `Run timed out after ${timeoutMs}ms`,
-          error: `timed out after ${timeoutMs}ms`,
-          data: { timeoutMs, ...(killError ? { killError } : {}) },
-        });
-      }, timeoutMs);
-
-      void invocation.exitPromise.then(
-        (exitCode) => {
-          finish({
-            status: exitCode === 0 ? 'passed' : 'failed',
-            exitCode,
-            eventKind: 'completed',
-            message:
-              exitCode === 0
-                ? 'Run completed successfully'
-                : exitCode === null
-                  ? 'Run completed without an exit code'
-                  : `Run completed with exit code ${exitCode}`,
-            error: exitCode === 0 ? undefined : exitErrorMessage(exitCode),
-          });
-        },
-        (err: unknown) => {
-          const message = errorMessage(err);
-          finish({
-            status: 'failed',
-            exitCode: null,
-            eventKind: 'error',
-            message,
-            error: message,
-          });
-        },
-      );
-    } catch (err) {
-      const message = errorMessage(err);
-      finish({
-        status: 'failed',
-        exitCode: null,
-        eventKind: 'error',
-        message,
-        error: message,
-      });
+    if (!settled) {
+      transition('running', 'Run entered running state');
+      state.status = status;
     }
 
-    return resultPromise;
+    // Lifecycle observers can cancel during startup transitions, before a
+    // command process exists. In that case the handle is still useful for the
+    // already-settled result, and no runner should be invoked.
+    if (!settled) {
+      try {
+        const invocation = this.runner.run(invocationSummary.command, invocationSummary.args, {
+          cwd: invocationSummary.cwd,
+          env: invocationSummary.env,
+        });
+        state.invocation = invocation;
+
+        invocation.onStdout((line) => {
+          if (settled) return;
+          stdout.push(line);
+          emit('stdout', line, { stream: 'stdout' });
+        });
+
+        invocation.onStderr((line) => {
+          if (settled) return;
+          stderr.push(line);
+          emit('stderr', line, { stream: 'stderr' });
+        });
+
+        timeoutHandle = setTimeout(() => {
+          if (settled) return;
+          const killError = killInvocation(invocation);
+          finish({
+            status: 'timed_out',
+            exitCode: null,
+            eventKind: 'timeout',
+            message: `Run timed out after ${timeoutMs}ms`,
+            error: `timed out after ${timeoutMs}ms`,
+            data: { timeoutMs, ...(killError ? { killError } : {}) },
+          });
+        }, timeoutMs);
+
+        void invocation.exitPromise.then(
+          (exitCode) => {
+            finish({
+              status: exitCode === 0 ? 'passed' : 'failed',
+              exitCode,
+              eventKind: 'completed',
+              message:
+                exitCode === 0
+                  ? 'Run completed successfully'
+                  : exitCode === null
+                    ? 'Run completed without an exit code'
+                    : `Run completed with exit code ${exitCode}`,
+              error: exitCode === 0 ? undefined : exitErrorMessage(exitCode),
+            });
+          },
+          (err: unknown) => {
+            const message = errorMessage(err);
+            finish({
+              status: 'failed',
+              exitCode: null,
+              eventKind: 'error',
+              message,
+              error: message,
+            });
+          },
+        );
+      } catch (err) {
+        const message = errorMessage(err);
+        finish({
+          status: 'failed',
+          exitCode: null,
+          eventKind: 'error',
+          message,
+          error: message,
+        });
+      }
+    }
+
+    return handle;
+  }
+
+  async launch(request: RunRequest): Promise<CoordinatorResult> {
+    return this.start(request).result;
   }
 
   on(event: 'lifecycle', cb: (event: LifecycleEvent) => void): void {
@@ -346,6 +481,18 @@ export class LocalCoordinator {
     return [...this.completedRuns.values()].map(cloneCoordinatorResult);
   }
 
+  async waitForRunResult(runId: string): Promise<CoordinatorResult | undefined> {
+    const completed = this.getRunResult(runId);
+    if (completed) return completed;
+    if (!this.activeRuns.has(runId)) return undefined;
+
+    return new Promise((resolve) => {
+      const waiters = this.runResultWaiters.get(runId) ?? [];
+      waiters.push((result) => resolve(cloneCoordinatorResult(result)));
+      this.runResultWaiters.set(runId, waiters);
+    });
+  }
+
   private recordCompletedRun(result: CoordinatorResult): void {
     if (this.completedRunLimit === 0) return;
     this.completedRuns.set(result.runId, cloneCoordinatorResult(result));
@@ -357,11 +504,21 @@ export class LocalCoordinator {
       this.completedRuns.delete(oldestRunId);
     }
   }
+
+  private resolveRunResultWaiters(result: CoordinatorResult): void {
+    const waiters = this.runResultWaiters.get(result.runId);
+    if (!waiters) return;
+    this.runResultWaiters.delete(result.runId);
+    for (const resolve of waiters) {
+      resolve(result);
+    }
+  }
 }
 
 function buildInvocationSummary(request: RunRequest): CommandInvocationSummary {
   const command = request.route?.command ?? DEFAULT_COMMAND;
   const baseArgs = request.route?.baseArgs ? [...request.route.baseArgs] : [...DEFAULT_BASE_ARGS];
+  const route = buildRouteSummary(request);
   return {
     command,
     args: [
@@ -372,6 +529,15 @@ function buildInvocationSummary(request: RunRequest): CommandInvocationSummary {
     ],
     cwd: request.cwd,
     env: request.env ? { ...request.env } : undefined,
+    ...(route ? { route } : {}),
+  };
+}
+
+function buildRouteSummary(request: RunRequest): CommandInvocationSummary['route'] {
+  if (!request.route?.id && !request.route?.kind) return undefined;
+  return {
+    id: request.route.id,
+    kind: request.route.kind,
   };
 }
 
@@ -436,6 +602,7 @@ function snapshot(state: ActiveRunState): ActiveRunSnapshot {
     cwd: state.cwd,
     status: state.status,
     startedAt: state.startedAt,
+    timeoutMs: state.timeoutMs,
     retry: cloneRetry(state.retry),
     invocation: cloneInvocationSummary(state.invocationSummary),
     metadata: cloneMetadata(state.metadata),
@@ -447,12 +614,14 @@ function cloneRetry(retry: RunRetryMetadata): RunRetryMetadata {
 }
 
 function cloneInvocationSummary(invocation: CommandInvocationSummary): CommandInvocationSummary {
-  return {
+  const summary: CommandInvocationSummary = {
     command: invocation.command,
     args: [...invocation.args],
     cwd: invocation.cwd,
     env: invocation.env ? { ...invocation.env } : undefined,
   };
+  if (invocation.route) summary.route = { ...invocation.route };
+  return summary;
 }
 
 function cloneCoordinatorResult(result: CoordinatorResult): CoordinatorResult {
@@ -479,12 +648,29 @@ function cloneSnippet(snippet: LogSnippet): LogSnippet {
 function cloneLifecycleEvent(event: LifecycleEvent): LifecycleEvent {
   return {
     ...event,
-    data: event.data ? { ...event.data } : undefined,
+    data: cloneRecord(event.data),
   };
 }
 
 function cloneMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  return metadata ? { ...metadata } : undefined;
+  return cloneRecord(metadata);
+}
+
+function cloneRecord(record: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!record) return undefined;
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, cloneValue(value)]));
+}
+
+function cloneValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneValue);
+  if (isPlainRecord(value)) return cloneRecord(value);
+  return value;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function errorMessage(err: unknown): string {

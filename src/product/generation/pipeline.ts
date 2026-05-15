@@ -10,6 +10,7 @@ import type {
   RenderedArtifact,
   SkillContext,
   WorkflowExecutionRoute,
+  WorkforcePersonaGenerationMetadata,
 } from './types.js';
 import { selectPattern } from './pattern-selector.js';
 import { refineWithLlm } from './refine-with-llm.js';
@@ -23,7 +24,15 @@ import {
   WorkforcePersonaClarificationError,
   WorkforcePersonaWriterError,
   type WorkforcePersonaPrewriteRepairAttempt,
+  type WorkforcePersonaResolver,
 } from './workforce-persona-writer.js';
+import { createRickyLocalPersonaResolver } from './ricky-local-persona-resolver.js';
+import {
+  renderReviewFixesForWriter,
+  reviewWorkflowWithWorkforcePersona,
+  type WorkforcePersonaReviewResult,
+} from './workforce-persona-reviewer.js';
+import type { WorkforcePersonaReviewSummary } from './types.js';
 
 const DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 4;
 const MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 8;
@@ -93,6 +102,7 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
     (input.spec.executionPreference === 'cloud' ? 'cloud' : 'local');
 
   try {
+    const resolver: WorkforcePersonaResolver = input.workforcePersonaWriter?.resolver ?? createRickyLocalPersonaResolver();
     const writerOptions = {
       repoRoot: input.workforcePersonaWriter?.repoRoot ?? process.cwd(),
       workflowName: input.workforcePersonaWriter?.workflowName ?? artifact.workflowId,
@@ -103,8 +113,9 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       installSkills: input.workforcePersonaWriter?.installSkills,
       installRoot: input.workforcePersonaWriter?.installRoot,
       tier: input.workforcePersonaWriter?.tier,
+      ...(input.workforcePersonaWriter?.specPath ? { specPath: input.workforcePersonaWriter.specPath } : {}),
       personaIntentCandidates: input.workforcePersonaWriter?.personaIntentCandidates,
-      resolver: input.workforcePersonaWriter?.resolver,
+      resolver,
       skillContext: baseResult.skillContext,
     };
     const personaResult = await writeWorkflowWithWorkforcePersona(input.spec, writerOptions);
@@ -165,6 +176,27 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
       };
     }
 
+    let reviewSummary: WorkforcePersonaReviewSummary | undefined;
+    if (workforcePersonaReviewEnabled(input)) {
+      const reviewOutcome = await runWorkforcePersonaReviewPass(input, {
+        baseWriterOptions: writerOptions,
+        baseArtifact: artifact,
+        baseSkillContext: baseResult.skillContext,
+        basePatternDecision: baseResult.patternDecision,
+        normalizedSpec: input.spec,
+        previousRepairAttempts,
+        currentArtifact: finalArtifact,
+        currentValidation: validation,
+        currentPersonaMetadata: finalPersonaMetadata,
+      });
+      if (reviewOutcome) {
+        finalArtifact = reviewOutcome.finalArtifact;
+        validation = reviewOutcome.validation;
+        finalPersonaMetadata = reviewOutcome.personaMetadata;
+        reviewSummary = reviewOutcome.reviewSummary;
+      }
+    }
+
     const plannedChecks = buildPlannedChecks(finalArtifact, input.dryRunEnabled !== false);
 
     return {
@@ -177,7 +209,9 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
         .filter((check) => check.stage !== 'dry_run')
         .map((check) => check.command),
       executionRoute: resolveExecutionRoute(input.spec, finalArtifact),
-      workforcePersona: finalPersonaMetadata,
+      workforcePersona: reviewSummary
+        ? { ...finalPersonaMetadata, review: reviewSummary }
+        : finalPersonaMetadata,
     };
   } catch (error) {
     if (error instanceof WorkforcePersonaClarificationError) {
@@ -201,29 +235,36 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
         workforcePersona: null,
       };
     }
+    // The workforce-persona writer failed (e.g. opencode/claude CLI errored,
+    // timed out, or returned a non-completed status). We already have a
+    // valid deterministic baseResult.artifact (the early-return at the top
+    // of this function ensures baseResult.success === true and
+    // baseResult.artifact is non-null), so fall back to it instead of
+    // returning success: false. Returning success: false here previously
+    // caused entrypoint.execute() to early-return without writing anything,
+    // which then made the auto-fix loop chase a phantom artifact path
+    // (retryBaseRequest promotes response.artifacts[0].path → request.specPath
+    // → workflowFileForRoute returns it → gate skips generation → precheck
+    // fails INVALID_ARTIFACT every retry until the auto-fix budget burns).
+    //
+    // This matches the validation-failure fallback above (lines 154-166),
+    // which also returns success: true with the deterministic baseResult.
     const writerError = error instanceof WorkforcePersonaWriterError ? error : null;
-    const issue = blockingIssue(
-      'rendering',
-      'WORKFORCE_PERSONA_WRITER_FAILED',
-      writerError?.message ?? `Workforce persona writer failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    const validation = {
-      ...baseResult.validation,
-      valid: false,
-      errors: [...baseResult.validation.errors, issue.message],
-      issues: [...baseResult.validation.issues, issue],
-    };
+    const fallbackMessage = `Workforce persona writer failed (${
+      writerError?.message ?? (error instanceof Error ? error.message : String(error))
+    }); used Ricky deterministic renderer instead.`;
+    const fallbackIssue = warningIssue('rendering', 'WORKFORCE_PERSONA_WRITER_FAILED', fallbackMessage);
     return {
       ...baseResult,
-      success: false,
-      validation,
+      success: true,
+      validation: addValidationWarning(baseResult.validation, fallbackIssue),
       workforcePersona: {
         personaId: 'unresolved',
         tier: 'unknown',
         harness: 'unknown',
         model: 'unknown',
         promptDigest: '',
-        warnings: writerError?.warnings ?? [],
+        warnings: [...(writerError?.warnings ?? []), fallbackMessage],
         runId: null,
         source: 'package',
         selectedIntent: 'agent-relay-workflow',
@@ -244,6 +285,190 @@ function resolvePrewriteRepairAttempts(value: number | undefined): number {
   if (value === undefined) return DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS;
   if (!Number.isFinite(value)) return DEFAULT_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS;
   return Math.max(0, Math.min(MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS, Math.floor(value)));
+}
+
+function workforcePersonaReviewEnabled(input: GenerationInput): boolean {
+  const writerOptions = input.workforcePersonaWriter;
+  if (writerOptions === false || writerOptions == null) return false;
+  if (writerOptions.review === false) return false;
+  const envFlag = process.env.RICKY_PERSONA_REVIEW;
+  if (envFlag !== undefined) {
+    const normalized = envFlag.trim().toLowerCase();
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  }
+  return true;
+}
+
+interface WorkforcePersonaReviewPassInputs {
+  baseWriterOptions: Parameters<typeof writeWorkflowWithWorkforcePersona>[1];
+  baseArtifact: RenderedArtifact;
+  baseSkillContext: SkillContext;
+  basePatternDecision: PatternDecision;
+  normalizedSpec: GenerationInput['spec'];
+  previousRepairAttempts: WorkforcePersonaPrewriteRepairAttempt[];
+  currentArtifact: RenderedArtifact;
+  currentValidation: GenerationValidationResult;
+  currentPersonaMetadata: WorkforcePersonaGenerationMetadata;
+}
+
+interface WorkforcePersonaReviewPassResult {
+  finalArtifact: RenderedArtifact;
+  validation: GenerationValidationResult;
+  personaMetadata: WorkforcePersonaGenerationMetadata;
+  reviewSummary: WorkforcePersonaReviewSummary;
+}
+
+async function runWorkforcePersonaReviewPass(
+  input: GenerationInput,
+  inputs: WorkforcePersonaReviewPassInputs,
+): Promise<WorkforcePersonaReviewPassResult | null> {
+  const writerOptions = input.workforcePersonaWriter;
+  if (writerOptions === false || writerOptions == null) return null;
+  const reviewOptions = writerOptions.review === undefined ? {} : writerOptions.review;
+  if (reviewOptions === false) return null;
+
+  // Reviewer resolver precedence: explicit `review.resolver` overrides
+  // everything; otherwise reuse the writer's custom resolver when the
+  // caller provided one (so tests and integration callers do not need to
+  // wire two parallel resolver mocks). Falls back to the Ricky-local
+  // Claude resolver when neither is supplied.
+  const reviewResolver = reviewOptions.resolver ?? inputs.baseWriterOptions.resolver;
+
+  let review: WorkforcePersonaReviewResult;
+  try {
+    review = await reviewWorkflowWithWorkforcePersona(inputs.normalizedSpec, {
+      repoRoot: inputs.baseWriterOptions.repoRoot,
+      outputPath: inputs.baseArtifact.artifactPath,
+      artifactContent: inputs.currentArtifact.content,
+      workflowName: inputs.baseWriterOptions.workflowName ?? inputs.baseArtifact.workflowId,
+      ...(reviewOptions.tier !== undefined ? { tier: reviewOptions.tier } : {}),
+      ...(reviewOptions.timeoutSeconds !== undefined ? { timeoutSeconds: reviewOptions.timeoutSeconds } : {}),
+      ...(reviewOptions.personaIntentCandidates ? { personaIntentCandidates: reviewOptions.personaIntentCandidates } : {}),
+      ...(reviewResolver ? { resolver: reviewResolver } : {}),
+      ...(writerOptions.installRoot !== undefined ? { installRoot: writerOptions.installRoot } : {}),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      finalArtifact: inputs.currentArtifact,
+      validation: inputs.currentValidation,
+      personaMetadata: appendPersonaWarning(
+        inputs.currentPersonaMetadata,
+        `Workforce persona review pass skipped: ${message}`,
+      ),
+      reviewSummary: {
+        // Reviewer pass crashed — surface as `error` so downstream
+        // automation (and humans reading the JSON) can tell "the reviewer
+        // never ran" from "the reviewer ran and approved." Synthesizing
+        // `pass` here would be a false approval signal.
+        verdict: 'error',
+        summary: `Reviewer pass was skipped after error: ${message}`,
+        personaId: 'unresolved',
+        tier: 'unknown',
+        harness: 'unknown',
+        model: 'unknown',
+        selectedIntent: 'review',
+        runId: null,
+        fixes: [],
+        appliedFix: false,
+        warnings: [message],
+      },
+    };
+  }
+
+  const reviewSummary: WorkforcePersonaReviewSummary = {
+    verdict: review.verdict,
+    summary: review.summary,
+    personaId: review.metadata.personaId,
+    tier: review.metadata.tier,
+    harness: review.metadata.harness,
+    model: review.metadata.model,
+    selectedIntent: review.metadata.selectedIntent,
+    runId: review.metadata.runId,
+    fixes: review.fixes,
+    appliedFix: false,
+    warnings: review.metadata.warnings,
+  };
+
+  // Skip the repair attempt when:
+  //   - verdict is `pass` (no fixes requested),
+  //   - verdict is `block` (the reviewer rejected the artifact outright; per
+  //     the contract documented on `WorkforcePersonaReviewSummary`, Ricky
+  //     keeps the writer artifact and records the verdict rather than trying
+  //     to repair what the reviewer called fundamentally wrong), or
+  //   - `fixes` is empty (a `fix` verdict without actionable items has
+  //     nothing the writer can act on).
+  if (review.verdict === 'pass' || review.verdict === 'block' || review.fixes.length === 0) {
+    return {
+      finalArtifact: inputs.currentArtifact,
+      validation: inputs.currentValidation,
+      personaMetadata: inputs.currentPersonaMetadata,
+      reviewSummary,
+    };
+  }
+
+  // Verdict is `fix` with a non-empty fix list: feed the structured fix
+  // list back into a single writer repair attempt.
+  const fixErrors = renderReviewFixesForWriter(review);
+  let appliedArtifact = inputs.currentArtifact;
+  let appliedValidation = inputs.currentValidation;
+  let appliedMetadata = inputs.currentPersonaMetadata;
+
+  try {
+    const repairResult = await writeWorkflowWithWorkforcePersona(inputs.normalizedSpec, {
+      ...inputs.baseWriterOptions,
+      validationFeedback: {
+        errors: fixErrors,
+        previousContent: appliedArtifact.content,
+        previousAttempts: inputs.previousRepairAttempts,
+      },
+    });
+    const repairedArtifact = applyPersonaArtifactToRenderedArtifact(inputs.baseArtifact, repairResult);
+    const repairedValidation = validateGeneratedArtifact(
+      repairedArtifact,
+      inputs.basePatternDecision,
+      inputs.baseSkillContext,
+      inputs.normalizedSpec,
+    );
+
+    if (repairedValidation.valid) {
+      appliedArtifact = repairedArtifact;
+      appliedValidation = repairedValidation;
+      appliedMetadata = {
+        ...repairResult.metadata,
+        warnings: [
+          ...repairResult.metadata.warnings,
+          `Workforce persona reviewer (${review.metadata.model}) returned ${review.fixes.length} fix(es); writer repair attempt applied them.`,
+        ],
+      };
+      reviewSummary.appliedFix = true;
+    } else {
+      appliedMetadata = appendPersonaWarning(
+        inputs.currentPersonaMetadata,
+        `Workforce persona reviewer fix attempt did not satisfy deterministic validation; kept the original writer artifact.`,
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appliedMetadata = appendPersonaWarning(
+      inputs.currentPersonaMetadata,
+      `Workforce persona reviewer fix attempt failed: ${message}.`,
+    );
+  }
+
+  return {
+    finalArtifact: appliedArtifact,
+    validation: appliedValidation,
+    personaMetadata: appliedMetadata,
+    reviewSummary,
+  };
+}
+
+function appendPersonaWarning(
+  metadata: WorkforcePersonaGenerationMetadata,
+  warning: string,
+): WorkforcePersonaGenerationMetadata {
+  return { ...metadata, warnings: [...metadata.warnings, warning] };
 }
 
 function workforcePersonaTierForRepairAttempt(tier: string | undefined, repairAttempt: number): string | undefined {
@@ -308,6 +533,14 @@ export function validateGeneratedArtifact(
   }
   if (!/80-to-100|80.?to.?100/i.test(content) || !/fix-loop/.test(content) || !/final-review/.test(content)) {
     issues.push(blockingIssue('validation', 'EIGHTY_TO_ONE_HUNDRED_LOOP_MISSING', 'Rendered workflow lacks the review/fix/final-review 80-to-100 loop.'));
+  }
+  const isMasterExecutorWorkflow = isMasterExecutorArtifact(artifact);
+  if (!isMasterExecutorWorkflow && !hasMandatoryFreshEyesReviewLoop(artifact)) {
+    issues.push(blockingIssue(
+      'validation',
+      'MANDATORY_FRESH_EYES_LOOP_MISSING',
+      'Rendered workflow must run Claude review/fix/final-review/final-fix before the Codex review/fix/final-review/final-fix loop, with final acceptance after the Codex loop.',
+    ));
   }
   if (!/prepare-context/.test(content)) {
     issues.push(blockingIssue('validation', 'CONTEXT_READ_MISSING', 'Rendered workflow does not include deterministic context preparation.'));
@@ -390,14 +623,13 @@ export function validateGeneratedArtifact(
   }
 
   const finalReviewPassGate = artifact.gates.find((gate) => gate.name === 'final-review-pass-gate');
-  if (finalReviewPassGate) {
-    for (const reviewName of ['final-review-claude', 'final-review-codex']) {
-      const pathInContent = extractReviewOutputPath(content, reviewName);
-      if (pathInContent && !finalReviewPassGate.command.includes(pathInContent)) {
+  if (!isMasterExecutorWorkflow && finalReviewPassGate) {
+    for (const fixArtifact of ['claude-final-fix.md', 'codex-final-fix.md']) {
+      if (!finalReviewPassGate.command.includes(fixArtifact)) {
         issues.push(blockingIssue(
           'validation',
           'REVIEW_PATH_MISMATCH',
-          `Review step ${reviewName} writes to ${pathInContent} but final-review-pass-gate does not check that path.`,
+          `Final review pass gate does not check ${fixArtifact}.`,
         ));
       }
     }
@@ -440,6 +672,66 @@ function requiresRepairAwareRetry(content: string): boolean {
 
   return workflowErrorHandling.some((line) =>
     !/\.onError\(\s*['"]retry['"]\s*,\s*\{.*\brepairAgent\s*:.*\brepairRetries\s*:/.test(line),
+  );
+}
+
+function hasMandatoryFreshEyesReviewLoop(artifact: RenderedArtifact): boolean {
+  const taskById = new Map(artifact.tasks.map((task) => [task.id, task]));
+  const gateByName = new Map(artifact.gates.map((gate) => [gate.name, gate]));
+  const requiredOrder = [
+    'review-claude',
+    'fix-loop',
+    'final-review-claude',
+    'final-fix-claude',
+    'review-codex',
+    'fix-loop-codex',
+    'final-review-codex',
+    'final-fix-codex',
+  ];
+  const positions = requiredOrder.map((id) => artifact.tasks.findIndex((task) => task.id === id));
+  if (positions.some((position) => position < 0)) return false;
+  if (!positions.every((position, index) => index === 0 || position > positions[index - 1])) return false;
+
+  const requiredAgents: Array<[string, string]> = [
+    ['review-claude', 'reviewer-claude'],
+    ['fix-loop', 'validator-claude'],
+    ['final-review-claude', 'reviewer-claude'],
+    ['final-fix-claude', 'validator-claude'],
+    ['review-codex', 'reviewer-codex'],
+    ['fix-loop-codex', 'validator-codex'],
+    ['final-review-codex', 'reviewer-codex'],
+    ['final-fix-codex', 'validator-codex'],
+  ];
+  for (const [taskId, agentRole] of requiredAgents) {
+    if (taskById.get(taskId)?.agentRole !== agentRole) return false;
+  }
+
+  const requiredDeps: Array<[string, string]> = [
+    ['fix-loop', 'review-claude'],
+    ['final-review-claude', 'post-fix-validation'],
+    ['final-fix-claude', 'final-review-claude'],
+    ['review-codex', 'final-fix-claude'],
+    ['fix-loop-codex', 'review-codex'],
+    ['final-review-codex', 'post-codex-fix-validation'],
+    ['final-fix-codex', 'final-review-codex'],
+  ];
+  for (const [taskOrGateId, dependency] of requiredDeps) {
+    const deps = taskById.get(taskOrGateId)?.dependsOn ?? gateByName.get(taskOrGateId)?.dependsOn ?? [];
+    if (!deps.includes(dependency)) return false;
+  }
+
+  const passGate = gateByName.get('final-review-pass-gate');
+  if (!passGate?.dependsOn.includes('final-fix-codex')) return false;
+  return gateByName.get('final-hard-validation')?.dependsOn.includes('final-review-pass-gate') === true;
+}
+
+function isMasterExecutorArtifact(artifact: RenderedArtifact): boolean {
+  const taskIds = new Set(artifact.tasks.map((task) => task.id));
+  return (
+    taskIds.has('materialize-child-workflows') &&
+    taskIds.has('review-child-evidence') &&
+    artifact.tasks.some((task) => task.id.startsWith('run-')) &&
+    artifact.gates.some((gate) => gate.name === 'child-workflow-file-gate')
   );
 }
 
@@ -603,12 +895,6 @@ function resolveExecutionRoute(spec: NormalizedWorkflowSpec, artifact: RenderedA
 
 function dryRunCommand(artifactPath: string): string {
   return `npx agent-relay run --dry-run ${artifactPath}`;
-}
-
-function extractReviewOutputPath(content: string, stepName: string): string | null {
-  const pattern = new RegExp(`Write\\s+(\\S+/${stepName}\\.md)`);
-  const match = pattern.exec(content);
-  return match ? match[1] : null;
 }
 
 function hasBalancedDelimiters(content: string): boolean {

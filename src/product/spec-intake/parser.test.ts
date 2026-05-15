@@ -618,6 +618,42 @@ describe('spec intake parser, normalizer, and router', () => {
     ]);
   });
 
+  it('lets explicit CLI local mode override mixed local and cloud spec text', () => {
+    const result = intake({
+      kind: 'structured_json',
+      surface: 'cli',
+      receivedAt: new Date().toISOString(),
+      metadata: { mode: 'local' },
+      data: {
+        intent: 'generate',
+        description: 'Generate a workflow for a primitive that supports local BYOH and Cloud hosted execution.',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('generate');
+    expect(result.routing?.normalizedSpec.executionPreference).toBe('local');
+    expect(result.clarificationQuestions).toEqual([]);
+  });
+
+  it('treats interactive execution-mode answers as resolving the conflict', () => {
+    const result = intake(
+      natural(
+        [
+          'Generate a workflow for a primitive that supports local BYOH and Cloud hosted execution.',
+          '',
+          'Clarification answers:',
+          '- Should this workflow run locally/BYOH, in Cloud, or generate artifacts for both paths?: locally',
+        ].join('\n'),
+      ),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('generate');
+    expect(result.routing?.normalizedSpec.executionPreference).toBe('local');
+    expect(result.clarificationQuestions).toEqual([]);
+  });
+
   it('asks for a side-effect boundary before generating risky workflows', () => {
     const result = intake(
       natural('Generate a workflow that deletes obsolete files, commits the cleanup, and pushes the branch.'),
@@ -632,5 +668,143 @@ describe('spec intake parser, normalizer, and router', () => {
         blocking: true,
       }),
     ]);
+  });
+
+  describe('targetFiles extraction (AST-driven)', () => {
+    it('captures backticked paths from markdown prose via inlineCode nodes', () => {
+      const result = intake(
+        natural(
+          [
+            'Implementation plan:',
+            '- Update `packages/web/app/api/v1/workflows/run/route.ts` to accept the new mode.',
+            '- Update `packages/core/src/bootstrap/launcher.ts` to provision a sandbox.',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toEqual(
+        expect.arrayContaining([
+          'packages/web/app/api/v1/workflows/run/route.ts',
+          'packages/core/src/bootstrap/launcher.ts',
+        ]),
+      );
+    });
+
+    it('does not capture paths inside fenced code blocks', () => {
+      const result = intake(
+        natural(
+          [
+            'Edit `packages/web/route.ts` to fix the bug.',
+            '',
+            'The current code looks like:',
+            '',
+            '```ts',
+            'import { foo } from "packages/legacy/old-helper.ts";',
+            'export const bar = "examples/sample/path.json";',
+            '```',
+            '',
+            'Replace it.',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toContain('packages/web/route.ts');
+      expect(targets).not.toContain('packages/legacy/old-helper.ts');
+      expect(targets).not.toContain('examples/sample/path.json');
+    });
+
+    it('suppresses backticked tokens that are not paths (git refs, type names)', () => {
+      const result = intake(
+        natural(
+          [
+            'Touch `packages/web/route.ts` and rebase onto `git/main`.',
+            'The new type `MsdRelayReviewArtifact` lives in `packages/core/types.ts`.',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toContain('packages/web/route.ts');
+      expect(targets).toContain('packages/core/types.ts');
+      // `git/main` has 2 segments, no extension, no recognized prefix → filtered.
+      expect(targets).not.toContain('git/main');
+      // `MsdRelayReviewArtifact` has no slash → never considered.
+      expect(targets).not.toContain('MsdRelayReviewArtifact');
+    });
+
+    it('extracts paths from a structured `## Target Files` block in priority over inline code', () => {
+      const result = intake(
+        natural(
+          [
+            '# Spec',
+            'Some prose mentioning `tests/scratch/example.ts` casually.',
+            '',
+            '## Target Files',
+            '',
+            '- `packages/web/app/api/v1/workflows/run/route.ts`',
+            '- packages/core/src/bootstrap/launcher.ts',
+            '',
+            '## Acceptance',
+            'It works.',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toEqual([
+        'packages/web/app/api/v1/workflows/run/route.ts',
+        'packages/core/src/bootstrap/launcher.ts',
+      ]);
+      expect(targets).not.toContain('tests/scratch/example.ts');
+    });
+
+    it('honors a `### Target Files` block at any heading depth', () => {
+      const result = intake(
+        natural(
+          [
+            '## Implementation',
+            '',
+            '### Target Files',
+            '',
+            '- `packages/web/route.ts`',
+            '',
+            '### Tests',
+            '',
+            'Run vitest.',
+          ].join('\n'),
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toEqual(['packages/web/route.ts']);
+    });
+
+    it('falls back to inline code extraction when there is no Target Files block', () => {
+      const result = intake(
+        natural('Edit `packages/core/src/bootstrap/launcher.ts` to provision a sandbox.'),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toContain('packages/core/src/bootstrap/launcher.ts');
+    });
+
+    it('suppresses prose noise in non-markdown inputs via the regex fallback', () => {
+      // No backticks anywhere — the AST extractor returns []. The plain-text
+      // fallback then applies looksLikeRealPath to drop noise.
+      const result = intake(
+        natural(
+          'Send the PR number, base/head SHA, and the user/account pair to MSD. ' +
+            'Update packages/web/route.ts.',
+        ),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toContain('packages/web/route.ts');
+      expect(targets).not.toContain('base/head');
+      expect(targets).not.toContain('user/account');
+    });
+
+    it('keeps deeply-nested paths without an extension (3+ segments)', () => {
+      const result = intake(
+        natural('Touch `packages/web/lib/nango-bridge` for the new adapter.'),
+      );
+      const targets = result.routing?.normalizedSpec.targetFiles ?? [];
+      expect(targets).toContain('packages/web/lib/nango-bridge');
+    });
   });
 });

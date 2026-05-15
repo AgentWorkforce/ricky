@@ -170,6 +170,42 @@ Your trajectory helps others understand:
 Future agents can query past trajectories to learn from your decisions.
 <!-- prpm:snippet:end @agent-workforce/trail-snippet@1.1.2 -->
 
+# Ricky Source Code Conventions
+
+Rules that apply to Ricky's own source under `src/`, distinct from the workflow-authoring rules below.
+
+## Source-Text Analysis: Use Grammar-Aware Parsers, Not Regex
+
+When Ricky source code needs to inspect text whose grammar Ricky already understands — TypeScript or JavaScript artifacts, Markdown specs, JSON manifests, shell command bodies — use a parser for that grammar. Do not use substring matches, line-anchored regex, or comment-stripping heuristics. Do not call an LLM.
+
+**Why parsers, not regex.** The bugs we keep shipping in this area share one shape: a substring or regex that looked right against the file's "normal" code matches the same characters inside a string literal, a comment, a fenced code block, a HEREDOC, or a multi-line declaration. The injected fix then either no-ops (because we falsely detected the pattern as already present) or duplicates a declaration (because we falsely detected it as missing). Two recent examples in the same week converged on this conclusion:
+
+- `src/local/auto-fix-loop.ts:hasRickyWorkflowAliasImport` — `injectWorkflowEnvLoader`'s substring check for `from 'node:fs'` matched the literal text inside a `node --input-type=module` HEREDOC embedded in a `.step({ command: ... })` body, then skipped adding the real `import * as rickyWorkflowFs` alias. The fix walks `ts.createSourceFile` `ImportDeclaration` nodes; string-literal contents are structurally inert.
+- `src/product/spec-intake/markdown-target-files.ts:extractTargetFilesFromMarkdown` — the previous `PATH_PATTERN` regex over markdown spec text matched paths inside fenced code blocks and prose noise like `base/head`. The fix walks `mdast-util-from-markdown` `inlineCode` nodes; fenced blocks become `code` nodes and are excluded by construction.
+
+**Why not an LLM.** For hot-path pure functions:
+
+- Non-determinism breaks the offline eval suite and makes regressions hard to bisect.
+- Latency multiplies on every retry and every `--no-run` / `--run` invocation.
+- Spawning a model adds an external-dependency surface to a deterministic transformation.
+- For paths that later drive shell commands, model output is a prompt-injection surface.
+
+LLMs are the right tool for judgment ("is this code refactor good?"). They are the wrong tool for "does this file have an import statement matching this pattern."
+
+**Concrete tools available.** Both are already in `dependencies`:
+
+- TypeScript / JavaScript: `import ts from 'typescript'`; `ts.createSourceFile(name, content, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)` then walk `sourceFile.statements`.
+- Markdown: `import { fromMarkdown } from 'mdast-util-from-markdown'`; walk the resulting mdast tree (`inlineCode`, `code`, `heading`, `list`, etc.).
+
+**When you must touch source text, prefer in this order:**
+
+1. AST walk for the file's grammar (TS, mdast, JSON.parse, etc.).
+2. A small purpose-built tokenizer that strips inert regions (string literals, comments, code fences) before checking the cleaned content. Use this only when the parser dependency is genuinely too heavy for the call site.
+3. Regex on a region you have already proven inert (e.g., a single import-statement node's `getText()` output).
+4. Substring matching on the raw file. **Default to no.** If you reach for this, the bug class above is already loaded and aimed at you.
+
+The detection rule is the strict one. Insertion code that anchors against a known marker (e.g., "append after the `import { workflow }` line") may stay regex-based when the marker itself is unambiguous, but if you find yourself stripping comments or guessing string-literal boundaries, switch to AST.
+
 # Ricky Workflow Conventions
 
 Every agent working in this repo must follow these rules when authoring, reviewing, or modifying Ricky workflows.
@@ -189,7 +225,8 @@ Every agent working in this repo must follow these rules when authoring, reviewi
 - **Numeric prefix and slug:** Use monotonically increasing numeric prefixes (`01-`, `02-`, ...) within each wave folder. Slugs must name the concrete deliverable or outcome, not a vague improvement theme.
 - **Dedicated channel:** Every workflow must use a `wf-ricky-*` channel. Never use `general`.
 - **Deterministic gates:** After any agent step that edits files, add a deterministic verification gate such as `file_exists`, `exit_code`, grep checks, dry-run checks, or scoped `git diff` change detection. Prefer gate types in this order: `exit_code`, `file_exists`, `output_contains` only for deterministic sentinels not echoed by the task, then `custom`.
-- **Review stage:** Every significant workflow must include review by an agent distinct from the writer when possible. Prefer `writer=codex` with `reviewer=claude`, `writer=claude` with `reviewer=codex`, and both reviewers for critical workflows. Review artifacts for significant workflows must be written under `.workflow-artifacts/`.
+- **Review stage:** Every significant workflow must include review by an agent distinct from the writer when possible. Prefer `writer=codex` with `reviewer=claude`, `writer=claude` with `reviewer=codex`, and both Claude and Codex final reviewers for critical workflows. Review artifacts for significant workflows must be written under `.workflow-artifacts/`.
+- **Shadowed squad loop:** Serious implementation workflows should default to one or more 2-3 agent squads: a scoped implementer, a live shadow reviewer, and optionally a validation/test owner. Ricky may choose a different workflow shape when the spec's dependency graph, risk, or scope clearly calls for it, but any deviation must preserve implementer self-reflection, fresh independent review, post-fix review, and deterministic evidence. Final review should be done independently by Claude and Codex, then merged into one final review artifact. Fresh fix agents handle final-review findings, self-reflect, and hand the post-fix state back for re-review before signoff.
 - **80-to-100 validation:** Serious implementation workflows must use a soft-gate, fix, hard-gate loop. The fix loop must include a post-fix re-review on the fixed state before final signoff. Passing compile or typecheck alone is not enough.
 - **Commit boundaries:** Do not run `git commit` or `git push` from agent steps unless the workflow explicitly owns that boundary and documents the expected files. Each workflow must state the expected branch naming pattern and whether PR creation is in or out of scope. Default branch names should follow `ricky/<wave-or-meta>-<workflow-slug>` unless a nearby spec declares a narrower pattern.
 - **PR creation primitive:** When PR creation is in scope, workflows MUST use the agent-relay GitHub primitive (`@agent-relay/github-primitive`) rather than shelling out to `gh pr create`. Use `createGitHubStep` from `@agent-relay/github-primitive/workflow-step` with `action: 'createPR'` for declarative workflow steps, or `GitHubClient.create({ runtime: 'auto' })` with `client.createPR(...)` for imperative use. The primitive handles runtime selection (local `gh` CLI vs Nango cloud vs relay-cloud proxy) and produces structured outputs the orchestrator can chain on. Master/orchestration workflows that complete an end-to-end deliverable SHOULD include a `final-pr` step using this primitive; specs must explicitly opt out if PR creation is not desired.
@@ -252,7 +289,7 @@ Use named roles instead of generic worker numbering. Preferred role names are:
 - `reviewer-codex`
 - `validator-claude`
 
-For implementation workflows, default to lead, `impl-primary-codex`, `impl-tests-codex`, `reviewer-claude`, `reviewer-codex`, and `validator-claude`. For standards and spec workflows, `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer are enough when the scope is narrow.
+For implementation workflows, default to lead plus scoped squads: `impl-<scope>-codex`, `shadow-<scope>-claude` or `shadow-<scope>-codex`, optional `validator-<scope>-claude`, then `final-reviewer-claude` and `final-reviewer-codex`. For standards and spec workflows, `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer are enough when the scope is narrow.
 
 ## Meta-Workflow Artifact Layout
 

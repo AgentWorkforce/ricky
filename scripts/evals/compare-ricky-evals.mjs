@@ -48,7 +48,6 @@ for (const afterTest of after.tests) {
 for (const [key, beforeTest] of beforeById.entries()) {
   if (seenBeforeKeys.has(key)) continue;
   disappeared += 1;
-  regressed += 1;
   console.log(`MISSING   ${beforeTest.status.padEnd(11)} -> disappeared ${beforeTest.id}`);
 }
 

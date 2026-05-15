@@ -57,7 +57,7 @@ describe('generated workflow reliability contract', () => {
     expect(content).toContain('repairRetries:');
     expect(content).not.toMatch(/^\s*\.onError\(\s*['"]fail-fast['"]/m);
     expect(content).toContain('.run({ cwd: process.cwd() });');
-    expect(content).toContain('80-to-100 fix loop');
+    expect(content).toMatch(/80-to-100 (?:review-)?fix loop/);
     expect(content).toContain('fix-loop-report.md');
     expect(content).toContain('captureOutput: true');
     expect(result.artifact!.gates.some((gate) => gate.name === 'initial-soft-validation' && gate.failOnError === false)).toBe(true);
@@ -86,10 +86,10 @@ describe('generated workflow reliability contract', () => {
     const unescaped = content.replace(/\\+"/g, '"');
 
     expect(content).toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
-    expect(content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"master-lead\", repairRetries: 2 })");
+    expect(content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"master-lead\", repairRetries: 2 })");
     expect(content).toContain('ricky run');
     expect(content).not.toContain('--no-auto-fix');
-    expect(unescaped).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(unescaped).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(unescaped).toMatch(/\.step\("final-hard-validation"[\s\S]*?failOnError: false,[\s\S]*?\.step\("final-signoff"/);
     expect(content).toMatch(/\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/);
     expect(content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
@@ -109,8 +109,8 @@ describe('generated workflow reliability contract', () => {
     const weakArtifact = {
       ...artifact,
       content: artifact.content.replace(
-        ".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })",
-        ".onError('retry', { maxRetries: 2, retryDelayMs: 1000 })",
+        ".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })",
+        ".onError('retry', { maxRetries: 2, retryDelayMs: 10000 })",
       ),
     };
 

@@ -10,8 +10,10 @@ QUEUE_MODE="${RICKY_OVERNIGHT_QUEUE_MODE:-flight-safe}"
 MAX_WORKFLOWS_PER_INVOCATION="${RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION:-4}"
 IDLE_TIMEOUT_SECONDS="${RICKY_OVERNIGHT_IDLE_TIMEOUT_SECONDS:-900}"
 DEFAULT_MAX_WORKFLOWS_PER_INVOCATION=4
-STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
-GLOBAL_STATE_ROOT="$REPO_ROOT/.workflow-artifacts/overnight-state"
+STATE_NAMESPACE_ROOT="$REPO_ROOT/.workflow-artifacts/state/overnight"
+LEGACY_STATE_NAMESPACE_ROOT="$REPO_ROOT/.workflow-artifacts/overnight-state"
+STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$STATE_NAMESPACE_ROOT/$QUEUE_MODE}"
+GLOBAL_STATE_ROOT="$(dirname "$STATE_ROOT")"
 GLOBAL_LOCK_DIR="$GLOBAL_STATE_ROOT/active.lock"
 GLOBAL_LOCK_FILE="$GLOBAL_LOCK_DIR/lock.env"
 RESUME_FLAG="${1:-}"
@@ -62,6 +64,11 @@ mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT" "$GLOBAL_STATE_ROOT"
 : > "$LOG_FILE"
 : > "$FAILED_FILE"
 : > "$SKIPPED_FILE"
+
+if [[ -z "${RICKY_OVERNIGHT_STATE_DIR:-}" && -d "$LEGACY_STATE_NAMESPACE_ROOT/$QUEUE_MODE" && ! -e "$STATE_ROOT/checkpoint.env" ]]; then
+  mkdir -p "$STATE_ROOT"
+  cp -f "$LEGACY_STATE_NAMESPACE_ROOT/$QUEUE_MODE"/* "$STATE_ROOT"/ 2>/dev/null || true
+fi
 
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -197,6 +204,21 @@ artifact_checkpoint_has_active_workflow() {
   [[ -n "$current_workflow" ]]
 }
 
+artifact_active_workflow_runner_log_shows_success() {
+  local artifact_dir="$1"
+  local current_index=""
+  local current_workflow=""
+  local runner_log=""
+
+  artifact_checkpoint_read_progress "$artifact_dir" current_index current_workflow || return 1
+  [[ -n "$current_workflow" ]] || return 1
+
+  runner_log="$artifact_dir/runner-$(basename "$current_workflow" .ts).log"
+  [[ -f "$runner_log" ]] || return 1
+
+  grep -Eq 'Workflow "[^"]+" — COMPLETED|\[agent-relay\] runScriptFile: runner .* completed exit=0' "$runner_log"
+}
+
 artifact_queue_exhausted_terminal_status() {
   local artifact_dir="$1"
   local failed_file="$artifact_dir/failed.txt"
@@ -227,12 +249,15 @@ mark_artifact_stale_or_complete() {
   if artifact_runner_logs_show_failure "$artifact_dir"; then
     resolved_status="failed"
     resolved_reason="runner failed before harness status flush"
-  elif artifact_runner_logs_show_success "$artifact_dir" && ! artifact_checkpoint_has_active_workflow "$artifact_dir"; then
-    resolved_status="complete"
-    resolved_reason="runner completed before harness status flush"
   elif artifact_checkpoint_indicates_queue_exhausted "$artifact_dir"; then
     resolved_status="$(artifact_queue_exhausted_terminal_status "$artifact_dir")"
     resolved_reason="queue exhausted before harness status flush"
+  elif artifact_runner_logs_show_success "$artifact_dir" && (
+    ! artifact_checkpoint_has_active_workflow "$artifact_dir" ||
+    artifact_active_workflow_runner_log_shows_success "$artifact_dir"
+  ); then
+    resolved_status="complete"
+    resolved_reason="runner completed before harness status flush"
   fi
 
   printf '%s\n' "$resolved_status" > "$status_file"
@@ -325,7 +350,7 @@ iterate_known_state_dirs() {
   local state_dir=""
   local emitted_custom_state_dir="false"
 
-  for state_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*; do
+  for state_dir in "$GLOBAL_STATE_ROOT"/*; do
     [[ -d "$state_dir" ]] || continue
     printf '%s\n' "$state_dir"
     if [[ "$state_dir" == "$STATE_ROOT" ]]; then
@@ -338,12 +363,54 @@ iterate_known_state_dirs() {
   fi
 }
 
+iterate_known_artifact_checkpoints() {
+  local checkpoint_file=""
+
+  shopt -s nullglob
+  for checkpoint_file in "$REPO_ROOT"/.workflow-artifacts/overnight-*/checkpoint.env; do
+    [[ -f "$checkpoint_file" ]] || continue
+    printf '%s\n' "$checkpoint_file"
+  done
+  shopt -u nullglob
+}
+
+iterate_running_artifact_dirs_without_checkpoints() {
+  local artifact_dir=""
+  local status_file=""
+
+  shopt -s nullglob
+  for artifact_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-*; do
+    [[ -d "$artifact_dir" ]] || continue
+    [[ "$artifact_dir" == "$ARTIFACT_DIR" ]] && continue
+    status_file="$artifact_dir/status.txt"
+    [[ -f "$status_file" ]] || continue
+    grep -Eqx 'running|checkpointed' "$status_file" || continue
+    [[ ! -f "$artifact_dir/checkpoint.env" ]] || continue
+    printf '%s\n' "$artifact_dir"
+  done
+  shopt -u nullglob
+}
+
 reconcile_stale_state_dirs() {
   local state_dir=""
+  local checkpoint_file=""
+  local artifact_dir=""
+
   while IFS= read -r state_dir; do
     [[ -d "$state_dir" ]] || continue
     reconcile_stale_state_dir "$state_dir/checkpoint.env"
   done < <(iterate_known_state_dirs)
+
+  while IFS= read -r checkpoint_file; do
+    [[ -f "$checkpoint_file" ]] || continue
+    reconcile_stale_state_dir "$checkpoint_file"
+  done < <(iterate_known_artifact_checkpoints)
+
+  while IFS= read -r artifact_dir; do
+    [[ -d "$artifact_dir" ]] || continue
+    mark_artifact_stale_or_complete "$artifact_dir"
+    log "reconciled orphaned overnight artifact without checkpoint -> $artifact_dir"
+  done < <(iterate_running_artifact_dirs_without_checkpoints)
 }
 
 clear_all_state_checkpoints() {
@@ -452,24 +519,28 @@ on_exit() {
 
   if [[ "$STATUS_MARKED" != "true" ]]; then
     if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
+      local recovered_status=""
+
       if artifact_runner_logs_show_success "$ARTIFACT_DIR" && ! artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR"; then
         STATUS_REASON="runner completed before harness status flush"
-        echo "complete" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "complete"
+        recovered_status="complete"
       elif artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR"; then
         STATUS_REASON="queue exhausted before harness status flush"
-        local recovered_status
         recovered_status="$(artifact_queue_exhausted_terminal_status "$ARTIFACT_DIR")"
-        echo "$recovered_status" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "$recovered_status"
       else
         STATUS_REASON="process exited unexpectedly"
-        echo "stale" > "$STATUS_FILE"
-        persist_checkpoint
-        write_summary "stale"
+        recovered_status="stale"
       fi
+
+      echo "$recovered_status" > "$STATUS_FILE"
+      persist_checkpoint
+
+      if [[ "$recovered_status" == "complete" || "$recovered_status" == "complete-with-failures" ]]; then
+        clear_all_state_checkpoints
+        finalize_current_artifact_checkpoint
+      fi
+
+      write_summary "$recovered_status"
     fi
   fi
 
@@ -492,8 +563,15 @@ append_generated_workflows_to_queue() {
 }
 
 append_repo_workflows_to_queue() {
+  local workflow_path=""
+
   while IFS= read -r workflow_path; do
     [[ -n "$workflow_path" ]] || continue
+
+    if [[ -f "$workflow_path" ]] && workflow_has_stale_package_targets "$workflow_path"; then
+      continue
+    fi
+
     printf '%s\n' "$workflow_path" >> "$QUEUE_FILE"
   done < <(find workflows -mindepth 2 -maxdepth 2 -type f -name '*.ts' \
     -path 'workflows/wave*/*' | sort)
@@ -533,6 +611,11 @@ LAST_FILTER_REMOVED_TOTAL=0
 LAST_FILTER_REMOVED_MISSING=0
 LAST_FILTER_REMOVED_STALE=0
 LAST_FILTER_REMOVED_SATISFIED=0
+EXPANDED_PROBE_QUEUE_EXHAUSTED=false
+EXPANDED_PROBE_REMOVED_TOTAL=0
+EXPANDED_PROBE_REMOVED_MISSING=0
+EXPANDED_PROBE_REMOVED_STALE=0
+EXPANDED_PROBE_REMOVED_SATISFIED=0
 
 prune_tracked_workflow_file_for_repo_state() {
   local workflow_file="$1"
@@ -564,7 +647,7 @@ prune_tracked_workflow_file_for_repo_state() {
 }
 
 refresh_state_paths() {
-  STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$REPO_ROOT/.workflow-artifacts/overnight-state/$QUEUE_MODE}"
+  STATE_ROOT="${RICKY_OVERNIGHT_STATE_DIR:-$STATE_NAMESPACE_ROOT/$QUEUE_MODE}"
   STATE_FILE="$STATE_ROOT/checkpoint.env"
   STATE_LOG="$STATE_ROOT/latest-run.txt"
   mkdir -p "$STATE_ROOT"
@@ -622,6 +705,12 @@ fallback_to_expanded_queue_when_flight_safe_exhausted() {
   local original_queue_mode="$QUEUE_MODE"
   local expanded_queue_count=0
 
+  EXPANDED_PROBE_QUEUE_EXHAUSTED=false
+  EXPANDED_PROBE_REMOVED_TOTAL=0
+  EXPANDED_PROBE_REMOVED_MISSING=0
+  EXPANDED_PROBE_REMOVED_STALE=0
+  EXPANDED_PROBE_REMOVED_SATISFIED=0
+
   if [[ "$QUEUE_MODE" != "flight-safe" ]]; then
     return 0
   fi
@@ -636,11 +725,17 @@ fallback_to_expanded_queue_when_flight_safe_exhausted() {
   write_queue
   filter_queue_for_repo_state
   expanded_queue_count="$(queue_count)"
+  EXPANDED_PROBE_REMOVED_TOTAL="$LAST_FILTER_REMOVED_TOTAL"
+  EXPANDED_PROBE_REMOVED_MISSING="$LAST_FILTER_REMOVED_MISSING"
+  EXPANDED_PROBE_REMOVED_STALE="$LAST_FILTER_REMOVED_STALE"
+  EXPANDED_PROBE_REMOVED_SATISFIED="$LAST_FILTER_REMOVED_SATISFIED"
 
   if (( expanded_queue_count > 0 )); then
     log "promoting overnight queue mode to expanded for this invocation (${expanded_queue_count} actionable workflows remain)"
     return 0
   fi
+
+  EXPANDED_PROBE_QUEUE_EXHAUSTED=true
 
   QUEUE_MODE="$original_queue_mode"
   refresh_state_paths
@@ -758,6 +853,32 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave1-runtime/implement-failure-diagnosis-engine/signoff.md \
         'RICKY_FAILURE_DIAGNOSIS_ENGINE_COMPLETE'
+      ;;
+    workflows/wave1-runtime/01-local-run-coordinator.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/local-run-coordinator/signoff.md \
+        'LOCAL_COORDINATOR_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/runtime/local-coordinator.test.ts >/dev/null
+      ;;
+    workflows/wave1-runtime/03-workflow-failure-classification.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-failure-classification/signoff.md \
+        'WORKFLOW_FAILURE_CLASSIFICATION_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-failure-classification/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave1-runtime/workflow-failure-classification/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/runtime/failure/classifier.test.ts >/dev/null
       ;;
     workflows/wave2-product/04-workflow-validator-specialist.ts)
       artifact_signoff_has_marker \
@@ -899,6 +1020,16 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave10-agent-assistant-adoption/executor/signoff.md \
         'WAVE10_AGENT_ASSISTANT_EXECUTOR_COMPLETE'
+      ;;
+    workflows/wave10-agent-assistant-adoption/01-verify-and-close-wave9-docs.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/verify-and-close-wave9-docs/signoff.md \
+        'WAVE9_AGENT_ASSISTANT_DOC_ISSUES_COMPLETE'
+      ;;
+    workflows/wave10-agent-assistant-adoption/04-close-agent-assistant-handoff-issue.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/close-agent-assistant-handoff-issue/signoff.md \
+        'RICKY_AGENT_ASSISTANT_HANDOFF_COMPLETE'
       ;;
     workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts)
       artifact_signoff_has_marker \
@@ -1103,7 +1234,7 @@ resolve_resume_checkpoint_file() {
     fallback_queue_mode="${fallback_queue_mode//\"/}"
   fi
 
-  for candidate in "$REPO_ROOT"/.workflow-artifacts/overnight-state/*/checkpoint.env; do
+  for candidate in "$GLOBAL_STATE_ROOT"/*/checkpoint.env; do
     [[ -f "$candidate" ]] || continue
     candidate_epoch="$(stat -f '%m' "$candidate" 2>/dev/null || printf '0')"
     if [[ ! "$candidate_epoch" =~ ^[0-9]+$ ]]; then
@@ -1321,10 +1452,34 @@ validate_repo() {
   npm test
 }
 
+capture_meaningful_git_status() {
+  git status --short -- . ':(exclude)tmp/' ':(exclude).workflow-artifacts/' ':(exclude).trajectories/'
+}
+
+capture_meaningful_git_diff_stat() {
+  git diff --stat -- . ':(exclude)tmp/' ':(exclude).workflow-artifacts/' ':(exclude).trajectories/' || true
+}
+
+meaningful_tracked_delta_exists() {
+  ! git diff --quiet -- . ':(exclude)tmp/' ':(exclude).workflow-artifacts/' ':(exclude).trajectories/'
+}
+
+meaningful_untracked_delta_exists() {
+  [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/' ':!.trajectories/')" ]]
+}
+
 inspect_repo_changes() {
   log "capturing repo status"
-  git status --short | tee "$ARTIFACT_DIR/git-status.txt"
-  git diff --stat > "$ARTIFACT_DIR/git-diff-stat.txt" || true
+  capture_meaningful_git_status > "$ARTIFACT_DIR/git-status.txt"
+  capture_meaningful_git_diff_stat > "$ARTIFACT_DIR/git-diff-stat.txt"
+
+  if [[ -s "$ARTIFACT_DIR/git-status.txt" ]]; then
+    cat "$ARTIFACT_DIR/git-status.txt"
+  fi
+
+  if [[ -s "$ARTIFACT_DIR/git-diff-stat.txt" ]]; then
+    cat "$ARTIFACT_DIR/git-diff-stat.txt"
+  fi
 }
 
 repo_has_captured_head_delta() {
@@ -1344,7 +1499,7 @@ repo_has_captured_head_delta() {
 }
 
 repo_has_meaningful_delta() {
-  ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]] || repo_has_captured_head_delta
+  meaningful_tracked_delta_exists || meaningful_untracked_delta_exists || repo_has_captured_head_delta
 }
 
 commit_if_clean_delta() {
@@ -1363,8 +1518,8 @@ commit_if_clean_delta() {
     head_advanced="true"
   fi
 
-  if ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard -- ':!tmp/' ':!.workflow-artifacts/')" ]]; then
-    git add -A ':!tmp/' ':!.workflow-artifacts/'
+  if meaningful_tracked_delta_exists || meaningful_untracked_delta_exists; then
+    git add -A ':!tmp/' ':!.workflow-artifacts/' ':!.trajectories/'
     git commit -m "chore(overnight): capture $short progress" || true
   elif [[ "$head_advanced" == "true" ]]; then
     log "repo HEAD already advanced during $workflow_path; capturing committed state"
@@ -1800,6 +1955,22 @@ done < "$QUEUE_FILE"
 QUEUE_TOTAL="${#QUEUE_ITEMS[@]}"
 
 if (( QUEUE_TOTAL == 0 )); then
+  effective_removed_missing="$LAST_FILTER_REMOVED_MISSING"
+  effective_removed_stale="$LAST_FILTER_REMOVED_STALE"
+  effective_removed_satisfied="$LAST_FILTER_REMOVED_SATISFIED"
+  effective_removed_total="$LAST_FILTER_REMOVED_TOTAL"
+
+  if [[ "$EXPANDED_PROBE_QUEUE_EXHAUSTED" == "true" ]]; then
+    effective_removed_missing="$EXPANDED_PROBE_REMOVED_MISSING"
+    effective_removed_stale="$EXPANDED_PROBE_REMOVED_STALE"
+    effective_removed_satisfied="$EXPANDED_PROBE_REMOVED_SATISFIED"
+    effective_removed_total="$EXPANDED_PROBE_REMOVED_TOTAL"
+    LAST_FILTER_REMOVED_MISSING="$effective_removed_missing"
+    LAST_FILTER_REMOVED_STALE="$effective_removed_stale"
+    LAST_FILTER_REMOVED_SATISFIED="$effective_removed_satisfied"
+    LAST_FILTER_REMOVED_TOTAL="$effective_removed_total"
+  fi
+
   CURRENT_PASS="$PASSES"
   CURRENT_INDEX=0
   CURRENT_WORKFLOW=""
@@ -1807,8 +1978,10 @@ if (( QUEUE_TOTAL == 0 )); then
 
   if [[ -s "$FAILED_FILE" ]]; then
     mark_status "complete-with-failures" "restored checkpoint contained failed workflows; queue is now exhausted after repo-state filtering"
-  elif (( LAST_FILTER_REMOVED_STALE > 0 )); then
-    mark_status "complete" "queue exhausted after repo-state filtering: stale=${LAST_FILTER_REMOVED_STALE}, satisfied=${LAST_FILTER_REMOVED_SATISFIED}, missing=${LAST_FILTER_REMOVED_MISSING}"
+  elif (( effective_removed_missing > 0 )); then
+    mark_status "blocked" "queue exhausted because remaining workflows are missing: stale=${effective_removed_stale}, satisfied=${effective_removed_satisfied}, missing=${effective_removed_missing}"
+  elif (( effective_removed_stale > 0 )); then
+    mark_status "blocked" "queue exhausted because remaining workflows are migration-blocked: stale=${effective_removed_stale}, satisfied=${effective_removed_satisfied}, missing=${effective_removed_missing}"
   else
     mark_status "complete" "queue exhausted with no actionable workflows after repo-state filtering"
   fi

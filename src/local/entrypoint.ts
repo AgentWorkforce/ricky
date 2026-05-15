@@ -19,6 +19,7 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
 import { runWithAutoFix } from './auto-fix-loop.js';
+import { isSyntheticStageId } from './synthetic-step-ids.js';
 import { generate, generateWithWorkforcePersona } from '../product/generation/index.js';
 import type { GenerationInput, GenerationResult, RenderedArtifact } from '../product/generation/index.js';
 import { intake } from '../product/spec-intake/index.js';
@@ -44,6 +45,7 @@ import type {
 const requireFromHere = createRequire(import.meta.url);
 const SCRIPT_PROCESS_KILL_GRACE_MS = 2_000;
 const FORWARDED_SCRIPT_PARENT_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+const BEST_JUDGEMENT_IMPLEMENTER = 'impl-primary-codex';
 
 // ---------------------------------------------------------------------------
 // Local response contract
@@ -70,6 +72,14 @@ export interface LocalAssistantTurnContextDecision {
   enrichment_ids: string[];
 }
 
+export interface BestJudgementClarificationDecision {
+  question_id: string;
+  question: string;
+  answer: string;
+  answered_by: string;
+  mode: '--best-judgement';
+}
+
 export interface LocalGenerationStageResult {
   stage: 'generate';
   status: LocalGenerationStatus;
@@ -77,6 +87,7 @@ export interface LocalGenerationStageResult {
     path: string;
     workflow_id: string;
     spec_digest: string;
+    target_files?: string[];
   };
   next?: {
     run_command: string;
@@ -90,6 +101,7 @@ export interface LocalGenerationStageResult {
     refinement?: unknown;
     workforce_persona?: unknown;
     clarification_questions?: ClarificationQuestion[];
+    best_judgement_clarifications?: BestJudgementClarificationDecision[];
     assistant_turn_context?: LocalAssistantTurnContextDecision;
   };
 }
@@ -149,6 +161,13 @@ export interface LocalExecutionEvidence {
   };
   assertions: Array<{ name: string; status: 'pass' | 'fail' | 'skipped'; detail: string }>;
   workflow_steps?: Array<{ id: string; name: string; status: 'pass' | 'fail' | 'skipped'; duration_ms: number }>;
+}
+
+interface LocalWorkflowStepSnapshot {
+  id: string;
+  name: string;
+  status: 'pass' | 'fail' | 'skipped';
+  duration_ms: number;
 }
 
 export interface LocalExecutionStageResult {
@@ -911,11 +930,55 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
   const { mkdir, writeFile } = await import('node:fs/promises');
   const loaderPath = join(localRunStateRoot(cwd), 'sdk-runtime-loader.mjs');
   const runtimeUrl = pathToFileURL(runtime.entryPath).href;
+
+  // Workflow files routinely import additional SDK subpaths (e.g.
+  // `@agent-relay/sdk/github`, `@agent-relay/sdk/relay`) and the sibling
+  // `@agent-relay/config` package. Resolve all of them against the same
+  // bundled SDK location so consumer repos don't need a local
+  // `npm install` of `@agent-relay/*` just to load workflow files under
+  // Ricky.
+  //
+  // runtime.entryPath looks like /<sdkRoot>/dist/workflows/index.js, so
+  // step up three dirs to get the SDK package root and one more for the
+  // parent `@agent-relay` scope dir (which also contains `config/`).
+  const sdkPackageRoot = dirname(dirname(dirname(runtime.entryPath)));
+  const scopeRoot = dirname(sdkPackageRoot);
+  const sdkIndexUrl = pathToFileURL(join(sdkPackageRoot, 'dist', 'index.js')).href;
+  const configPackageRoot = join(scopeRoot, 'config');
+  const configIndexUrl = pathToFileURL(join(configPackageRoot, 'dist', 'index.js')).href;
+  // Anchor URLs for re-resolving subpaths through node's package-exports
+  // machinery. We pretend the import came from a file inside each package's
+  // own root, so node walks up to find the @agent-relay/sdk (or config)
+  // entry in Ricky's bundled node_modules and consults that package's
+  // exports map. This is what `nextResolve(specifier, { parentURL })`
+  // is for — passing a fully-qualified file:// URL would skip exports
+  // resolution and try to load the literal path.
+  const sdkParentUrl = pathToFileURL(join(sdkPackageRoot, 'index.js')).href;
+  const configParentUrl = pathToFileURL(join(configPackageRoot, 'index.js')).href;
+
   const loaderSource = [
     `const sdkWorkflowsUrl = ${JSON.stringify(runtimeUrl)};`,
+    `const sdkIndexUrl = ${JSON.stringify(sdkIndexUrl)};`,
+    `const configIndexUrl = ${JSON.stringify(configIndexUrl)};`,
+    `const sdkParentUrl = ${JSON.stringify(sdkParentUrl)};`,
+    `const configParentUrl = ${JSON.stringify(configParentUrl)};`,
+    'const SDK_SUBPATH_PREFIX = "@agent-relay/sdk/";',
+    'const CONFIG_SUBPATH_PREFIX = "@agent-relay/config/";',
     'export async function resolve(specifier, context, nextResolve) {',
     "  if (specifier === '@agent-relay/sdk/workflows') {",
     '    return { url: sdkWorkflowsUrl, shortCircuit: true };',
+    '  }',
+    "  if (specifier === '@agent-relay/sdk') {",
+    '    return { url: sdkIndexUrl, shortCircuit: true };',
+    '  }',
+    "  if (specifier === '@agent-relay/config') {",
+    '    return { url: configIndexUrl, shortCircuit: true };',
+    '  }',
+    '  if (specifier.startsWith(SDK_SUBPATH_PREFIX)) {',
+    '    return nextResolve(specifier, { ...context, parentURL: sdkParentUrl });',
+    '  }',
+    '  if (specifier.startsWith(CONFIG_SUBPATH_PREFIX)) {',
+    '    return nextResolve(specifier, { ...context, parentURL: configParentUrl });',
     '  }',
     '  return nextResolve(specifier, context);',
     '}',
@@ -923,9 +986,45 @@ async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefi
   ].join('\n');
   await mkdir(dirname(loaderPath), { recursive: true });
   await writeFile(loaderPath, loaderSource, 'utf8');
+  // The SDK reads broker stdout just long enough to parse the startup URL.
+  // Once readline detaches its 'data' listener, the stream falls back to
+  // paused mode and libuv stops draining the kernel pipe; a chatty broker
+  // then blocks in write() once the OS pipe buffer fills. Patch spawn in the
+  // workflow process so every managed agent-relay-broker child (init AND
+  // pty workers) has a no-op data listener attached and is resumed
+  // immediately, keeping the stream in flowing mode for the lifetime of the
+  // broker. Prior versions hooked the 'pause' event instead, which Node's
+  // Readable never emits for internal buffer fills — only when something
+  // explicitly calls .pause() — so the workaround never fired.
   const registerSource = [
-    'import{register}from"node:module";',
+    'import{createRequire,register,syncBuiltinESMExports}from"node:module";',
     'import{pathToFileURL}from"node:url";',
+    'const require=createRequire(pathToFileURL("./"));',
+    'const childProcess=require("node:child_process");',
+    'const brokerStdoutDrainPatchKey=Symbol.for("ricky.sdkRuntimeLoader.brokerStdoutDrainPatch");',
+    'if(!childProcess[brokerStdoutDrainPatchKey]){',
+    'const originalSpawn=childProcess.spawn;',
+    'childProcess.spawn=function rickySpawnWithBrokerStdoutDrain(command,args,options){',
+    'const child=originalSpawn.apply(this,arguments);',
+    'const argv=Array.isArray(args)?args.map(String):[];',
+    'const executable=String(command??"");',
+    'if((argv[0]==="init"||argv[0]==="pty")&&/(?:^|[/\\\\])agent-relay-broker(?:\\.exe)?$/u.test(executable)&&child.stdout){',
+    // Keep broker stdout drained for the lifetime of the child. Attach a
+    // no-op data listener immediately so startup output can flow, then also
+    // re-resume on explicit pauses because the SDK startup readline closes
+    // after parsing the API URL and that close path can pause init brokers.
+    // Using only `pause` regressed PTY workers during startup; using only an
+    // eager `resume()` regressed init brokers once readline shut down.
+    'const ensureBrokerStdoutFlowing=()=>{child.stdout?.resume();};',
+    'child.stdout.on("data",()=>{});',
+    'child.stdout.on("pause",ensureBrokerStdoutFlowing);',
+    'ensureBrokerStdoutFlowing();',
+    '}',
+    'return child;',
+    '};',
+    'childProcess[brokerStdoutDrainPatchKey]=true;',
+    'syncBuiltinESMExports();',
+    '}',
     `register(${JSON.stringify(pathToFileURL(loaderPath).href)},pathToFileURL("./"));`,
   ].join('');
   return `--import=data:text/javascript,${encodeURIComponent(registerSource)}`;
@@ -948,8 +1047,10 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           : new SdkScriptWorkflowCoordinator(options.scriptWorkflowRunner ?? createSdkScriptWorkflowRunner(), options.onRuntimeOutput));
       const stageMode = resolveStageMode(request.stageMode, options.returnGeneratedArtifactOnly);
       const includeStageContract = true;
-      const specDigest = digestSpec(request.spec);
+      let activeRequest = request;
+      let specDigest = digestSpec(activeRequest.spec);
       let generationStage: LocalGenerationStageResult | undefined;
+      let bestJudgementClarifications: BestJudgementClarificationDecision[] | undefined;
 
       const assistantTurnContext = await observeRickyTurnContext(request, logs);
 
@@ -971,7 +1072,24 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         return { ok: false, artifacts, logs, warnings, nextActions };
       }
 
-      const intakeResult = intake(toRawSpecPayload(request));
+      let intakeResult = intake(toRawSpecPayload(activeRequest));
+      if (shouldApplyBestJudgement(activeRequest, intakeResult.clarificationQuestions)) {
+        bestJudgementClarifications = answerClarificationsWithBestJudgement(intakeResult.clarificationQuestions);
+        activeRequest = {
+          ...activeRequest,
+          spec: appendBestJudgementClarificationAnswers(activeRequest.spec, bestJudgementClarifications),
+          metadata: {
+            ...activeRequest.metadata,
+            bestJudgement: true,
+            bestJudgementClarifications,
+          },
+        };
+        specDigest = digestSpec(activeRequest.spec);
+        logs.push(`[local] --best-judgement answered ${bestJudgementClarifications.length} clarification question(s) as ${BEST_JUDGEMENT_IMPLEMENTER}`);
+        warnings.push('--best-judgement resolved blocking clarifications with implementer assumptions; review them in the generated workflow context.');
+        warnings.push(...bestJudgementClarifications.map((answer) => `--best-judgement ${answer.question}: ${answer.answer}`));
+        intakeResult = intake(toRawSpecPayload(activeRequest));
+      }
       logs.push(`[local] spec intake route: ${intakeResult.routing?.target ?? 'none'}`);
       onProgress?.(`Spec intake routed to ${intakeResult.routing?.target ?? 'clarify'}...`);
 
@@ -986,7 +1104,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           stage: 'generate',
           status: intakeResult.clarificationQuestions.length > 0 ? 'needs_clarification' : 'error',
           error: warnings[0] ?? 'Spec intake could not produce an executable workflow artifact.',
-          ...decisionsForClarification(intakeResult.clarificationQuestions, assistantTurnContext),
+          ...decisionsForClarification(intakeResult.clarificationQuestions, assistantTurnContext, bestJudgementClarifications),
         };
         return {
           ok: false,
@@ -1000,7 +1118,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       }
 
       const workflowFile = workflowFileForRoute(
-        request,
+        activeRequest,
         intakeResult.routing.target,
         intakeResult.routing.normalizedSpec.desiredAction.workflowFileHint,
       );
@@ -1008,17 +1126,17 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       let generationResult: GenerationResult | null = null;
 
       if (intakeResult.routing.target === 'generate' || !workflowFile) {
-        const executionPreference: ExecutionPreference = request.mode === 'both' ? 'auto' : 'local';
+        const executionPreference: ExecutionPreference = activeRequest.mode === 'both' ? 'auto' : 'local';
         const normalizedSpec = {
           ...intakeResult.routing.normalizedSpec,
           executionPreference,
         };
-        const workforcePersonaWriter = resolveWorkforcePersonaWriterOptions(request, options, cwd, executionPreference);
+        const workforcePersonaWriter = resolveWorkforcePersonaWriterOptions(activeRequest, options, cwd, executionPreference);
         const generationInput: GenerationInput = {
           spec: normalizedSpec,
           dryRunEnabled: true,
-          artifactPath: artifactPathOverrideFor(request),
-          refine: request.refine,
+          artifactPath: artifactPathOverrideFor(activeRequest),
+          refine: activeRequest.refine,
           ...(workforcePersonaWriter ? { workforcePersonaWriter } : {}),
         };
         onProgress?.('Selecting workflow pattern, agents, and validation gates...');
@@ -1062,6 +1180,8 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
             generationResult.validation.errors[0],
             generationResult,
             assistantTurnContext,
+            bestJudgementClarifications,
+            normalizedSpec.targetFiles,
           );
           return {
             ok: false,
@@ -1082,7 +1202,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
         }
         logs.push(`[local] wrote workflow artifact: ${artifact.artifactPath}`);
-        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult, assistantTurnContext);
+        generationStage = createGenerationStage('ok', artifact, specDigest, undefined, generationResult, assistantTurnContext, bestJudgementClarifications, normalizedSpec.targetFiles);
       }
 
       const runTarget = artifact?.artifactPath ?? workflowFile;
@@ -1147,9 +1267,9 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
       const runtimeRunIdFile = runtimeRunIdFilePath(cwd, workflowId);
       await ensureParentDir(runtimeRunIdFile);
-      if (request.metadata.autoFixProgressOwner !== true) {
-        onProgress?.(request.retry?.startFromStep
-          ? `Running workflow from ${request.retry.startFromStep}...`
+      if (activeRequest.metadata.autoFixProgressOwner !== true) {
+        onProgress?.(activeRequest.retry?.startFromStep
+          ? `Running workflow from ${activeRequest.retry.startFromStep}...`
           : 'Running workflow...');
       }
       const runResult = await coordinator.launch({
@@ -1158,18 +1278,19 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         timeoutMs: options.timeoutMs,
         route,
         env: { AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
-        ...stableRunIdFor(request),
-        retry: request.retry,
+        ...stableRunIdFor(activeRequest),
+        retry: activeRequest.retry,
         metadata: {
           requestId: intakeResult.requestId,
-          source: request.source,
+          source: activeRequest.source,
           route: intakeResult.routing.target,
           generatedWorkflowId: artifact?.workflowId,
+          ...(bestJudgementClarifications ? { bestJudgementClarifications } : {}),
           ...(assistantTurnContext ? { assistantTurnContext } : {}),
         },
       });
 
-      logs.push(...mapCoordinatorLogs(runResult));
+      appendCoordinatorLogs(logs, runResult);
       artifacts.push({
         path: runTarget,
         type: 'text/typescript',
@@ -1198,7 +1319,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       }
 
       nextActions.push('Inspect generated artifacts and local run evidence.');
-      if (request.mode === 'both') {
+      if (activeRequest.mode === 'both') {
         nextActions.push('After local validation, optionally promote to Cloud execution.');
       }
 
@@ -1359,6 +1480,66 @@ function isLocalInvocationRequest(input: LocalEntrypointInput): input is LocalIn
   );
 }
 
+function shouldApplyBestJudgement(
+  request: LocalInvocationRequest,
+  questions: ClarificationQuestion[],
+): boolean {
+  return request.bestJudgement === true && questions.some((question) => question.blocking);
+}
+
+function answerClarificationsWithBestJudgement(
+  questions: ClarificationQuestion[],
+): BestJudgementClarificationDecision[] {
+  return questions
+    .filter((question) => question.blocking)
+    .map((question) => ({
+      question_id: question.id,
+      question: question.question,
+      answer: bestJudgementAnswerFor(question),
+      answered_by: BEST_JUDGEMENT_IMPLEMENTER,
+      mode: '--best-judgement',
+    }));
+}
+
+function bestJudgementAnswerFor(question: ClarificationQuestion): string {
+  if (question.defaultAssumption) {
+    return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: ${question.defaultAssumption}`;
+  }
+
+  const lower = question.question.toLowerCase();
+  if (/\bwho\b|\bowner\b|\bsign[- ]?off\b|\bresponsible\b/.test(lower)) {
+    return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: ${BEST_JUDGEMENT_IMPLEMENTER} owns the implementation assumption, reviewer-claude reviews it, and validator-claude performs final validation signoff.`;
+  }
+  if (/\bpackage manager\b|\bnpm\b|\bpnpm\b|\byarn\b/.test(lower)) {
+    return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: detect the package manager from repo lockfiles first, then default to npm when no lockfile is present.`;
+  }
+  if (/\bbranch\b|\bpr\b|\bpull request\b/.test(lower)) {
+    return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: use the repo branch convention, keep PR creation out of scope unless the spec explicitly requests it, and report the result summary.`;
+  }
+
+  return `Answered by implementing agent ${BEST_JUDGEMENT_IMPLEMENTER} using --best-judgement: choose the smallest conservative workflow-compatible option, document it as an implementation assumption, and preserve a review gate where the assumption can be challenged.`;
+}
+
+function appendBestJudgementClarificationAnswers(
+  spec: string,
+  answers: BestJudgementClarificationDecision[],
+): string {
+  const answerLines = answers.flatMap((answer) => [
+    `- ${answer.question}`,
+    `  ${answer.answer}`,
+  ]);
+  const clarificationAnswerLines = answers.map((answer) => `- ${answer.question}: ${answer.answer}`);
+  const suffix = [
+    '',
+    'Best-judgement clarifications:',
+    ...answerLines,
+    '',
+    'Clarification answers:',
+    ...clarificationAnswerLines,
+  ].join('\n');
+  return `${spec.trimEnd()}${suffix}\n`;
+}
+
 function toRawSpecPayload(
   request: LocalInvocationRequest,
   repoDetector: RepoDetector = defaultRepoDetector,
@@ -1483,11 +1664,18 @@ function resolveWorkforcePersonaWriterOptions(
   const requestedByMetadata = request.metadata.workflowWriter === 'workforce' || request.metadata.workflow_writer === 'workforce';
   if (!options.workforcePersonaWriter && !requestedByMetadata) return undefined;
 
+  // Thread the original spec file path (when --spec-file was used and the
+  // path is not an executable workflow) so the persona writer can reference
+  // the spec by path instead of inlining the full text into the prompt.
+  const specPath =
+    request.specPath && !isExecutableWorkflowPath(request.specPath) ? request.specPath : undefined;
+
   return {
     ...(options.workforcePersonaWriter || {}),
     repoRoot: cwd,
     targetMode: executionPreference === 'cloud' ? 'cloud' : 'local',
     installRoot: join(localRunStateRoot(cwd), 'workforce-persona-skills'),
+    ...(specPath ? { specPath } : {}),
   };
 }
 
@@ -1516,13 +1704,14 @@ function isExecutableWorkflowPath(path: string): boolean {
   return /(?:^|\/)workflows\/.+\.(?:ts|js)$|\.workflow\.(?:ts|js|yaml|yml)$/i.test(path);
 }
 
-function mapCoordinatorLogs(result: CoordinatorResult): string[] {
-  return [
-    `[local] runtime status: ${result.status}`,
-    `[local] runtime command: ${result.invocation.command} ${result.invocation.args.join(' ')}`,
-    ...result.stdout.map((line) => `[stdout] ${line}`),
-    ...result.stderr.map((line) => `[stderr] ${line}`),
-  ];
+// Appends coordinator log lines onto `target` without spreading large arrays.
+// `arr.push(...big)` and `[...big]` both pass each element as a function argument,
+// which overflows V8's argument-stack limit (~100k entries) for noisy runs.
+export function appendCoordinatorLogs(target: string[], result: CoordinatorResult): void {
+  target.push(`[local] runtime status: ${result.status}`);
+  target.push(`[local] runtime command: ${result.invocation.command} ${result.invocation.args.join(' ')}`);
+  for (const line of result.stdout) target.push(`[stdout] ${line}`);
+  for (const line of result.stderr) target.push(`[stderr] ${line}`);
 }
 
 function stageResponse(
@@ -1561,6 +1750,8 @@ function createGenerationStage(
   error?: string,
   generationResult?: GenerationResult,
   assistantTurnContext?: LocalAssistantTurnContextDecision,
+  bestJudgementClarifications?: BestJudgementClarificationDecision[],
+  targetFiles?: string[],
 ): LocalGenerationStageResult {
   return {
     stage: 'generate',
@@ -1571,6 +1762,7 @@ function createGenerationStage(
             path: artifact.artifactPath,
             workflow_id: artifact.workflowId,
             spec_digest: specDigest,
+            ...(targetFiles && targetFiles.length > 0 ? { target_files: targetFiles } : {}),
           },
         }
       : {}),
@@ -1607,10 +1799,11 @@ function createGenerationStage(
             ...(generationResult.refinement ? { refinement: generationResult.refinement } : {}),
             ...(generationResult.workforcePersona ? { workforce_persona: generationResult.workforcePersona } : {}),
             ...((generationResult.clarificationQuestions?.length ?? 0) > 0 ? { clarification_questions: generationResult.clarificationQuestions } : {}),
+            ...(bestJudgementClarifications ? { best_judgement_clarifications: bestJudgementClarifications } : {}),
             ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
           },
         }
-      : decisionsForAssistantTurnContext(assistantTurnContext)),
+      : decisionsForAssistantTurnContext(assistantTurnContext, bestJudgementClarifications)),
   };
 }
 
@@ -1632,11 +1825,13 @@ function clarificationNextActions(questions: ClarificationQuestion[]): string[] 
 function decisionsForClarification(
   questions: ClarificationQuestion[],
   assistantTurnContext: LocalAssistantTurnContextDecision | undefined,
+  bestJudgementClarifications?: BestJudgementClarificationDecision[],
 ): Pick<LocalGenerationStageResult, 'decisions'> {
-  if (questions.length === 0) return decisionsForAssistantTurnContext(assistantTurnContext);
+  if (questions.length === 0) return decisionsForAssistantTurnContext(assistantTurnContext, bestJudgementClarifications);
   return {
     decisions: {
       clarification_questions: questions,
+      ...(bestJudgementClarifications ? { best_judgement_clarifications: bestJudgementClarifications } : {}),
       ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
     },
   };
@@ -1683,11 +1878,13 @@ function createArtifactReferenceGenerationStage(
 
 function decisionsForAssistantTurnContext(
   assistantTurnContext: LocalAssistantTurnContextDecision | undefined,
+  bestJudgementClarifications?: BestJudgementClarificationDecision[],
 ): Pick<LocalGenerationStageResult, 'decisions'> {
-  if (!assistantTurnContext) return {};
+  if (!assistantTurnContext && !bestJudgementClarifications) return {};
   return {
     decisions: {
-      assistant_turn_context: assistantTurnContext,
+      ...(bestJudgementClarifications ? { best_judgement_clarifications: bestJudgementClarifications } : {}),
+      ...(assistantTurnContext ? { assistant_turn_context: assistantTurnContext } : {}),
     },
   };
 }
@@ -1961,6 +2158,18 @@ async function createExecutionStageFromCoordinatorResult(
     ...(logs.stderr_path ? [logs.stderr_path] : []),
   ];
   const stepStatus = status === 'success' ? 'pass' : 'fail';
+  const workflowSteps = workflowStepsFromRuntimeOutput([...result.stdout, ...result.stderr], result.durationMs);
+  const completedRealWorkflowSteps = workflowSteps.filter((step) => (
+    step.status === 'pass' && !isSyntheticStageId(step.id)
+  )).length;
+  const fallbackWorkflowSteps: LocalWorkflowStepSnapshot[] = status === 'success'
+    ? [{
+        id: 'runtime-launch',
+        name: 'Local runtime execution',
+        status: stepStatus,
+        duration_ms: result.durationMs,
+      }]
+    : [];
   const outcome = status === 'success'
     ? `Workflow ${result.workflowFile} completed successfully with ${result.stdout.length} stdout line(s) and ${result.stderr.length} stderr line(s).`
     : `Workflow ${result.workflowFile} was blocked during local runtime execution: ${classifiedBlocker?.message ?? result.error ?? result.status}.`;
@@ -1977,8 +2186,8 @@ async function createExecutionStageFromCoordinatorResult(
       started_at: result.startedAt,
       finished_at: result.completedAt,
       duration_ms: result.durationMs,
-      steps_completed: status === 'success' ? 1 : 0,
-      steps_total: 1,
+      steps_completed: workflowSteps.length > 0 ? completedRealWorkflowSteps : status === 'success' ? 1 : 0,
+      steps_total: workflowSteps.length > 0 ? workflowSteps.length : 1,
       ...(runtimeRunId ? { run_id: runtimeRunId } : {}),
     },
     ...(classifiedBlocker ? { blocker: classifiedBlocker } : {}),
@@ -2000,20 +2209,44 @@ async function createExecutionStageFromCoordinatorResult(
           detail: result.exitCode === 0 ? 'Runtime exited with code 0.' : `Runtime exit code: ${result.exitCode ?? 'unknown'}.`,
         },
       ],
-      ...(status === 'success'
-        ? {
-            workflow_steps: [
-              {
-                id: 'runtime-launch',
-                name: 'Local runtime execution',
-                status: stepStatus,
-                duration_ms: result.durationMs,
-              },
-            ],
-          }
+      ...((workflowSteps.length > 0 || fallbackWorkflowSteps.length > 0)
+        ? { workflow_steps: workflowSteps.length > 0 ? workflowSteps : fallbackWorkflowSteps }
         : {}),
     },
   };
+}
+
+/**
+ * Rehydrates workflow step status from the full runtime output before
+ * stdout/stderr are reduced to `logs.tail`, preserving completed-step evidence
+ * for chatty failed runs.
+ */
+function workflowStepsFromRuntimeOutput(
+  lines: string[],
+  durationMs: number,
+): LocalWorkflowStepSnapshot[] {
+  const steps = new Map<string, LocalWorkflowStepSnapshot>();
+  for (const line of lines) {
+    const state = line.match(/^\s*[●✓✗○]\s+(.+?)\s+—\s+(started|completed|skipped|FAILED:\s*(.+))$/);
+    if (!state) continue;
+    const stepId = state[1].trim();
+    const statusText = state[2];
+    const status = statusText === 'completed'
+      ? 'pass'
+      : statusText === 'skipped'
+        ? 'skipped'
+        : statusText.startsWith('FAILED:')
+          ? 'fail'
+          : undefined;
+    if (!status) continue;
+    steps.set(stepId, {
+      id: stepId,
+      name: stepId,
+      status,
+      duration_ms: durationMs,
+    });
+  }
+  return [...steps.values()];
 }
 
 function runtimeRunIdFilePath(cwd: string, workflowId: string): string {

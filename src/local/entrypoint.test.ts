@@ -13,6 +13,7 @@ import type {
   WorkflowArtifactHandoff,
 } from './index.js';
 import { DEFAULT_LOCAL_ROUTE, normalizeRequest, runLocal } from './index.js';
+import { appendCoordinatorLogs } from './entrypoint.js';
 import type {
   CommandInvocation,
   CommandRunner,
@@ -1286,6 +1287,71 @@ describe('runLocal', () => {
     expect(result.clarificationQuestions).toEqual(result.generation?.decisions?.clarification_questions);
     expect(result.nextActions).toContain('Clarify: Should it validate package A or package B?');
     expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(0);
+    expect(localExecutor.runner.invocations).toHaveLength(0);
+  });
+
+  it('does not ask execution-mode clarification when CLI mode already chose local', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        mode: 'local',
+        spec: 'Generate a workflow for a primitive that supports local BYOH and Cloud hosted execution.',
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.clarificationQuestions).toBeUndefined();
+    expect(result.logs).toEqual(expect.arrayContaining([
+      '[local] mode: local',
+      '[local] spec intake route: generate',
+    ]));
+    expect(result.nextActions.some((action) => action.includes('Should this workflow run locally/BYOH'))).toBe(false);
+    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
+    expect(localExecutor.runner.invocations).toHaveLength(0);
+  });
+
+  it('uses --best-judgement to answer unresolved spec questions before generation', async () => {
+    const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: [
+          'Generate a workflow for package validation.',
+          'Open questions:',
+          '- Who owns final rollout signoff?',
+        ].join('\n'),
+        bestJudgement: true,
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.clarificationQuestions).toBeUndefined();
+    expect(result.generation).toMatchObject({
+      stage: 'generate',
+      status: 'ok',
+      decisions: {
+        best_judgement_clarifications: [
+          expect.objectContaining({
+            question: 'Who owns final rollout signoff?',
+            answered_by: 'impl-primary-codex',
+            mode: '--best-judgement',
+          }),
+        ],
+      },
+    });
+    expect(result.logs).toContain('[local] --best-judgement answered 1 clarification question(s) as impl-primary-codex');
+    expect(result.warnings).toContain('--best-judgement resolved blocking clarifications with implementer assumptions; review them in the generated workflow context.');
+
+    const writes = workflowArtifactWrites(localExecutor.writes);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].content).toContain('Best-judgement clarifications:');
+    expect(writes[0].content).toContain('Who owns final rollout signoff?');
+    expect(writes[0].content).toContain('Answered by implementing agent impl-primary-codex using --best-judgement');
     expect(localExecutor.runner.invocations).toHaveLength(0);
   });
 
@@ -2990,6 +3056,201 @@ describe('runLocal', () => {
     }
   });
 
+  it('resolves @agent-relay/sdk subpaths and @agent-relay/config via the bundled package', async () => {
+    // Regression test for the loader bug fixed in PR #92: previously the
+    // generated sdk-runtime-loader only redirected `@agent-relay/sdk/workflows`,
+    // so workflow files importing other SDK subpaths (e.g. `/github`) or any
+    // `@agent-relay/config` subpath failed in consumer repos that hadn't
+    // `npm install`ed the SDK locally — defeating the point of bundling.
+    //
+    // This test imports a non-`workflows` SDK subpath AND an `@agent-relay/config`
+    // subpath, and asserts the workflow runs successfully without the consumer
+    // repo having any node_modules.
+    const { access, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-subpaths-repo-'));
+    const stateHome = await mkdtemp(join(tmpdir(), 'ricky-sdk-subpaths-state-'));
+    const artifactPath = 'workflows/generated/sdk-subpaths.workflow.ts';
+    const previousStateHome = process.env.RICKY_STATE_HOME;
+
+    try {
+      process.env.RICKY_STATE_HOME = stateHome;
+      await mkdir(join(repo, 'workflows/generated'), { recursive: true });
+      await writeFile(
+        join(repo, artifactPath),
+        [
+          'import { workflow } from "@agent-relay/sdk/workflows";',
+          'import * as github from "@agent-relay/sdk/github";',
+          'import * as relayConfig from "@agent-relay/config/relay-config";',
+          'import * as agentConfig from "@agent-relay/config/agent-config";',
+          'console.log("workflow=" + typeof workflow);',
+          'console.log("sdk-subpath=" + typeof github);',
+          'console.log("config-subpath-relay=" + typeof relayConfig);',
+          'console.log("config-subpath-agent=" + typeof agentConfig);',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+
+      const result = await runLocal(
+        { source: 'workflow-artifact', artifactPath, stageMode: 'run' },
+        {
+          artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          localExecutor: {
+            cwd: repo,
+            timeoutMs: 10_000,
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.execution?.status).toBe('success');
+      // No consumer-repo node_modules needed.
+      await expect(access(join(repo, 'node_modules'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      if (previousStateHome === undefined) {
+        delete process.env.RICKY_STATE_HOME;
+      } else {
+        process.env.RICKY_STATE_HOME = previousStateHome;
+      }
+      await rm(repo, { recursive: true, force: true });
+      await rm(stateHome, { recursive: true, force: true });
+    }
+  });
+
+  it('drains broker stdout after SDK startup so event floods cannot wedge the workflow node', async () => {
+    const { chmod, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const repo = await mkdtemp(join(tmpdir(), 'ricky-sdk-broker-drain-repo-'));
+    const stateHome = await mkdtemp(join(tmpdir(), 'ricky-sdk-broker-drain-state-'));
+    const brokerDir = await mkdtemp(join(tmpdir(), 'ricky-sdk-broker-drain-bin-'));
+    const brokerPath = join(brokerDir, process.platform === 'win32' ? 'agent-relay-broker.exe' : 'agent-relay-broker');
+    const artifactPath = 'workflows/generated/broker-drain.workflow.ts';
+    const previousStateHome = process.env.RICKY_STATE_HOME;
+    const previousFakeBrokerPath = process.env.FAKE_BROKER_PATH;
+
+    try {
+      process.env.RICKY_STATE_HOME = stateHome;
+      process.env.FAKE_BROKER_PATH = brokerPath;
+      await mkdir(join(repo, 'workflows/generated'), { recursive: true });
+      // Give the SDK a portable executable named like the broker while keeping
+      // the broker body in the repo-local `init` script that Node receives as
+      // argv[1]. Copying `process.execPath` is not portable on macOS because the
+      // binary depends on sibling dylibs that are not copied with it.
+      if (process.platform === 'win32') {
+        await writeFile(
+          brokerPath,
+          `@echo off\r\n"${process.execPath}" "%CD%\\init" %*\r\n`,
+          'utf8',
+        );
+      } else {
+        await writeFile(
+          brokerPath,
+          `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$PWD/init" "$@"\n`,
+          'utf8',
+        );
+        await chmod(brokerPath, 0o755);
+      }
+      await writeFile(
+        join(repo, 'init'),
+        [
+          "const http = require('node:http');",
+          'const server = http.createServer((req, res) => {',
+          "  if (req.url === '/api/session') {",
+          "    res.writeHead(200, { 'content-type': 'application/json' });",
+          "    res.end(JSON.stringify({ workspace_key: 'wk_fake' }));",
+          '    return;',
+          '  }',
+          "  if (req.url === '/health' || req.url === '/api/session/renew' || req.url === '/api/shutdown') {",
+          "    res.writeHead(200, { 'content-type': 'application/json' });",
+          '    res.end(JSON.stringify({ ok: true }));',
+          '    return;',
+          '  }',
+          "  res.writeHead(404, { 'content-type': 'application/json' });",
+          "  res.end(JSON.stringify({ error: 'not found' }));",
+          '});',
+          "server.listen(0, '127.0.0.1', () => {",
+          '  const address = server.address();',
+          '  console.log(`[agent-relay] API listening on http://127.0.0.1:${address.port}`);',
+          '  let index = 0;',
+          "  const chunk = 'x'.repeat(1024);",
+          '  const writeMore = () => {',
+          '    let ok = true;',
+          '    while (index < 20000 && ok) {',
+          '      ok = process.stdout.write(`event-${index}:${chunk}\\n`);',
+          '      index += 1;',
+          '    }',
+          '    if (index >= 20000) {',
+          "      console.error('FAKE_BROKER_FLOOD_DONE');",
+          '      setTimeout(() => process.exit(0), 25);',
+          '      return;',
+          '    }',
+          "    process.stdout.once('drain', writeMore);",
+          '  };',
+          '  writeMore();',
+          '});',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+      await writeFile(
+        join(repo, artifactPath),
+        [
+          'import { AgentRelayClient } from "@agent-relay/sdk";',
+          'const client = await AgentRelayClient.spawn({',
+          '  binaryPath: process.env.FAKE_BROKER_PATH,',
+          '  cwd: process.cwd(),',
+          '  startupTimeoutMs: 3000,',
+          '  requestTimeoutMs: 3000,',
+          '});',
+          'const outcome = await Promise.race([',
+          '  new Promise((resolve) => client.child?.once("exit", () => resolve("exited"))),',
+          '  new Promise((resolve) => setTimeout(() => resolve("blocked"), 1500)),',
+          ']);',
+          'client.disconnect();',
+          'if (outcome !== "exited") {',
+          '  client.child?.kill("SIGKILL");',
+          '  throw new Error(`broker stdout flood ${outcome}`);',
+          '}',
+          'console.log("BROKER_STDOUT_DRAINED");',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+
+      const result = await runLocal(
+        { source: 'workflow-artifact', artifactPath, stageMode: 'run' },
+        {
+          artifactReader: mockArtifactReader('import { AgentRelayClient } from "@agent-relay/sdk";'),
+          localExecutor: {
+            cwd: repo,
+            timeoutMs: 10_000,
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.execution?.status).toBe('success');
+      expect(result.logs).toContain('[stdout] BROKER_STDOUT_DRAINED');
+    } finally {
+      if (previousStateHome === undefined) {
+        delete process.env.RICKY_STATE_HOME;
+      } else {
+        process.env.RICKY_STATE_HOME = previousStateHome;
+      }
+      if (previousFakeBrokerPath === undefined) {
+        delete process.env.FAKE_BROKER_PATH;
+      } else {
+        process.env.FAKE_BROKER_PATH = previousFakeBrokerPath;
+      }
+      await rm(repo, { recursive: true, force: true });
+      await rm(stateHome, { recursive: true, force: true });
+      await rm(brokerDir, { recursive: true, force: true });
+    }
+  });
+
   it('kills the SDK workflow process tree when the local timeout fires', async () => {
     const { mkdir, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
@@ -3772,6 +4033,49 @@ describe('runLocal', () => {
       });
       expect(blocked.nextActions).toEqual(blocked.execution?.blocker?.recovery.steps);
     });
+
+    it('preserves completed workflow steps from full runtime output on failed runs', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stdout: [
+          '[workflow 00:00] Executing 4 steps (pattern: pipeline)',
+          '  ● prepare — started',
+          '  ✓ prepare — completed',
+          '  ● implement — started',
+          '  ✓ implement — completed',
+          '  ● verify — started',
+          '  ✗ verify — FAILED: Command failed with exit code 1',
+        ],
+        stderr: ['verification failed'],
+      });
+
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'run workflows/issue-11/failing-after-work.workflow.ts',
+          stageMode: 'run',
+          requestId: 'req-issue-11-failed-steps',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'blocker',
+        execution: {
+          steps_completed: 2,
+          steps_total: 3,
+        },
+        evidence: {
+          workflow_steps: [
+            { id: 'prepare', name: 'prepare', status: 'pass' },
+            { id: 'implement', name: 'implement', status: 'pass' },
+            { id: 'verify', name: 'verify', status: 'fail' },
+          ],
+        },
+      });
+    });
   });
 
   describe('CLI sane defaults — explicit description handoff', () => {
@@ -3840,5 +4144,62 @@ describe('runLocal', () => {
 
       expect(result.logs).toContain('[local] spec intake route: execute');
     });
+  });
+});
+
+describe('appendCoordinatorLogs', () => {
+  function buildResult(overrides: Partial<CoordinatorResult> = {}): CoordinatorResult {
+    return {
+      runId: 'run-1',
+      workflowFile: '/tmp/workflow.ts',
+      cwd: '/tmp',
+      status: 'failed',
+      exitCode: 1,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      completedAt: '2026-01-01T00:00:01.000Z',
+      endedAt: '2026-01-01T00:00:01.000Z',
+      durationMs: 1000,
+      stdout: [],
+      stderr: [],
+      stdoutSnippet: { lines: [], totalLines: 0, maxLines: 0, truncated: false },
+      stderrSnippet: { lines: [], totalLines: 0, maxLines: 0, truncated: false },
+      events: [],
+      retry: { attempt: 0, maxAttempts: 1, attempts: [] },
+      invocation: { command: 'node', args: ['workflow.ts'], cwd: '/tmp' },
+      ...overrides,
+    } as CoordinatorResult;
+  }
+
+  it('emits header lines plus prefixed stdout/stderr entries', () => {
+    const logs: string[] = ['preexisting'];
+    appendCoordinatorLogs(
+      logs,
+      buildResult({ stdout: ['hello', 'world'], stderr: ['warn'] }),
+    );
+    expect(logs).toEqual([
+      'preexisting',
+      '[local] runtime status: failed',
+      '[local] runtime command: node workflow.ts',
+      '[stdout] hello',
+      '[stdout] world',
+      '[stderr] warn',
+    ]);
+  });
+
+  // Regression: `arr.push(...big)` and `[...big]` both pass each element as a
+  // function argument, which overflows V8's argument-stack limit (~100k) on
+  // noisy failed runs. A multi-agent failure easily produces > 200k log lines.
+  it('handles 200k stdout/stderr entries without overflowing the call stack', () => {
+    const stdout = Array.from({ length: 200_000 }, (_, i) => `out-${i}`);
+    const stderr = Array.from({ length: 200_000 }, (_, i) => `err-${i}`);
+    const logs: string[] = [];
+
+    expect(() =>
+      appendCoordinatorLogs(logs, buildResult({ stdout, stderr })),
+    ).not.toThrow();
+
+    expect(logs.length).toBe(2 + stdout.length + stderr.length);
+    expect(logs[2]).toBe('[stdout] out-0');
+    expect(logs[logs.length - 1]).toBe('[stderr] err-199999');
   });
 });

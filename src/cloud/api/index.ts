@@ -41,3 +41,14 @@ export type {
   RickyLinearSession,
   SessionEndReason,
 } from './linear-agent-types.js';
+
+export {
+  listRickyWorkflowSchedules,
+  scheduleRickyWorkflow,
+} from './workflow-schedules.js';
+export type {
+  ListRickyWorkflowSchedulesResult,
+  RickyWorkflowSchedule,
+  ScheduleRickyWorkflowOptions,
+  ScheduleRickyWorkflowResult,
+} from './workflow-schedules.js';

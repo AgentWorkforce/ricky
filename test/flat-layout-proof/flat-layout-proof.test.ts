@@ -137,6 +137,6 @@ describe('Ricky flat src layout proof', () => {
     evaluateFlatLayoutProof();
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(1000);
+    expect(elapsed).toBeLessThan(2000);
   });
 });

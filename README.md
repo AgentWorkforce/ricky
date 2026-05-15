@@ -30,6 +30,7 @@ Ricky is designed around co-equal interfaces and onboarding surfaces. Current im
 - **CLI** — implemented as the primary local command surface.
 - **Local / BYOH** — implemented for local workflow generation, artifact execution, background monitoring, and status checks.
 - **Cloud API** — partially implemented for Cloud generation request/response contracts and CLI connection/status flows.
+- **Proactive runtime agent** — implemented for scheduled background-run monitoring via `@agent-relay/agent`.
 - **Slack** — planned; no source handler is currently implemented in this repo.
 - **Web** — planned; no browser surface is currently implemented in this repo.
 
@@ -102,6 +103,22 @@ ricky status --run <run-id>
 
 When generation does not run the artifact, the CLI prints the artifact path plus foreground and background run commands.
 
+## Proactive Runtime Monitoring
+
+Ricky now exposes a proactive runtime entrypoint at [`src/agent.ts`](./src/agent.ts). The scheduled agent wakes every 5 minutes with `agent({ schedule: "*/5 * * * *" })`, scans Ricky's persisted background-run state, and posts terminal run updates to `RICKY_MONITOR_CHANNEL` (default `#ricky`).
+
+Environment knobs for the scheduled agent:
+- `RICKY_WORKSPACE_ID` — Relaycast/relayfile workspace name for the agent runtime. Defaults to `ricky`.
+- `RICKY_MONITOR_CHANNEL` — channel that receives proactive run updates. Defaults to `#ricky`.
+- `RICKY_MONITOR_REPO_ROOT` — repo root whose persisted run-state tree should be monitored. Defaults to the current working directory. Both `<repo>/.workflow-artifacts/ricky-local-runs/` and the XDG state-home tree are scanned.
+- `RICKY_STATE_HOME` — optional override for the base state directory Ricky already uses for background runs.
+
+Run it locally with:
+
+```sh
+tsx src/agent.ts
+```
+
 ## CLI Onboarding
 
 Ricky's CLI should be intentionally welcoming and user-friendly.
@@ -155,6 +172,7 @@ Ricky is a single-package npm repo with a flat `src/` tree. npm is the only supp
 npm install          # install dependencies for the single root package
 npm run typecheck    # typecheck src, tests, workflows, and scripts
 npm test             # bundle the CLI and run the repo test suite + proof tests
+npm run premerge     # run typecheck, full tests, and the local auto-fix ladder e2e
 npm start            # launch the CLI from src/surfaces/cli/commands/cli-main.ts
 ```
 
@@ -164,10 +182,12 @@ npm scripts (canonical ordering matches `package.json`):
 - `npm run build` — alias for `bundle`; produces `dist/ricky.js`
 - `npm run typecheck` — typecheck the flat `src/` tree plus workflows/proofs/scripts
 - `npm test` — bundle the CLI, then run the full test suite and proof tests
+- `npm run premerge` — run typecheck, the full test suite, and `test/local-auto-fix-workflow-failures.e2e.test.ts` as an explicit pre-merge regression gate
 - `npm start` — launch the interactive CLI from `src/surfaces/cli/commands/cli-main.ts`
 - `npm run dev` — alias for `npm start`
 - `npm run evals` — compile and run the Ricky eval suite
 - `npm run evals:compile` — compile Ricky eval definitions
+- `npm run evals:provider` — build Ricky, then run evals through the provider executor path
 - `npm run evals:opencode` — run Ricky evals through the OpenCode executor path
 - `npm run evals:list` — list available Ricky evals
 - `npm run evals:summary` — summarize the latest Ricky eval results
@@ -176,10 +196,10 @@ npm scripts (canonical ordering matches `package.json`):
 - `npm run overnight` — run the overnight workflow queue via `scripts/run-ricky-overnight.sh`
   - default queue mode is now `flight-safe`, which only runs the workflows currently classified as unattended-safe
   - default behavior checkpoints after a small bounded chunk (`RICKY_OVERNIGHT_MAX_WORKFLOWS_PER_INVOCATION`, default `4`) and can resume with `bash scripts/run-ricky-overnight.sh --resume`
-  - checkpoint state lives under `.workflow-artifacts/overnight-state/<queue-mode>/checkpoint.env`
+  - checkpoint state lives under `.workflow-artifacts/state/overnight/<queue-mode>/checkpoint.env` (legacy `.workflow-artifacts/overnight-state/...` checkpoints are still imported automatically)
 - `npm run prepack` — build before package packing (runs automatically on `npm pack` and `npm publish`)
 
-Node and npm versions are pinned: `engines.node = ">=20"`, `packageManager = "npm@11.11.0"`, `engine-strict=true` in `.npmrc`, and `.nvmrc = 20`. There is no Yarn, pnpm, or other package-manager surface — npm is the default and only path.
+Node and npm versions are pinned: `engines.node = ">=22.14.0"`, `packageManager = "npm@11.11.0"`, `engine-strict=true` in `.npmrc`, and `.nvmrc = 22.14.0`. There is no Yarn, pnpm, or other package-manager surface — npm is the default and only path.
 
 Note: `prpm.lock` at the repo root is **not** an npm artifact. It tracks AI-agent skills installed under `.agents/skills/` via the `prpm` skill registry, and it is referenced by `test/flat-layout-proof/` to verify that legacy Claude skill mirrors stay removed. Treat it as orthogonal to npm.
 

@@ -1,0 +1,113 @@
+name: Ricky Evals
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ricky-evals.yml"
+      - "evals/**"
+      - "scripts/evals/**"
+      - "AGENTS.md"
+      - "README.md"
+      - "SPEC.md"
+      - "docs/**"
+      - "specs/**"
+      - "src/cloud/**"
+      - "src/local/**"
+      - "src/product/**"
+      - "src/runtime/**"
+      - "src/surfaces/**"
+      - "src/shared/**"
+      - "workflows/shared/**"
+      - "workflows/meta/spec/**"
+      - "package.json"
+      - "package-lock.json"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/ricky-evals.yml"
+      - "evals/**"
+      - "scripts/evals/**"
+      - "AGENTS.md"
+      - "README.md"
+      - "SPEC.md"
+      - "docs/**"
+      - "specs/**"
+      - "src/cloud/**"
+      - "src/local/**"
+      - "src/product/**"
+      - "src/runtime/**"
+      - "src/surfaces/**"
+      - "src/shared/**"
+      - "workflows/shared/**"
+      - "workflows/meta/spec/**"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+concurrency:
+  group: ricky-evals-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  NPM_CONFIG_FUND: "false"
+  RICKY_EVAL_OPENROUTER_MODEL: openai/gpt-oss-120b:free
+
+jobs:
+  evals:
+    name: Provider-backed evals
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Require OpenRouter API key
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "${OPENROUTER_API_KEY}" ]; then
+            echo "OPENROUTER_API_KEY GitHub secret is required for provider-backed Ricky evals."
+            exit 1
+          fi
+
+      - name: Run provider evals
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: npm run evals:provider -- --trials 1
+
+      - name: Summarize evals
+        if: always()
+        run: node scripts/evals/ci-summary.mjs
+
+      - name: Comment human-review cases
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/evals/ci-review-comment.mjs
+
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ricky-eval-run
+          path: .ricky/evals/runs/
+          retention-days: 14
+          if-no-files-found: ignore

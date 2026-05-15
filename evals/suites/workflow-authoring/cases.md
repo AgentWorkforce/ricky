@@ -48,6 +48,152 @@ maxToolCalls: 0
 - Skip deterministic file-existence, grep, symlink, or scoped change-detection checks.
 - Edit unrelated package metadata or generated workflows for a convention-only request.
 
+## workflow-authoring.fresh-eyes-loop-simple-test
+Executor: ricky-cli
+Kind: regression
+Tags: workflow-authoring, review, tests, fresh-eyes
+Human Review: false
+
+### Message
+Generate a small Agent Relay workflow that adds one missing Vitest unit test for a TypeScript helper and proves the test passes.
+
+### Mock
+cwd: temp
+specFileContent: Generate a small Agent Relay workflow that adds one missing Vitest unit test for a TypeScript helper and proves the test passes.
+argv: --mode local --spec-file {{specFile}} --no-run --json --no-workforce-persona
+includeGeneratedArtifacts: true
+
+### Deterministic Checks
+ok: true
+contentIncludes:
+- stage": "generate
+- status": "ok
+- --- GENERATED ARTIFACT:
+- .agent("reviewer-claude"
+- .agent("validator-claude"
+- .agent("reviewer-codex"
+- .agent("validator-codex"
+- verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED
+- add or update appropriate tests, fixtures, assertions, or deterministic proofs
+- dependsOn: ["final-fix-codex"]
+contentMatches:
+- \.step\("review-claude"[\s\S]*\.step\("fix-loop"[\s\S]*\.step\("final-review-claude"[\s\S]*\.step\("final-fix-claude"[\s\S]*\.step\("review-codex"[\s\S]*\.step\("fix-loop-codex"[\s\S]*\.step\("final-review-codex"[\s\S]*\.step\("final-fix-codex"[\s\S]*\.step\("final-review-pass-gate"[\s\S]*\.step\("final-hard-validation"
+forbidPhrases:
+- TypeError
+- ReferenceError
+- needs_clarification
+maxToolCalls: 1
+
+### Must
+- Include the mandatory fresh-eyes review/fix loop even though the workflow is small.
+- Run the loop in this order: Claude review, Claude fix, Claude final review, Claude final fix, then Codex review, Codex fix, Codex final review, Codex final fix.
+- Require review output to use a structured verdict such as `FINDINGS`, `NO_ISSUES_FOUND`, or `BLOCKED`.
+- Require fix steps to add or update tests, fixtures, assertions, or deterministic proof for testable findings.
+- Put final deterministic acceptance after the Codex final fix.
+
+### Must Not
+- Treat the first passing test run as a substitute for fresh-eyes review.
+- Run Claude and Codex reviews in parallel before fixing.
+- Collapse all findings into one generic fix step with no final re-review.
+- Commit, open a PR, or hand off before the Codex loop finishes.
+
+## workflow-authoring.fresh-eyes-loop-medium-source-and-test
+Executor: ricky-cli
+Kind: regression
+Tags: workflow-authoring, review, generation, fresh-eyes
+Human Review: false
+
+### Message
+Generate a Ricky workflow that changes one source file and one test file for a CLI parsing bug, with scoped diff evidence and a targeted Vitest command.
+
+### Mock
+cwd: temp
+specFileContent: Generate a Ricky workflow that changes one source file and one test file for a CLI parsing bug.\n\n## Target Files\n\n- src/surfaces/cli/flows/power-user-parser.ts\n- src/surfaces/cli/flows/power-user-parser.test.ts\n\n## Acceptance\n\nRun `npx vitest run src/surfaces/cli/flows/power-user-parser.test.ts`.
+argv: --mode local --spec-file {{specFile}} --no-run --json --no-workforce-persona
+includeGeneratedArtifacts: true
+
+### Deterministic Checks
+ok: true
+contentIncludes:
+- stage": "generate
+- status": "ok
+- src/surfaces/cli/flows/power-user-parser.ts
+- src/surfaces/cli/flows/power-user-parser.test.ts
+- npx vitest run src/surfaces/cli/flows/power-user-parser.test.ts
+- git diff --name-only
+- git ls-files --others --exclude-standard
+- review-claude.md
+- final-review-codex.md
+- codex-final-fix.md
+- dependsOn: ["final-fix-codex"]
+contentMatches:
+- \.step\("review-claude"[\s\S]*\.step\("fix-loop"[\s\S]*\.step\("final-review-claude"[\s\S]*\.step\("final-fix-claude"[\s\S]*\.step\("review-codex"[\s\S]*\.step\("fix-loop-codex"[\s\S]*\.step\("final-review-codex"[\s\S]*\.step\("final-fix-codex"[\s\S]*\.step\("final-review-pass-gate"[\s\S]*\.step\("final-hard-validation"
+forbidPhrases:
+- TypeError
+- ReferenceError
+- needs_clarification
+maxToolCalls: 1
+
+### Must
+- Preserve the Claude-then-Codex review/fix/final-review/final-fix order before final acceptance.
+- Keep deterministic file gates and scoped `git diff --name-only` / untracked-file checks limited to the declared source and test targets.
+- Feed review findings into fix steps and require fixers to harden tests when findings are testable.
+- Write review, fix, final-review, final-fix, validation, and signoff artifacts under `.workflow-artifacts/`.
+
+### Must Not
+- Use broad repo-wide change detection as the only proof.
+- Allow a single reviewer to rubber-stamp its own work without a distinct fresh-eyes pass.
+- Skip the Codex final review/fix loop because Claude already reviewed.
+- Move final hard validation before the Codex final fix.
+
+## workflow-authoring.fresh-eyes-loop-complex-multitrack
+Executor: ricky-cli
+Kind: capability
+Tags: workflow-authoring, review, multitrack, fresh-eyes
+Human Review: false
+
+### Message
+Generate a serious multi-track master executor workflow for three independent product slices: runtime evidence, CLI status copy, and generation validation. Each track owns separate files and the final workflow may create a PR.
+
+### Mock
+cwd: temp
+specFileContent: Generate a serious multi-track workflow for three independent product slices as smaller workflows run by a master executor: runtime evidence, CLI status copy, and generation validation. Each track owns separate files and the final workflow may create a PR.\n\nUse independent child workflows with deterministic validation, fresh-eyes review/fix loops, and GitHub primitive PR creation when shipping is in scope.
+argv: --mode local --spec-file {{specFile}} --no-run --json --no-workforce-persona
+includeGeneratedArtifacts: true
+
+### Deterministic Checks
+ok: true
+contentIncludes:
+- stage": "generate
+- status": "ok
+- RICKY_MASTER_EXECUTOR_WORKFLOW
+- Master plan:
+- RICKY_CHILD_WORKFLOW_COMPLETE
+- review-claude
+- final-fix-codex
+- RICKY_CHILD_FRESH_EYES_LOOP_READY
+- BLOCKED_NO_COMMIT
+contentMatches:
+- review-claude[\s\S]*fix-loop[\s\S]*final-review-claude[\s\S]*final-fix-claude[\s\S]*review-codex[\s\S]*fix-loop-codex[\s\S]*final-review-codex[\s\S]*final-fix-codex[\s\S]*final-review-pass-gate[\s\S]*final-hard-validation
+forbidPhrases:
+- TypeError
+- ReferenceError
+- needs_clarification
+maxToolCalls: 1
+
+### Must
+- Use a coordination shape that fits independent tracks while preserving deterministic gates after every editing step.
+- Ensure each implementation track or child workflow has the mandatory Claude-then-Codex fresh-eyes review/fix loop before track signoff.
+- Run final deterministic acceptance only after all Codex final fixes and post-fix reviews have completed.
+- Use `BLOCKED_NO_COMMIT` with evidence when a finding cannot be fixed, and skip commit or PR creation in that state.
+- Use the GitHub primitive for PR creation when shipping is in scope.
+
+### Must Not
+- Put one global review at the end and call that sufficient for all tracks.
+- Serialize independent tracks without a stated dependency reason.
+- Let PR creation, commit, or handoff race ahead of unresolved review findings.
+- Present tests, typecheck, or dry-run alone as the complete proof bar.
+
 ## workflow-authoring.no-silent-mode-fallback
 Executor: manual
 Kind: regression

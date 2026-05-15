@@ -6,9 +6,10 @@
  */
 
 import type {
+  EvidenceOutcome,
   EvidenceSummary,
   WorkflowRunEvidence,
-} from '../../shared/models/workflow-evidence.js';
+} from '../evidence/types.js';
 
 // ── Failure Classes ──────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ export type PlainValidationSummary = string;
 
 export type FailureClassifierInput =
   | WorkflowRunEvidence
+  | EvidenceOutcome
   | EvidenceSummary
   | PlainValidationSummary;
 

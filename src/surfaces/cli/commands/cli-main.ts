@@ -16,9 +16,18 @@ import type { CloudIntegrationConnector } from '../entrypoint/interactive-cli.js
 import type { ProviderStatus, RickyMode } from '../cli/mode-selector.js';
 import type { RawHandoff, SpecInput } from '../../../local/request-normalizer.js';
 import type { CloudGenerateRequest, CloudGenerateRequestBody, CloudWorkflowSpecPayload } from '../../../cloud/api/request-types.js';
+import type {
+  ListRickyWorkflowSchedulesResult,
+  ScheduleRickyWorkflowResult,
+} from '../../../cloud/api/workflow-schedules.js';
 import type { ConnectProviderOptions, ConnectProviderResult, StoredAuth, WhoAmIResponse } from '@agent-relay/cloud';
 import type { LocalRunMonitorState } from '../flows/local-run-monitor.js';
-import { legacyLocalRunStatePath, localRunStatePath } from '../flows/local-run-monitor.js';
+import {
+  initializeLocalRunMonitorState,
+  legacyLocalRunStatePath,
+  localRunStatePath,
+  startLocalRunMonitor,
+} from '../flows/local-run-monitor.js';
 import type {
   CloudAgentReadiness,
   CloudImplementationAgent,
@@ -28,6 +37,7 @@ import type {
 } from '../flows/cloud-workflow-flow.js';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ora from 'ora';
@@ -46,13 +56,17 @@ import { resolvePreferWorkforcePersonaWorkflowWriter } from '../flows/workforce-
 import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
 import { getLinearConnectGuidance } from '../../linear/connect.js';
 import { linearStatusSummary, renderLinearStatus } from '../../linear/status.js';
+import {
+  listRickyWorkflowSchedules,
+  scheduleRickyWorkflow,
+} from '../../../cloud/api/workflow-schedules.js';
 
 // ---------------------------------------------------------------------------
 // Parsed CLI arguments
 // ---------------------------------------------------------------------------
 
 export interface ParsedArgs {
-  command: 'run' | 'help' | 'version' | 'status' | 'connect';
+  command: 'run' | 'help' | 'version' | 'status' | 'connect' | 'schedule' | 'schedules';
   surface?: PowerUserSurface;
   mode?: RickyMode;
   connectTarget?: ConnectTarget;
@@ -64,6 +78,9 @@ export interface ParsedArgs {
   artifact?: string;
   stdin?: boolean;
   workflowName?: string;
+  cronExpression?: string;
+  scheduledAt?: string;
+  timezone?: string;
   runRequested?: boolean;
   noRun?: boolean;
   background?: boolean;
@@ -76,6 +93,7 @@ export interface ParsedArgs {
   verbose?: boolean;
   autoFix?: number;
   refine?: false | { model?: string };
+  bestJudgement?: boolean;
   login?: boolean;
   connectMissing?: boolean;
   workforcePersonaWriterCli?: boolean;
@@ -97,6 +115,16 @@ export interface CliMainResult {
 
 export type RelayCloudConnectProvider = (options: ConnectProviderOptions) => Promise<ConnectProviderResult>;
 export type RelayCloudAuthenticator = () => Promise<StoredAuth>;
+export type RickyScheduleWorkflow = (
+  workflowPath: string,
+  options: {
+    name?: string;
+    cronExpression?: string;
+    scheduledAt?: string;
+    timezone?: string;
+  },
+) => Promise<ScheduleRickyWorkflowResult>;
+export type RickyListWorkflowSchedules = () => Promise<ListRickyWorkflowSchedulesResult>;
 
 export interface CliProgressSpinner {
   text: string;
@@ -109,6 +137,18 @@ export type CliProgressSpinnerFactory = (options: {
   text: string;
   stream: NodeJS.WritableStream;
 }) => CliProgressSpinner;
+export type DetachedProcessSpawner = (
+  command: string,
+  args: string[],
+  options: {
+    cwd: string;
+    detached: boolean;
+    stdio: 'ignore';
+    env: NodeJS.ProcessEnv;
+  },
+) => Pick<ChildProcess, 'unref'>;
+
+const DETACHED_BACKGROUND_RUN_ID_ENV = 'RICKY_DETACHED_BACKGROUND_RUN_ID';
 
 // ---------------------------------------------------------------------------
 // Injectable dependencies
@@ -137,6 +177,12 @@ export interface CliMainDeps extends InteractiveCliDeps {
   connectTimeoutMs?: number;
   /** Spinner factory override for focused progress tests. */
   createProgressSpinner?: CliProgressSpinnerFactory;
+  /** Detached background process spawner override for deterministic CLI tests. */
+  spawnDetachedProcess?: DetachedProcessSpawner;
+  /** Cloud workflow scheduling override for deterministic schedule command tests. */
+  scheduleWorkflow?: RickyScheduleWorkflow;
+  /** Cloud workflow schedule listing override for deterministic schedule command tests. */
+  listWorkflowSchedules?: RickyListWorkflowSchedules;
 }
 
 let cachedPackageVersion: string | undefined;
@@ -159,6 +205,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.artifact !== undefined) result.artifact = parsed.artifact;
   if (parsed.stdin) result.stdin = true;
   if (parsed.workflowName !== undefined) result.workflowName = parsed.workflowName;
+  if (parsed.cronExpression !== undefined) result.cronExpression = parsed.cronExpression;
+  if (parsed.scheduledAt !== undefined) result.scheduledAt = parsed.scheduledAt;
+  if (parsed.timezone !== undefined) result.timezone = parsed.timezone;
   if (parsed.runRequested) result.runRequested = true;
   if (parsed.noRun) result.noRun = true;
   if (parsed.background) result.background = true;
@@ -171,6 +220,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.verbose) result.verbose = true;
   if (parsed.autoFix !== undefined && parsed.autoFix > 0) result.autoFix = parsed.autoFix;
   if (parsed.refine) result.refine = parsed.refine;
+  if (parsed.bestJudgement) result.bestJudgement = true;
   if (parsed.login) result.login = true;
   if (parsed.connectMissing) result.connectMissing = true;
   if (parsed.workforcePersonaWriterCli !== undefined) result.workforcePersonaWriterCli = parsed.workforcePersonaWriterCli;
@@ -298,6 +348,8 @@ export function renderHelp(): string[] {
     '  ricky local --spec <text>                           Write a workflow artifact',
     '  ricky run <path>                                  Run attached in this terminal',
     '  ricky run <path> --cloud                          Run it in AgentWorkforce Cloud',
+    '  ricky schedule <path> --cron "0 * * * *"          Schedule a Cloud workflow run',
+    '  ricky schedules                                   List Cloud workflow schedules',
     '  ricky run <path> --background                     Run it in the background',
     '  ricky status --run <run-id>                         Check progress',
     '  ricky status linear                                 Check Linear readiness',
@@ -323,6 +375,9 @@ export function renderHelp(): string[] {
     '  ricky --mode local --stdin                          Generate from stdin',
     '  ricky run <artifact>                                Execute existing artifact',
     '  ricky run <artifact> --cloud                        Execute existing artifact in Cloud',
+    '  ricky schedule <artifact> --cron "0 * * * *"        Schedule recurring Cloud execution',
+    '  ricky schedule <artifact> --at <iso-timestamp>       Schedule one-time Cloud execution',
+    '  ricky schedules                                     List scheduled Cloud workflows',
     '  ricky run <artifact> --start-from <step>             Resume an existing workflow from a failed step',
     '  ricky help                                          This help text',
     '  ricky version                                       Version',
@@ -339,6 +394,9 @@ export function renderHelp(): string[] {
     '  --foreground        Keep the local run attached to this process',
     '  --start-from <step> Resume a workflow from a specific step',
     '  --previous-run-id <id> Reuse prior run context when resuming',
+    '  --cron <expr>       Schedule recurring execution with cron syntax',
+    '  --at <timestamp>    Schedule one-time execution at an ISO timestamp',
+    '  --timezone <tz>     IANA timezone for schedule evaluation',
     '  --json              Print results as JSON',
     '  --help, -h          Show help',
     '  --version, -v       Show version',
@@ -349,6 +407,7 @@ export function renderHelp(): string[] {
     '  --refine[=model]    Optional LLM pass; off by default',
     '  --no-refine         Disable refinement; emit only the deterministic artifact',
     '  --with-llm[=model]  Alias for --refine',
+    '  --best-judgement    Answer unresolved spec questions with implementer assumptions',
     '  --workforce-persona Use Workforce personas to author the workflow',
     '  --no-workforce-persona Disable Workforce persona authoring',
     `  --auto-fix[=N]      Local diagnose/repair/resume loop (default ${DEFAULT_AUTO_FIX_ATTEMPTS} attempts, max 10)`,
@@ -377,6 +436,8 @@ export function renderHelp(): string[] {
     '  ricky --mode local --spec-file ./my-spec.md',
     '  printf "%s\\n" "run workflows/release.workflow.ts" | ricky --mode local --stdin',
     '  ricky run workflows/generated/package-checks.ts --background',
+    '  ricky schedule workflows/generated/package-checks.ts --cron "0 9 * * 1"',
+    '  ricky schedules',
   ];
 }
 
@@ -389,6 +450,100 @@ function renderCliArgumentRecovery(errors: string[]): string[] {
     '  Use `ricky --help` for the currently implemented flags.',
     '  For local handoff, provide one of --spec, --spec-file, or --stdin.',
   ];
+}
+
+async function renderScheduleCommand(parsed: ParsedArgs, deps: CliMainDeps): Promise<CliMainResult> {
+  if (!parsed.artifact) {
+    return {
+      exitCode: 1,
+      output: renderCliArgumentRecovery(['schedule requires a workflow artifact path.']),
+    };
+  }
+
+  const scheduler = deps.scheduleWorkflow ?? scheduleRickyWorkflow;
+  try {
+    const result = await scheduler(parsed.artifact, {
+      ...(parsed.workflowName ? { name: parsed.workflowName } : {}),
+      ...(parsed.cronExpression ? { cronExpression: parsed.cronExpression } : {}),
+      ...(parsed.scheduledAt ? { scheduledAt: parsed.scheduledAt } : {}),
+      ...(parsed.timezone ? { timezone: parsed.timezone } : {}),
+    });
+    if (parsed.json) {
+      return { exitCode: 0, output: [JSON.stringify(result, null, 2)] };
+    }
+    if (parsed.quiet) {
+      return {
+        exitCode: 0,
+        output: [`Ricky schedule: ${result.schedule.id} ${result.schedule.status}.`],
+      };
+    }
+    return {
+      exitCode: 0,
+      output: renderScheduleCreated(result.schedule),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      exitCode: 1,
+      output: parsed.json
+        ? [JSON.stringify({ status: 'failed', error: message }, null, 2)]
+        : renderCliArgumentRecovery([`Could not schedule workflow: ${message}`]),
+    };
+  }
+}
+
+async function renderSchedulesCommand(parsed: ParsedArgs, deps: CliMainDeps): Promise<CliMainResult> {
+  const lister = deps.listWorkflowSchedules ?? listRickyWorkflowSchedules;
+  try {
+    const result = await lister();
+    if (parsed.json) {
+      return { exitCode: 0, output: [JSON.stringify(result, null, 2)] };
+    }
+    if (result.schedules.length === 0) {
+      return { exitCode: 0, output: ['No scheduled Ricky workflows.'] };
+    }
+    return {
+      exitCode: 0,
+      output: [
+        'Scheduled Ricky workflows',
+        ...result.schedules.map((schedule) => {
+          const cadence = schedule.scheduleType === 'cron'
+            ? `cron ${schedule.cronExpression ?? '(missing)'}`
+            : `at ${formatScheduleDate(schedule.scheduledAt)}`;
+          return `  ${schedule.id}  ${schedule.status}  ${cadence}  ${schedule.name}`;
+        }),
+      ],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      exitCode: 1,
+      output: parsed.json
+        ? [JSON.stringify({ status: 'failed', error: message }, null, 2)]
+        : renderCliArgumentRecovery([`Could not list workflow schedules: ${message}`]),
+    };
+  }
+}
+
+function renderScheduleCreated(schedule: ScheduleRickyWorkflowResult['schedule']): string[] {
+  return [
+    'Ricky cloud schedule created',
+    `  ID:       ${schedule.id}`,
+    `  Name:     ${schedule.name}`,
+    `  Status:   ${schedule.status}`,
+    `  Type:     ${schedule.scheduleType}`,
+    ...(schedule.scheduleType === 'cron'
+      ? [`  Cron:     ${schedule.cronExpression ?? '(missing)'}`]
+      : [`  At:       ${formatScheduleDate(schedule.scheduledAt)}`]),
+    ...(schedule.timezone ? [`  Timezone: ${schedule.timezone}`] : []),
+    '',
+    'List schedules with `ricky schedules`.',
+  ];
+}
+
+function formatScheduleDate(value: string | Date | null | undefined): string {
+  if (!value) return '(missing)';
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 async function readStreamText(input: NodeJS.ReadableStream): Promise<string> {
@@ -428,6 +583,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(retry ? { retry } : {}),
       metadata: cliMetadataFor(parsed, 'artifact'),
     };
@@ -447,6 +603,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'inline-spec'),
     };
@@ -465,6 +622,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'spec-file'),
     };
@@ -484,6 +642,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'stdin'),
     };
@@ -520,6 +679,7 @@ function cliMetadataFor(parsed: ParsedArgs, handoff: string): Record<string, unk
     ...(parsed.background ? { runMode: 'background' } : {}),
     ...(parsed.foreground ? { runMode: 'foreground' } : {}),
     ...(parsed.yes ? { yes: 'non-destructive-confirmations-only' } : {}),
+    ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
   };
 }
 
@@ -541,6 +701,120 @@ function cliPackageRoot(): string {
 
 function resolveSpecFilePath(specFile: string, invocationRoot: string): string {
   return isAbsolute(specFile) ? specFile : resolve(invocationRoot, specFile);
+}
+
+function shouldLaunchDetachedBackgroundRun(parsed: ParsedArgs, cliHandoff: RawHandoff | undefined): boolean {
+  return Boolean(
+    cliHandoff &&
+    parsed.command === 'run' &&
+    parsed.runRequested === true &&
+    parsed.background === true &&
+    parsed.mode !== 'cloud',
+  );
+}
+
+function shouldRunDetachedBackgroundChild(parsed: ParsedArgs, cliHandoff: RawHandoff): boolean {
+  return Boolean(
+    parsed.command === 'run' &&
+    parsed.runRequested === true &&
+    parsed.foreground === true &&
+    parsed.noRun !== true &&
+    parsed.mode !== 'cloud' &&
+    process.env[DETACHED_BACKGROUND_RUN_ID_ENV],
+  );
+}
+
+async function launchDetachedBackgroundRun(
+  argv: string[],
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff,
+  deps: CliMainDeps,
+): Promise<CliMainResult> {
+  const cwd = resolveInvocationRoot(deps.cwd);
+  const artifactPath = backgroundArtifactPathFor(parsed, cliHandoff);
+  const runningState = await initializeLocalRunMonitorState({
+    cwd,
+    artifactPath,
+    mode: 'background',
+  });
+  const command = process.execPath;
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    return {
+      exitCode: 1,
+      output: renderCliArgumentRecovery(['Could not start background run: Ricky entrypoint path is unavailable.']),
+    };
+  }
+  const childArgs = [entrypoint, ...backgroundChildArgs(argv)];
+  const spawner = deps.spawnDetachedProcess ?? ((command, args, options) => spawn(command, args, options));
+  const child = spawner(command, childArgs, {
+    cwd,
+    detached: true,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      [DETACHED_BACKGROUND_RUN_ID_ENV]: runningState.runId,
+    },
+  });
+  child.unref();
+
+  return {
+    exitCode: 0,
+    output: renderDetachedBackgroundRunStarted(runningState),
+  };
+}
+
+function backgroundChildArgs(argv: string[]): string[] {
+  const args = argv.filter((arg) => arg !== '--background');
+  return args.includes('--foreground') ? args : [...args, '--foreground'];
+}
+
+async function runDetachedBackgroundChild(
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff,
+  deps: CliMainDeps,
+): Promise<CliMainResult> {
+  const runId = process.env[DETACHED_BACKGROUND_RUN_ID_ENV]?.trim();
+  if (!runId) {
+    return {
+      exitCode: 1,
+      output: renderCliArgumentRecovery([`${DETACHED_BACKGROUND_RUN_ID_ENV} is empty.`]),
+    };
+  }
+  const cwd = resolveInvocationRoot(deps.cwd);
+  delete process.env[DETACHED_BACKGROUND_RUN_ID_ENV];
+  const finalState = await startLocalRunMonitor({
+    cwd,
+    artifactPath: backgroundArtifactPathFor(parsed, cliHandoff),
+    handoff: cliHandoff,
+    mode: 'foreground',
+    autoFixAttempts: parsed.autoFix,
+    localOptions: deps.localExecutor ? { executor: deps.localExecutor } : undefined,
+    runIdFactory: () => runId,
+  });
+  return {
+    exitCode: finalState.status === 'completed' ? 0 : 1,
+    output: [],
+  };
+}
+
+function backgroundArtifactPathFor(parsed: ParsedArgs, cliHandoff: RawHandoff): string {
+  if (parsed.artifact) return parsed.artifact;
+  if (parsed.workflowName) return defaultArtifactPathForWorkflowName(parsed.workflowName);
+  if (cliHandoff.source === 'workflow-artifact') return cliHandoff.artifactPath;
+  return 'workflows/generated/background-run.ts';
+}
+
+function renderDetachedBackgroundRunStarted(state: LocalRunMonitorState): string[] {
+  return [
+    'Ricky background run',
+    '',
+    `Workflow run id: ${state.runId}`,
+    `Status: ${state.status}`,
+    `Status command: ${state.reattachCommand}`,
+    `Logs: ${state.logPath}`,
+    `Evidence: ${state.evidencePath}`,
+  ];
 }
 
 class CloudPowerUserSetupError extends Error {
@@ -1564,6 +1838,26 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     return renderConnect(parsed, deps);
   }
 
+  if (parsed.command === 'schedule') {
+    if (parsed.errors && parsed.errors.length > 0) {
+      return {
+        exitCode: 1,
+        output: renderCliArgumentRecovery(parsed.errors),
+      };
+    }
+    return renderScheduleCommand(parsed, deps);
+  }
+
+  if (parsed.command === 'schedules') {
+    if (parsed.errors && parsed.errors.length > 0) {
+      return {
+        exitCode: 1,
+        output: renderCliArgumentRecovery(parsed.errors),
+      };
+    }
+    return renderSchedulesCommand(parsed, deps);
+  }
+
   if (parsed.errors && parsed.errors.length > 0) {
     return {
       exitCode: 1,
@@ -1580,6 +1874,14 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
       exitCode: 1,
       output: renderCliArgumentRecovery([`Could not read spec handoff: ${message}`]),
     };
+  }
+
+  if (cliHandoff && shouldRunDetachedBackgroundChild(parsed, cliHandoff)) {
+    return runDetachedBackgroundChild(parsed, cliHandoff, deps);
+  }
+
+  if (shouldLaunchDetachedBackgroundRun(parsed, cliHandoff)) {
+    return launchDetachedBackgroundRun(argv, parsed, cliHandoff!, deps);
   }
 
   // Default: run interactive session
