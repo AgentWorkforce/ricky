@@ -200,3 +200,26 @@ maxToolCalls: 0
 - Mutate evidence while analyzing it.
 - Return generic advice like "improve your workflow" without references.
 - Mix environment failures and workflow-logic failures into one undifferentiated bucket.
+
+## runtime-recovery.preserve-pr-shipping-during-repair
+Executor: manual
+Kind: regression
+Tags: runtime, recovery, auto-fix, github-primitive
+Human Review: true
+
+### Message
+A persona-authored workflow that imports `@agent-relay/github-primitive` and uses `createGitHubStep` to open a PR fails its runtime-precheck. The auto-fix repair persona is invoked. Describe the contract the repaired artifact must satisfy.
+
+### Deterministic Checks
+maxToolCalls: 0
+
+### Must
+- Preserve the `@agent-relay/github-primitive` import, the `GitHubStepExecutor` reference, and every `createGitHubStep(...)` invocation that the original artifact declared.
+- Keep the failing workflow runnable from the same path with the same `workflow(...)` builder and `.run({ cwd: process.cwd() })` invocation.
+- Retain at least ceil(N / 2) of the original workflow's `.step(...)` calls when the original declared four or more steps; a repair that collapses to a 2-3 step placeholder is a regression, not a fix.
+- Reject (do not apply) any repair output whose step list reduces to `prepare-context` / `runtime-precheck: true` / `final-signoff: echo placeholder`; surface the regression diagnostic instead.
+
+### Must Not
+- Strip `createGitHubStep`, `GitHubStepExecutor`, or `@agent-relay/github-primitive` because the runtime-precheck failure mentioned PR-shipping or git side effects. The repair contract's "no commit / no push" constraint applies to the REPAIR AGENT's runtime behavior, not to the workflow's step declarations.
+- Emit a "minimal repair-safe master" or "simplified Ricky master" scaffold that passes the builder validator while doing none of the original work.
+- Treat "the workflow now builds and runs" as success when the work it was supposed to ship is gone.

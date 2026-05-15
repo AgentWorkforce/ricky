@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { WorkforcePersonaExecution, WorkforcePersonaResolver } from './workforce-persona-writer.js';
-import { buildWorkflowRepairPersonaTask, repairWorkflowWithWorkforcePersona } from './workforce-persona-repairer.js';
+import {
+  buildWorkflowRepairPersonaTask,
+  detectWorkflowIntentRegressions,
+  repairWorkflowWithWorkforcePersona,
+} from './workforce-persona-repairer.js';
 
 describe('workforce persona workflow repairer', () => {
   it('builds a repair task with artifact content, failure evidence, resume details, and response contract', () => {
@@ -199,6 +203,67 @@ describe('workforce persona workflow repairer', () => {
   });
 });
 
+describe('detectWorkflowIntentRegressions (PR-shipping preservation guard)', () => {
+  it('flags a repair that removed `@agent-relay/github-primitive` from an originally PR-shipping workflow', () => {
+    const original = workflowWithGithubShipping();
+    const repaired = repairStubFromObservedAutoFixFailure();
+    const regressions = detectWorkflowIntentRegressions(original, repaired);
+    expect(regressions.some((r) => r.includes('@agent-relay/github-primitive'))).toBe(true);
+  });
+
+  it('flags a repair that removed `GitHubStepExecutor` or `createGitHubStep` symbols', () => {
+    const original = workflowWithGithubShipping();
+    const repaired = original.replaceAll('createGitHubStep', 'noopShellStep').replaceAll('GitHubStepExecutor', 'NoopExecutor');
+    const regressions = detectWorkflowIntentRegressions(original, repaired);
+    expect(regressions.some((r) => r.includes('createGitHubStep'))).toBe(true);
+    expect(regressions.some((r) => r.includes('GitHubStepExecutor'))).toBe(true);
+  });
+
+  it('flags a repair that collapses step count below ceil(N/2) when the original had at least 4 steps', () => {
+    const original = workflowWithManySteps(12);
+    const repaired = repairStubFromObservedAutoFixFailure();
+    const regressions = detectWorkflowIntentRegressions(original, repaired);
+    expect(regressions.some((r) => r.includes('step count collapsed'))).toBe(true);
+  });
+
+  it('does NOT flag a repair that preserves PR-shipping, builder usage, and most of the steps', () => {
+    const original = workflowWithGithubShipping();
+    const healthyRepair = original
+      .replace('echo ok', 'echo "validated"')
+      .replace('"verify"', '"verify-renamed"');
+    expect(detectWorkflowIntentRegressions(original, healthyRepair)).toEqual([]);
+  });
+
+  it('does NOT trigger the step-count guard when the original is small (<4 steps)', () => {
+    const tinyOriginal = workflowSource('small');
+    const stubRepair = repairStubFromObservedAutoFixFailure();
+    const regressions = detectWorkflowIntentRegressions(tinyOriginal, stubRepair);
+    // Step count guard intentionally skipped for small workflows; only the
+    // builder check applies, and both keep `workflow(`, so no regression.
+    expect(regressions.some((r) => r.includes('step count collapsed'))).toBe(false);
+  });
+
+  it('flags a repair that dropped the `workflow(...)` builder entirely', () => {
+    const original = workflowSource('original');
+    const repaired = 'export const noop = () => null;';
+    const regressions = detectWorkflowIntentRegressions(original, repaired);
+    expect(regressions.some((r) => r.includes('builder'))).toBe(true);
+  });
+
+  it('reproduces the regression observed on 2026-05-15: parent spec with createGitHubStep gets replaced by 3-step placeholder stub', () => {
+    // Reproduction case from the failing local run. The "repair" the LLM
+    // emitted was a minimal master scaffold with prepare-context →
+    // runtime-precheck: true → final-signoff: echo placeholder. The guard
+    // must fire on this exact pattern.
+    const original = workflowWithGithubShipping(/* steps */ 20);
+    const repaired = repairStubFromObservedAutoFixFailure();
+    const regressions = detectWorkflowIntentRegressions(original, repaired);
+    expect(regressions.length).toBeGreaterThanOrEqual(2);
+    expect(regressions.some((r) => /github-primitive|GitHubStepExecutor|createGitHubStep/.test(r))).toBe(true);
+    expect(regressions.some((r) => r.includes('step count collapsed'))).toBe(true);
+  });
+});
+
 function execution(output: string): WorkforcePersonaExecution {
   const promise = Promise.resolve({
     status: 'completed' as const,
@@ -232,5 +297,74 @@ function workflowSource(name: string): string {
     '  process.exitCode = 1;',
     '});',
     '',
+  ].join('\n');
+}
+
+function workflowWithGithubShipping(stepCount: number = 8): string {
+  const steps = Array.from({ length: stepCount }, (_, idx) =>
+    `    .step("impl-${idx + 1}", { type: "deterministic", command: "echo step-${idx + 1}" })`,
+  ).join('\n');
+  return [
+    'import { workflow } from "@agent-relay/sdk/workflows";',
+    'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
+    '',
+    'async function main() {',
+    '  await workflow("ship-it")',
+    '    .description("Ship a PR via the GitHub primitive")',
+    '    .pattern("dag")',
+    '    .channel("wf-ricky-ship")',
+    steps,
+    '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+    '    .step("verify", { type: "deterministic", command: "echo ok" })',
+    '    .run({ cwd: process.cwd() });',
+    '}',
+    '',
+    'main().catch((error) => { console.error(error); process.exitCode = 1; });',
+  ].join('\n');
+}
+
+function workflowWithManySteps(stepCount: number): string {
+  const steps = Array.from({ length: stepCount }, (_, idx) =>
+    `    .step("s-${idx + 1}", { type: "deterministic", command: "echo ${idx + 1}" })`,
+  ).join('\n');
+  return [
+    'import { workflow } from "@agent-relay/sdk/workflows";',
+    '',
+    'async function main() {',
+    '  await workflow("many-steps")',
+    '    .description("Original 12-step workflow")',
+    '    .pattern("dag")',
+    '    .channel("wf-ricky-many")',
+    steps,
+    '    .run({ cwd: process.cwd() });',
+    '}',
+    '',
+    'main().catch((error) => { console.error(error); process.exitCode = 1; });',
+  ].join('\n');
+}
+
+/**
+ * Verbatim shape of the dummy stub the persona-driven repair returned on the
+ * 2026-05-15 reproduction run (three deterministic placeholder steps,
+ * `prepare-context` / `runtime-precheck: true` / `final-signoff: echo placeholder`).
+ * Used as input to assert the regression guard fires.
+ */
+function repairStubFromObservedAutoFixFailure(): string {
+  return [
+    'import { workflow } from "@agent-relay/sdk/workflows";',
+    '',
+    '// Repair: simplified Ricky master workflow.',
+    'async function main() {',
+    '  await workflow("ricky-spec-cloud-dev-stack-skeleton")',
+    '    .description("Repair master flow: minimal, bounded steps to re-enable precheck.")',
+    '    .pattern("dag")',
+    '    .channel("wf-ricky-repair")',
+    '    .step("prepare-context", { type: "deterministic", command: "mkdir -p .workflow-artifacts" })',
+    '    .step("runtime-precheck", { type: "deterministic", command: "true" })',
+    '    .step("final-signoff", { type: "deterministic", command: "echo Ricky master signoff placeholder" })',
+    '    .run({ cwd: process.cwd() });',
+    '}',
+    '',
+    'main().catch((error) => { console.error(error); process.exitCode = 1; });',
   ].join('\n');
 }

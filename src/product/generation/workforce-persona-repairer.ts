@@ -122,6 +122,13 @@ export async function repairWorkflowWithWorkforcePersona(
   if (!hasExplicitWorkflowRunCwd(parsed.content)) {
     throw new WorkforcePersonaWriterError('Workforce persona repair artifact must run with explicit cwd.');
   }
+  const intentRegressions = detectWorkflowIntentRegressions(options.artifactContent, parsed.content);
+  if (intentRegressions.length > 0) {
+    throw new WorkforcePersonaWriterError(
+      `Workforce persona repair regressed workflow intent: ${intentRegressions.join('; ')}.`,
+      [`Original workflow declared work that the repair removed. See diagnostic above for specifics.`],
+    );
+  }
   const responseFormat = parsed.responseFormat as 'structured-json' | 'fenced-artifact';
   return {
     artifact: {
@@ -203,12 +210,84 @@ export function buildWorkflowRepairPersonaTask(options: WorkforcePersonaRepairOp
     '- For MISSING_ENV_VAR failures, first make the workflow load repo-local `.env.local` and `.env` without overwriting shell exports, then add a fast `MISSING_ENV_VAR: NAME` assertion for known required variables before long-running agent steps. Do not fabricate secret values.',
     '- Preserve or improve the 80-to-100 loop: implementation, deterministic validation, review, final hard gate, and signoff evidence.',
     '- Ensure the failed step can be resumed by Ricky using --start-from with the failed step id and the previous run id.',
-    '- Keep side effects explicit and bounded. Do not commit, push, open PRs, or perform destructive file operations.',
+    '- Preserve original workflow intent. You are repairing one failing step — not rewriting the workflow. If the input declares `createGitHubStep`/`GitHubStepExecutor`/`@agent-relay/github-primitive`, child workflow invocations, named agents, or PR-shipping steps, those MUST remain in the repaired artifact. Do not collapse the workflow to a 2-3 step "minimal" or "repair-safe master" placeholder; a structurally valid workflow that no longer does the original work is a regression, not a repair.',
+    '- Constraint on YOUR runtime side-effects (the repair agent, not the workflow being repaired): do not commit, push, open PRs, or perform destructive file operations during repair generation. This does NOT mean the workflow you emit should stop using `@agent-relay/github-primitive` or `createGitHubStep` — those are step declarations that run later when Ricky executes the workflow, which is the entire point.',
     '- Prefer @agent-relay/sdk/workflows TypeScript workflows and keep .run({ cwd: process.cwd() }).',
     '',
     'Structured response contract:',
     JSON.stringify(contract, null, 2),
   ].join('\n');
+}
+
+/**
+ * Returns a list of human-readable regression descriptions when the repaired
+ * artifact has removed PR-shipping or substantive structure that the original
+ * workflow declared. Empty array means "no regression detected" — repair is
+ * safe to apply.
+ *
+ * Heuristics (all gate on what the ORIGINAL declared; we never add a new
+ * requirement):
+ * - PR-shipping primitives: if the original imported or invoked
+ *   `@agent-relay/github-primitive`, `GitHubStepExecutor`, or
+ *   `createGitHubStep`, those must remain present in the repair. Stripping
+ *   them turns a "ship the PR" workflow into a no-op stub, which is the
+ *   exact regression this guard exists to prevent.
+ * - Step count collapse: if the original had `N >= 4` `.step(...)` calls,
+ *   the repair must keep at least `ceil(N / 2)`. A 20-step workflow
+ *   "repaired" into 3 placeholder steps is overwhelmingly likely to be a
+ *   misdiagnosis (the LLM bailed out and emitted a minimal scaffold) rather
+ *   than a legitimate fix.
+ * - Builder usage: the original's `workflow(...)` invocation must remain;
+ *   a repair that replaces it with a different builder pattern is by
+ *   definition rewriting, not repairing.
+ *
+ * These are intentionally conservative — a healthy repair will trivially
+ * satisfy all three. They only fire on the failure mode this PR addresses
+ * (the LLM "simplifies" the workflow into a placeholder).
+ */
+export function detectWorkflowIntentRegressions(
+  originalContent: string,
+  repairedContent: string,
+): string[] {
+  const regressions: string[] = [];
+
+  const githubPrimitiveMarkers = [
+    '@agent-relay/github-primitive',
+    'GitHubStepExecutor',
+    'createGitHubStep',
+  ];
+  for (const marker of githubPrimitiveMarkers) {
+    if (originalContent.includes(marker) && !repairedContent.includes(marker)) {
+      regressions.push(
+        `original declared "${marker}" but the repair removed it. PR-shipping primitives must survive repair.`,
+      );
+    }
+  }
+
+  const originalStepCount = countStepInvocations(originalContent);
+  const repairedStepCount = countStepInvocations(repairedContent);
+  if (originalStepCount >= 4) {
+    const floor = Math.ceil(originalStepCount / 2);
+    if (repairedStepCount < floor) {
+      regressions.push(
+        `step count collapsed from ${originalStepCount} to ${repairedStepCount} (below the ${floor} minimum). Repair appears to be a placeholder scaffold rather than a fix.`,
+      );
+    }
+  }
+
+  if (originalContent.includes('workflow(') && !repairedContent.includes('workflow(')) {
+    regressions.push('original used `workflow(...)` builder but the repair removed it.');
+  }
+
+  return regressions;
+}
+
+function countStepInvocations(content: string): number {
+  // Matches the `.step("name", ...)` chain calls produced by the
+  // @agent-relay/sdk/workflows builder. The dot anchor avoids matching
+  // arbitrary `step(` usage outside the builder chain.
+  const matches = content.match(/\.step\(\s*['"]/g);
+  return matches ? matches.length : 0;
 }
 
 function safeJson(value: unknown): string {
