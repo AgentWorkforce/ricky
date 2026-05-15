@@ -250,6 +250,87 @@ describe('detectWorkflowIntentRegressions (PR-shipping preservation guard)', () 
     expect(regressions.some((r) => r.includes('builder'))).toBe(true);
   });
 
+  it('does NOT count `.step(` matches inside HEREDOCs / string literals / comments when measuring step count', () => {
+    // A repair that genuinely shrinks the workflow but quotes ".step(\"x\")"
+    // inside one step's command body would falsely inflate the count under
+    // raw regex. With the masking helper the count reflects real chain calls
+    // only, so the regression guard fires as expected.
+    const original = workflowWithManySteps(12);
+    const repairedWithStringNoise = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      '',
+      'async function main() {',
+      '  await workflow("collapsed-with-noise")',
+      '    .description("Repair: minimal placeholder masquerading as a real workflow.")',
+      '    .pattern("dag")',
+      '    .channel("wf-ricky-noisy")',
+      '    .step("only-real-step", {',
+      '      type: "deterministic",',
+      // Twelve .step("...") references buried inside a command HEREDOC,
+      // designed to fool a naive regex into thinking the workflow has many
+      // chain calls. The masking helper neutralizes them.
+      '      command: `echo "this command mentions .step(\\"s1\\"), .step(\\"s2\\"), .step(\\"s3\\"), .step(\\"s4\\"), .step(\\"s5\\"), .step(\\"s6\\"), .step(\\"s7\\"), .step(\\"s8\\"), .step(\\"s9\\"), .step(\\"s10\\"), .step(\\"s11\\"), .step(\\"s12\\") but only one real chain call"`,',
+      '    })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      '',
+      'main().catch((error) => { console.error(error); process.exitCode = 1; });',
+    ].join('\n');
+    const regressions = detectWorkflowIntentRegressions(original, repairedWithStringNoise);
+    expect(regressions.some((r) => r.includes('step count collapsed'))).toBe(true);
+    expect(regressions.some((r) => /to\s+1\b/.test(r))).toBe(true);
+  });
+
+  it('does NOT pass when a repair smuggles createGitHubStep past the check via a // comment or string literal', () => {
+    // A repair that removes the real `createGitHubStep` invocation but adds
+    // a comment like "// Removed createGitHubStep" would fool a naive
+    // includes() check. The masking helper strips comments so the regression
+    // still fires.
+    const original = workflowWithGithubShipping();
+    const repairedWithCommentDecoy = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      '// Removed import of @agent-relay/github-primitive — see commit notes',
+      '// createGitHubStep and GitHubStepExecutor no longer needed for this repair',
+      '',
+      'async function main() {',
+      '  await workflow("decoy")',
+      '    .description("Repair note mentions createGitHubStep in `command: \\"echo createGitHubStep\\"` but never invokes it.")',
+      '    .pattern("dag")',
+      '    .channel("wf-ricky-decoy")',
+      '    .step("placeholder", { type: "deterministic", command: "echo \\"workflow without createGitHubStep\\"" })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      '',
+      'main().catch((error) => { console.error(error); process.exitCode = 1; });',
+    ].join('\n');
+    const regressions = detectWorkflowIntentRegressions(original, repairedWithCommentDecoy);
+    expect(regressions.some((r) => r.includes('@agent-relay/github-primitive'))).toBe(true);
+    expect(regressions.some((r) => r.includes('GitHubStepExecutor'))).toBe(true);
+    expect(regressions.some((r) => r.includes('createGitHubStep'))).toBe(true);
+  });
+
+  it('does NOT trip the github-primitive check when the original only mentions it inside a comment / string', () => {
+    // The original never actually imports github-primitive — it just talks
+    // about it in a comment. A repair that removes the comment is fine; the
+    // mask layer means the guard never thought the import was there.
+    const originalWithCommentOnly = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      '// Note: a future revision may want @agent-relay/github-primitive for shipping PRs.',
+      '',
+      'async function main() {',
+      '  await workflow("commenty")',
+      '    .description("createGitHubStep is mentioned here as a string literal only")',
+      '    .step("just-one", { type: "deterministic", command: "echo ok" })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    const repairedDropsComment = originalWithCommentOnly
+      .replace('// Note: a future revision may want @agent-relay/github-primitive for shipping PRs.\n', '')
+      .replace('createGitHubStep is mentioned here as a string literal only', 'no mentions anywhere');
+    expect(detectWorkflowIntentRegressions(originalWithCommentOnly, repairedDropsComment)).toEqual([]);
+  });
+
   it('reproduces the regression observed on 2026-05-15: parent spec with createGitHubStep gets replaced by 3-step placeholder stub', () => {
     // Reproduction case from the failing local run. The "repair" the LLM
     // emitted was a minimal master scaffold with prepare-context →

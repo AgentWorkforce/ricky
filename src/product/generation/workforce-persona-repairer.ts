@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import ts from 'typescript';
+
 import {
   defaultWorkforcePersonaResolver,
   hasExplicitWorkflowRunCwd,
@@ -227,13 +229,13 @@ export function buildWorkflowRepairPersonaTask(options: WorkforcePersonaRepairOp
  *
  * Heuristics (all gate on what the ORIGINAL declared; we never add a new
  * requirement):
- * - PR-shipping primitives: if the original imported or invoked
- *   `@agent-relay/github-primitive`, `GitHubStepExecutor`, or
- *   `createGitHubStep`, those must remain present in the repair. Stripping
- *   them turns a "ship the PR" workflow into a no-op stub, which is the
- *   exact regression this guard exists to prevent.
- * - Step count collapse: if the original had `N >= 4` `.step(...)` calls,
- *   the repair must keep at least `ceil(N / 2)`. A 20-step workflow
+ * - PR-shipping primitives: if the original `import`s
+ *   `@agent-relay/github-primitive` or references the identifiers
+ *   `GitHubStepExecutor` / `createGitHubStep`, those must remain present in
+ *   the repair. Stripping them turns a "ship the PR" workflow into a no-op
+ *   stub, which is the exact regression this guard exists to prevent.
+ * - Step count collapse: if the original had `N >= 4` `.step(...)` chain
+ *   calls, the repair must keep at least `ceil(N / 2)`. A 20-step workflow
  *   "repaired" into 3 placeholder steps is overwhelmingly likely to be a
  *   misdiagnosis (the LLM bailed out and emitted a minimal scaffold) rather
  *   than a legitimate fix.
@@ -241,53 +243,152 @@ export function buildWorkflowRepairPersonaTask(options: WorkforcePersonaRepairOp
  *   a repair that replaces it with a different builder pattern is by
  *   definition rewriting, not repairing.
  *
- * These are intentionally conservative — a healthy repair will trivially
- * satisfy all three. They only fire on the failure mode this PR addresses
- * (the LLM "simplifies" the workflow into a placeholder).
+ * **Source-Text Analysis (AGENTS.md):** every check inspects the parsed
+ * TypeScript AST via `ts.createSourceFile` — imports come from
+ * `ImportDeclaration.moduleSpecifier` (only real import statements count),
+ * identifier references from `Identifier` node walks (only real symbol
+ * references count), and step/workflow chain calls from `CallExpression`
+ * nodes (only real call expressions count). This rules out both false
+ * positives (a step `command` HEREDOC containing the literal text
+ * `.step("foo")` inflating the count) AND false negatives (a repair
+ * sneaking `// Removed createGitHubStep` past the check as a comment, or
+ * embedding `"createGitHubStep"` inside a string literal it never invokes).
+ *
+ * Unparseable repairs are not silently accepted: if the repaired content
+ * fails to parse cleanly enough for AST walks, every present-in-original
+ * marker is flagged so the failure surfaces rather than coercing the
+ * "no AST signal" case into "no regression detected."
+ *
+ * These guards are intentionally conservative — a healthy repair will
+ * trivially satisfy all three. They only fire on the failure mode this PR
+ * addresses (the LLM "simplifies" the workflow into a placeholder).
  */
 export function detectWorkflowIntentRegressions(
   originalContent: string,
   repairedContent: string,
 ): string[] {
   const regressions: string[] = [];
+  const original = analyzeWorkflowSource(originalContent);
+  const repaired = analyzeWorkflowSource(repairedContent);
 
-  const githubPrimitiveMarkers = [
-    '@agent-relay/github-primitive',
-    'GitHubStepExecutor',
-    'createGitHubStep',
-  ];
-  for (const marker of githubPrimitiveMarkers) {
-    if (originalContent.includes(marker) && !repairedContent.includes(marker)) {
+  if (original.importsModule(GITHUB_PRIMITIVE_MODULE) && !repaired.importsModule(GITHUB_PRIMITIVE_MODULE)) {
+    regressions.push(
+      `original imported "${GITHUB_PRIMITIVE_MODULE}" but the repair removed the import. PR-shipping primitives must survive repair.`,
+    );
+  }
+
+  for (const identifier of PR_SHIPPING_IDENTIFIERS) {
+    if (original.referencesIdentifier(identifier) && !repaired.referencesIdentifier(identifier)) {
       regressions.push(
-        `original declared "${marker}" but the repair removed it. PR-shipping primitives must survive repair.`,
+        `original referenced "${identifier}" but the repair removed it. PR-shipping primitives must survive repair.`,
       );
     }
   }
 
-  const originalStepCount = countStepInvocations(originalContent);
-  const repairedStepCount = countStepInvocations(repairedContent);
-  if (originalStepCount >= 4) {
-    const floor = Math.ceil(originalStepCount / 2);
-    if (repairedStepCount < floor) {
+  if (original.stepInvocationCount >= 4) {
+    const floor = Math.ceil(original.stepInvocationCount / 2);
+    if (repaired.stepInvocationCount < floor) {
       regressions.push(
-        `step count collapsed from ${originalStepCount} to ${repairedStepCount} (below the ${floor} minimum). Repair appears to be a placeholder scaffold rather than a fix.`,
+        `step count collapsed from ${original.stepInvocationCount} to ${repaired.stepInvocationCount} (below the ${floor} minimum). Repair appears to be a placeholder scaffold rather than a fix.`,
       );
     }
   }
 
-  if (originalContent.includes('workflow(') && !repairedContent.includes('workflow(')) {
+  if (original.callsWorkflowBuilder && !repaired.callsWorkflowBuilder) {
     regressions.push('original used `workflow(...)` builder but the repair removed it.');
   }
 
   return regressions;
 }
 
-function countStepInvocations(content: string): number {
-  // Matches the `.step("name", ...)` chain calls produced by the
-  // @agent-relay/sdk/workflows builder. The dot anchor avoids matching
-  // arbitrary `step(` usage outside the builder chain.
-  const matches = content.match(/\.step\(\s*['"]/g);
-  return matches ? matches.length : 0;
+const GITHUB_PRIMITIVE_MODULE = '@agent-relay/github-primitive';
+const PR_SHIPPING_IDENTIFIERS = ['GitHubStepExecutor', 'createGitHubStep'] as const;
+
+interface WorkflowSourceFacts {
+  importsModule(moduleSpec: string): boolean;
+  referencesIdentifier(name: string): boolean;
+  readonly stepInvocationCount: number;
+  readonly callsWorkflowBuilder: boolean;
+}
+
+/**
+ * Parses a workflow artifact into AST-derived facts the regression guard
+ * needs. Uses `ts.createSourceFile` (TypeScript is already in deps and used
+ * the same way by `src/local/auto-fix-loop.ts`) so the heuristics inspect
+ * actual ImportDeclaration / Identifier / CallExpression nodes instead of
+ * raw substrings — i.e. they can't be fooled by HEREDOC strings, comments,
+ * or string-literal echoes. Unparseable sources fall through to a
+ * conservative "everything present" view so a malformed repair is flagged
+ * instead of silently accepted.
+ */
+function analyzeWorkflowSource(content: string): WorkflowSourceFacts {
+  let sourceFile: ts.SourceFile | undefined;
+  try {
+    sourceFile = ts.createSourceFile(
+      'ricky-workflow-artifact.ts',
+      content,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ false,
+      ts.ScriptKind.TS,
+    );
+  } catch {
+    sourceFile = undefined;
+  }
+
+  if (!sourceFile) {
+    // Treat an unparseable source as "every marker is present" — the
+    // regression guard then has to flag any missing-in-repair markers,
+    // surfacing the broken repair rather than letting a parse failure pass
+    // as evidence of "nothing wrong."
+    return {
+      importsModule: () => true,
+      referencesIdentifier: () => true,
+      stepInvocationCount: Number.POSITIVE_INFINITY,
+      callsWorkflowBuilder: true,
+    };
+  }
+
+  const importedModules = new Set<string>();
+  const referencedIdentifiers = new Set<string>();
+  let stepInvocationCount = 0;
+  let callsWorkflowBuilder = false;
+
+  const trackedIdentifiers = new Set<string>(PR_SHIPPING_IDENTIFIERS);
+
+  function walk(node: ts.Node): void {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      importedModules.add(node.moduleSpecifier.text);
+    }
+
+    if (ts.isIdentifier(node) && trackedIdentifiers.has(node.text)) {
+      referencedIdentifiers.add(node.text);
+    }
+
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && callee.name.text === 'step') {
+        stepInvocationCount += 1;
+      }
+      if (ts.isIdentifier(callee) && callee.text === 'workflow') {
+        callsWorkflowBuilder = true;
+      }
+    }
+
+    ts.forEachChild(node, walk);
+  }
+
+  walk(sourceFile);
+
+  return {
+    importsModule(moduleSpec: string): boolean {
+      return importedModules.has(moduleSpec);
+    },
+    referencesIdentifier(name: string): boolean {
+      return referencedIdentifiers.has(name);
+    },
+    stepInvocationCount,
+    callsWorkflowBuilder,
+  };
 }
 
 function safeJson(value: unknown): string {
