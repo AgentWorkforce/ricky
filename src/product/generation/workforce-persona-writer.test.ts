@@ -1227,6 +1227,28 @@ describe('writer-wait watchdog (waitForWriterWithWatchdog)', () => {
     expect(run.cancel).not.toHaveBeenCalled();
   });
 
+  it('does not wait on a stuck `runId` promise once `run` itself has settled (coderabbit #114-0002)', async () => {
+    // Reproduces the failure mode coderabbit flagged: if `run` resolves
+    // with a valid result but `runId` never settles (the metadata side of
+    // the promise hangs), the original `Promise.all([run, run.runId])`
+    // would have blocked indefinitely. The watchdog races runId against
+    // run.then(() => null) so a completed run forces runId to yield null
+    // immediately when the runId side is stuck.
+    const expected = { status: 'completed', output: 'ok', stderr: '', exitCode: 0, durationMs: 10 } as unknown as Awaited<ReturnType<typeof makeRun>>;
+    const neverSettlingRunId = new Promise<string | null>(() => {
+      // never resolves — simulates a stuck runId promise
+    });
+    const run = makeRun(Promise.resolve(expected), neverSettlingRunId);
+
+    // No fake timers needed: the race resolves as soon as `run` settles.
+    const [result, runId] = await waitForWriterWithWatchdog(run, 1, []);
+
+    expect(result).toBe(expected);
+    expect(runId).toBeNull();
+    // run.cancel must not fire when the run itself completed successfully.
+    expect(run.cancel).not.toHaveBeenCalled();
+  });
+
   function makeRun(resolveTo: Promise<unknown>, runIdResolveTo: Promise<string | null>): WorkforcePersonaExecution & { cancel: ReturnType<typeof vi.fn> } {
     const promise = resolveTo as WorkforcePersonaExecution;
     Object.defineProperty(promise, 'runId', { value: runIdResolveTo });

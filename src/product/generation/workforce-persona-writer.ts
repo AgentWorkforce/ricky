@@ -253,7 +253,18 @@ export async function writeWorkflowWithWorkforcePersona(
   // resolver and task-builder awaits — opens a multi-second window in
   // which a stale leftover could falsely satisfy the freshness check.
   const writerInvokedAtMs = Date.now();
-  const effectiveTimeoutSeconds = options.timeoutSeconds ?? selection.runtime.harnessSettings?.timeoutSeconds;
+  // Normalize the timeout once before threading it into both
+  // `sendMessage` (harness-kit subprocess timeout) and the outer watchdog
+  // so they're guaranteed to run on the same schedule. If the configured
+  // value is missing, zero, or negative, harness-kit otherwise disables
+  // its internal timeout entirely (see harness-kit/dist/runner.js:
+  // `options.timeoutSeconds && options.timeoutSeconds > 0 ? setTimeout(...) : undefined`)
+  // — and a watchdog firing on a fallback window while the subprocess has
+  // no inner timeout at all is exactly the divergence coderabbit flagged.
+  const configuredTimeoutSeconds = options.timeoutSeconds ?? selection.runtime.harnessSettings?.timeoutSeconds;
+  const effectiveTimeoutSeconds = typeof configuredTimeoutSeconds === 'number' && configuredTimeoutSeconds > 0
+    ? configuredTimeoutSeconds
+    : WRITER_DEFAULT_WATCHDOG_SECONDS;
   const run = resolved.context.sendMessage(task, {
     workingDirectory: options.repoRoot,
     name: `ricky-workflow-writer-${promptDigest.slice(0, 12)}`,
@@ -1572,7 +1583,7 @@ const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
  * timeout) clears the watchdog timer in the `finally` block and never
  * pays any wall-clock cost.
  */
-export async function waitForWriterWithWatchdog<R extends { runId: Promise<string | null>; cancel?: () => void }>(
+export async function waitForWriterWithWatchdog<R extends Promise<unknown> & { runId: Promise<string | null>; cancel?: () => void }>(
   run: R,
   timeoutSeconds: number | undefined,
   resolverWarnings: string[],
@@ -1606,9 +1617,21 @@ export async function waitForWriterWithWatchdog<R extends { runId: Promise<strin
     watchdogTimer.unref?.();
   });
 
+  // `run.runId` is optional metadata downstream (`result.workflowRunId ??
+  // runId`), but the original `Promise.all([run, run.runId.catch(...)])`
+  // shape blocked on BOTH sides — so a writer that resolves successfully
+  // but whose runId promise never settles would still hang here until the
+  // watchdog fired, even though the result is already in hand. Race the
+  // runId against the run's own resolution so a completed run forces
+  // runId to yield `null` immediately when the runId side is stuck.
+  const runIdOrNull = Promise.race<string | null>([
+    run.runId.catch(() => null),
+    run.then(() => null, () => null),
+  ]);
+
   try {
     const settled = await Promise.race([
-      Promise.all([run, run.runId.catch(() => null)]),
+      Promise.all([run, runIdOrNull]),
       watchdog,
     ]);
     return settled as [Awaited<R>, string | null];
