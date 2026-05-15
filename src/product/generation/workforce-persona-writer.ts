@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
@@ -158,6 +158,25 @@ export interface WorkforcePersonaWriterResult {
 export interface PersonaResponseParseOptions {
   repoRoot?: string;
   readFileText?: (path: string) => string;
+  /**
+   * Optional `Date.now()`-style ms timestamp captured *before* the writer
+   * subprocess was spawned. When set, the parser's "stdout was truncated
+   * but a file exists on disk at expectedPath" fallback only fires for a
+   * file whose mtime is newer than this — i.e. one this writer call
+   * produced — so the parser cannot accidentally accept a stale leftover
+   * artifact from a prior attempt as the current writer's output.
+   *
+   * Without this timestamp the parser treats the file as untrusted and
+   * skips the disk fallback (preserving prior behavior).
+   */
+  writerInvokedAtMs?: number;
+  /**
+   * Optional stat-by-path used by the disk fallback. Defaults to
+   * `fs.statSync(path)` swallowing ENOENT to `undefined`. Override for
+   * deterministic tests of the freshness check without touching the real
+   * filesystem.
+   */
+  statFile?: (path: string) => { mtimeMs: number } | undefined;
 }
 
 export interface ResolvedWorkforcePersonaContext {
@@ -210,6 +229,10 @@ export async function writeWorkflowWithWorkforcePersona(
 ): Promise<WorkforcePersonaWriterResult> {
   const workflowName = options.workflowName ?? workflowNameFromOutputPath(options.outputPath);
   const relevantFiles = await resolveRelevantFiles(options.repoRoot, spec, options.relevantFiles);
+  // Pin "writer invoked at" before the spawn so the parser's disk fallback
+  // can prove a file at outputPath was actually written by THIS run (mtime
+  // newer than this timestamp) rather than left over from a prior attempt.
+  const writerInvokedAtMs = Date.now();
   const resolver = options.resolver ?? defaultWorkforcePersonaResolver;
   const resolved = await resolver(
     options.personaIntentCandidates ?? WORKFORCE_PERSONA_INTENT_CANDIDATES,
@@ -275,6 +298,7 @@ export async function writeWorkflowWithWorkforcePersona(
   try {
     parsed = parsePersonaWorkflowResponse(result.output, options.outputPath, {
       repoRoot: options.repoRoot,
+      writerInvokedAtMs: writerInvokedAtMs,
     });
   } catch (error) {
     await dumpDebug('parse-error');
@@ -955,9 +979,71 @@ export function parsePersonaWorkflowResponse(
     return validateStructuredResponse(embedded, expectedPath, 'structured-json', options);
   }
 
+  // Last-resort disk fallback. claude --print buffers a full response then
+  // returns; for large workflow artifacts the LLM's max_output_tokens cap
+  // kicks in and the JSON gets cut off mid-emit (observed: 38KB of valid
+  // JSON ending at `"language": "typescript",` with no closing braces). In
+  // that case the writer typically *did* succeed at writing the workflow
+  // source to disk via the Write tool — there's just no parseable stdout
+  // wrapper for the parser to read. Trust the file on disk only when (a)
+  // the caller provided `writerInvokedAtMs` so we can prove the file is
+  // fresh, and (b) the file's mtime is strictly after that timestamp.
+  const recovered = recoverArtifactFromTruncatedOutput(expectedPath, options);
+  if (recovered) {
+    try {
+      validateArtifactContent(recovered);
+      return {
+        content: recovered,
+        metadata: { recoveredFromDisk: true, reason: 'stdout-truncated-or-unparseable' },
+        responseFormat: 'structured-json',
+      };
+    } catch {
+      // Recovered content failed structural validation; fall through to
+      // the original parser-failure error so the caller sees the real
+      // truncation symptom rather than a misleading "no workflow()" error.
+    }
+  }
+
   throw new WorkforcePersonaWriterError(
     'Workforce persona response must be structured JSON or include fenced TypeScript artifact and JSON metadata blocks.',
   );
+}
+
+/**
+ * Reads the artifact from disk as a last-resort fallback when the writer's
+ * stdout could not be parsed. Only fires when the caller pinned a
+ * `writerInvokedAtMs` timestamp AND the file at `expectedPath` was modified
+ * strictly after it — proving the file is the current writer's output, not
+ * a stale leftover from a prior attempt.
+ */
+function recoverArtifactFromTruncatedOutput(
+  expectedPath: string,
+  options: PersonaResponseParseOptions,
+): string | undefined {
+  if (!options.repoRoot || options.writerInvokedAtMs === undefined) return undefined;
+  const expectedResolved = isAbsolute(expectedPath)
+    ? expectedPath
+    : resolve(options.repoRoot, expectedPath);
+
+  const statFn = options.statFile ?? defaultStatFile;
+  const stat = statFn(expectedResolved);
+  if (!stat) return undefined;
+  if (stat.mtimeMs <= options.writerInvokedAtMs) return undefined;
+
+  try {
+    return options.readFileText?.(expectedResolved) ?? readFileSync(expectedResolved, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+function defaultStatFile(path: string): { mtimeMs: number } | undefined {
+  try {
+    const stats = statSync(path);
+    return { mtimeMs: stats.mtimeMs };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -275,6 +275,90 @@ describe('workforce persona workflow writer', () => {
     }
   });
 
+  describe('truncated-stdout disk fallback', () => {
+    // The claude CLI buffers a full --print response then emits it; for
+    // large workflow artifacts the LLM's max_output_tokens cap kicks in
+    // and the JSON gets cut off mid-emit. The writer typically *did*
+    // succeed at writing the workflow to disk via the Write tool (now that
+    // bypass-permissions makes that reliable in headless mode), so the
+    // parser should fall back to reading the file rather than hard-failing.
+
+    const truncatedJsonOutput = [
+      'I need to author a workflow that ships this PR. Let me produce the structured JSON response.',
+      '',
+      '```json',
+      '{',
+      '  "artifact": {',
+      '    "path": "workflows/generated/persona.ts",',
+      '    "language": "typescript",',
+      // cut off here — no `content` field, no closing braces
+    ].join('\n');
+
+    it('recovers from truncated stdout by reading a fresh file at expectedPath', () => {
+      const artifactPath = 'workflows/generated/persona.ts';
+      const writerInvokedAtMs = 100;
+      const parsed = parsePersonaWorkflowResponse(truncatedJsonOutput, artifactPath, {
+        repoRoot: '/tmp/repo',
+        writerInvokedAtMs,
+        statFile: (path) => path.endsWith('persona.ts') ? { mtimeMs: writerInvokedAtMs + 1_000 } : undefined,
+        readFileText: () => workflowSource(),
+      });
+      expect(parsed.responseFormat).toBe('structured-json');
+      expect(parsed.content).toContain('workflow("persona")');
+      expect(parsed.metadata).toMatchObject({ recoveredFromDisk: true });
+    });
+
+    it('does NOT fall back to a STALE file (mtime older than writerInvokedAtMs)', () => {
+      const artifactPath = 'workflows/generated/persona.ts';
+      const writerInvokedAtMs = 1_000;
+      expect(() =>
+        parsePersonaWorkflowResponse(truncatedJsonOutput, artifactPath, {
+          repoRoot: '/tmp/repo',
+          writerInvokedAtMs,
+          statFile: () => ({ mtimeMs: writerInvokedAtMs - 1 }),
+          readFileText: () => workflowSource(),
+        }),
+      ).toThrow(/structured JSON or include fenced TypeScript artifact/);
+    });
+
+    it('does NOT fall back when `writerInvokedAtMs` is absent (preserves prior behavior for callers that have not opted in)', () => {
+      const artifactPath = 'workflows/generated/persona.ts';
+      expect(() =>
+        parsePersonaWorkflowResponse(truncatedJsonOutput, artifactPath, {
+          repoRoot: '/tmp/repo',
+          // writerInvokedAtMs intentionally omitted
+          statFile: () => ({ mtimeMs: Date.now() }),
+          readFileText: () => workflowSource(),
+        }),
+      ).toThrow(/structured JSON or include fenced TypeScript artifact/);
+    });
+
+    it('does NOT fall back when no file exists at expectedPath (stat returns undefined)', () => {
+      const artifactPath = 'workflows/generated/persona.ts';
+      expect(() =>
+        parsePersonaWorkflowResponse(truncatedJsonOutput, artifactPath, {
+          repoRoot: '/tmp/repo',
+          writerInvokedAtMs: 100,
+          statFile: () => undefined,
+          readFileText: () => workflowSource(),
+        }),
+      ).toThrow(/structured JSON or include fenced TypeScript artifact/);
+    });
+
+    it('does NOT fall back when the on-disk file fails structural validation (re-raises original parser error)', () => {
+      const artifactPath = 'workflows/generated/persona.ts';
+      expect(() =>
+        parsePersonaWorkflowResponse(truncatedJsonOutput, artifactPath, {
+          repoRoot: '/tmp/repo',
+          writerInvokedAtMs: 100,
+          statFile: () => ({ mtimeMs: 200 }),
+          // File on disk is not a valid workflow (no `workflow(` call) — fallback should refuse it.
+          readFileText: () => 'export const broken = 1;',
+        }),
+      ).toThrow(/structured JSON or include fenced TypeScript artifact/);
+    });
+  });
+
   it('invokes the spawned harness non-interactively (no TUI flag, structured-response contract)', async () => {
     const base = generate({
       spec: spec({
