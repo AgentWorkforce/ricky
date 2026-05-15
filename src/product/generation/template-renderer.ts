@@ -159,13 +159,9 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'initial-soft-validation')!),
     '',
-    renderReviewStep('review-claude', input.isCodeWorkflow ? 'reviewer-claude' : 'reviewer-codex', ['initial-soft-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-claude')),
+    renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-claude')),
     '',
-    renderSecondaryReviewStep('review-codex', ['initial-soft-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'review-codex'), input.isCodeWorkflow),
-    '',
-    renderReadReviewStep(input.artifactsDir),
-    '',
-    renderFixLoopStep(input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop')),
+    renderFixLoopStep('fix-loop', 'validator-claude', ['review-claude', 'initial-soft-validation'], `${input.artifactsDir}/review-claude.md`, `${input.artifactsDir}/fix-loop-report.md`, 'FIX_LOOP_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop')),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'fix-loop-report-gate')!),
     '',
@@ -175,9 +171,21 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-validation')!),
     '',
-    renderReviewStep('final-review-claude', input.isCodeWorkflow ? 'reviewer-claude' : 'reviewer-codex', ['post-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude'), true),
+    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude'), true),
     '',
-    renderSecondaryReviewStep('final-review-codex', ['post-fix-validation'], input.spec, input.artifactsDir, selectionFor(input.toolSelection, 'final-review-codex'), input.isCodeWorkflow, true),
+    renderFixLoopStep('final-fix-claude', 'validator-claude', ['final-review-claude'], `${input.artifactsDir}/final-review-claude.md`, `${input.artifactsDir}/claude-final-fix.md`, 'CLAUDE_FINAL_FIX_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-claude'), true),
+    '',
+    renderReviewStep('review-codex', 'reviewer-codex', ['final-fix-claude'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-codex')),
+    '',
+    renderFixLoopStep('fix-loop-codex', 'validator-codex', ['review-codex'], `${input.artifactsDir}/review-codex.md`, `${input.artifactsDir}/codex-fix-loop-report.md`, 'CODEX_FIX_LOOP_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop-codex')),
+    '',
+    renderGateStep(input.gates.find((gate) => gate.name === 'codex-fix-loop-report-gate')!),
+    '',
+    renderGateStep(input.gates.find((gate) => gate.name === 'post-codex-fix-validation')!),
+    '',
+    renderReviewStep('final-review-codex', 'reviewer-codex', ['post-codex-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-codex'), true),
+    '',
+    renderFixLoopStep('final-fix-codex', 'validator-codex', ['final-review-codex'], `${input.artifactsDir}/final-review-codex.md`, `${input.artifactsDir}/codex-final-fix.md`, 'CODEX_FINAL_FIX_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-codex'), true),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'final-review-pass-gate')!),
     '',
@@ -217,7 +225,9 @@ function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSp
     return [
       { name: 'lead-codex', cli: 'codex', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
       { name: 'author-codex', cli: 'codex', role: 'Writes the requested bounded artifact and keeps scope to declared files.', retries: 2 },
-      { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews artifact quality, scope, and evidence.', retries: 1 },
+      { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'First-pass fresh-eyes reviewer for scope, evidence, and product fit.', retries: 1 },
+      { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Second-pass fresh-eyes reviewer for TypeScript/workflow correctness, deterministic gates, and test coverage.', retries: 1 },
+      { name: 'validator-claude', cli: 'claude', preset: 'worker', role: 'Applies Claude review findings and proves the fixed state.', retries: 2 },
       { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
     ];
   }
@@ -234,30 +244,24 @@ function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSp
     { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'Reviews product fit, scope control, and workflow evidence quality.', retries: 1 },
     { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews TypeScript correctness, deterministic gates, and test coverage.', retries: 1 },
     { name: 'validator-claude', cli: 'claude', preset: 'worker', role: 'Runs the 80-to-100 fix loop and verifies final readiness.', retries: 2 },
+    { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Runs the final Codex review-fix loop and verifies final readiness.', retries: 2 },
   ];
 }
 
 function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean): WorkflowTask[] {
   const implementer = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
-  const codexReviewRole = isCodeWorkflow ? 'reviewer-codex' : 'deterministic';
-  const codexReviewName = isCodeWorkflow ? 'Review with Codex' : 'Codex structural marker gate';
-  const codexReviewDescription = isCodeWorkflow
-    ? 'Review generated work for code quality and deterministic checks.'
-    : 'Write deterministic structural review-marker evidence without presenting it as an independent agent review.';
-  const finalCodexReviewName = isCodeWorkflow ? 'Final review with Codex' : 'Final Codex structural marker gate';
-  const finalCodexReviewDescription = isCodeWorkflow
-    ? 'Re-review implementation and validation after fixes.'
-    : 'Write deterministic final structural review-marker evidence without presenting it as an independent agent review.';
   return [
     task('prepare-context', 'Prepare context', 'deterministic', 'Read or materialize the normalized spec and target context.', []),
     task('lead-plan', 'Lead plan', isCodeWorkflow ? 'lead-claude' : 'lead-codex', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
     task('implement-artifact', 'Implement artifact', implementer, describeImplementation(spec), ['lead-plan']),
-    task('review-claude', 'Review with Claude', isCodeWorkflow ? 'reviewer-claude' : 'reviewer-codex', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
-    task('review-codex', codexReviewName, codexReviewRole, codexReviewDescription, ['initial-soft-validation']),
-    task('read-review-feedback', 'Read review feedback', 'deterministic', 'Collect review verdicts before fixing.', ['review-claude', 'review-codex']),
-    task('fix-loop', '80-to-100 fix loop', isCodeWorkflow ? 'validator-claude' : 'validator-codex', 'Apply bounded fixes from review and validation feedback.', ['read-review-feedback']),
-    task('final-review-claude', 'Final review with Claude', isCodeWorkflow ? 'reviewer-claude' : 'reviewer-codex', 'Re-review the fixed state only.', ['post-fix-validation']),
-    task('final-review-codex', finalCodexReviewName, codexReviewRole, finalCodexReviewDescription, ['post-fix-validation']),
+    task('review-claude', 'Fresh-eyes review with Claude', 'reviewer-claude', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
+    task('fix-loop', 'Claude review-fix loop', 'validator-claude', 'Apply bounded fixes from Claude review and validation feedback.', ['review-claude', 'initial-soft-validation']),
+    task('final-review-claude', 'Final review with Claude', 'reviewer-claude', 'Re-review the fixed state only.', ['post-fix-validation']),
+    task('final-fix-claude', 'Final Claude review-fix loop', 'validator-claude', 'Apply final Claude findings or record no further fixes.', ['final-review-claude']),
+    task('review-codex', 'Fresh-eyes review with Codex', 'reviewer-codex', 'Second-pass fresh-eyes review after the Claude loop.', ['final-fix-claude']),
+    task('fix-loop-codex', 'Codex review-fix loop', 'validator-codex', 'Apply bounded fixes from Codex review feedback.', ['review-codex']),
+    task('final-review-codex', 'Final review with Codex', 'reviewer-codex', 'Re-review implementation and validation after Codex fixes.', ['post-codex-fix-validation']),
+    task('final-fix-codex', 'Final Codex review-fix loop', 'validator-codex', 'Apply final Codex findings or record no further fixes.', ['final-review-codex']),
     task('final-signoff', 'Final signoff', isCodeWorkflow ? 'validator-claude' : 'validator-codex', 'Write final evidence summary after hard deterministic gates.', ['regression-gate']),
   ];
 }
@@ -317,14 +321,27 @@ function buildGates(
     gate('active-reference-gate', activeReferenceCommand, 'deterministic_gate', true, ['post-fix-verification-gate'], 'post_fix'),
     gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['active-reference-gate'], 'post_fix'),
     gate(
-      'final-review-pass-gate',
+      'codex-fix-loop-report-gate',
       [
-        `tail -n 1 ${shellQuote(`${artifactsDir}/final-review-claude.md`)} | tr -d '[:space:]*' | grep -Eq '^FINAL_REVIEW_CLAUDE_PASS$'`,
-        `tail -n 1 ${shellQuote(`${artifactsDir}/final-review-codex.md`)} | tr -d '[:space:]*' | grep -Eq '^FINAL_REVIEW_CODEX_PASS$'`,
+        `test -f ${shellQuote(`${artifactsDir}/codex-fix-loop-report.md`)}`,
+        `tail -n 1 ${shellQuote(`${artifactsDir}/codex-fix-loop-report.md`)} | tr -d '[:space:]' | grep -Eq '^CODEX_FIX_LOOP_COMPLETE$'`,
       ].join(' && '),
       'output_contains',
       true,
-      ['final-review-claude', 'final-review-codex'],
+      ['fix-loop-codex'],
+      'post_fix',
+    ),
+    gate('post-codex-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
+    gate(
+      'final-review-pass-gate',
+      [
+        `tail -n 1 ${shellQuote(`${artifactsDir}/claude-final-fix.md`)} | tr -d '[:space:]*' | grep -Eq '^CLAUDE_FINAL_FIX_COMPLETE$'`,
+        `tail -n 1 ${shellQuote(`${artifactsDir}/codex-final-fix.md`)} | tr -d '[:space:]*' | grep -Eq '^CODEX_FINAL_FIX_COMPLETE$'`,
+        `test ! -f ${shellQuote(`${artifactsDir}/BLOCKED_NO_COMMIT.md`)}`,
+      ].join(' && '),
+      'output_contains',
+      true,
+      ['final-fix-codex'],
       'final',
     ),
     gate('final-hard-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
@@ -857,7 +874,7 @@ function renderReviewStep(
   selection?: ToolSelection,
   final = false,
 ): string {
-  const marker = final ? (agent.includes('claude') ? 'FINAL_REVIEW_CLAUDE_PASS' : 'FINAL_REVIEW_CODEX_PASS') : 'REVIEW_COMPLETE';
+  const marker = final ? (agent.includes('claude') ? 'FINAL_REVIEW_CLAUDE_COMPLETE' : 'FINAL_REVIEW_CODEX_COMPLETE') : 'REVIEW_COMPLETE';
   const reviewPath = `${artifactsDir}/${stepName}.md`;
   const selectionLines = renderSelectionFields(selection);
   return `    .step(${literal(stepName)}, {
@@ -876,96 +893,64 @@ Read:
 ${hasTargetContext ? `- ${artifactsDir}/target-context.txt` : ''}
 ${renderToolSelectionSummary(selection)}
 
-Write ${reviewPath} ending with ${marker}.`)},
+Write ${reviewPath} using this structured verdict format:
+verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED
+finding_id: short-stable-id
+severity: blocker | high | medium | low
+file: path/to/file
+issue: what is wrong
+fix_required: concrete change needed
+test_required: test, fixture, assertion, or proof command needed
+status: open | fixed | wontfix | blocked
+evidence: commands run, file paths, or blocker details
+
+If there are no actionable issues, write verdict: NO_ISSUES_FOUND.
+End the file with ${marker}.`)},
       verification: { type: 'file_exists', value: ${literal(reviewPath)} },
     })`;
 }
 
-function renderSecondaryReviewStep(
-  stepName: string,
-  dependsOn: string[],
-  spec: NormalizedWorkflowSpec,
-  artifactsDir: string,
-  selection: ToolSelection | undefined,
-  isCodeWorkflow: boolean,
-  final = false,
-): string {
-  if (isCodeWorkflow) {
-    return renderReviewStep(stepName, 'reviewer-codex', dependsOn, artifactsDir, Boolean(spec.targetContext), selection, final);
-  }
-
-  const marker = final ? 'FINAL_REVIEW_CODEX_PASS' : 'REVIEW_COMPLETE';
-  const reviewPath = `${artifactsDir}/${stepName}.md`;
-  const label = final ? 'Final Codex structural marker gate' : 'Codex structural marker gate';
-  const lines = [
-    "node - <<'NODE'",
-    "const fs = require('node:fs');",
-    `const out = ${literal(reviewPath)};`,
-    'const body = [',
-    `  ${literal(`# ${label}`)},`,
-    "  '',",
-    `  ${literal(`- Spec: ${spec.description}`)},`,
-    "  '- This deterministic structural marker replaces the hanging non-interactive Codex reviewer path for non-code workflow slices.',",
-    "  '- It is not an independent reviewer subprocess and must not be presented as independent review evidence.',",
-    "  '- Substantive review evidence comes from the Claude review steps plus deterministic validation gates.',",
-    `  ${literal(`- Marker artifact: ${reviewPath}`)},`,
-    "  '- Deterministic validation gates completed before this review step.',",
-    "  '',",
-    `  ${literal(marker)},`,
-    '].join("\\n");',
-    "fs.writeFileSync(out, `${body}\n`);",
-    `console.log(${literal(final ? 'FINAL_REVIEW_CODEX_GATE_PASS' : 'REVIEW_CODEX_GATE_PASS')});`,
-    'NODE',
-  ];
-
-  return renderDeterministicStep(stepName, dependsOn, lines.join('\n'), true);
-}
-
-function renderReadReviewStep(artifactsDir: string): string {
-  return renderDeterministicStep(
-    'read-review-feedback',
-    ['review-claude', 'review-codex'],
-    [
-      `test -f ${shellQuote(`${artifactsDir}/review-claude.md`)}`,
-      `test -f ${shellQuote(`${artifactsDir}/review-codex.md`)}`,
-      `grep -F ${shellQuote('REVIEW_COMPLETE')} ${shellQuote(`${artifactsDir}/review-claude.md`)}`,
-      `grep -F ${shellQuote('REVIEW_COMPLETE')} ${shellQuote(`${artifactsDir}/review-codex.md`)}`,
-      `cat ${shellQuote(`${artifactsDir}/review-claude.md`)} ${shellQuote(`${artifactsDir}/review-codex.md`)} | tee ${shellQuote(`${artifactsDir}/review-feedback.md`)}`,
-    ].join(' && '),
-    true,
-  );
-}
-
 function renderFixLoopStep(
+  stepName: string,
+  agent: string,
+  dependsOn: string[],
+  reviewPath: string,
+  reportPath: string,
+  marker: string,
   spec: NormalizedWorkflowSpec,
   isCodeWorkflow: boolean,
   artifactsDir: string,
   selection?: ToolSelection,
+  final = false,
 ): string {
   const selectionLines = renderSelectionFields(selection);
-  return `    .step('fix-loop', {
-      agent: ${literal(isCodeWorkflow ? 'validator-claude' : 'validator-codex')},
-      dependsOn: ['read-review-feedback', 'initial-soft-validation'],
+  return `    .step(${literal(stepName)}, {
+      agent: ${literal(agent)},
+      dependsOn: ${arrayLiteral(dependsOn)},
 ${selectionLines}
       timeoutMs: ${DEFAULT_FIX_LOOP_TIMEOUT_MS},
-      task: ${templateLiteral(`Run the 80-to-100 fix loop.
+      task: ${templateLiteral(`${final ? 'Run the final review-fix pass.' : 'Run the 80-to-100 review-fix loop.'}
 
 Inputs:
-- ${artifactsDir}/review-feedback.md
+- ${reviewPath}
+- ${artifactsDir}/acceptance-contract.json
+- ${artifactsDir}/verification-plan.md
 
 Review feedback:
-{{steps.read-review-feedback.output}}
+Read ${reviewPath} from disk.
 
-Initial validation output:
-{{steps.initial-soft-validation.output}}
+${dependsOn.includes('initial-soft-validation') ? 'Initial validation output:\n{{steps.initial-soft-validation.output}}\n' : ''}
 
-Fix only concrete review or validation findings. Preserve the declared target boundary:
+If the review says verdict: NO_ISSUES_FOUND, record that no fix was needed.
+If the review lists findings, fix every valid issue and add or update appropriate tests, fixtures, assertions, or deterministic proofs for testable findings.
+If no fix is possible, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.
+Preserve the declared target boundary:
 ${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : ['No explicit targets supplied'])}
 ${renderToolSelectionSummary(selection)}
 
-Before exiting, write ${artifactsDir}/fix-loop-report.md summarizing the exact fixes you applied or explicitly saying that no repo changes were required, then end that file with FIX_LOOP_COMPLETE.
+Before exiting, write ${reportPath} summarizing the exact fixes you applied or explicitly saying that no repo changes were required, then end that file with ${marker}.
 Re-run ${isCodeWorkflow ? 'typecheck and tests' : 'document sanity checks'} before handing off to post-fix validation.`)},
-      verification: { type: 'file_exists', value: ${literal(`${artifactsDir}/fix-loop-report.md`)} },
+      verification: { type: 'file_exists', value: ${literal(reportPath)} },
     })`;
 }
 
@@ -1135,9 +1120,14 @@ function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string 
     '  return match[2];',
     '});',
     'const docs = [',
-    "  ['review-feedback.md', read('review-feedback.md')],",
+    "  ['review-claude.md', read('review-claude.md')],",
     "  ['fix-loop-report.md', read('fix-loop-report.md')],",
     "  ['final-review-claude.md', read('final-review-claude.md')],",
+    "  ['claude-final-fix.md', read('claude-final-fix.md')],",
+    "  ['review-codex.md', read('review-codex.md')],",
+    "  ['codex-fix-loop-report.md', read('codex-fix-loop-report.md')],",
+    "  ['final-review-codex.md', read('final-review-codex.md')],",
+    "  ['codex-final-fix.md', read('codex-final-fix.md')],",
     "  ['signoff.md', read('signoff.md')],",
     '];',
     'for (const [name, body] of docs) {',
@@ -1145,8 +1135,8 @@ function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string 
     "    if (!body.includes(path)) throw new Error(name + ' missing manifest path: ' + path);",
     '  }',
     '}',
-    'const codexMarker = read(\'final-review-codex.md\');',
-    "if (!codexMarker.includes('FINAL_REVIEW_CODEX_PASS')) throw new Error('final-review-codex marker missing pass sentinel');",
+    'const codexMarker = read(\'codex-final-fix.md\');',
+    "if (!codexMarker.includes('CODEX_FINAL_FIX_COMPLETE')) throw new Error('codex-final-fix marker missing pass sentinel');",
     'const staleTargets = [',
     "  ['test', 'smoke' + '.test' + '.ts'].join('/'),",
     "  'smoke' + '.test' + '.ts',",

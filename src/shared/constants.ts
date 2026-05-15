@@ -38,7 +38,7 @@ export const DEFAULT_REPAIR_RETRY_ATTEMPTS = 2;
 
 export const DEFAULT_AUTO_FIX_ATTEMPTS = 7;
 
-export const DEFAULT_RETRY_BACKOFF_MS = 1_000;
+export const DEFAULT_RETRY_BACKOFF_MS = 10_000;
 
 export const DEFAULT_VALIDATION_POLICY = {
   mode: 'standard',
