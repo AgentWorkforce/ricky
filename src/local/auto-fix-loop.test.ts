@@ -1020,6 +1020,40 @@ describe('runWithAutoFix', () => {
     }
   });
 
+  it('does not treat a non-executable --spec-file path as a workflow artifact to repair', async () => {
+    // Regression: when `ricky --spec-file docs/foo.md` failed at the intake
+    // stage (e.g. unresolved clarification questions), `resolveArtifactPath`
+    // used to fall back to `request.specPath`, which pointed at the source
+    // spec markdown. Auto-fix then handed the markdown to the workflow
+    // repairer, re-fed the "repaired" content as source=workflow-artifact,
+    // and looped 7× while the natural-language intent detector misrouted the
+    // spec body to debug. With no executable workflow path available, there
+    // is nothing to repair and auto-fix should bail on attempt 1.
+    const specFileRequest: LocalInvocationRequest = {
+      ...baseRequest,
+      spec: '# Some markdown spec\n\nUnresolved question?',
+      specPath: 'docs/some-spec.md',
+    };
+    const runSingleAttempt = vi.fn().mockResolvedValueOnce(generationOnlyFailureResponse());
+    const workflowRepairer = vi.fn().mockResolvedValue(workflowRepair('should-not-run'));
+    const artifactWriter = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runWithAutoFix(specFileRequest, {
+      maxAttempts: 7,
+      runSingleAttempt,
+      classifyFailure: fakeClassification,
+      debugWorkflowRun: directDebugger,
+      workflowRepairer,
+      artifactWriter,
+    });
+
+    expect(runSingleAttempt).toHaveBeenCalledTimes(1);
+    expect(workflowRepairer).not.toHaveBeenCalled();
+    expect(artifactWriter).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.auto_fix?.attempts).toHaveLength(1);
+  });
+
 });
 
 describe('isSyntheticStageId', () => {
@@ -1058,6 +1092,22 @@ function successResponse(runId: string): LocalResponse {
       execution: execution(runId),
     },
     exitCode: 0,
+  };
+}
+
+function generationOnlyFailureResponse(): LocalResponse {
+  return {
+    ok: false,
+    artifacts: [],
+    logs: [],
+    warnings: ['routing: Spec has unresolved workflow authoring questions'],
+    nextActions: ['Clarify the local workflow request and retry.'],
+    generation: {
+      stage: 'generate',
+      status: 'needs_clarification',
+      error: 'routing: Spec has unresolved workflow authoring questions',
+    },
+    exitCode: 2,
   };
 }
 

@@ -1700,7 +1700,7 @@ function artifactPathOverrideFor(request: LocalInvocationRequest): string | unde
   return typeof candidate === 'string' && candidate.trim() ? candidate : undefined;
 }
 
-function isExecutableWorkflowPath(path: string): boolean {
+export function isExecutableWorkflowPath(path: string): boolean {
   return /(?:^|\/)workflows\/.+\.(?:ts|js)$|\.workflow\.(?:ts|js|yaml|yml)$/i.test(path);
 }
 
