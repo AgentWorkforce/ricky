@@ -295,6 +295,34 @@ export async function writeWorkflowWithWorkforcePersona(
   // `run.cancel()` to release any subprocess handles the runner still owns
   // and throwing a WorkforcePersonaWriterError so the caller can move on
   // instead of blocking the master script forever.
+  //
+  // ⚠️  Known limitation: the watchdog is implemented with `setTimeout` and
+  // therefore relies on Node's event loop being able to run timer callbacks.
+  // A hang inside a native libuv code path that does not yield (observed
+  // 2026-05-15 on pr-01 of the cloud MCP cloud-spawn split: writer authored
+  // 43 KB to disk + staged 12 files in the worktree via the Write tool,
+  // then sat at 0% CPU for 60+ minutes with no claude child) can prevent
+  // the watchdog timer from ever firing. For hang-recovery guarantees in
+  // batch-mode usage (master scripts iterating many specs), wrap each
+  // ricky invocation in an OS-level timeout that operates from outside the
+  // process. Example, using GNU coreutils:
+  //
+  //     gtimeout --kill-after=30s "${PER_SPEC_TIMEOUT_SECONDS}s" \
+  //       ricky --mode local --spec-file <spec>.md --run --workforce-persona ...
+  //
+  // The kernel signals are immune to a blocked main thread; the JS watchdog
+  // here remains as a best-effort defense-in-depth that catches the common
+  // half-open-pipe case while leaving the harder native-hang case to the
+  // outer wrapper.
+  if (process.env.RICKY_WRITER_WATCHDOG_VERBOSE === '1') {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[ricky] writer starting (timeoutSeconds=${effectiveTimeoutSeconds}, ` +
+        `js-watchdog-at=${effectiveTimeoutSeconds + WRITER_WATCHDOG_GRACE_SECONDS}s). ` +
+        `If this never returns, the JS watchdog cannot kill a hang in native libuv code — ` +
+        `wrap ricky in an outer \`timeout(1)\` for hang recovery.`,
+    );
+  }
   const [result, runId] = await waitForWriterWithWatchdog(run, effectiveTimeoutSeconds, resolved.warnings);
   const dumpDebug = (reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success') =>
     dumpPersonaDebug({
@@ -1559,6 +1587,17 @@ const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
 /**
  * Awaits the harness-kit writer execution with a watchdog so a stuck
  * subprocess settle path can't hang the caller indefinitely.
+ *
+ * ⚠️  Known limitation: the watchdog uses `setTimeout`, which only fires
+ * when Node's event loop is free to run timer callbacks. A hang in a
+ * native libuv code path that does not yield (observed 2026-05-15: writer
+ * authored 43 KB to disk + staged 12 files via the Write tool, then ricky
+ * sat at 0% CPU for 60+ minutes without ever advancing past the
+ * `Promise.all` await) prevents this watchdog from firing. The only
+ * reliable hang-recovery in that scenario is an OS-level timeout outside
+ * the process, e.g. `gtimeout --kill-after=30s 5400s ricky ...` in batch
+ * mode. The JS watchdog here remains as a best-effort defense-in-depth
+ * for the common half-open-pipe case.
  *
  * Background — production hang on 2026-05-15:
  * - claude writer subprocess ran to its harness-kit-declared timeout
