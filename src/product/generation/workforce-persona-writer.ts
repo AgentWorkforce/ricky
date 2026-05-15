@@ -229,10 +229,6 @@ export async function writeWorkflowWithWorkforcePersona(
 ): Promise<WorkforcePersonaWriterResult> {
   const workflowName = options.workflowName ?? workflowNameFromOutputPath(options.outputPath);
   const relevantFiles = await resolveRelevantFiles(options.repoRoot, spec, options.relevantFiles);
-  // Pin "writer invoked at" before the spawn so the parser's disk fallback
-  // can prove a file at outputPath was actually written by THIS run (mtime
-  // newer than this timestamp) rather than left over from a prior attempt.
-  const writerInvokedAtMs = Date.now();
   const resolver = options.resolver ?? defaultWorkforcePersonaResolver;
   const resolved = await resolver(
     options.personaIntentCandidates ?? WORKFORCE_PERSONA_INTENT_CANDIDATES,
@@ -250,6 +246,13 @@ export async function writeWorkflowWithWorkforcePersona(
   });
   const promptDigest = digest(task);
   const selection = resolved.context.selection;
+  // Pin "writer invoked at" immediately before the spawn so the parser's
+  // disk fallback can prove a file at outputPath was actually written by
+  // THIS sendMessage window (mtime > this timestamp) rather than left
+  // over from a prior attempt. Capturing earlier — e.g. before the
+  // resolver and task-builder awaits — opens a multi-second window in
+  // which a stale leftover could falsely satisfy the freshness check.
+  const writerInvokedAtMs = Date.now();
   const run = resolved.context.sendMessage(task, {
     workingDirectory: options.repoRoot,
     name: `ricky-workflow-writer-${promptDigest.slice(0, 12)}`,
