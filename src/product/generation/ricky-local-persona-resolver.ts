@@ -3,6 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { BUNDLED_RICKY_LOCAL_PERSONAS } from './bundled-personas.js';
 import {
   defaultWorkforcePersonaResolver as packageWorkforcePersonaResolver,
   WorkforcePersonaWriterError,
@@ -97,13 +98,33 @@ export function resetRickyLocalPersonaCacheForTests(): void {
 }
 
 /**
- * Loads every `personas/*.json` Ricky-local spec from `dir`. Files that fail
- * to parse are skipped with a warning rather than throwing; the resolver
- * should treat a missing or malformed override as "fall through to the
- * package resolver" rather than hard-failing the writer.
+ * Loads every Ricky-local persona spec available to the resolver. Seeds the
+ * cache from {@link BUNDLED_RICKY_LOCAL_PERSONAS} (always present because
+ * esbuild inlines them at bundle time), then layers any `personas/*.json`
+ * read from `dir` on top so a developer-edited file overrides the bundled
+ * default for that intent.
+ *
+ * The bundled fallback exists because the install-time filesystem layout has
+ * proven fragile: between v0.1.38 and v0.1.51 the `files` array in
+ * `package.json` did not include `"personas"`, so the published tarball
+ * shipped without the directory and every `npm install -g
+ * @agentworkforce/ricky` of those versions was silently broken at the writer
+ * step. The bundle is the source of truth at runtime; the filesystem is a
+ * developer-time override mechanism.
+ *
+ * Files that fail to parse are skipped silently — the resolver treats a
+ * malformed override as "fall back to the bundled spec or the package
+ * resolver" rather than hard-failing the writer.
  */
 export async function loadAllRickyLocalPersonas(dir: string): Promise<LoadedPersonaCache> {
   const byIntent = new Map<string, RickyLocalPersonaSpec>();
+  // Seed from the bundle so we always have at least the published persona
+  // set, regardless of install layout or `files`-array drift.
+  for (const spec of BUNDLED_RICKY_LOCAL_PERSONAS) {
+    if (isRickyLocalPersonaSpec(spec)) {
+      byIntent.set(spec.intent, spec);
+    }
+  }
   let entries: string[];
   try {
     entries = await readdir(dir);
@@ -122,6 +143,8 @@ export async function loadAllRickyLocalPersonas(dir: string): Promise<LoadedPers
       if (!isRickyLocalPersonaSpec(spec)) {
         continue;
       }
+      // Filesystem entries override the bundled spec for the same intent,
+      // letting developers test persona changes without rebuilding the CLI.
       byIntent.set(spec.intent, spec);
     } catch {
       // Skip unreadable or invalid persona JSONs; the resolver falls through.
