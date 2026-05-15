@@ -1,3 +1,6 @@
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { Node, Parent, Root } from 'mdast';
+
 import type {
   DesiredAction,
   ExecutionPreference,
@@ -126,18 +129,76 @@ function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
  * to `auto`, which in turn fired the execution-mode-conflict clarification.
  * Authors had to learn the magic "Clarification answers: ..." section to
  * pin the preference; a bare prose declaration is the more natural surface.
+ *
+ * Parses via `mdast-util-from-markdown` (per AGENTS.md: use grammar-aware
+ * parsers for markdown) so paragraphs that happen to live inside fenced
+ * code blocks don't false-match, and so wrapped paragraphs are matched as
+ * one logical line rather than per source-text line.
  */
 function executionPreferenceFromDeclaration(description: string): ExecutionPreference | undefined {
-  for (const rawLine of description.split(/\r?\n/)) {
-    const line = rawLine.trim().replace(/^[-*+]\s+/, '');
-    const match = line.match(/^(?:execution\s+(?:preference|mode)|run\s+(?:in|on))\s*[:=]\s*(.+?)\s*$/i);
-    if (!match) continue;
-    const value = match[1].toLowerCase();
-    if (/\b(both|auto|both paths)\b/.test(value)) return 'auto';
-    if (/\b(local|locally|byoh|on this machine)\b/.test(value)) return 'local';
-    if (/\b(cloud|hosted|remote)\b/.test(value)) return 'cloud';
+  let tree: Root;
+  try {
+    tree = fromMarkdown(description);
+  } catch {
+    return undefined;
   }
-  return undefined;
+  let resolved: ExecutionPreference | undefined;
+  visitParagraphsAndItems(tree, (text) => {
+    if (resolved) return;
+    const match = text.match(/^(?:execution\s+(?:preference|mode)|run\s+(?:in|on))\s*[:=]\s*(.+)$/is);
+    if (!match) return;
+    resolved = preferenceFromDeclaredValue(match[1]);
+  });
+  return resolved;
+}
+
+/**
+ * Resolve `local | cloud | auto` from the right-hand side of an
+ * `Execution preference: ...` declaration. Position-based, not priority-
+ * based: when both `local` and `cloud` appear, the first one wins. This
+ * fixes a fixed-priority bias that returned `local` for declarations like
+ * `Execution preference: cloud. Local is a follow-up.`.
+ */
+function preferenceFromDeclaredValue(rawValue: string): ExecutionPreference | undefined {
+  const value = rawValue.toLowerCase().trim();
+  const bothIdx = firstMatchIndex(value, /\b(both|auto|both paths)\b/);
+  const localIdx = firstMatchIndex(value, /\b(local|locally|byoh|on this machine)\b/);
+  const cloudIdx = firstMatchIndex(value, /\b(cloud|hosted|remote)\b/);
+
+  const candidates: Array<[number, ExecutionPreference]> = [];
+  if (bothIdx >= 0) candidates.push([bothIdx, 'auto']);
+  if (localIdx >= 0) candidates.push([localIdx, 'local']);
+  if (cloudIdx >= 0) candidates.push([cloudIdx, 'cloud']);
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => a[0] - b[0]);
+  return candidates[0][1];
+}
+
+function firstMatchIndex(text: string, pattern: RegExp): number {
+  const match = pattern.exec(text);
+  return match ? match.index : -1;
+}
+
+function visitParagraphsAndItems(node: Node, visit: (text: string) => void): void {
+  if (node.type === 'code') return; // skip fenced code blocks
+  if (node.type === 'paragraph' || node.type === 'listItem') {
+    visit(collectText(node).replace(/\s+/g, ' ').trim());
+  }
+  if (isParent(node)) {
+    for (const child of node.children) visitParagraphsAndItems(child, visit);
+  }
+}
+
+function collectText(node: Node): string {
+  if (node.type === 'code') return '';
+  const candidate = (node as unknown as { value?: unknown }).value;
+  if (typeof candidate === 'string') return candidate;
+  if (isParent(node)) return node.children.map(collectText).join('');
+  return '';
+}
+
+function isParent(node: Node): node is Parent {
+  return Array.isArray((node as Parent).children);
 }
 
 function explicitExecutionPreference(parsed: ParsedSpec): ExecutionPreference | undefined {

@@ -50,13 +50,15 @@ describe('analyzeClarificationNeeds', () => {
 
     // Each numbered item collapses to a single coalesced question — none of the
     // mid-question continuation lines should appear as standalone fragments.
+    // We match against plain-text substrings because the mdast walker emits
+    // inline-code values without the surrounding backticks.
     expect(questions).toEqual(
       expect.arrayContaining([
         expect.stringContaining('Should the skill contracts be changed to match current runtime names'),
         expect.stringContaining('should runtime change to match skills'),
-        expect.stringContaining('Should digest generation remain generic in `cloud`'),
-        expect.stringContaining('Is `/.skills/activity-summary.md` intended to be a mounted runtime artifact'),
-        expect.stringContaining('Is `by-edited` mandatory for every resource'),
+        expect.stringContaining('Should digest generation remain generic in'),
+        expect.stringContaining('intended to be a mounted runtime artifact'),
+        expect.stringContaining('mandatory for every resource'),
         expect.stringContaining('Should writeback status history be durable enough'),
       ]),
     );
@@ -79,6 +81,30 @@ describe('analyzeClarificationNeeds', () => {
     // capped this at 3, hiding the rest until the user re-ran).
     const openQuestionMatches = questions.filter((q) => /Should we pick option \d/.test(q));
     expect(openQuestionMatches).toHaveLength(6);
+  });
+
+  it('resolves execution preference by first-mention position, not fixed priority order', () => {
+    // Regression: when the declared value mentions both "cloud" and "local",
+    // the function used to return 'local' regardless of which one appeared
+    // first. The author of `Execution preference: cloud. Local is a follow-up.`
+    // means cloud — the trailing prose about "local follow-up" should not
+    // invert the declaration.
+    const cloudFirst = [
+      'Generate a workflow.',
+      '',
+      'Execution preference: cloud. Local is a follow-up.',
+    ].join('\n');
+    const localFirst = [
+      'Generate a workflow.',
+      '',
+      'Execution preference: local/BYOH first. Cloud promotion is a follow-up.',
+    ].join('\n');
+
+    const cloudNormalized = normalizeSpec(parseSpec(cliStructured(cloudFirst))).normalized;
+    expect(cloudNormalized.executionPreference).toBe('cloud');
+
+    const localNormalized = normalizeSpec(parseSpec(cliStructured(localFirst))).normalized;
+    expect(localNormalized.executionPreference).toBe('local');
   });
 
   it('does not surface the execution-mode conflict when the spec declares Execution preference: local', () => {

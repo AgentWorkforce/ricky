@@ -1,3 +1,6 @@
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { Heading, List, ListItem, Node, Paragraph, Parent, Root } from 'mdast';
+
 import type { ClarificationQuestion, NormalizedWorkflowSpec, ValidationIssue } from './types.js';
 
 export function analyzeClarificationNeeds(
@@ -106,99 +109,157 @@ function textWithoutClarificationAnswerSections(text: string): string {
   return retained.join('\n');
 }
 
+// Markdown structures that head an "open questions" section. Matched against
+// the plain text of a heading node (not the raw line) so prefix `#`s don't
+// affect detection.
+const OPEN_QUESTIONS_HEADING = /^(?:open questions?|questions?|clarifications needed|unresolved|tbd)\s*:?\s*$/i;
+const CLARIFICATION_ANSWERS_HEADING = /^(?:clarification answers?|resolved clarifications?)\s*:?\s*$/i;
+const UNRESOLVED_TOKEN = /^(?:tbd|todo|unclear|unspecified|not sure|decide later|open question)\b/i;
+const UNRESOLVED_TOKEN_INLINE = /\b(?:tbd|unclear|unspecified|not sure|decide later|\?\?\?)\b/i;
+
+/**
+ * Collect candidate open-question lines from the spec description. Uses
+ * `mdast-util-from-markdown` (per AGENTS.md: "Source-Text Analysis: Use
+ * Grammar-Aware Parsers, Not Regex") so list-item coalescing is structural —
+ * each `listItem` node already contains the full wrapped item text via the
+ * paragraph children — and fenced code blocks (`code` nodes) are excluded by
+ * construction. This replaces an earlier line-by-line state machine whose
+ * blank-line and heading-boundary handling repeatedly emitted truncated
+ * tails of multi-line numbered questions.
+ */
 function openQuestionLines(text: string): string[] {
-  const lines = text.split(/\r?\n/);
-  const questionLines: string[] = [];
+  let tree: Root;
+  try {
+    tree = fromMarkdown(text);
+  } catch {
+    return [];
+  }
+
+  const questions: string[] = [];
   let inOpenQuestionSection = false;
-  let inClarificationAnswerSection = false;
-  // Accumulator for the current numbered/bulleted question inside the Open
-  // Questions section. Multi-line markdown items are common (the source spec
-  // typically wraps questions across 2-4 lines), so we buffer continuation
-  // lines until a blank line, a new list marker, or a section boundary, then
-  // emit a single coalesced question. Without this, the tail line of each
-  // wrapped question (the one that ends with "?") becomes its own clarification
-  // and the user sees truncated fragments instead of full questions.
-  let pendingItem: string[] | null = null;
-  const flushPending = () => {
-    if (!pendingItem) return;
-    const joined = pendingItem.join(' ').replace(/\s+/g, ' ').trim();
-    if (joined) questionLines.push(joined);
-    pendingItem = null;
-  };
+  let openSectionDepth = 0;
+  let inAnswersSection = false;
+  let answersSectionDepth = 0;
 
-  for (const rawLine of lines) {
-    const trimmed = rawLine.trim();
-    const line = stripListMarker(trimmed);
-    if (!line) {
-      // Blank lines flush the current question but do NOT exit the Open
-      // Questions section. Markdown convention places a blank line between
-      // the heading and the list, and many specs separate items with blank
-      // lines; treating blank lines as section terminators dropped us back to
-      // the explicit-`?` path and surfaced only the wrapped tail of each
-      // multi-line item. The clarification-answer section is similarly
-      // closed only by a real new heading.
-      flushPending();
-      continue;
-    }
+  for (const child of tree.children) {
+    if (child.type === 'heading') {
+      const heading = child as Heading;
+      const headingText = collectText(heading).trim();
 
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
-      flushPending();
-      inOpenQuestionSection = false;
-      inClarificationAnswerSection = true;
-      continue;
-    }
+      if (inOpenQuestionSection && heading.depth <= openSectionDepth) {
+        inOpenQuestionSection = false;
+      }
+      if (inAnswersSection && heading.depth <= answersSectionDepth) {
+        inAnswersSection = false;
+      }
 
-    if (/^(#{1,6}\s*)?(open questions?|questions?|clarifications needed|unresolved|tbd)\s*:?\s*$/i.test(line)) {
-      flushPending();
-      inOpenQuestionSection = true;
-      inClarificationAnswerSection = false;
-      continue;
-    }
-
-    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line) && !/^(tbd|todo|unclear|unspecified|open question)/i.test(line)) {
-      flushPending();
-      inOpenQuestionSection = false;
-      inClarificationAnswerSection = false;
-    }
-
-    // A new markdown heading (other than the open-questions / clarification-
-    // answers headings already handled above) closes the open-questions
-    // section. Previously blank lines did this implicitly; now that we keep
-    // wrapping items together across blank lines, we need an explicit
-    // boundary so a later "## Cross-Repo Work Plan" section doesn't keep
-    // pulling lines into the Open Questions bucket.
-    if (/^#{1,6}\s+\S/.test(trimmed)) {
-      flushPending();
-      inOpenQuestionSection = false;
-      inClarificationAnswerSection = false;
-      continue;
-    }
-
-    if (inClarificationAnswerSection) continue;
-
-    if (inOpenQuestionSection) {
-      const startsNewItem = /^(?:[-*+]\s+|\d+[.)]\s+|\[[ xX]\]\s+)/.test(trimmed);
-      if (startsNewItem) {
-        flushPending();
-        pendingItem = [line];
-      } else if (pendingItem) {
-        pendingItem.push(line);
-      } else {
-        pendingItem = [line];
+      if (CLARIFICATION_ANSWERS_HEADING.test(headingText)) {
+        inAnswersSection = true;
+        answersSectionDepth = heading.depth;
+        inOpenQuestionSection = false;
+        continue;
+      }
+      if (OPEN_QUESTIONS_HEADING.test(headingText)) {
+        inOpenQuestionSection = true;
+        openSectionDepth = heading.depth;
+        inAnswersSection = false;
+        continue;
       }
       continue;
     }
 
-    const explicitQuestion = line.endsWith('?');
-    const unresolvedItem = /^(?:tbd|todo|unclear|unspecified|not sure|decide later|open question)\b/i.test(line) ||
-      /\b(?:tbd|unclear|unspecified|not sure|decide later|\?\?\?)\b/i.test(line);
-    if (explicitQuestion || unresolvedItem) {
-      questionLines.push(line);
+    // Authors often write "Clarification answers:" as a plain paragraph
+    // (not a markdown heading) immediately under the Open Questions list,
+    // following the interactive CLI's appended format. Treat that paragraph
+    // as a soft section terminator so the answer Q/A lines don't get pulled
+    // back in as new open questions.
+    if (child.type === 'paragraph') {
+      const para = collectText(child as Paragraph).trim();
+      if (CLARIFICATION_ANSWERS_HEADING.test(para)) {
+        inOpenQuestionSection = false;
+        inAnswersSection = true;
+        answersSectionDepth = openSectionDepth || 0;
+        continue;
+      }
     }
+
+    if (inAnswersSection) continue;
+
+    if (inOpenQuestionSection) {
+      collectFromOpenQuestionBlock(child, questions);
+      continue;
+    }
+
+    collectStandaloneUnresolved(child, questions);
   }
 
-  flushPending();
-  return questionLines;
+  return questions;
+}
+
+/**
+ * Inside an "open questions" section: emit one candidate per list item, plus
+ * any standalone paragraphs that are themselves a question or an unresolved
+ * marker. Pure prose (intro sentences, trailing notes) is ignored.
+ */
+function collectFromOpenQuestionBlock(node: Node, out: string[]): void {
+  if (node.type === 'list') {
+    for (const item of (node as List).children as ListItem[]) {
+      const itemText = collectText(item).replace(/\s+/g, ' ').trim();
+      if (itemText) out.push(itemText);
+    }
+    return;
+  }
+  if (node.type === 'paragraph') {
+    const text = collectText(node as Paragraph).replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    if (text.endsWith('?') || UNRESOLVED_TOKEN.test(text) || UNRESOLVED_TOKEN_INLINE.test(text)) {
+      out.push(text);
+    }
+  }
+}
+
+/**
+ * Outside any open-questions section: still surface explicit questions and
+ * unresolved markers found in plain paragraphs or list items so a TBD/`?`
+ * line elsewhere in the spec is not silently dropped. Walks the subtree to
+ * find paragraph nodes; `code` blocks are skipped via `collectText`.
+ */
+function collectStandaloneUnresolved(node: Node, out: string[]): void {
+  if (node.type === 'paragraph') {
+    const text = collectText(node as Paragraph).replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    if (text.endsWith('?') || UNRESOLVED_TOKEN.test(text) || UNRESOLVED_TOKEN_INLINE.test(text)) {
+      out.push(text);
+    }
+    return;
+  }
+  if (node.type === 'list') {
+    for (const item of (node as List).children as ListItem[]) {
+      const text = collectText(item).replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      if (text.endsWith('?') || UNRESOLVED_TOKEN.test(text) || UNRESOLVED_TOKEN_INLINE.test(text)) {
+        out.push(text);
+      }
+    }
+    return;
+  }
+  if (isParent(node)) {
+    for (const child of node.children) collectStandaloneUnresolved(child, out);
+  }
+}
+
+function collectText(node: Node): string {
+  // Fenced code blocks must not contribute to detection — a `?` line inside
+  // an example workflow body is not a real question to ask the user.
+  if (node.type === 'code') return '';
+  const candidate = (node as unknown as { value?: unknown }).value;
+  if (typeof candidate === 'string') return candidate;
+  if (isParent(node)) return node.children.map(collectText).join('');
+  return '';
+}
+
+function isParent(node: Node): node is Parent {
+  return Array.isArray((node as Parent).children);
 }
 
 function answeredClarificationQuestions(text: string): Set<string> {
