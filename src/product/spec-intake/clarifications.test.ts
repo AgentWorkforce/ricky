@@ -141,4 +141,56 @@ describe('analyzeClarificationNeeds', () => {
     expect(questions.some((q) => /option A or option B/.test(q))).toBe(false);
     expect(questions.some((q) => /keep the old behavior/.test(q))).toBe(true);
   });
+
+  it('skips items already answered in a Best-judgement clarifications block', () => {
+    const spec = [
+      'Generate a workflow.',
+      '',
+      '## Open Questions',
+      '',
+      '1. Should we pick option A or option B?',
+      '2. Should we keep the old behavior?',
+      '',
+      'Best-judgement clarifications:',
+      '- Should we pick option A or option B?: option A',
+    ].join('\n');
+
+    const questions = questionsFor(spec);
+    expect(questions.some((q) => /option A or option B/.test(q))).toBe(false);
+    expect(questions.some((q) => /keep the old behavior/.test(q))).toBe(true);
+  });
+
+  it('terminates paragraph-style Open questions sections at the next heading', () => {
+    const spec = [
+      'Generate a workflow.',
+      '',
+      'Open questions:',
+      '',
+      '1. Should we pick option A or option B?',
+      '',
+      '## Scope',
+      '',
+      '- Use the current repository.',
+    ].join('\n');
+
+    const questions = questionsFor(spec);
+    expect(questions.some((q) => /option A or option B/.test(q))).toBe(true);
+    expect(questions.some((q) => /Use the current repository/.test(q))).toBe(false);
+  });
+
+  it('uses Best-judgement clarifications to answer the execution-mode conflict', () => {
+    const spec = [
+      'Generate a workflow that touches the local relayfile mount and the hosted cloud runtime.',
+      '',
+      'Best-judgement clarifications:',
+      '- Should this workflow run locally/BYOH, in Cloud, or generate artifacts for both paths?: local/BYOH',
+    ].join('\n');
+
+    const parsed = parseSpec(cliStructured(spec));
+    const { normalized, issues } = normalizeSpec(parsed);
+
+    expect(normalized.executionPreference).toBe('local');
+    const questions = analyzeClarificationNeeds(normalized, issues);
+    expect(questions.some((q) => /locally\/BYOH, in Cloud/i.test(q.question))).toBe(false);
+  });
 });

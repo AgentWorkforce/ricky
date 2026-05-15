@@ -94,12 +94,12 @@ function textWithoutClarificationAnswerSections(text: string): string {
       continue;
     }
 
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+    if (isClarificationAnswersHeading(line)) {
       inAnswerSection = true;
       continue;
     }
 
-    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+    if (isSectionLabel(line)) {
       inAnswerSection = false;
     }
 
@@ -179,12 +179,12 @@ function openQuestionLines(text: string): string[] {
       if (CLARIFICATION_ANSWERS_HEADING.test(lastLine)) {
         inOpenQuestionSection = false;
         inAnswersSection = true;
-        answersSectionDepth = openSectionDepth || 0;
+        answersSectionDepth = 6;
         continue;
       }
       if (OPEN_QUESTIONS_HEADING.test(lastLine)) {
         inOpenQuestionSection = true;
-        openSectionDepth = openSectionDepth || 1;
+        openSectionDepth = 6;
         inAnswersSection = false;
         continue;
       }
@@ -285,12 +285,12 @@ function answeredClarificationQuestions(text: string): Set<string> {
       continue;
     }
 
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+    if (isClarificationAnswersHeading(line)) {
       inAnswerSection = true;
       continue;
     }
 
-    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+    if (isSectionLabel(line)) {
       inAnswerSection = false;
     }
 
@@ -335,6 +335,18 @@ function stripListMarker(line: string): string {
     .replace(/^\d+[.)]\s+/, '')
     .replace(/^\[[ xX]\]\s+/, '')
     .trim();
+}
+
+function isClarificationAnswersHeading(line: string): boolean {
+  return CLARIFICATION_ANSWERS_HEADING.test(stripMarkdownHeadingMarker(line));
+}
+
+function isSectionLabel(line: string): boolean {
+  return /^(?:[A-Z][\w\s/-]{2,80})\s*:$/u.test(stripMarkdownHeadingMarker(line));
+}
+
+function stripMarkdownHeadingMarker(line: string): string {
+  return line.replace(/^#{1,6}\s+/, '').trim();
 }
 
 function lowercaseFirst(value: string): string {
@@ -386,11 +398,11 @@ function hasAnsweredExecutionModeConflict(text: string): boolean {
       inAnswerSection = false;
       continue;
     }
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+    if (isClarificationAnswersHeading(line)) {
       inAnswerSection = true;
       continue;
     }
-    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+    if (isSectionLabel(line)) {
       inAnswerSection = false;
     }
     if (

@@ -223,7 +223,7 @@ function executionPreferenceFromClarificationAnswers(description: string): Execu
       inAnswerSection = false;
       continue;
     }
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+    if (isClarificationAnswersHeading(line)) {
       inAnswerSection = true;
       continue;
     }
@@ -239,6 +239,12 @@ function executionPreferenceFromClarificationAnswers(description: string): Execu
     if (/\b(both|auto|both paths)\b/.test(answer)) return 'auto';
   }
   return undefined;
+}
+
+const CLARIFICATION_ANSWERS_HEADING = /^(?:clarification answers?|resolved clarifications?|best[- ]judgement clarifications?)\s*:?\s*$/i;
+
+function isClarificationAnswersHeading(line: string): boolean {
+  return CLARIFICATION_ANSWERS_HEADING.test(line.replace(/^#{1,6}\s+/, '').trim());
 }
 
 function stringMetadata(metadata: Record<string, unknown>, key: string): string | undefined {
