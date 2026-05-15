@@ -1962,9 +1962,9 @@ if [[ ! -x "$RUNNER" ]]; then
 fi
 
 cd "$REPO_ROOT"
-quarantine_repo_runtime_state
 reconcile_stale_state_dirs
 sync_repo_with_origin_main_if_safe
+quarantine_repo_runtime_state
 
 echo "running" > "$STATUS_FILE"
 git rev-parse HEAD > "$LAST_COMMIT_FILE"
