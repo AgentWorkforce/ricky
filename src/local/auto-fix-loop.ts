@@ -7,6 +7,7 @@ import ts from 'typescript';
 
 import type { LocalInvocationRequest } from './request-normalizer.js';
 import type { LocalClassifiedBlocker, LocalExecutionEvidence, LocalResponse } from './entrypoint.js';
+import { isExecutableWorkflowPath } from './entrypoint.js';
 import { classifyFailure as defaultClassifyFailure } from '../runtime/failure/classifier.js';
 import type { FailureClassification } from '../runtime/failure/types.js';
 import { debugWorkflowRun as defaultDebugWorkflowRun } from '../product/specialists/debugger/debugger.js';
@@ -1586,12 +1587,20 @@ async function resolveWorkflowRepairTarget(
 }
 
 function resolveArtifactPath(request: LocalInvocationRequest, response: LocalResponse): string | undefined {
+  // `request.specPath` is the LAST resort because for CLI invocations like
+  // `--spec-file docs/foo.md` it points at the source spec (markdown, etc.),
+  // not an executable workflow. Treating that as the "artifact to repair"
+  // makes auto-fix hand the markdown spec to the workflow repairer and then
+  // re-feed the result as source=workflow-artifact, which loses the original
+  // CLI intent and routes the spec body through natural-language intent
+  // detection — where failure-vocabulary keywords misroute it to debug.
+  // Only fall back to specPath when it actually names an executable workflow.
   return (
     response.execution?.execution.workflow_file ??
     response.execution?.execution.artifact_path ??
     response.generation?.artifact?.path ??
     response.artifacts[0]?.path ??
-    request.specPath
+    (request.specPath && isExecutableWorkflowPath(request.specPath) ? request.specPath : undefined)
   );
 }
 
