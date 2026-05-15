@@ -617,6 +617,61 @@ describe('runWithAutoFix', () => {
     expect(repair?.content).toContain('MISSING_ENV_VAR:');
   });
 
+  it('does not convert ambient provider credentials into workflow-start blockers', () => {
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/foo.ts',
+      artifactContent: workflowContent(),
+      evidence: missingEnvEvidence('OPENAI_API_KEY'),
+    });
+
+    expect(repair).toMatchObject({
+      applied: true,
+      mode: 'deterministic',
+      summary: expect.stringContaining('ambient BYOH/runtime vars as optional: OPENAI_API_KEY'),
+    });
+    expect(repair?.content).toContain('RICKY_WORKFLOW_ENV_LOADER');
+    expect(repair?.content).toContain('loadRickyWorkflowEnv();');
+    expect(repair?.content).not.toContain('assertRickyWorkflowEnv(["OPENAI_API_KEY"]);');
+  });
+
+  it('relaxes over-broad shell REQUIRED_VARS preflights for ambient BYOH/runtime vars', () => {
+    const overBroadPreflight = [
+      "import { workflow } from '@agent-relay/sdk/workflows';",
+      '',
+      'async function main() {',
+      "  await workflow('foo')",
+      "    .step('preflight', {",
+      "      type: 'deterministic',",
+      '      command: `set -euo pipefail',
+      'REQUIRED_VARS=(OPENAI_API_KEY ANTHROPIC_API_KEY NANGO_SECRET_KEY DATABASE_URL JWT_SECRET)',
+      'for VAR in "${REQUIRED_VARS[@]}"; do',
+      '  if [ -z "${!VAR+x}" ]; then',
+      '    echo "MISSING_ENV_VAR: $VAR"',
+      '    exit 1',
+      '  fi',
+      'done`,',
+      '      captureOutput: true,',
+      '      failOnError: true,',
+      '    })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+    ].join('\n');
+
+    const repair = repairWorkflowDeterministically({
+      artifactPath: 'workflows/generated/foo.ts',
+      artifactContent: overBroadPreflight,
+      evidence: missingEnvEvidence('OPENAI_API_KEY'),
+    });
+
+    expect(repair?.applied).toBe(true);
+    expect(repair?.content).toContain('OPTIONAL_VARS=(OPENAI_API_KEY ANTHROPIC_API_KEY NANGO_SECRET_KEY DATABASE_URL JWT_SECRET)');
+    expect(repair?.content).toContain('for VAR in "${OPTIONAL_VARS[@]}"; do');
+    expect(repair?.content).toContain('OPTIONAL_ENV_VAR_NOT_SET: $VAR');
+    expect(repair?.content).not.toContain('REQUIRED_VARS=(OPENAI_API_KEY');
+    expect(repair?.content).not.toContain('MISSING_ENV_VAR: $VAR');
+    expect(repair?.content).not.toContain('    exit 1');
+  });
+
   // Regression: assertRickyWorkflowEnv used to throw at module-load time
   // unconditionally, before the SDK had a chance to honour --start-from.
   // That made resuming with --start-from impossible if the resumed step
@@ -1725,7 +1780,7 @@ function leadPlanMarkerWorkflowContent(): string {
   ].join('\n');
 }
 
-function missingEnvEvidence(): WorkflowRunEvidence {
+function missingEnvEvidence(name = 'TEST_TOKEN'): WorkflowRunEvidence {
   return {
     runId: 'run-1',
     workflowId: 'wf-1',
@@ -1740,10 +1795,10 @@ function missingEnvEvidence(): WorkflowRunEvidence {
         status: 'failed',
         startedAt: '2026-04-28T00:00:00.000Z',
         completedAt: '2026-04-28T00:00:01.000Z',
-        error: 'MISSING_ENV_VAR: TEST_TOKEN',
+        error: `MISSING_ENV_VAR: ${name}`,
         verifications: [],
         deterministicGates: [],
-        logs: [{ stream: 'stderr', excerpt: 'MISSING_ENV_VAR: TEST_TOKEN' }],
+        logs: [{ stream: 'stderr', excerpt: `MISSING_ENV_VAR: ${name}` }],
         artifacts: [],
         history: [],
         retries: [],
@@ -1752,7 +1807,7 @@ function missingEnvEvidence(): WorkflowRunEvidence {
     ],
     deterministicGates: [],
     artifacts: [{ path: 'workflows/generated/foo.ts', kind: 'file' }],
-    logs: [{ stream: 'stderr', excerpt: 'MISSING_ENV_VAR: TEST_TOKEN' }],
+    logs: [{ stream: 'stderr', excerpt: `MISSING_ENV_VAR: ${name}` }],
     narrative: [],
     routing: [],
   };

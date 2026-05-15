@@ -98,6 +98,13 @@ export interface RunWithAutoFixOptions {
 }
 
 const DEFAULT_BACKOFF_MS = 500;
+const AMBIENT_OPTIONAL_ENV_VARS = new Set([
+  'ANTHROPIC_API_KEY',
+  'DATABASE_URL',
+  'JWT_SECRET',
+  'NANGO_SECRET_KEY',
+  'OPENAI_API_KEY',
+]);
 
 /**
  * When `failedStep` cannot be parsed from the workflow run's evidence, a retry
@@ -990,15 +997,21 @@ function repairMissingEnvVarPreflight(
   if (!isMissingEnvVarFailure(evidence, response)) return { content, changes: [] };
 
   const requiredEnvVars = missingEnvVarsFromFailure(evidence, response);
-  const next = injectWorkflowEnvLoader(content, requiredEnvVars);
+  const assertionEnvVars = requiredEnvVars.filter((name) => !AMBIENT_OPTIONAL_ENV_VARS.has(name));
+  const optionalEnvVars = requiredEnvVars.filter((name) => AMBIENT_OPTIONAL_ENV_VARS.has(name));
+  let next = injectWorkflowEnvLoader(content, assertionEnvVars);
+  next = relaxAmbientOptionalEnvPreflight(next, optionalEnvVars);
   if (next === content) return { content, changes: [] };
 
-  const assertion = requiredEnvVars.length > 0
-    ? ` and fast assertion for ${requiredEnvVars.join(', ')}`
+  const assertion = assertionEnvVars.length > 0
+    ? ` and fast assertion for ${assertionEnvVars.join(', ')}`
+    : '';
+  const optional = optionalEnvVars.length > 0
+    ? `; treated ambient BYOH/runtime vars as optional: ${optionalEnvVars.join(', ')}`
     : '';
   return {
     content: next,
-    changes: [`added repo-local .env loader${assertion}`],
+    changes: [`added repo-local .env loader${assertion}${optional}`],
   };
 }
 
@@ -1063,6 +1076,72 @@ function isConcreteEnvVarName(name: string): boolean {
   return /^[A-Z][A-Z0-9_]{2,}$/.test(name)
     && !['ENOENT', 'PATH'].includes(name)
     && (name.includes('_') || name.length > 3);
+}
+
+function relaxAmbientOptionalEnvPreflight(content: string, optionalEnvVars: string[]): string {
+  if (optionalEnvVars.length === 0) return content;
+
+  const optionalSet = new Set(optionalEnvVars);
+  const lines = content.split('\n');
+  let changed = false;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    const match = /^(\s*)REQUIRED_VARS=\(([^)]*)\)/.exec(line);
+    if (!match) continue;
+
+    const [, indent = '', body = ''] = match;
+    const names = body.split(/\s+/).filter(Boolean);
+    const optionalInArray = names.filter((name) => optionalSet.has(name) || AMBIENT_OPTIONAL_ENV_VARS.has(name));
+    if (optionalInArray.length === 0) continue;
+
+    const optionalInArraySet = new Set(optionalInArray);
+    const requiredInArray = names.filter((name) => !optionalInArraySet.has(name));
+    if (requiredInArray.length === 0) {
+      lines[index] = `${indent}OPTIONAL_VARS=(${optionalInArray.join(' ')})`;
+      relaxFollowingEnvLoop(lines, index + 1);
+    } else {
+      const loopLines = optionalEnvLoopLines(indent, optionalInArray);
+      lines[index] = `${indent}REQUIRED_VARS=(${requiredInArray.join(' ')})`;
+      lines.splice(index + 1, 0, ...loopLines);
+      index += loopLines.length;
+    }
+    changed = true;
+  }
+
+  return changed ? lines.join('\n') : content;
+}
+
+function optionalEnvLoopLines(indent: string, names: string[]): string[] {
+  return [
+    `${indent}OPTIONAL_VARS=(${names.join(' ')})`,
+    `${indent}for VAR in "\${OPTIONAL_VARS[@]}"; do`,
+    `${indent}  if [ -z "\${!VAR+x}" ]; then`,
+    `${indent}    echo "OPTIONAL_ENV_VAR_NOT_SET: $VAR"`,
+    `${indent}  fi`,
+    `${indent}done`,
+  ];
+}
+
+function relaxFollowingEnvLoop(lines: string[], startIndex: number): void {
+  let inLoop = false;
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (!inLoop && line.includes('REQUIRED_VARS[@]')) {
+      inLoop = true;
+      lines[index] = line.replace('REQUIRED_VARS[@]', 'OPTIONAL_VARS[@]');
+      continue;
+    }
+    if (!inLoop) continue;
+
+    lines[index] = (lines[index] ?? '').replace('MISSING_ENV_VAR:', 'OPTIONAL_ENV_VAR_NOT_SET:');
+    if ((lines[index] ?? '').trim() === 'exit 1') {
+      lines.splice(index, 1);
+      index -= 1;
+      continue;
+    }
+    if ((lines[index] ?? '').trim() === 'done') return;
+  }
 }
 
 function injectWorkflowEnvLoader(content: string, requiredEnvVars: string[]): string {
