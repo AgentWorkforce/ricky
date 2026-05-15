@@ -534,7 +534,7 @@ export function validateGeneratedArtifact(
   if (!/80-to-100|80.?to.?100/i.test(content) || !/fix-loop/.test(content) || !/final-review/.test(content)) {
     issues.push(blockingIssue('validation', 'EIGHTY_TO_ONE_HUNDRED_LOOP_MISSING', 'Rendered workflow lacks the review/fix/final-review 80-to-100 loop.'));
   }
-  const isMasterExecutorWorkflow = content.includes('RICKY_MASTER_EXECUTOR_WORKFLOW');
+  const isMasterExecutorWorkflow = isMasterExecutorArtifact(artifact);
   if (!isMasterExecutorWorkflow && !hasMandatoryFreshEyesReviewLoop(artifact)) {
     issues.push(blockingIssue(
       'validation',
@@ -688,7 +688,7 @@ function hasMandatoryFreshEyesReviewLoop(artifact: RenderedArtifact): boolean {
     'final-review-codex',
     'final-fix-codex',
   ];
-  const positions = requiredOrder.map((id) => artifact.content.indexOf(`.step(${JSON.stringify(id)}`));
+  const positions = requiredOrder.map((id) => artifact.tasks.findIndex((task) => task.id === id));
   if (positions.some((position) => position < 0)) return false;
   if (!positions.every((position, index) => index === 0 || position > positions[index - 1])) return false;
 
@@ -723,6 +723,16 @@ function hasMandatoryFreshEyesReviewLoop(artifact: RenderedArtifact): boolean {
   const passGate = gateByName.get('final-review-pass-gate');
   if (!passGate?.dependsOn.includes('final-fix-codex')) return false;
   return gateByName.get('final-hard-validation')?.dependsOn.includes('final-review-pass-gate') === true;
+}
+
+function isMasterExecutorArtifact(artifact: RenderedArtifact): boolean {
+  const taskIds = new Set(artifact.tasks.map((task) => task.id));
+  return (
+    taskIds.has('materialize-child-workflows') &&
+    taskIds.has('review-child-evidence') &&
+    artifact.tasks.some((task) => task.id.startsWith('run-')) &&
+    artifact.gates.some((gate) => gate.name === 'child-workflow-file-gate')
+  );
 }
 
 function hasDeterministicSanityGate(artifact: RenderedArtifact): boolean {

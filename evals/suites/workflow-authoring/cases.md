@@ -74,7 +74,7 @@ contentIncludes:
 - .agent("reviewer-codex"
 - .agent("validator-codex"
 - verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED
-- add or update appropriate tests/proofs
+- add or update appropriate tests, fixtures, assertions, or deterministic proofs
 - dependsOn: ["final-fix-codex"]
 contentMatches:
 - \.step\("review-claude"[\s\S]*\.step\("fix-loop"[\s\S]*\.step\("final-review-claude"[\s\S]*\.step\("final-fix-claude"[\s\S]*\.step\("review-codex"[\s\S]*\.step\("fix-loop-codex"[\s\S]*\.step\("final-review-codex"[\s\S]*\.step\("final-fix-codex"[\s\S]*\.step\("final-review-pass-gate"[\s\S]*\.step\("final-hard-validation"

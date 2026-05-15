@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -335,18 +335,35 @@ function executeRickyCli(testCase, context) {
 function readGeneratedArtifactContent(stdout, workingDir) {
   const artifactPaths = generatedArtifactPathsFromStdout(stdout);
   const sections = [];
+  const realWorkingDir = safeRealpath(workingDir);
+  if (!realWorkingDir) return '';
   for (const artifactPath of artifactPaths) {
     const fullPath = path.resolve(workingDir, artifactPath);
-    if (!fullPath.startsWith(`${path.resolve(workingDir)}${path.sep}`) && fullPath !== path.resolve(workingDir)) {
+    if (!existsSync(fullPath)) continue;
+    const realFullPath = safeRealpath(fullPath);
+    if (!realFullPath) continue;
+    if (realFullPath !== realWorkingDir && !realFullPath.startsWith(`${realWorkingDir}${path.sep}`)) {
       continue;
     }
-    if (!existsSync(fullPath)) continue;
+    try {
+      if (!statSync(realFullPath).isFile()) continue;
+    } catch {
+      continue;
+    }
     sections.push([
       `\n--- GENERATED ARTIFACT: ${artifactPath} ---`,
-      readFileSync(fullPath, 'utf8'),
+      readFileSync(realFullPath, 'utf8'),
     ].join('\n'));
   }
   return sections.join('\n');
+}
+
+function safeRealpath(value) {
+  try {
+    return realpathSync(value);
+  } catch {
+    return null;
+  }
 }
 
 function generatedArtifactPathsFromStdout(stdout) {

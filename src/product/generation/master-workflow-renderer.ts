@@ -227,7 +227,7 @@ function renderMasterSource(input: {
       'echo RICKY_MASTER_CONTEXT_READY',
     ].join('\n'))},`,
     '      captureOutput: true,',
-    '      failOnError: false,',
+    '      failOnError: true,',
     '    })',
     '',
     '    .step("lead-plan", {',
