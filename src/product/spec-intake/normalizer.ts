@@ -102,6 +102,9 @@ function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
   const answeredPreference = executionPreferenceFromClarificationAnswers(parsed.description);
   if (answeredPreference) return answeredPreference;
 
+  const declaredPreference = executionPreferenceFromDeclaration(parsed.description);
+  if (declaredPreference) return declaredPreference;
+
   const text = [parsed.description, parsed.targetContext, parsed.providerContext.metadata.mode, ...parsed.constraints]
     .filter((value): value is string => typeof value === 'string')
     .join('\n')
@@ -114,6 +117,27 @@ function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
   if (mentionsLocal) return 'local';
   if (mentionsCloud) return 'cloud';
   return 'auto';
+}
+
+/**
+ * Recognize a top-level execution-preference declaration in spec markdown,
+ * e.g. `Execution preference: local/BYOH first`. Without this, cross-repo
+ * specs that legitimately mention both `local` and `cloud` always fell back
+ * to `auto`, which in turn fired the execution-mode-conflict clarification.
+ * Authors had to learn the magic "Clarification answers: ..." section to
+ * pin the preference; a bare prose declaration is the more natural surface.
+ */
+function executionPreferenceFromDeclaration(description: string): ExecutionPreference | undefined {
+  for (const rawLine of description.split(/\r?\n/)) {
+    const line = rawLine.trim().replace(/^[-*+]\s+/, '');
+    const match = line.match(/^(?:execution\s+(?:preference|mode)|run\s+(?:in|on))\s*[:=]\s*(.+?)\s*$/i);
+    if (!match) continue;
+    const value = match[1].toLowerCase();
+    if (/\b(both|auto|both paths)\b/.test(value)) return 'auto';
+    if (/\b(local|locally|byoh|on this machine)\b/.test(value)) return 'local';
+    if (/\b(cloud|hosted|remote)\b/.test(value)) return 'cloud';
+  }
+  return undefined;
 }
 
 function explicitExecutionPreference(parsed: ParsedSpec): ExecutionPreference | undefined {

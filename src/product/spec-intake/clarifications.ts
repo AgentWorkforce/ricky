@@ -18,7 +18,14 @@ export function analyzeClarificationNeeds(
   if (issues.some((issue) => issue.severity === 'error')) return questions;
 
   if (spec.intent === 'generate') {
-    questions.push(...explicitOpenQuestionQuestions(text));
+    // Open-question scanning runs against the original description only.
+    // The combined `text` above concatenates extracted constraints, evidence,
+    // and acceptance-gate fragments after the description — those are bare
+    // lines without markdown headings, so a multi-line question accumulator
+    // would keep pulling them into the trailing Open Questions item once the
+    // section was opened. The other clarification detectors are line-fragment
+    // tolerant and continue to use the broader combined text.
+    questions.push(...explicitOpenQuestionQuestions(spec.description, text));
     const executionConflict = executionModeConflictQuestion(spec, text);
     if (executionConflict) questions.push(executionConflict);
     const riskySideEffect = riskySideEffectQuestion(text);
@@ -32,8 +39,8 @@ export function blockingClarificationQuestions(questions: ClarificationQuestion[
   return questions.filter((question) => question.blocking);
 }
 
-function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
-  const lower = textWithoutClarificationAnswerSections(text).toLowerCase();
+function explicitOpenQuestionQuestions(description: string, combinedText: string): ClarificationQuestion[] {
+  const lower = textWithoutClarificationAnswerSections(combinedText).toLowerCase();
   const unresolvedMarkers = [
     /\bopen questions?\b/,
     /\btbd\b/,
@@ -46,13 +53,12 @@ function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
   ];
   if (!unresolvedMarkers.some((pattern) => pattern.test(lower))) return [];
 
-  const answeredQuestions = answeredClarificationQuestions(text);
-  const openLines = openQuestionLines(text)
+  const answeredQuestions = answeredClarificationQuestions(combinedText);
+  const openLines = openQuestionLines(description)
     .map(questionFromOpenQuestionLine)
     .filter((line): line is string => Boolean(line));
   const questionLines = openLines
-    .filter((line) => !answeredQuestions.has(normalizeQuestion(line)))
-    .slice(0, 3);
+    .filter((line) => !answeredQuestions.has(normalizeQuestion(line)));
 
   if (questionLines.length > 0) {
     return questionLines.map((line, index) => ({
@@ -105,42 +111,93 @@ function openQuestionLines(text: string): string[] {
   const questionLines: string[] = [];
   let inOpenQuestionSection = false;
   let inClarificationAnswerSection = false;
+  // Accumulator for the current numbered/bulleted question inside the Open
+  // Questions section. Multi-line markdown items are common (the source spec
+  // typically wraps questions across 2-4 lines), so we buffer continuation
+  // lines until a blank line, a new list marker, or a section boundary, then
+  // emit a single coalesced question. Without this, the tail line of each
+  // wrapped question (the one that ends with "?") becomes its own clarification
+  // and the user sees truncated fragments instead of full questions.
+  let pendingItem: string[] | null = null;
+  const flushPending = () => {
+    if (!pendingItem) return;
+    const joined = pendingItem.join(' ').replace(/\s+/g, ' ').trim();
+    if (joined) questionLines.push(joined);
+    pendingItem = null;
+  };
 
   for (const rawLine of lines) {
-    const line = stripListMarker(rawLine.trim());
+    const trimmed = rawLine.trim();
+    const line = stripListMarker(trimmed);
     if (!line) {
-      inOpenQuestionSection = false;
-      inClarificationAnswerSection = false;
+      // Blank lines flush the current question but do NOT exit the Open
+      // Questions section. Markdown convention places a blank line between
+      // the heading and the list, and many specs separate items with blank
+      // lines; treating blank lines as section terminators dropped us back to
+      // the explicit-`?` path and surfaced only the wrapped tail of each
+      // multi-line item. The clarification-answer section is similarly
+      // closed only by a real new heading.
+      flushPending();
       continue;
     }
 
     if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+      flushPending();
       inOpenQuestionSection = false;
       inClarificationAnswerSection = true;
       continue;
     }
 
     if (/^(#{1,6}\s*)?(open questions?|questions?|clarifications needed|unresolved|tbd)\s*:?\s*$/i.test(line)) {
+      flushPending();
       inOpenQuestionSection = true;
       inClarificationAnswerSection = false;
       continue;
     }
 
     if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line) && !/^(tbd|todo|unclear|unspecified|open question)/i.test(line)) {
+      flushPending();
       inOpenQuestionSection = false;
       inClarificationAnswerSection = false;
     }
 
+    // A new markdown heading (other than the open-questions / clarification-
+    // answers headings already handled above) closes the open-questions
+    // section. Previously blank lines did this implicitly; now that we keep
+    // wrapping items together across blank lines, we need an explicit
+    // boundary so a later "## Cross-Repo Work Plan" section doesn't keep
+    // pulling lines into the Open Questions bucket.
+    if (/^#{1,6}\s+\S/.test(trimmed)) {
+      flushPending();
+      inOpenQuestionSection = false;
+      inClarificationAnswerSection = false;
+      continue;
+    }
+
     if (inClarificationAnswerSection) continue;
+
+    if (inOpenQuestionSection) {
+      const startsNewItem = /^(?:[-*+]\s+|\d+[.)]\s+|\[[ xX]\]\s+)/.test(trimmed);
+      if (startsNewItem) {
+        flushPending();
+        pendingItem = [line];
+      } else if (pendingItem) {
+        pendingItem.push(line);
+      } else {
+        pendingItem = [line];
+      }
+      continue;
+    }
 
     const explicitQuestion = line.endsWith('?');
     const unresolvedItem = /^(?:tbd|todo|unclear|unspecified|not sure|decide later|open question)\b/i.test(line) ||
       /\b(?:tbd|unclear|unspecified|not sure|decide later|\?\?\?)\b/i.test(line);
-    if (explicitQuestion || inOpenQuestionSection || unresolvedItem) {
+    if (explicitQuestion || unresolvedItem) {
       questionLines.push(line);
     }
   }
 
+  flushPending();
   return questionLines;
 }
 
