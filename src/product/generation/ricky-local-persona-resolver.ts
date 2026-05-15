@@ -34,6 +34,16 @@ export interface RickyLocalPersonaSpec {
   tiers: Record<RickyLocalPersonaTier, RickyLocalPersonaRuntime>;
   defaultTier?: RickyLocalPersonaTier;
   env?: Record<string, string>;
+  /**
+   * Optional top-level permission policy. When the active tier does not
+   * declare its own `permissions`, the resolver falls back to this value;
+   * when both are unset, the resolver picks a harness-appropriate default
+   * (`bypassPermissions` for claude, undefined for codex/opencode — see
+   * {@link DEFAULT_RICKY_LOCAL_CLAUDE_PERMISSIONS}). Mirrors the shape
+   * `@agentworkforce/harness-kit` reads off the selection in its
+   * `useRunnableSelection` entrypoint.
+   */
+  permissions?: RickyLocalPersonaPermissions;
 }
 
 export interface RickyLocalPersonaRuntime {
@@ -46,7 +56,39 @@ export interface RickyLocalPersonaRuntime {
   };
   claudeMd?: string;
   agentsMd?: string;
+  /** Optional tier-level override of the persona's permission policy. */
+  permissions?: RickyLocalPersonaPermissions;
 }
+
+/**
+ * Shape consumed by harness-kit when it builds the spawn args:
+ * - `mode` translates to `--permission-mode <mode>` for the claude harness.
+ * - `allow` / `deny` translate to `--allowedTools` / `--disallowedTools`.
+ * See `@agentworkforce/harness-kit`'s `harness.ts` for the canonical map.
+ */
+export interface RickyLocalPersonaPermissions {
+  mode?: 'acceptEdits' | 'auto' | 'bypassPermissions' | 'default' | 'dontAsk' | 'plan';
+  allow?: readonly string[];
+  deny?: readonly string[];
+}
+
+/**
+ * Default permission policy for Ricky-local personas that target the claude
+ * harness. Ricky-local always invokes the writer subprocess **headlessly**
+ * (no interactive caller able to grant tool-use approvals), so the default
+ * has to be a mode the claude CLI treats as pre-authorized. Without this
+ * the writer hangs on the first tool-permission prompt and ricky observes
+ * a SIGTERM with empty stdout — exactly the failure mode that motivated
+ * this constant.
+ *
+ * Personas can override this by declaring their own `permissions` block on
+ * the spec or any tier; pass `{}` to opt out of bypass while still
+ * surfacing tools, or `{ mode: 'default' }` to restore claude's default
+ * (interactive) permission behavior for personas that genuinely need it.
+ */
+export const DEFAULT_RICKY_LOCAL_CLAUDE_PERMISSIONS: RickyLocalPersonaPermissions = Object.freeze({
+  mode: 'bypassPermissions',
+});
 
 const PERSONA_SENTINEL = join('personas', 'agent-relay-workflow.json');
 
@@ -205,8 +247,10 @@ export function buildPersonaSelectionFromRickyLocalSpec(
   rationale: string;
   inputs?: RickyLocalPersonaSpec['inputs'];
   env?: RickyLocalPersonaSpec['env'];
+  permissions?: RickyLocalPersonaPermissions;
 } {
   const runtime = spec.tiers[tier];
+  const permissions = resolvePermissionsForSelection(spec, runtime);
   return {
     personaId: spec.id,
     tier,
@@ -215,7 +259,34 @@ export function buildPersonaSelectionFromRickyLocalSpec(
     rationale: `Ricky-local Claude persona override for intent "${spec.intent}" (tier ${tier})`,
     ...(spec.inputs ? { inputs: spec.inputs } : {}),
     ...(spec.env ? { env: spec.env } : {}),
+    ...(permissions ? { permissions } : {}),
   };
+}
+
+/**
+ * Picks the permission policy attached to a Ricky-local persona selection.
+ *
+ * Precedence (first non-`undefined` wins):
+ * 1. tier-level `runtime.permissions` — lets a persona vary tools per tier
+ * 2. top-level `spec.permissions` — persona-wide default
+ * 3. harness-appropriate fallback — for claude this is
+ *    {@link DEFAULT_RICKY_LOCAL_CLAUDE_PERMISSIONS} (bypass mode) because
+ *    Ricky-local always spawns the writer headlessly; for codex/opencode
+ *    we return undefined so harness-kit applies its own defaults.
+ *
+ * Returning the literal empty object `{}` lets a persona explicitly clear
+ * the default while still letting harness-kit see "no permission overrides"
+ * (rather than the bypass fallback). Use that escape hatch only when the
+ * persona genuinely wants claude's default interactive behavior.
+ */
+function resolvePermissionsForSelection(
+  spec: RickyLocalPersonaSpec,
+  runtime: RickyLocalPersonaRuntime,
+): RickyLocalPersonaPermissions | undefined {
+  if (runtime.permissions !== undefined) return runtime.permissions;
+  if (spec.permissions !== undefined) return spec.permissions;
+  if (runtime.harness === 'claude') return DEFAULT_RICKY_LOCAL_CLAUDE_PERMISSIONS;
+  return undefined;
 }
 
 interface HarnessKitRunnableSelectionModule {
