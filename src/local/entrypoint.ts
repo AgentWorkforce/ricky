@@ -1529,7 +1529,20 @@ function appendBestJudgementClarificationAnswers(
     `  ${answer.answer}`,
   ]);
   const clarificationAnswerLines = answers.map((answer) => `- ${answer.question}: ${answer.answer}`);
+  // A leading blank line is required: when the source spec ends with a
+  // list item (typical for an "Open questions:" section), markdown parses
+  // a subsequent unindented "Best-judgement clarifications:" line as a
+  // lazy continuation of the last list item rather than a new section
+  // header, which means the intake clarification walker sees the answer
+  // text glued onto the original question and re-emits it as new open
+  // questions on the next pass.
+  //
+  // The blank line goes BETWEEN sections only — keeping the answer list
+  // directly under each header so the line-based answer detector in
+  // `answeredClarificationQuestions` (which treats a blank line as a
+  // section terminator) still finds the Q/A pairs.
   const suffix = [
+    '',
     '',
     'Best-judgement clarifications:',
     ...answerLines,

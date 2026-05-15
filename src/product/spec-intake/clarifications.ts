@@ -113,7 +113,7 @@ function textWithoutClarificationAnswerSections(text: string): string {
 // the plain text of a heading node (not the raw line) so prefix `#`s don't
 // affect detection.
 const OPEN_QUESTIONS_HEADING = /^(?:open questions?|questions?|clarifications needed|unresolved|tbd)\s*:?\s*$/i;
-const CLARIFICATION_ANSWERS_HEADING = /^(?:clarification answers?|resolved clarifications?)\s*:?\s*$/i;
+const CLARIFICATION_ANSWERS_HEADING = /^(?:clarification answers?|resolved clarifications?|best[- ]judgement clarifications?)\s*:?\s*$/i;
 const UNRESOLVED_TOKEN = /^(?:tbd|todo|unclear|unspecified|not sure|decide later|open question)\b/i;
 const UNRESOLVED_TOKEN_INLINE = /\b(?:tbd|unclear|unspecified|not sure|decide later|\?\?\?)\b/i;
 
@@ -168,17 +168,24 @@ function openQuestionLines(text: string): string[] {
       continue;
     }
 
-    // Authors often write "Clarification answers:" as a plain paragraph
-    // (not a markdown heading) immediately under the Open Questions list,
-    // following the interactive CLI's appended format. Treat that paragraph
-    // as a soft section terminator so the answer Q/A lines don't get pulled
-    // back in as new open questions.
+    // Many specs use a plain paragraph as the section marker rather than a
+    // markdown heading — e.g. `Open questions:` or `Clarification answers:`
+    // as a label line just before a list. Recognize both styles so the
+    // section boundary tracking matches what authors actually write. We
+    // check only the LAST physical line of the paragraph because the label
+    // typically follows soft line-breaks attached to the previous prose.
     if (child.type === 'paragraph') {
-      const para = collectText(child as Paragraph).trim();
-      if (CLARIFICATION_ANSWERS_HEADING.test(para)) {
+      const lastLine = lastNonEmptyLineOf(collectText(child as Paragraph));
+      if (CLARIFICATION_ANSWERS_HEADING.test(lastLine)) {
         inOpenQuestionSection = false;
         inAnswersSection = true;
         answersSectionDepth = openSectionDepth || 0;
+        continue;
+      }
+      if (OPEN_QUESTIONS_HEADING.test(lastLine)) {
+        inOpenQuestionSection = true;
+        openSectionDepth = openSectionDepth || 1;
+        inAnswersSection = false;
         continue;
       }
     }
@@ -260,6 +267,11 @@ function collectText(node: Node): string {
 
 function isParent(node: Node): node is Parent {
   return Array.isArray((node as Parent).children);
+}
+
+function lastNonEmptyLineOf(text: string): string {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length === 0 ? '' : lines[lines.length - 1];
 }
 
 function answeredClarificationQuestions(text: string): Set<string> {
