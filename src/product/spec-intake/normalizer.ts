@@ -1,3 +1,6 @@
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { Node, Parent, Root } from 'mdast';
+
 import type {
   DesiredAction,
   ExecutionPreference,
@@ -102,6 +105,9 @@ function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
   const answeredPreference = executionPreferenceFromClarificationAnswers(parsed.description);
   if (answeredPreference) return answeredPreference;
 
+  const declaredPreference = executionPreferenceFromDeclaration(parsed.description);
+  if (declaredPreference) return declaredPreference;
+
   const text = [parsed.description, parsed.targetContext, parsed.providerContext.metadata.mode, ...parsed.constraints]
     .filter((value): value is string => typeof value === 'string')
     .join('\n')
@@ -114,6 +120,85 @@ function inferExecutionPreference(parsed: ParsedSpec): ExecutionPreference {
   if (mentionsLocal) return 'local';
   if (mentionsCloud) return 'cloud';
   return 'auto';
+}
+
+/**
+ * Recognize a top-level execution-preference declaration in spec markdown,
+ * e.g. `Execution preference: local/BYOH first`. Without this, cross-repo
+ * specs that legitimately mention both `local` and `cloud` always fell back
+ * to `auto`, which in turn fired the execution-mode-conflict clarification.
+ * Authors had to learn the magic "Clarification answers: ..." section to
+ * pin the preference; a bare prose declaration is the more natural surface.
+ *
+ * Parses via `mdast-util-from-markdown` (per AGENTS.md: use grammar-aware
+ * parsers for markdown) so paragraphs that happen to live inside fenced
+ * code blocks don't false-match, and so wrapped paragraphs are matched as
+ * one logical line rather than per source-text line.
+ */
+function executionPreferenceFromDeclaration(description: string): ExecutionPreference | undefined {
+  let tree: Root;
+  try {
+    tree = fromMarkdown(description);
+  } catch {
+    return undefined;
+  }
+  let resolved: ExecutionPreference | undefined;
+  visitParagraphsAndItems(tree, (text) => {
+    if (resolved) return;
+    const match = text.match(/^(?:execution\s+(?:preference|mode)|run\s+(?:in|on))\s*[:=]\s*(.+)$/is);
+    if (!match) return;
+    resolved = preferenceFromDeclaredValue(match[1]);
+  });
+  return resolved;
+}
+
+/**
+ * Resolve `local | cloud | auto` from the right-hand side of an
+ * `Execution preference: ...` declaration. Position-based, not priority-
+ * based: when both `local` and `cloud` appear, the first one wins. This
+ * fixes a fixed-priority bias that returned `local` for declarations like
+ * `Execution preference: cloud. Local is a follow-up.`.
+ */
+function preferenceFromDeclaredValue(rawValue: string): ExecutionPreference | undefined {
+  const value = rawValue.toLowerCase().trim();
+  const bothIdx = firstMatchIndex(value, /\b(both|auto|both paths)\b/);
+  const localIdx = firstMatchIndex(value, /\b(local|locally|byoh|on this machine)\b/);
+  const cloudIdx = firstMatchIndex(value, /\b(cloud|hosted|remote)\b/);
+
+  const candidates: Array<[number, ExecutionPreference]> = [];
+  if (bothIdx >= 0) candidates.push([bothIdx, 'auto']);
+  if (localIdx >= 0) candidates.push([localIdx, 'local']);
+  if (cloudIdx >= 0) candidates.push([cloudIdx, 'cloud']);
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => a[0] - b[0]);
+  return candidates[0][1];
+}
+
+function firstMatchIndex(text: string, pattern: RegExp): number {
+  const match = pattern.exec(text);
+  return match ? match.index : -1;
+}
+
+function visitParagraphsAndItems(node: Node, visit: (text: string) => void): void {
+  if (node.type === 'code') return; // skip fenced code blocks
+  if (node.type === 'paragraph' || node.type === 'listItem') {
+    visit(collectText(node).replace(/\s+/g, ' ').trim());
+  }
+  if (isParent(node)) {
+    for (const child of node.children) visitParagraphsAndItems(child, visit);
+  }
+}
+
+function collectText(node: Node): string {
+  if (node.type === 'code') return '';
+  const candidate = (node as unknown as { value?: unknown }).value;
+  if (typeof candidate === 'string') return candidate;
+  if (isParent(node)) return node.children.map(collectText).join('');
+  return '';
+}
+
+function isParent(node: Node): node is Parent {
+  return Array.isArray((node as Parent).children);
 }
 
 function explicitExecutionPreference(parsed: ParsedSpec): ExecutionPreference | undefined {
@@ -138,7 +223,7 @@ function executionPreferenceFromClarificationAnswers(description: string): Execu
       inAnswerSection = false;
       continue;
     }
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+    if (isClarificationAnswersHeading(line)) {
       inAnswerSection = true;
       continue;
     }
@@ -154,6 +239,12 @@ function executionPreferenceFromClarificationAnswers(description: string): Execu
     if (/\b(both|auto|both paths)\b/.test(answer)) return 'auto';
   }
   return undefined;
+}
+
+const CLARIFICATION_ANSWERS_HEADING = /^(?:clarification answers?|resolved clarifications?|best[- ]judgement clarifications?)\s*:?\s*$/i;
+
+function isClarificationAnswersHeading(line: string): boolean {
+  return CLARIFICATION_ANSWERS_HEADING.test(line.replace(/^#{1,6}\s+/, '').trim());
 }
 
 function stringMetadata(metadata: Record<string, unknown>, key: string): string | undefined {

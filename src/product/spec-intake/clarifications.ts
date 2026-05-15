@@ -1,3 +1,6 @@
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { Heading, List, ListItem, Node, Paragraph, Parent, Root } from 'mdast';
+
 import type { ClarificationQuestion, NormalizedWorkflowSpec, ValidationIssue } from './types.js';
 
 export function analyzeClarificationNeeds(
@@ -18,7 +21,14 @@ export function analyzeClarificationNeeds(
   if (issues.some((issue) => issue.severity === 'error')) return questions;
 
   if (spec.intent === 'generate') {
-    questions.push(...explicitOpenQuestionQuestions(text));
+    // Open-question scanning runs against the original description only.
+    // The combined `text` above concatenates extracted constraints, evidence,
+    // and acceptance-gate fragments after the description — those are bare
+    // lines without markdown headings, so a multi-line question accumulator
+    // would keep pulling them into the trailing Open Questions item once the
+    // section was opened. The other clarification detectors are line-fragment
+    // tolerant and continue to use the broader combined text.
+    questions.push(...explicitOpenQuestionQuestions(spec.description, text));
     const executionConflict = executionModeConflictQuestion(spec, text);
     if (executionConflict) questions.push(executionConflict);
     const riskySideEffect = riskySideEffectQuestion(text);
@@ -32,8 +42,8 @@ export function blockingClarificationQuestions(questions: ClarificationQuestion[
   return questions.filter((question) => question.blocking);
 }
 
-function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
-  const lower = textWithoutClarificationAnswerSections(text).toLowerCase();
+function explicitOpenQuestionQuestions(description: string, combinedText: string): ClarificationQuestion[] {
+  const lower = textWithoutClarificationAnswerSections(combinedText).toLowerCase();
   const unresolvedMarkers = [
     /\bopen questions?\b/,
     /\btbd\b/,
@@ -46,13 +56,12 @@ function explicitOpenQuestionQuestions(text: string): ClarificationQuestion[] {
   ];
   if (!unresolvedMarkers.some((pattern) => pattern.test(lower))) return [];
 
-  const answeredQuestions = answeredClarificationQuestions(text);
-  const openLines = openQuestionLines(text)
+  const answeredQuestions = answeredClarificationQuestions(combinedText);
+  const openLines = openQuestionLines(description)
     .map(questionFromOpenQuestionLine)
     .filter((line): line is string => Boolean(line));
   const questionLines = openLines
-    .filter((line) => !answeredQuestions.has(normalizeQuestion(line)))
-    .slice(0, 3);
+    .filter((line) => !answeredQuestions.has(normalizeQuestion(line)));
 
   if (questionLines.length > 0) {
     return questionLines.map((line, index) => ({
@@ -85,12 +94,12 @@ function textWithoutClarificationAnswerSections(text: string): string {
       continue;
     }
 
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+    if (isClarificationAnswersHeading(line)) {
       inAnswerSection = true;
       continue;
     }
 
-    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+    if (isSectionLabel(line)) {
       inAnswerSection = false;
     }
 
@@ -100,48 +109,169 @@ function textWithoutClarificationAnswerSections(text: string): string {
   return retained.join('\n');
 }
 
+// Markdown structures that head an "open questions" section. Matched against
+// the plain text of a heading node (not the raw line) so prefix `#`s don't
+// affect detection.
+const OPEN_QUESTIONS_HEADING = /^(?:open questions?|questions?|clarifications needed|unresolved|tbd)\s*:?\s*$/i;
+const CLARIFICATION_ANSWERS_HEADING = /^(?:clarification answers?|resolved clarifications?|best[- ]judgement clarifications?)\s*:?\s*$/i;
+const UNRESOLVED_TOKEN = /^(?:tbd|todo|unclear|unspecified|not sure|decide later|open question)\b/i;
+const UNRESOLVED_TOKEN_INLINE = /\b(?:tbd|unclear|unspecified|not sure|decide later|\?\?\?)\b/i;
+
+/**
+ * Collect candidate open-question lines from the spec description. Uses
+ * `mdast-util-from-markdown` (per AGENTS.md: "Source-Text Analysis: Use
+ * Grammar-Aware Parsers, Not Regex") so list-item coalescing is structural —
+ * each `listItem` node already contains the full wrapped item text via the
+ * paragraph children — and fenced code blocks (`code` nodes) are excluded by
+ * construction. This replaces an earlier line-by-line state machine whose
+ * blank-line and heading-boundary handling repeatedly emitted truncated
+ * tails of multi-line numbered questions.
+ */
 function openQuestionLines(text: string): string[] {
-  const lines = text.split(/\r?\n/);
-  const questionLines: string[] = [];
-  let inOpenQuestionSection = false;
-  let inClarificationAnswerSection = false;
-
-  for (const rawLine of lines) {
-    const line = stripListMarker(rawLine.trim());
-    if (!line) {
-      inOpenQuestionSection = false;
-      inClarificationAnswerSection = false;
-      continue;
-    }
-
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
-      inOpenQuestionSection = false;
-      inClarificationAnswerSection = true;
-      continue;
-    }
-
-    if (/^(#{1,6}\s*)?(open questions?|questions?|clarifications needed|unresolved|tbd)\s*:?\s*$/i.test(line)) {
-      inOpenQuestionSection = true;
-      inClarificationAnswerSection = false;
-      continue;
-    }
-
-    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line) && !/^(tbd|todo|unclear|unspecified|open question)/i.test(line)) {
-      inOpenQuestionSection = false;
-      inClarificationAnswerSection = false;
-    }
-
-    if (inClarificationAnswerSection) continue;
-
-    const explicitQuestion = line.endsWith('?');
-    const unresolvedItem = /^(?:tbd|todo|unclear|unspecified|not sure|decide later|open question)\b/i.test(line) ||
-      /\b(?:tbd|unclear|unspecified|not sure|decide later|\?\?\?)\b/i.test(line);
-    if (explicitQuestion || inOpenQuestionSection || unresolvedItem) {
-      questionLines.push(line);
-    }
+  let tree: Root;
+  try {
+    tree = fromMarkdown(text);
+  } catch {
+    return [];
   }
 
-  return questionLines;
+  const questions: string[] = [];
+  let inOpenQuestionSection = false;
+  let openSectionDepth = 0;
+  let inAnswersSection = false;
+  let answersSectionDepth = 0;
+
+  for (const child of tree.children) {
+    if (child.type === 'heading') {
+      const heading = child as Heading;
+      const headingText = collectText(heading).trim();
+
+      if (inOpenQuestionSection && heading.depth <= openSectionDepth) {
+        inOpenQuestionSection = false;
+      }
+      if (inAnswersSection && heading.depth <= answersSectionDepth) {
+        inAnswersSection = false;
+      }
+
+      if (CLARIFICATION_ANSWERS_HEADING.test(headingText)) {
+        inAnswersSection = true;
+        answersSectionDepth = heading.depth;
+        inOpenQuestionSection = false;
+        continue;
+      }
+      if (OPEN_QUESTIONS_HEADING.test(headingText)) {
+        inOpenQuestionSection = true;
+        openSectionDepth = heading.depth;
+        inAnswersSection = false;
+        continue;
+      }
+      continue;
+    }
+
+    // Many specs use a plain paragraph as the section marker rather than a
+    // markdown heading — e.g. `Open questions:` or `Clarification answers:`
+    // as a label line just before a list. Recognize both styles so the
+    // section boundary tracking matches what authors actually write. We
+    // check only the LAST physical line of the paragraph because the label
+    // typically follows soft line-breaks attached to the previous prose.
+    if (child.type === 'paragraph') {
+      const lastLine = lastNonEmptyLineOf(collectText(child as Paragraph));
+      if (CLARIFICATION_ANSWERS_HEADING.test(lastLine)) {
+        inOpenQuestionSection = false;
+        inAnswersSection = true;
+        answersSectionDepth = 6;
+        continue;
+      }
+      if (OPEN_QUESTIONS_HEADING.test(lastLine)) {
+        inOpenQuestionSection = true;
+        openSectionDepth = 6;
+        inAnswersSection = false;
+        continue;
+      }
+    }
+
+    if (inAnswersSection) continue;
+
+    if (inOpenQuestionSection) {
+      collectFromOpenQuestionBlock(child, questions);
+      continue;
+    }
+
+    collectStandaloneUnresolved(child, questions);
+  }
+
+  return questions;
+}
+
+/**
+ * Inside an "open questions" section: emit one candidate per list item, plus
+ * any standalone paragraphs that are themselves a question or an unresolved
+ * marker. Pure prose (intro sentences, trailing notes) is ignored.
+ */
+function collectFromOpenQuestionBlock(node: Node, out: string[]): void {
+  if (node.type === 'list') {
+    for (const item of (node as List).children as ListItem[]) {
+      const itemText = collectText(item).replace(/\s+/g, ' ').trim();
+      if (itemText) out.push(itemText);
+    }
+    return;
+  }
+  if (node.type === 'paragraph') {
+    const text = collectText(node as Paragraph).replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    if (text.endsWith('?') || UNRESOLVED_TOKEN.test(text) || UNRESOLVED_TOKEN_INLINE.test(text)) {
+      out.push(text);
+    }
+  }
+}
+
+/**
+ * Outside any open-questions section: still surface explicit questions and
+ * unresolved markers found in plain paragraphs or list items so a TBD/`?`
+ * line elsewhere in the spec is not silently dropped. Walks the subtree to
+ * find paragraph nodes; `code` blocks are skipped via `collectText`.
+ */
+function collectStandaloneUnresolved(node: Node, out: string[]): void {
+  if (node.type === 'paragraph') {
+    const text = collectText(node as Paragraph).replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    if (text.endsWith('?') || UNRESOLVED_TOKEN.test(text) || UNRESOLVED_TOKEN_INLINE.test(text)) {
+      out.push(text);
+    }
+    return;
+  }
+  if (node.type === 'list') {
+    for (const item of (node as List).children as ListItem[]) {
+      const text = collectText(item).replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      if (text.endsWith('?') || UNRESOLVED_TOKEN.test(text) || UNRESOLVED_TOKEN_INLINE.test(text)) {
+        out.push(text);
+      }
+    }
+    return;
+  }
+  if (isParent(node)) {
+    for (const child of node.children) collectStandaloneUnresolved(child, out);
+  }
+}
+
+function collectText(node: Node): string {
+  // Fenced code blocks must not contribute to detection — a `?` line inside
+  // an example workflow body is not a real question to ask the user.
+  if (node.type === 'code') return '';
+  const candidate = (node as unknown as { value?: unknown }).value;
+  if (typeof candidate === 'string') return candidate;
+  if (isParent(node)) return node.children.map(collectText).join('');
+  return '';
+}
+
+function isParent(node: Node): node is Parent {
+  return Array.isArray((node as Parent).children);
+}
+
+function lastNonEmptyLineOf(text: string): string {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length === 0 ? '' : lines[lines.length - 1];
 }
 
 function answeredClarificationQuestions(text: string): Set<string> {
@@ -155,12 +285,12 @@ function answeredClarificationQuestions(text: string): Set<string> {
       continue;
     }
 
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+    if (isClarificationAnswersHeading(line)) {
       inAnswerSection = true;
       continue;
     }
 
-    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+    if (isSectionLabel(line)) {
       inAnswerSection = false;
     }
 
@@ -205,6 +335,18 @@ function stripListMarker(line: string): string {
     .replace(/^\d+[.)]\s+/, '')
     .replace(/^\[[ xX]\]\s+/, '')
     .trim();
+}
+
+function isClarificationAnswersHeading(line: string): boolean {
+  return CLARIFICATION_ANSWERS_HEADING.test(stripMarkdownHeadingMarker(line));
+}
+
+function isSectionLabel(line: string): boolean {
+  return /^(?:[A-Z][\w\s/-]{2,80})\s*:$/u.test(stripMarkdownHeadingMarker(line));
+}
+
+function stripMarkdownHeadingMarker(line: string): string {
+  return line.replace(/^#{1,6}\s+/, '').trim();
 }
 
 function lowercaseFirst(value: string): string {
@@ -256,11 +398,11 @@ function hasAnsweredExecutionModeConflict(text: string): boolean {
       inAnswerSection = false;
       continue;
     }
-    if (/^(#{1,6}\s*)?(clarification answers?|resolved clarifications?)\s*:?\s*$/i.test(line)) {
+    if (isClarificationAnswersHeading(line)) {
       inAnswerSection = true;
       continue;
     }
-    if (/^(#{1,6}\s*)?[A-Z][\w\s/-]{2,80}:$/.test(line)) {
+    if (isSectionLabel(line)) {
       inAnswerSection = false;
     }
     if (
