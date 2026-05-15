@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +15,9 @@ import {
   resolveWorkforcePersonaContextWithModules,
   summarizeRelevantFilesForPersona,
   summarizeSpecForPersona,
+  waitForWriterWithWatchdog,
   WORKFORCE_PERSONA_INTENT_CANDIDATES,
+  WorkforcePersonaWriterError,
 } from './workforce-persona-writer.js';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -1162,6 +1164,84 @@ describe('workforce persona workflow writer', () => {
       warnings: [expect.stringContaining('exports: resolvePersona')],
     });
   });
+});
+
+describe('writer-wait watchdog (waitForWriterWithWatchdog)', () => {
+  // The watchdog protects callers from a harness-kit stall in which the
+  // subprocess exits but `finish()` never resolves because the stdio pipe
+  // stayed half-open. Tests exercise both directions: settled-before-watchdog
+  // (happy path) and watchdog-fires (the production hang).
+
+  it('returns the settled value when the run resolves before the watchdog window', async () => {
+    const expected = { status: 'completed', output: 'ok', stderr: '', exitCode: 0, durationMs: 10 } as unknown as Awaited<ReturnType<typeof makeRun>>;
+    const run = makeRun(Promise.resolve(expected), Promise.resolve('run-1'));
+
+    // Watchdog at (1 + 90) * 1000 = 91 000ms; the run resolves immediately,
+    // so the watchdog never fires.
+    const [result, runId] = await waitForWriterWithWatchdog(run, 1, ['resolver-warning-A']);
+
+    expect(result).toBe(expected);
+    expect(runId).toBe('run-1');
+  });
+
+  it('rejects with a WorkforcePersonaWriterError when the run never settles, after timeoutSeconds + grace', async () => {
+    // A `run` that never resolves simulates the production hang: the
+    // subprocess exited but the harness-kit promise stays pending.
+    const hangingRun = makeHangingRun();
+    // Use a 0s `timeoutSeconds` to trigger the watchdog as fast as possible
+    // (the fallback in waitForWriterWithWatchdog defaults to 60min when the
+    // input is non-positive; we provide a small positive override path via
+    // a tiny grace-only window).
+    const originalGrace = 90;
+    void originalGrace;
+
+    // Build the watchdog with a tiny effective window by stubbing out the
+    // grace constant. We can't easily monkey-patch the constant, so we lean
+    // on `vi.useFakeTimers` to advance time past the watchdog deadline.
+    vi.useFakeTimers();
+    try {
+      const settledPromise = waitForWriterWithWatchdog(hangingRun, 1, ['resolver-warning-B']);
+      const captured = settledPromise.catch((error) => error);
+      // Advance past 1s + 90s grace + a margin.
+      await vi.advanceTimersByTimeAsync(92_000);
+      const error = await captured;
+      expect(error).toBeInstanceOf(WorkforcePersonaWriterError);
+      expect((error as WorkforcePersonaWriterError).message).toMatch(/did not settle within 91s/);
+      expect((error as WorkforcePersonaWriterError).message).toMatch(/half-open/);
+      // Resolver warnings flow into the thrown error so debug surfaces them.
+      expect((error as WorkforcePersonaWriterError).warnings).toEqual(['resolver-warning-B']);
+      // Watchdog called run.cancel() to release subprocess handles.
+      expect(hangingRun.cancel).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT call run.cancel() when the run resolves before the watchdog fires', async () => {
+    const expected = { status: 'completed', output: 'ok', stderr: '', exitCode: 0, durationMs: 10 } as unknown as Awaited<ReturnType<typeof makeRun>>;
+    const run = makeRun(Promise.resolve(expected), Promise.resolve('run-2'));
+    run.cancel = vi.fn();
+
+    await waitForWriterWithWatchdog(run, 1, []);
+
+    expect(run.cancel).not.toHaveBeenCalled();
+  });
+
+  function makeRun(resolveTo: Promise<unknown>, runIdResolveTo: Promise<string | null>): WorkforcePersonaExecution & { cancel: ReturnType<typeof vi.fn> } {
+    const promise = resolveTo as WorkforcePersonaExecution;
+    Object.defineProperty(promise, 'runId', { value: runIdResolveTo });
+    (promise as { cancel: () => void }).cancel = vi.fn();
+    return promise as WorkforcePersonaExecution & { cancel: ReturnType<typeof vi.fn> };
+  }
+
+  function makeHangingRun(): WorkforcePersonaExecution & { cancel: ReturnType<typeof vi.fn> } {
+    const promise = new Promise<unknown>(() => {
+      // never resolves — simulates the half-open-pipe hang from production
+    }) as WorkforcePersonaExecution;
+    Object.defineProperty(promise, 'runId', { value: new Promise<string | null>(() => {}) });
+    (promise as { cancel: () => void }).cancel = vi.fn();
+    return promise as WorkforcePersonaExecution & { cancel: ReturnType<typeof vi.fn> };
+  }
 });
 
 describe('workforce persona writer task summarization', () => {
