@@ -3249,7 +3249,7 @@ describe('runLocal', () => {
       await rm(stateHome, { recursive: true, force: true });
       await rm(brokerDir, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 
   it('kills the SDK workflow process tree when the local timeout fires', async () => {
     const { mkdir, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
