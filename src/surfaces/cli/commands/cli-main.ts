@@ -177,6 +177,15 @@ export interface CliMainDeps extends InteractiveCliDeps {
   connectTimeoutMs?: number;
   /** Spinner factory override for focused progress tests. */
   createProgressSpinner?: CliProgressSpinnerFactory;
+  /**
+   * Override the heartbeat cadence (milliseconds) that periodically refreshes
+   * the local progress spinner with an elapsed-time suffix while waiting for
+   * the next `onProgress` message. Defaults to 5000ms (5s); set to 0 to
+   * disable. Also overridable via `RICKY_PROGRESS_HEARTBEAT_MS`.
+   */
+  localProgressHeartbeatMs?: number;
+  /** Clock override for deterministic heartbeat tests; defaults to `Date.now`. */
+  now?: () => number;
   /** Detached background process spawner override for deterministic CLI tests. */
   spawnDetachedProcess?: DetachedProcessSpawner;
   /** Cloud workflow scheduling override for deterministic schedule command tests. */
@@ -2291,26 +2300,79 @@ function createLocalProgressReporter(
       discardStdin: false,
     }));
   let spinner: CliProgressSpinner | undefined;
+  let currentMessage = '';
+  let messageSetAtMs = 0;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const heartbeatIntervalMs = resolveHeartbeatIntervalMs(deps);
+
+  const refreshSpinnerText = (): void => {
+    if (!spinner || !currentMessage) return;
+    const elapsedMs = (deps.now ?? Date.now)() - messageSetAtMs;
+    spinner.text = progressSpinnerText(currentMessage, elapsedMs);
+  };
+
+  const startHeartbeat = (): void => {
+    if (heartbeat || heartbeatIntervalMs <= 0) return;
+    heartbeat = setInterval(refreshSpinnerText, heartbeatIntervalMs);
+    // Allow the process to exit even if the heartbeat is still scheduled,
+    // mirroring the spinner's own non-blocking behavior.
+    heartbeat.unref?.();
+  };
+
+  const stopHeartbeat = (): void => {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = undefined;
+    }
+  };
 
   return {
     onProgress(message: string): void {
+      currentMessage = message;
+      messageSetAtMs = (deps.now ?? Date.now)();
       const text = progressSpinnerText(message);
       if (!spinner) {
         spinner = createSpinner({ text, stream });
         spinner.start();
+        startHeartbeat();
         return;
       }
       spinner.text = text;
     },
     stop(): void {
+      stopHeartbeat();
       spinner?.stop();
       spinner = undefined;
+      currentMessage = '';
     },
   };
 }
 
-function progressSpinnerText(message: string): string {
-  return message.replace(/\s+/g, ' ').trim() || 'Ricky is working...';
+function resolveHeartbeatIntervalMs(deps: CliMainDeps): number {
+  // Allow tests and integrators to override the cadence; default to 5s which
+  // balances "user sees life signs" against "spinner doesn't redraw too noisily".
+  const fromDeps = deps.localProgressHeartbeatMs;
+  if (typeof fromDeps === 'number' && Number.isFinite(fromDeps) && fromDeps >= 0) return fromDeps;
+  const envValue = process.env.RICKY_PROGRESS_HEARTBEAT_MS;
+  if (envValue !== undefined) {
+    const parsed = Number.parseInt(envValue, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return 5_000;
+}
+
+function progressSpinnerText(message: string, elapsedMs?: number): string {
+  const normalized = message.replace(/\s+/g, ' ').trim() || 'Ricky is working...';
+  if (elapsedMs === undefined || elapsedMs < 1_000) return normalized;
+  return `${normalized} (${formatElapsed(elapsedMs)})`;
+}
+
+function formatElapsed(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1_000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
 }
 
 function createLocalRuntimeOutputReporter(

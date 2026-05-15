@@ -2013,6 +2013,114 @@ describe('cliMain', () => {
     ]);
   });
 
+  it('refreshes the spinner text with an elapsed-time suffix while the local writer phase is silent', async () => {
+    const events: string[] = [];
+    let spinnerText = '';
+    const spinner: CliProgressSpinner = {
+      get text(): string {
+        return spinnerText;
+      },
+      set text(value: string) {
+        spinnerText = value;
+        events.push(`text:${value}`);
+      },
+      start(): CliProgressSpinner {
+        events.push(`start:${spinnerText}`);
+        return spinner;
+      },
+      stop(): CliProgressSpinner {
+        events.push(`stop:${spinnerText}`);
+        return spinner;
+      },
+    };
+    const createProgressSpinner = vi.fn(({ text }: { text: string; stream: NodeJS.WritableStream }) => {
+      spinnerText = text;
+      events.push(`create:${text}`);
+      return spinner;
+    });
+
+    // Deterministic clock for the elapsed-time formatter. The runner advances
+    // it before each tick so the heartbeat can observe a non-zero delta.
+    let nowValue = 1_000_000;
+    const now = (): number => nowValue;
+
+    const runner = vi.fn(async (deps) => {
+      deps.localProgress?.('Authoring workflow with Workforce persona...');
+      // Advance the simulated clock to 1m 5s past message-set time; the
+      // heartbeat callback runs at every real-time tick of `setInterval`,
+      // reads `now()`, and renders the elapsed-time suffix.
+      nowValue += 65_000;
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      return fakeInteractiveResult({ ok: true, localResult: stagedLocalResult() });
+    });
+
+    await cliMain({
+      argv: ['run', 'workflows/generated/issue-3.ts', '--foreground'],
+      output: ttyOutputSink(),
+      isTTY: true,
+      createProgressSpinner,
+      runInteractive: runner,
+      localProgressHeartbeatMs: 4,
+      now,
+    });
+
+    const heartbeatTexts = events
+      .filter((e) => e.startsWith('text:') && /\(\d/.test(e))
+      .map((e) => e.slice('text:'.length));
+    expect(heartbeatTexts.length).toBeGreaterThan(0);
+    // The simulated clock advanced ~65s, so every observed refresh should
+    // carry an elapsed-time suffix in either "(Ns)" or "(Nm XXs)" form.
+    for (const text of heartbeatTexts) {
+      expect(text).toMatch(/^Authoring workflow with Workforce persona\.\.\. \((?:\d+s|\d+m \d{2}s)\)$/);
+    }
+    // At least one refresh observes >=60s and renders the "(Nm XXs)" form.
+    expect(heartbeatTexts.some((t) => /\(\d+m \d{2}s\)/.test(t))).toBe(true);
+  });
+
+  it('honors `localProgressHeartbeatMs: 0` to disable the elapsed-time heartbeat entirely', async () => {
+    const events: string[] = [];
+    let spinnerText = '';
+    const spinner: CliProgressSpinner = {
+      get text(): string {
+        return spinnerText;
+      },
+      set text(value: string) {
+        spinnerText = value;
+        events.push(`text:${value}`);
+      },
+      start(): CliProgressSpinner {
+        events.push(`start:${spinnerText}`);
+        return spinner;
+      },
+      stop(): CliProgressSpinner {
+        events.push(`stop:${spinnerText}`);
+        return spinner;
+      },
+    };
+    const createProgressSpinner = vi.fn(({ text }: { text: string; stream: NodeJS.WritableStream }) => {
+      spinnerText = text;
+      events.push(`create:${text}`);
+      return spinner;
+    });
+
+    const runner = vi.fn(async (deps) => {
+      deps.localProgress?.('Authoring workflow with Workforce persona...');
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      return fakeInteractiveResult({ ok: true, localResult: stagedLocalResult() });
+    });
+
+    await cliMain({
+      argv: ['run', 'workflows/generated/issue-3.ts', '--foreground'],
+      output: ttyOutputSink(),
+      isTTY: true,
+      createProgressSpinner,
+      runInteractive: runner,
+      localProgressHeartbeatMs: 0,
+    });
+
+    expect(events.filter((e) => /\(\d+(?:m|s)/.test(e))).toHaveLength(0);
+  });
+
   it('does not attach spinner progress for JSON, quiet, non-TTY, background, or ordinary injected output streams', async () => {
     const { mkdtemp, rm } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
