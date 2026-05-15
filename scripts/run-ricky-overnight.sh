@@ -59,6 +59,7 @@ LOCK_OWNER_ARTIFACT_DIR=""
 LOCK_OWNER_QUEUE_MODE=""
 LOCK_OWNER_STATUS_FILE=""
 LOCK_ACQUIRED="false"
+QUARANTINED_RUNTIME_PATHS=()
 
 mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT" "$GLOBAL_STATE_ROOT"
 : > "$LOG_FILE"
@@ -506,7 +507,38 @@ quarantine_repo_runtime_state() {
     mkdir -p "$quarantine_root"
     destination="$quarantine_root/${candidate#.}-$stamp"
     mv "$candidate" "$destination"
+    QUARANTINED_RUNTIME_PATHS+=("$candidate:$destination")
     log "quarantined repo runtime state: $candidate -> $destination"
+  done
+}
+
+restore_repo_runtime_state() {
+  local entry=""
+  local candidate=""
+  local destination=""
+  local idx=0
+
+  for (( idx=${#QUARANTINED_RUNTIME_PATHS[@]}-1; idx>=0; idx-- )); do
+    entry="${QUARANTINED_RUNTIME_PATHS[$idx]}"
+    candidate="${entry%%:*}"
+    destination="${entry#*:}"
+    [[ -e "$destination" ]] || continue
+
+    if [[ ! -e "$candidate" ]]; then
+      mv "$destination" "$candidate"
+      log "restored quarantined repo runtime state: $destination -> $candidate"
+      continue
+    fi
+
+    if [[ -d "$candidate" && -d "$destination" ]]; then
+      mkdir -p "$candidate"
+      cp -R "$destination"/. "$candidate"/
+      rm -rf "$destination"
+      log "merged quarantined repo runtime state back into repo: $destination -> $candidate"
+      continue
+    fi
+
+    log "leaving quarantined runtime state in place because restore target already exists: $destination (target: $candidate)"
   done
 }
 
@@ -516,6 +548,8 @@ on_exit() {
   if [[ -n "$RUN_PGID" && "$RUNNER_EXPECTS_DETACHED_PGID" != "true" ]]; then
     kill_process_group "$RUN_PGID"
   fi
+
+  restore_repo_runtime_state
 
   if [[ "$STATUS_MARKED" != "true" ]]; then
     if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
