@@ -253,10 +253,22 @@ export async function writeWorkflowWithWorkforcePersona(
   // resolver and task-builder awaits — opens a multi-second window in
   // which a stale leftover could falsely satisfy the freshness check.
   const writerInvokedAtMs = Date.now();
+  // Normalize the timeout once before threading it into both
+  // `sendMessage` (harness-kit subprocess timeout) and the outer watchdog
+  // so they're guaranteed to run on the same schedule. If the configured
+  // value is missing, zero, or negative, harness-kit otherwise disables
+  // its internal timeout entirely (see harness-kit/dist/runner.js:
+  // `options.timeoutSeconds && options.timeoutSeconds > 0 ? setTimeout(...) : undefined`)
+  // — and a watchdog firing on a fallback window while the subprocess has
+  // no inner timeout at all is exactly the divergence coderabbit flagged.
+  const configuredTimeoutSeconds = options.timeoutSeconds ?? selection.runtime.harnessSettings?.timeoutSeconds;
+  const effectiveTimeoutSeconds = typeof configuredTimeoutSeconds === 'number' && configuredTimeoutSeconds > 0
+    ? configuredTimeoutSeconds
+    : WRITER_DEFAULT_WATCHDOG_SECONDS;
   const run = resolved.context.sendMessage(task, {
     workingDirectory: options.repoRoot,
     name: `ricky-workflow-writer-${promptDigest.slice(0, 12)}`,
-    timeoutSeconds: options.timeoutSeconds ?? selection.runtime.harnessSettings?.timeoutSeconds,
+    timeoutSeconds: effectiveTimeoutSeconds,
     installSkills: options.installSkills,
     mode: 'one-shot',
     responseFormat: 'structured-json-or-fenced-artifact',
@@ -272,10 +284,18 @@ export async function writeWorkflowWithWorkforcePersona(
     },
   });
 
-  const [result, runId] = await Promise.all([
-    run,
-    run.runId.catch(() => null),
-  ]);
+  // Defense-in-depth watchdog around the harness-kit await. Observed in
+  // production (2026-05-15): claude subprocess exited cleanly after the
+  // harness-kit timeoutSeconds expired and SIGTERM/SIGKILL fired, but the
+  // subprocess's stdio pipe stayed half-open with buffered bytes, and the
+  // harness-kit `finish()` resolution never landed on its `exit` handler.
+  // Ricky's `await Promise.all([run, run.runId])` then hung indefinitely
+  // (60+ minutes with 0% CPU, FD 4/5 = PIPE waiting on a dead writer).
+  // The watchdog forces a settle at `timeoutSeconds + grace`, calling
+  // `run.cancel()` to release any subprocess handles the runner still owns
+  // and throwing a WorkforcePersonaWriterError so the caller can move on
+  // instead of blocking the master script forever.
+  const [result, runId] = await waitForWriterWithWatchdog(run, effectiveTimeoutSeconds, resolved.warnings);
   const dumpDebug = (reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success') =>
     dumpPersonaDebug({
       kind: 'writer',
@@ -1512,6 +1532,114 @@ function safeReadSkillText(path: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Default grace window (seconds) added on top of the harness-kit
+ * subprocess timeout before ricky's outer watchdog fires. Has to absorb
+ * harness-kit's SIGTERM → SIGKILL window plus the final pipe-drain — but
+ * not so much that an actually-hung writer holds up a multi-spec run for
+ * an hour. 90s has handled every observed harness-kit-timely settle case
+ * in testing while still releasing within ~1.5 min of a true pipe-hang.
+ */
+const WRITER_WATCHDOG_GRACE_SECONDS = 90;
+
+/**
+ * Default total watchdog window (seconds) when no harness-level
+ * `timeoutSeconds` was configured. Picked to be generous enough for the
+ * largest writer task observed in production (~45-50 min on `best-value`
+ * tier with claude-sonnet-4-6 on the cloud MCP cloud-spawn split) plus
+ * the standard grace. Callers that already pass `timeoutSeconds` (the
+ * common case) get watchdog = `timeoutSeconds + WRITER_WATCHDOG_GRACE_SECONDS`,
+ * so this fallback only applies when the persona forgot to declare a
+ * timeout.
+ */
+const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
+
+/**
+ * Awaits the harness-kit writer execution with a watchdog so a stuck
+ * subprocess settle path can't hang the caller indefinitely.
+ *
+ * Background — production hang on 2026-05-15:
+ * - claude writer subprocess ran to its harness-kit-declared timeout
+ *   (3600s), got SIGTERM, then SIGKILL.
+ * - The subprocess exited (gone from `ps`) but its stdio pipe stayed
+ *   half-open with ~16 KB of buffered bytes. harness-kit's `finish()`
+ *   resolution never fired because its `exit` handler was waiting on a
+ *   `stdout` close that never came.
+ * - Ricky's `await Promise.all([run, run.runId])` then hung at 0% CPU
+ *   for an additional 60+ minutes with FD 4/5 = PIPE, blocking the
+ *   master script from advancing to the next spec.
+ *
+ * This watchdog forces a settle at `timeoutSeconds + grace`. If it
+ * fires, `run.cancel()` is invoked first so any subprocess handles the
+ * runner still owns get released, then a WorkforcePersonaWriterError is
+ * raised so the master loop can move on rather than block forever.
+ *
+ * The watchdog is opt-out by design: every caller already passes
+ * `timeoutSeconds` via the persona's `harnessSettings`, so the watchdog
+ * fires at most `grace` seconds after the harness-kit-internal timeout
+ * was supposed to land. The happy path (writer settles before its own
+ * timeout) clears the watchdog timer in the `finally` block and never
+ * pays any wall-clock cost.
+ */
+export async function waitForWriterWithWatchdog<R extends Promise<unknown> & { runId: Promise<string | null>; cancel?: () => void }>(
+  run: R,
+  timeoutSeconds: number | undefined,
+  resolverWarnings: string[],
+): Promise<[Awaited<R>, string | null]> {
+  const effectiveTimeoutSeconds = typeof timeoutSeconds === 'number' && timeoutSeconds > 0
+    ? timeoutSeconds
+    : WRITER_DEFAULT_WATCHDOG_SECONDS;
+  const watchdogMs = (effectiveTimeoutSeconds + WRITER_WATCHDOG_GRACE_SECONDS) * 1000;
+
+  let watchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  let watchdogFired = false;
+
+  const watchdog = new Promise<never>((_, reject) => {
+    watchdogTimer = setTimeout(() => {
+      watchdogFired = true;
+      try {
+        run.cancel?.();
+      } catch {
+        // Best-effort — release the subprocess handle if the runner
+        // exposes one; failures here cannot stop the throw below.
+      }
+      reject(
+        new WorkforcePersonaWriterError(
+          `Workforce persona writer did not settle within ${effectiveTimeoutSeconds + WRITER_WATCHDOG_GRACE_SECONDS}s (declared timeout ${effectiveTimeoutSeconds}s + watchdog grace ${WRITER_WATCHDOG_GRACE_SECONDS}s). The harness-kit subprocess likely exited but left its stdio pipe half-open; aborting to avoid an indefinite wait.`,
+          resolverWarnings,
+        ),
+      );
+    }, watchdogMs);
+    // Don't keep the event loop alive just for the watchdog; if the
+    // process is exiting for unrelated reasons the watchdog is moot.
+    watchdogTimer.unref?.();
+  });
+
+  // `run.runId` is optional metadata downstream (`result.workflowRunId ??
+  // runId`), but the original `Promise.all([run, run.runId.catch(...)])`
+  // shape blocked on BOTH sides — so a writer that resolves successfully
+  // but whose runId promise never settles would still hang here until the
+  // watchdog fired, even though the result is already in hand. Race the
+  // runId against the run's own resolution so a completed run forces
+  // runId to yield `null` immediately when the runId side is stuck.
+  const runIdOrNull = Promise.race<string | null>([
+    run.runId.catch(() => null),
+    run.then(() => null, () => null),
+  ]);
+
+  try {
+    const settled = await Promise.race([
+      Promise.all([run, runIdOrNull]),
+      watchdog,
+    ]);
+    return settled as [Awaited<R>, string | null];
+  } finally {
+    if (watchdogTimer && !watchdogFired) {
+      clearTimeout(watchdogTimer);
+    }
+  }
 }
 
 export interface PersonaDebugDumpInput {
