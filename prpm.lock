@@ -13,9 +13,9 @@
       "installedPath": ".agents/skills/choosing-swarm-patterns/SKILL.md"
     },
     "@agent-relay/writing-agent-relay-workflows#codex": {
-      "version": "1.6.10",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.10.tar.gz",
-      "integrity": "sha256-02bcf8c4c7705c80b5985f8c43f833ecae2b9601b17cbed289ad96496cae02fd",
+      "version": "1.6.11",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.11.tar.gz",
+      "integrity": "sha256-51434e08073698ea7aaf3244703493d87fd4aaeea4f8d067299ea5c736be668e",
       "format": "codex",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -44,9 +44,9 @@
       }
     },
     "@agent-relay/relay-80-100-workflow#codex": {
-      "version": "1.0.5",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.5.tar.gz",
-      "integrity": "sha256-3f4c2209ea6ee46aaa03299bb1cb365ce9bafc80ca5fccbcc2c0003a6a1ca2b7",
+      "version": "1.0.7",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.7.tar.gz",
+      "integrity": "sha256-a49614637062803ff8b83c987c610ed292983fb7326e7374659f37aa702af8fc",
       "format": "codex",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -75,9 +75,9 @@
       }
     },
     "@agent-relay/writing-agent-relay-workflows#claude": {
-      "version": "1.6.10",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.10.tar.gz",
-      "integrity": "sha256-02bcf8c4c7705c80b5985f8c43f833ecae2b9601b17cbed289ad96496cae02fd",
+      "version": "1.6.11",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Fwriting-agent-relay-workflows/1.6.11.tar.gz",
+      "integrity": "sha256-51434e08073698ea7aaf3244703493d87fd4aaeea4f8d067299ea5c736be668e",
       "format": "claude",
       "subtype": "skill",
       "sourceFormat": "claude",
@@ -85,17 +85,37 @@
       "installedPath": ".claude/skills/writing-agent-relay-workflows/SKILL.md"
     },
     "@agent-relay/relay-80-100-workflow#claude": {
-      "version": "1.0.5",
-      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.5.tar.gz",
-      "integrity": "sha256-3f4c2209ea6ee46aaa03299bb1cb365ce9bafc80ca5fccbcc2c0003a6a1ca2b7",
+      "version": "1.0.7",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Frelay-80-100-workflow/1.0.7.tar.gz",
+      "integrity": "sha256-a49614637062803ff8b83c987c610ed292983fb7326e7374659f37aa702af8fc",
       "format": "claude",
       "subtype": "skill",
       "sourceFormat": "claude",
       "sourceSubtype": "skill",
       "installedPath": ".claude/skills/relay-80-100-workflow/SKILL.md"
+    },
+    "@agent-relay/review-fix-signoff-loop#claude": {
+      "version": "1.0.0",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Freview-fix-signoff-loop/1.0.0.tar.gz",
+      "integrity": "sha256-f73ade203082d30e6133c8e8ecb814a14038282c8ec5e46090f039719025724e",
+      "format": "claude",
+      "subtype": "skill",
+      "sourceFormat": "claude",
+      "sourceSubtype": "skill",
+      "installedPath": ".claude/skills/review-fix-signoff-loop/SKILL.md"
+    },
+    "@agent-relay/review-fix-signoff-loop#codex": {
+      "version": "1.0.0",
+      "resolved": "https://registry.prpm.dev/api/v1/packages/%40agent-relay%2Freview-fix-signoff-loop/1.0.0.tar.gz",
+      "integrity": "sha256-f73ade203082d30e6133c8e8ecb814a14038282c8ec5e46090f039719025724e",
+      "format": "codex",
+      "subtype": "skill",
+      "sourceFormat": "claude",
+      "sourceSubtype": "skill",
+      "installedPath": ".agents/skills/review-fix-signoff-loop/SKILL.md"
     }
   },
-  "generated": "2026-05-15T10:28:14.631Z",
+  "generated": "2026-05-15T18:18:04.871Z",
   "collections": {
     "agent-relay-starter": {
       "name_slug": "agent-relay-starter",

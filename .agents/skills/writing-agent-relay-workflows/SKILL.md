@@ -692,6 +692,7 @@ runWorkflow().catch((error) => {
 verification: { type: 'exit_code' }                        // preferred for code-editing steps
 verification: { type: 'output_contains', value: 'DONE' }   // optional accelerator
 verification: { type: 'file_exists', value: 'src/out.ts' } // deterministic file check
+verification: { type: 'pr_url', value: 'owner/repo' }      // step must leave behind a PR
 ```
 
 #### DAG Dependencies

@@ -167,6 +167,7 @@ describe('skill matcher', () => {
           expect.objectContaining({ id: 'choosing-swarm-patterns' }),
           expect.objectContaining({ id: 'writing-agent-relay-workflows' }),
           expect.objectContaining({ id: 'relay-80-100-workflow' }),
+          expect.objectContaining({ id: 'review-fix-signoff-loop' }),
         ]),
       );
     } finally {
@@ -174,6 +175,26 @@ describe('skill matcher', () => {
       rmSync(emptyProject, { recursive: true, force: true });
       resetSkillRegistryCache();
     }
+  });
+
+  it('promotes the review-fix-signoff-loop skill as a default workflow generation skill', () => {
+    const matches = matchSkills(spec('Update a small README sentence.'), {
+      registry: registry([
+        { id: 'choosing-swarm-patterns', description: 'Use for Agent Relay workflow pattern selection.' },
+        { id: 'writing-agent-relay-workflows', description: 'Use for agent relay workflow authoring.' },
+        { id: 'relay-80-100-workflow', description: 'Use for end-to-end workflow validation.' },
+        { id: 'review-fix-signoff-loop', description: 'Use for dual-reviewer review-fix-signoff loops.' },
+      ]),
+    });
+
+    expect(matches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'review-fix-signoff-loop',
+          reason: expect.stringContaining('Project default'),
+        }),
+      ]),
+    );
   });
 });
 

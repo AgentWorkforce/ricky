@@ -603,7 +603,7 @@ export function validateGeneratedArtifact(
     }
   }
 
-  for (const requiredRenderingSkill of ['choosing-swarm-patterns', 'writing-agent-relay-workflows', 'relay-80-100-workflow']) {
+  for (const requiredRenderingSkill of ['choosing-swarm-patterns', 'writing-agent-relay-workflows', 'relay-80-100-workflow', 'review-fix-signoff-loop']) {
     if (
       skillContext.applicableSkillNames.includes(requiredRenderingSkill) &&
       !artifact.skillApplicationEvidence.some(

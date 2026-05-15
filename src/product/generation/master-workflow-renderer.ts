@@ -592,7 +592,7 @@ function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan, spec:
 function buildMasterSkillEvidence(skills: SkillContext): SkillApplicationEvidence[] {
   const names = skills.applicableSkillNames.length > 0
     ? skills.applicableSkillNames
-    : ['choosing-swarm-patterns', 'writing-agent-relay-workflows', 'relay-80-100-workflow'];
+    : ['choosing-swarm-patterns', 'writing-agent-relay-workflows', 'relay-80-100-workflow', 'review-fix-signoff-loop'];
   return names.map((skillName) => ({
     skillName,
     stage: 'generation_rendering' as const,
