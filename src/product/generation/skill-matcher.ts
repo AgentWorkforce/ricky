@@ -31,6 +31,7 @@ const DEFAULT_WORKFLOW_SKILL_IDS = [
   'choosing-swarm-patterns',
   'writing-agent-relay-workflows',
   'relay-80-100-workflow',
+  'review-fix-signoff-loop',
 ];
 const PROJECT_SKILL_DIRS = ['.agents/skills', 'skills'];
 const USER_SKILL_DIRS = ['.claude/skills'];

@@ -522,6 +522,13 @@ function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillC
     );
   }
 
+  if (skills.applicableSkillNames.includes('review-fix-signoff-loop')) {
+    commands.push(
+      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
+      `grep -F ${shellQuote('"skillName":"review-fix-signoff-loop"')} ${quotedPath}`,
+    );
+  }
+
   return commands.join(' && ');
 }
 
@@ -1209,6 +1216,18 @@ function buildRenderingSkillEvidence(
       behavior: 'generation_time_only',
       runtimeEmbodiment: false,
       evidence: `Rendered ${gates.length} deterministic gates including initial soft validation, fix-loop checks, final hard validation, git diff, and regression gates.`,
+    });
+  }
+
+  if (loaded.has('review-fix-signoff-loop')) {
+    const reviewerTasks = tasks.filter((task) => /reviewer|review-claude|review-codex|final-review|final-fix/i.test(`${task.id} ${task.agentRole}`)).length;
+    evidence.push({
+      skillName: 'review-fix-signoff-loop',
+      stage: 'generation_rendering',
+      effect: 'workflow_contract',
+      behavior: 'generation_time_only',
+      runtimeEmbodiment: false,
+      evidence: `Rendered dual-reviewer review-fix-signoff loop with ${reviewerTasks} reviewer/fix tasks, repairable post-fix re-review, and final signoff so the workflow exits only on independent Claude and Codex agreement.`,
     });
   }
 

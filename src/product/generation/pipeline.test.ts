@@ -389,7 +389,7 @@ describe('workflow generation pipeline', () => {
     const artifact = result.artifact!;
 
     expect(result.skillContext.applicableSkillNames).toEqual(
-      expect.arrayContaining(['choosing-swarm-patterns', 'writing-agent-relay-workflows', 'relay-80-100-workflow']),
+      expect.arrayContaining(['choosing-swarm-patterns', 'writing-agent-relay-workflows', 'relay-80-100-workflow', 'review-fix-signoff-loop']),
     );
     expect(result.skillContext.applicationEvidence).toEqual(
       expect.arrayContaining([
@@ -460,6 +460,14 @@ describe('workflow generation pipeline', () => {
           runtimeEmbodiment: false,
           evidence: expect.stringContaining('deterministic gates'),
         }),
+        expect.objectContaining({
+          skillName: 'review-fix-signoff-loop',
+          stage: 'generation_rendering',
+          effect: 'workflow_contract',
+          behavior: 'generation_time_only',
+          runtimeEmbodiment: false,
+          evidence: expect.stringContaining('review-fix-signoff loop'),
+        }),
       ]),
     );
     expect(artifact.content).toContain('loaded-skills.txt');
@@ -467,6 +475,7 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('choosing-swarm-patterns');
     expect(artifact.content).toContain('writing-agent-relay-workflows');
     expect(artifact.content).toContain('relay-80-100-workflow');
+    expect(artifact.content).toContain('review-fix-signoff-loop');
     expect(artifact.content).toContain('generation_time_only');
     expect(artifact.content).toContain('runtimeEmbodiment');
     expect(artifact.content).toContain('Skills are applied by Ricky during selection, loading, and template rendering.');
@@ -475,6 +484,7 @@ describe('workflow generation pipeline', () => {
     expect(skillBoundaryGate.command).toContain('choosing-swarm-patterns');
     expect(skillBoundaryGate.command).toContain('writing-agent-relay-workflows');
     expect(skillBoundaryGate.command).toContain('relay-80-100-workflow');
+    expect(skillBoundaryGate.command).toContain('review-fix-signoff-loop');
     expect(skillBoundaryGate.command).toContain('"stage":"generation_selection"');
     expect(skillBoundaryGate.command).toContain('"stage":"generation_loading"');
     expect(skillBoundaryGate.command).toContain('"stage":"generation_rendering"');
