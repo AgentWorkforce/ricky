@@ -534,6 +534,14 @@ export function validateGeneratedArtifact(
   if (!/80-to-100|80.?to.?100/i.test(content) || !/fix-loop/.test(content) || !/final-review/.test(content)) {
     issues.push(blockingIssue('validation', 'EIGHTY_TO_ONE_HUNDRED_LOOP_MISSING', 'Rendered workflow lacks the review/fix/final-review 80-to-100 loop.'));
   }
+  const isMasterExecutorWorkflow = content.includes('RICKY_MASTER_EXECUTOR_WORKFLOW');
+  if (!isMasterExecutorWorkflow && !hasMandatoryFreshEyesReviewLoop(artifact)) {
+    issues.push(blockingIssue(
+      'validation',
+      'MANDATORY_FRESH_EYES_LOOP_MISSING',
+      'Rendered workflow must run Claude review/fix/final-review/final-fix before the Codex review/fix/final-review/final-fix loop, with final acceptance after the Codex loop.',
+    ));
+  }
   if (!/prepare-context/.test(content)) {
     issues.push(blockingIssue('validation', 'CONTEXT_READ_MISSING', 'Rendered workflow does not include deterministic context preparation.'));
   }
@@ -615,14 +623,13 @@ export function validateGeneratedArtifact(
   }
 
   const finalReviewPassGate = artifact.gates.find((gate) => gate.name === 'final-review-pass-gate');
-  if (finalReviewPassGate) {
-    for (const reviewName of ['final-review-claude', 'final-review-codex']) {
-      const pathInContent = extractReviewOutputPath(content, reviewName);
-      if (pathInContent && !finalReviewPassGate.command.includes(pathInContent)) {
+  if (!isMasterExecutorWorkflow && finalReviewPassGate) {
+    for (const fixArtifact of ['claude-final-fix.md', 'codex-final-fix.md']) {
+      if (!finalReviewPassGate.command.includes(fixArtifact)) {
         issues.push(blockingIssue(
           'validation',
           'REVIEW_PATH_MISMATCH',
-          `Review step ${reviewName} writes to ${pathInContent} but final-review-pass-gate does not check that path.`,
+          `Final review pass gate does not check ${fixArtifact}.`,
         ));
       }
     }
@@ -666,6 +673,56 @@ function requiresRepairAwareRetry(content: string): boolean {
   return workflowErrorHandling.some((line) =>
     !/\.onError\(\s*['"]retry['"]\s*,\s*\{.*\brepairAgent\s*:.*\brepairRetries\s*:/.test(line),
   );
+}
+
+function hasMandatoryFreshEyesReviewLoop(artifact: RenderedArtifact): boolean {
+  const taskById = new Map(artifact.tasks.map((task) => [task.id, task]));
+  const gateByName = new Map(artifact.gates.map((gate) => [gate.name, gate]));
+  const requiredOrder = [
+    'review-claude',
+    'fix-loop',
+    'final-review-claude',
+    'final-fix-claude',
+    'review-codex',
+    'fix-loop-codex',
+    'final-review-codex',
+    'final-fix-codex',
+  ];
+  const positions = requiredOrder.map((id) => artifact.content.indexOf(`.step(${JSON.stringify(id)}`));
+  if (positions.some((position) => position < 0)) return false;
+  if (!positions.every((position, index) => index === 0 || position > positions[index - 1])) return false;
+
+  const requiredAgents: Array<[string, string]> = [
+    ['review-claude', 'reviewer-claude'],
+    ['fix-loop', 'validator-claude'],
+    ['final-review-claude', 'reviewer-claude'],
+    ['final-fix-claude', 'validator-claude'],
+    ['review-codex', 'reviewer-codex'],
+    ['fix-loop-codex', 'validator-codex'],
+    ['final-review-codex', 'reviewer-codex'],
+    ['final-fix-codex', 'validator-codex'],
+  ];
+  for (const [taskId, agentRole] of requiredAgents) {
+    if (taskById.get(taskId)?.agentRole !== agentRole) return false;
+  }
+
+  const requiredDeps: Array<[string, string]> = [
+    ['fix-loop', 'review-claude'],
+    ['final-review-claude', 'post-fix-validation'],
+    ['final-fix-claude', 'final-review-claude'],
+    ['review-codex', 'final-fix-claude'],
+    ['fix-loop-codex', 'review-codex'],
+    ['final-review-codex', 'post-codex-fix-validation'],
+    ['final-fix-codex', 'final-review-codex'],
+  ];
+  for (const [taskOrGateId, dependency] of requiredDeps) {
+    const deps = taskById.get(taskOrGateId)?.dependsOn ?? gateByName.get(taskOrGateId)?.dependsOn ?? [];
+    if (!deps.includes(dependency)) return false;
+  }
+
+  const passGate = gateByName.get('final-review-pass-gate');
+  if (!passGate?.dependsOn.includes('final-fix-codex')) return false;
+  return gateByName.get('final-hard-validation')?.dependsOn.includes('final-review-pass-gate') === true;
 }
 
 function hasDeterministicSanityGate(artifact: RenderedArtifact): boolean {
@@ -828,12 +885,6 @@ function resolveExecutionRoute(spec: NormalizedWorkflowSpec, artifact: RenderedA
 
 function dryRunCommand(artifactPath: string): string {
   return `npx agent-relay run --dry-run ${artifactPath}`;
-}
-
-function extractReviewOutputPath(content: string, stepName: string): string | null {
-  const pattern = new RegExp(`Write\\s+(\\S+/${stepName}\\.md)`);
-  const match = pattern.exec(content);
-  return match ? match[1] : null;
 }
 
 function hasBalancedDelimiters(content: string): boolean {

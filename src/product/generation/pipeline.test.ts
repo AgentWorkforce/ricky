@@ -50,10 +50,13 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).not.toMatch(/^\s*command: "set -e\\nricky run .*--no-auto-fix/m);
     expect(rendered.content).toContain('MASTER_EXECUTOR_RESULT_READY');
     expect(rendered.content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
-    expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"master-lead\", repairRetries: 2 })");
-    expect(rendered.content.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(rendered.content).toContain('review-claude');
+    expect(rendered.content).toContain('final-fix-codex');
+    expect(rendered.content).toContain('RICKY_CHILD_FRESH_EYES_LOOP_READY');
+    expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"master-lead\", repairRetries: 2 })");
+    expect(rendered.content.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(rendered.content.replace(/\\+"/g, '"')).toMatch(
-      /\.step\("final-hard-validation"[\s\S]*?failOnError: false,[\s\S]*?\.step\("final-signoff"/,
+      /\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/,
     );
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
   });
@@ -298,9 +301,14 @@ describe('workflow generation pipeline', () => {
       expect.arrayContaining([
         expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-claude' }),
         expect.objectContaining({ id: 'implement-artifact', agentRole: 'impl-primary-codex' }),
-        expect.objectContaining({ id: 'fix-loop', name: '80-to-100 fix loop' }),
-        expect.objectContaining({ id: 'final-review-claude' }),
-        expect.objectContaining({ id: 'final-review-codex' }),
+        expect.objectContaining({ id: 'review-claude', agentRole: 'reviewer-claude', dependsOn: ['initial-soft-validation'] }),
+        expect.objectContaining({ id: 'fix-loop', agentRole: 'validator-claude', dependsOn: ['review-claude', 'initial-soft-validation'] }),
+        expect.objectContaining({ id: 'final-review-claude', agentRole: 'reviewer-claude', dependsOn: ['post-fix-validation'] }),
+        expect.objectContaining({ id: 'final-fix-claude', agentRole: 'validator-claude', dependsOn: ['final-review-claude'] }),
+        expect.objectContaining({ id: 'review-codex', agentRole: 'reviewer-codex', dependsOn: ['final-fix-claude'] }),
+        expect.objectContaining({ id: 'fix-loop-codex', agentRole: 'validator-codex', dependsOn: ['review-codex'] }),
+        expect.objectContaining({ id: 'final-review-codex', agentRole: 'reviewer-codex', dependsOn: ['post-codex-fix-validation'] }),
+        expect.objectContaining({ id: 'final-fix-codex', agentRole: 'validator-codex', dependsOn: ['final-review-codex'] }),
         expect.objectContaining({ id: 'final-signoff', dependsOn: ['regression-gate'] }),
       ]),
     );
@@ -308,9 +316,10 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('.agent("impl-primary-codex"');
     expect(artifact.content).toContain('.agent("impl-tests-codex"');
     expect(artifact.content).toContain('.agent("validator-claude"');
-    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(artifact.content).toContain('.agent("validator-codex"');
+    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(artifact.content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
-    expect(artifact.content).toContain('80-to-100 fix loop');
+    expect(artifact.content).toContain('80-to-100 review-fix loop');
     expect(artifact.content).toContain('deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion');
     expect(artifact.content).toContain('If using rg, guard it with command -v rg');
     expect(artifact.content).toContain('Generated workflow quality');
@@ -347,7 +356,7 @@ describe('workflow generation pipeline', () => {
     expect(gate(artifact, 'final-review-pass-gate')).toMatchObject({
       stage: 'final',
       failOnError: true,
-      dependsOn: ['final-review-claude', 'final-review-codex'],
+      dependsOn: ['final-fix-codex'],
     });
     expect(result.validation).toMatchObject({
       valid: true,
@@ -362,7 +371,7 @@ describe('workflow generation pipeline', () => {
       ]),
     );
     expect(result.validation.issues).toEqual([]);
-    expect(artifact.content).toMatch(/80-to-100 fix loop/i);
+    expect(artifact.content).toMatch(/80-to-100 review-fix loop/i);
     expect(artifact.content).toContain('final-review');
   });
 
@@ -538,26 +547,24 @@ describe('workflow generation pipeline', () => {
       expect.arrayContaining([
         expect.objectContaining({ id: 'lead-plan', agentRole: 'lead-codex' }),
         expect.objectContaining({ id: 'implement-artifact', agentRole: 'author-codex' }),
-        expect.objectContaining({ id: 'review-claude', dependsOn: ['initial-soft-validation'] }),
-        expect.objectContaining({
-          id: 'review-codex',
-          agentRole: 'deterministic',
-          name: 'Codex structural marker gate',
-          dependsOn: ['initial-soft-validation'],
-        }),
+        expect.objectContaining({ id: 'review-claude', agentRole: 'reviewer-claude', dependsOn: ['initial-soft-validation'] }),
+        expect.objectContaining({ id: 'fix-loop', agentRole: 'validator-claude', dependsOn: ['review-claude', 'initial-soft-validation'] }),
+        expect.objectContaining({ id: 'final-fix-claude', agentRole: 'validator-claude', dependsOn: ['final-review-claude'] }),
+        expect.objectContaining({ id: 'review-codex', agentRole: 'reviewer-codex', dependsOn: ['final-fix-claude'] }),
+        expect.objectContaining({ id: 'final-fix-codex', agentRole: 'validator-codex', dependsOn: ['final-review-codex'] }),
       ]),
     );
     expect(artifact.content).toContain('.agent("lead-codex", { cli: "codex", interactive: false');
     expect(artifact.content).toContain('.agent("reviewer-codex", { cli: "codex", preset: "reviewer"');
-    expect(artifact.content).not.toContain('.agent("reviewer-claude"');
+    expect(artifact.content).toContain('.agent("reviewer-claude", { cli: "claude", preset: "reviewer"');
     expect(artifact.content).toContain('.agent("validator-codex", { cli: "codex", preset: "worker"');
+    expect(artifact.content).toContain('.agent("validator-claude", { cli: "claude", preset: "worker"');
     expect(artifact.content).toContain('.agent("author-codex"');
     expect(artifact.content).not.toContain('.agent("impl-primary-codex"');
-    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-codex\", repairRetries: 2 })");
+    expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-codex\", repairRetries: 2 })");
     expect(artifact.content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
-    expect(artifact.content).toContain('Codex structural marker gate');
-    expect(artifact.content).toContain('must not be presented as independent review evidence');
-    expect(artifact.content).toContain('Substantive review evidence comes from the Claude review steps plus deterministic validation gates');
+    expect(artifact.content).toContain('verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED');
+    expect(artifact.content).toContain('review-codex.md');
     expect(artifact.content).toContain('docs/release-readiness.md');
     expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
@@ -568,15 +575,16 @@ describe('workflow generation pipeline', () => {
         }),
         expect.objectContaining({
           stepId: 'review-claude',
-          agent: 'reviewer-codex',
+          agent: 'reviewer-claude',
           concurrency: 1,
         }),
       ]),
     );
-    expect(result.toolSelection.selections).not.toEqual(
+    expect(result.toolSelection.selections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           stepId: 'review-codex',
+          agent: 'reviewer-codex',
         }),
       ]),
     );
@@ -707,6 +715,69 @@ describe('workflow generation pipeline', () => {
     });
     expect(gate(artifact, 'git-diff-gate').command).toContain('git ls-files --others --exclude-standard');
     expect(result.validation.issues).toEqual([]);
+  });
+
+  it('requires the mandatory Claude-then-Codex fresh-eyes review/fix loop', () => {
+    const loopSpec = spec({
+      description: 'Implement one helper change and add a focused Vitest unit test.',
+      targetFiles: ['src/product/generation/template-renderer.ts', 'src/product/generation/pipeline.test.ts'],
+      acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+    });
+    const result = generate({
+      spec: loopSpec,
+      artifactPath: 'workflows/generated/fresh-eyes-loop.ts',
+    });
+    const base = artifact(result);
+
+    const loopOrder = [
+      '.step("review-claude"',
+      '.step("fix-loop"',
+      '.step("final-review-claude"',
+      '.step("final-fix-claude"',
+      '.step("review-codex"',
+      '.step("fix-loop-codex"',
+      '.step("final-review-codex"',
+      '.step("final-fix-codex"',
+      '.step("final-review-pass-gate"',
+      '.step("final-hard-validation"',
+    ].map((needle) => base.content.indexOf(needle));
+    expect(loopOrder.every((index) => index >= 0)).toBe(true);
+    expect(loopOrder.every((index, position) => position === 0 || index > loopOrder[position - 1])).toBe(true);
+    expect(base.content).toContain('verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED');
+    expect(base.content).toContain('add or update appropriate tests, fixtures, assertions, or deterministic proofs');
+    expect(gate(base, 'post-codex-fix-validation')).toMatchObject({
+      dependsOn: ['codex-fix-loop-report-gate'],
+      failOnError: false,
+      stage: 'post_fix',
+    });
+    expect(gate(base, 'final-review-pass-gate')).toMatchObject({
+      dependsOn: ['final-fix-codex'],
+      stage: 'final',
+    });
+
+    const oldParallelShape = {
+      ...base,
+      tasks: base.tasks.map((task) =>
+        task.id === 'review-codex'
+          ? { ...task, dependsOn: ['initial-soft-validation'] }
+          : task.id === 'final-review-codex'
+            ? { ...task, dependsOn: ['post-fix-validation'] }
+            : task,
+      ),
+      gates: base.gates.map((candidate) =>
+        candidate.name === 'final-review-pass-gate'
+          ? { ...candidate, dependsOn: ['final-review-claude', 'final-review-codex'] }
+          : candidate,
+      ),
+    };
+    const validation = validateGeneratedArtifact(oldParallelShape, result.patternDecision, result.skillContext, loopSpec);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'MANDATORY_FRESH_EYES_LOOP_MISSING' }),
+      ]),
+    );
   });
 
   it('requires the runtime run call itself to pass explicit cwd, ignoring embedded examples', () => {
@@ -1184,8 +1255,8 @@ describe('workflow generation pipeline', () => {
     const artifact = result.artifact!;
     const passGate = artifact.gates.find((g) => g.name === 'final-review-pass-gate')!;
 
-    const claudePathMatch = artifact.content.match(/Write\s+(\S+\/final-review-claude\.md)/);
-    const codexPathMatch = artifact.content.match(/Write\s+(\S+\/final-review-codex\.md)/);
+    const claudePathMatch = artifact.content.match(/write\s+(\S+\/claude-final-fix\.md)/i);
+    const codexPathMatch = artifact.content.match(/write\s+(\S+\/codex-final-fix\.md)/i);
     expect(claudePathMatch).not.toBeNull();
     expect(codexPathMatch).not.toBeNull();
 
@@ -1218,12 +1289,16 @@ describe('workflow generation pipeline', () => {
       dependsOn: ['final-signoff'],
     });
     const consistencyGate = gate(artifact, 'final-artifact-consistency-gate');
-    expect(consistencyGate.command).toContain("['review-feedback.md', read('review-feedback.md')]");
+    expect(consistencyGate.command).toContain("['review-claude.md', read('review-claude.md')]");
     expect(consistencyGate.command).toContain("['fix-loop-report.md', read('fix-loop-report.md')]");
     expect(consistencyGate.command).toContain("['final-review-claude.md', read('final-review-claude.md')]");
+    expect(consistencyGate.command).toContain("['claude-final-fix.md', read('claude-final-fix.md')]");
+    expect(consistencyGate.command).toContain("['review-codex.md', read('review-codex.md')]");
+    expect(consistencyGate.command).toContain("['codex-fix-loop-report.md', read('codex-fix-loop-report.md')]");
+    expect(consistencyGate.command).toContain("['final-review-codex.md', read('final-review-codex.md')]");
+    expect(consistencyGate.command).toContain("['codex-final-fix.md', read('codex-final-fix.md')]");
     expect(consistencyGate.command).toContain("['signoff.md', read('signoff.md')]");
-    expect(consistencyGate.command).not.toContain("['final-review-codex.md', read('final-review-codex.md')]");
-    expect(consistencyGate.command).toContain('FINAL_REVIEW_CODEX_PASS');
+    expect(consistencyGate.command).toContain('CODEX_FINAL_FIX_COMPLETE');
   });
 
   it('no-target code workflow file gate validates manifest contents, not source-shape grep', () => {
@@ -1471,7 +1546,7 @@ describe('workflow generation pipeline', () => {
     });
     expect(result.patternDecision.specSignals).toContain('choosing-swarm-patterns skill loaded');
     expect(result.patternDecision.reason).toMatch(/choosing-swarm-patterns/i);
-    expect(artifact(result).content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-codex\", repairRetries: 2 })");
+    expect(artifact(result).content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-codex\", repairRetries: 2 })");
     expect(artifact(result).content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
   });
 
@@ -1488,8 +1563,8 @@ describe('workflow generation pipeline', () => {
     const weakArtifact = {
       ...baseArtifact,
       content: baseArtifact.content.replace(
-        ".onError('retry', { maxRetries: 2, retryDelayMs: 1000, repairAgent: \"validator-claude\", repairRetries: 2 })",
-        ".onError('retry', { maxRetries: 2, retryDelayMs: 1000 })",
+        ".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })",
+        ".onError('retry', { maxRetries: 2, retryDelayMs: 10000 })",
       ),
     };
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -297,17 +297,22 @@ function executeRickyCli(testCase, context) {
     },
   });
   const durationMs = Date.now() - startedAt;
-  if (cleanupDir) {
-    rmSync(cleanupDir, { recursive: true, force: true });
-  }
-
   if (result.error) {
+    if (cleanupDir) {
+      rmSync(cleanupDir, { recursive: true, force: true });
+    }
     throw result.error;
   }
 
   const stdout = result.stdout ?? '';
   const stderr = result.stderr ?? '';
-  const content = [stdout.trimEnd(), stderr.trimEnd()].filter(Boolean).join('\n');
+  const artifactContent = testCase.mock?.includeGeneratedArtifacts === true
+    ? readGeneratedArtifactContent(stdout, workingDir)
+    : '';
+  const content = [stdout.trimEnd(), stderr.trimEnd(), artifactContent].filter(Boolean).join('\n');
+  if (cleanupDir) {
+    rmSync(cleanupDir, { recursive: true, force: true });
+  }
 
   return {
     ok: result.status === 0,
@@ -325,6 +330,46 @@ function executeRickyCli(testCase, context) {
     ],
     notes: `Ran: tsx src/surfaces/cli/commands/cli-main.ts ${argv.join(' ')}`,
   };
+}
+
+function readGeneratedArtifactContent(stdout, workingDir) {
+  const artifactPaths = generatedArtifactPathsFromStdout(stdout);
+  const sections = [];
+  for (const artifactPath of artifactPaths) {
+    const fullPath = path.resolve(workingDir, artifactPath);
+    if (!fullPath.startsWith(`${path.resolve(workingDir)}${path.sep}`) && fullPath !== path.resolve(workingDir)) {
+      continue;
+    }
+    if (!existsSync(fullPath)) continue;
+    sections.push([
+      `\n--- GENERATED ARTIFACT: ${artifactPath} ---`,
+      readFileSync(fullPath, 'utf8'),
+    ].join('\n'));
+  }
+  return sections.join('\n');
+}
+
+function generatedArtifactPathsFromStdout(stdout) {
+  const paths = new Set();
+  const parsed = parseJson(stdout);
+  const records = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+  for (const record of records) {
+    const artifactPath = stringValue(record?.artifact?.path);
+    if (artifactPath) paths.add(artifactPath);
+    for (const artifact of Array.isArray(record?.artifacts) ? record.artifacts : []) {
+      const pathValue = stringValue(artifact?.path);
+      if (pathValue) paths.add(pathValue);
+    }
+  }
+  return [...paths].filter((artifactPath) => artifactPath.startsWith('workflows/generated/') && artifactPath.endsWith('.ts'));
+}
+
+function parseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function splitArgv(value) {
