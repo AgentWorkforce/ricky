@@ -8,6 +8,7 @@ import { generate, generateWithWorkforcePersona } from './pipeline.js';
 import type { WorkforcePersonaExecution, WorkforcePersonaResolver } from './workforce-persona-writer.js';
 import {
   buildWorkflowPersonaTask,
+  detectSpecIntentMismatch,
   dumpPersonaDebug,
   loadWorkforcePersonaModule,
   loadWorkforceSelectionModule,
@@ -1913,6 +1914,151 @@ describe('persona debug dump', () => {
         ...dumpInputs('/nonexistent-ricky-test-root-' + Date.now(), { reason: 'parse-error' }),
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
+  // Complements `detectWorkflowIntentRegressions` in
+  // workforce-persona-repairer.ts: that one catches regressions during
+  // repair, this one catches a degenerate first emit so the pre-write
+  // repair loop is given a chance to recover the work before the workflow
+  // ever reaches disk / runtime-launch.
+
+  it('flags a workflow that omits github-primitive imports when the spec declares a PR-shipping outcome', () => {
+    const spec = {
+      description: [
+        '# Spec: cloud-side cli-login + auth exchange',
+        '',
+        'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+        '',
+        'The workflow must use createGitHubStep from @agent-relay/github-primitive.',
+      ].join('\n'),
+    };
+    const stubWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'async function main() {',
+      '  await workflow("stub")',
+      '    .pattern("dag")',
+      '    .step("prepare-context", { type: "deterministic", command: "true" })',
+      '    .step("lead-plan", { type: "deterministic", command: "true" })',
+      '    .step("materialize-child-workflows", { type: "deterministic", command: "true" })',
+      '    .step("final-signoff", { type: "deterministic", command: "echo done" })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    const mismatches = detectSpecIntentMismatch(spec, stubWorkflow);
+    expect(mismatches.some((m) => m.includes('PR-shipping outcome'))).toBe(true);
+  });
+
+  it('does NOT flag a workflow that imports @agent-relay/github-primitive even when the spec declares PR shipping', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const realWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("real")',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    expect(detectSpecIntentMismatch(spec, realWorkflow)).toEqual([]);
+  });
+
+  it('also accepts the `@agent-relay/sdk/github` import path (used by some persona variants)', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const realWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/sdk/github";',
+      'async function main() {',
+      '  await workflow("real").step("open-pr", createGitHubStep({ action: "openPullRequest" })).run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    expect(detectSpecIntentMismatch(spec, realWorkflow)).toEqual([]);
+  });
+
+  it('flags a workflow with fewer than 4 top-level steps when the spec is large (>4 KB)', () => {
+    const spec = {
+      description: 'Outcome: one PR.\n' + 'detail '.repeat(700), // ~5 KB
+    };
+    const tinyWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("tiny")',
+      '    .step("only-step", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    const mismatches = detectSpecIntentMismatch(spec, tinyWorkflow);
+    expect(mismatches.some((m) => m.includes('master-executor stub'))).toBe(true);
+  });
+
+  it('does NOT trip the step-count floor on a small spec (<4 KB)', () => {
+    const spec = {
+      description: 'Tiny spec asking for one PR. Outcome: one pull request in cloud.',
+    };
+    const tinyButValidWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("tiny-spec").step("open-pr", createGitHubStep({ action: "openPullRequest" })).run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    expect(detectSpecIntentMismatch(spec, tinyButValidWorkflow)).toEqual([]);
+  });
+
+  it('does NOT flag PR-shipping mismatch when the spec is silent about PRs', () => {
+    const spec = { description: 'A planning-only spec; do not ship anything.' };
+    const planOnlyWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'async function main() {',
+      '  await workflow("plan-only").step("draft", { type: "deterministic", command: "echo plan" }).run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    expect(detectSpecIntentMismatch(spec, planOnlyWorkflow)).toEqual([]);
+  });
+
+  it('reproduces the 2026-05-16 cloud MCP cloud-spawn pr-02 failure mode: 180-line master-executor stub with no github-primitive', () => {
+    // Verbatim shape of the failure that prompted this PR. The spec
+    // declares `Outcome: one pull request` AND is large (~6 KB). The
+    // writer's first emit was a 180-line stub whose top-level steps are
+    // just `prepare-context → lead-plan → materialize-child-workflows →
+    // final-hard-validation → final-signoff` with createGitHubStep
+    // hidden inside nested-string child workflow definitions that ricky's
+    // auto-fix loop could not materialize. Both checks fire.
+    const spec = {
+      description:
+        '# Spec: local-sandbox-runner sidecar implementation\n' +
+        'Outcome: **one pull request in `cloud` opened against `origin/main`.**\n' +
+        'The workflow must use createGitHubStep from @agent-relay/github-primitive.\n' +
+        ('## Acceptance\n- impl files exist\n- typecheck green\n- docker builds\n').repeat(80), // pad over 4 KB
+    };
+    const stub = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      '// IMPLEMENTATION_WORKFLOW_CONTRACT: master-executor wrapping nested child workflows',
+      'async function main() {',
+      '  await workflow("stub")',
+      '    .step("prepare-context", { type: "deterministic", command: "true" })',
+      '    .step("lead-plan", { type: "deterministic", command: "true" })',
+      '    .step("materialize-child-workflows", { type: "deterministic", command: "echo defer" })',
+      '    .step("final-signoff", { type: "deterministic", command: "echo done" })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    const mismatches = detectSpecIntentMismatch(spec, stub);
+    expect(mismatches.length).toBeGreaterThanOrEqual(1);
+    expect(mismatches.some((m) => m.includes('PR-shipping outcome'))).toBe(true);
   });
 });
 
