@@ -215,6 +215,7 @@ export interface CliMainDeps extends InteractiveCliDeps {
 }
 
 let cachedPackageVersion: string | undefined;
+let salvageRunInProgress = false;
 
 // ---------------------------------------------------------------------------
 // Argument parsing — deterministic, no external deps
@@ -2146,6 +2147,7 @@ async function tryAutoSalvage(
   const salvageOptions = {
     ...(parsed.noAutoSalvage ? { disabled: true } : {}),
   };
+  if (!tryStartSalvageRun()) return;
   try {
     if (deps.runAutoSalvage) {
       await deps.runAutoSalvage(specMarkdown, exitContext, salvageOptions);
@@ -2159,6 +2161,8 @@ async function tryAutoSalvage(
     // to stderr and continue.
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`[ricky auto-salvage] hook crashed (continuing): ${message}\n`);
+  } finally {
+    finishSalvageRun();
   }
 }
 
@@ -2695,15 +2699,20 @@ async function runSignalSalvage(signal: NodeJS.Signals): Promise<void> {
       reason: `signal-${signal.toLowerCase()}`,
     };
     const runtime = createDefaultSalvageRuntime();
+    if (!tryStartSalvageRun()) return;
     // Race the salvage against a hard 60s budget so a hung salvage call
     // doesn't keep the process alive past the parent SIGTERM grace window.
-    await Promise.race([
-      runAutoSalvage(specMarkdown, exitContext, runtime),
-      new Promise<void>((resolveBudget) => {
-        const timer = setTimeout(() => resolveBudget(), 60_000);
-        timer.unref();
-      }),
-    ]);
+    try {
+      await Promise.race([
+        runAutoSalvage(specMarkdown, exitContext, runtime),
+        new Promise<void>((resolveBudget) => {
+          const timer = setTimeout(() => resolveBudget(), 60_000);
+          timer.unref();
+        }),
+      ]);
+    } finally {
+      finishSalvageRun();
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`[ricky auto-salvage] signal hook crashed: ${message}\n`);
@@ -2717,6 +2726,16 @@ export function resolveSignalSalvageSpecFile(argv: readonly string[]): string | 
   if (parsed.mode === 'cloud') return undefined;
   if (parsed.noAutoSalvage) return undefined;
   return parsed.specFile;
+}
+
+function tryStartSalvageRun(): boolean {
+  if (salvageRunInProgress) return false;
+  salvageRunInProgress = true;
+  return true;
+}
+
+function finishSalvageRun(): void {
+  salvageRunInProgress = false;
 }
 
 function signalNumberFor(signal: NodeJS.Signals): number {
