@@ -3,6 +3,8 @@ import { readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
+import ts from 'typescript';
+
 import type { ClarificationQuestion, ClarificationRequest, NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { RenderedArtifact, SkillContext, WorkflowExecutionTarget } from './types.js';
 
@@ -324,7 +326,7 @@ export async function writeWorkflowWithWorkforcePersona(
     );
   }
   const [result, runId] = await waitForWriterWithWatchdog(run, effectiveTimeoutSeconds, resolved.warnings);
-  const dumpDebug = (reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success') =>
+  const dumpDebug = (reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success' | 'spec-intent-mismatch') =>
     dumpPersonaDebug({
       kind: 'writer',
       reason,
@@ -362,6 +364,32 @@ export async function writeWorkflowWithWorkforcePersona(
     await dumpDebug('no-content');
     throw new WorkforcePersonaWriterError('Workforce persona response did not include workflow artifact content.');
   }
+
+  // Validate the writer's first emit against the spec's declared intent.
+  // The pre-write repair loop in pipeline.ts re-invokes the writer on
+  // throw, so this gives the writer a chance to fix a degenerate
+  // "master-executor stub" output before that output ever reaches disk
+  // or the runtime-launch step. Observed 2026-05-16 driving the cloud
+  // MCP cloud-spawn split: writer occasionally emits a 180-line stub
+  // whose top-level steps are just `prepare-context → lead-plan →
+  // materialize-child-workflows → final-signoff` with the actual impl
+  // work deferred to nested-string child workflows AND no PR-shipping
+  // primitives — even when the spec explicitly declares
+  // `Outcome: **one pull request in <repo>**`. detectWorkflowIntentRegressions
+  // (PR #109) only fires for repairs vs originals; this guard catches
+  // the case where the FIRST emit is already the degenerate shape.
+  const specIntentMismatches = detectSpecIntentMismatch(spec, parsed.content);
+  if (specIntentMismatches.length > 0) {
+    await dumpDebug('spec-intent-mismatch');
+    throw new WorkforcePersonaWriterError(
+      `Workforce persona writer output does not satisfy spec-declared intent: ${specIntentMismatches.join('; ')}.`,
+      [
+        ...resolved.warnings,
+        `The pre-write repair loop will re-invoke the writer with this failure as feedback.`,
+      ],
+    );
+  }
+
   await dumpDebug('success');
   const responseFormat = parsed.responseFormat as WorkforcePersonaWriterMetadata['responseFormat'];
   return {
@@ -1285,6 +1313,165 @@ function validateArtifactContent(content: string): void {
   }
 }
 
+/**
+ * Returns a list of human-readable mismatches between what the spec asked
+ * the writer to ship and what the writer actually emitted. Empty array
+ * means "writer output is consistent with the spec's declared intent" —
+ * safe to proceed.
+ *
+ * This is complementary to `detectWorkflowIntentRegressions` in
+ * workforce-persona-repairer.ts (which fires during the *repair* path).
+ * That guard catches: "the original ship-a-PR workflow was replaced by a
+ * placeholder during repair." This guard catches: "the writer's first
+ * emit was already a placeholder even though the spec declared a PR-
+ * shipping outcome."
+ *
+ * Heuristics:
+ * - PR-shipping intent: if the spec's description contains markers like
+ *   `Outcome: ... pull request`, `createGitHubStep`, `GitHubStepExecutor`,
+ *   or `@agent-relay/github-primitive`, the workflow must import or
+ *   reference at least one of `@agent-relay/github-primitive`,
+ *   `GitHubStepExecutor`, or `createGitHubStep`.
+ * - Step-count floor: when the spec is large enough that the writer
+ *   should produce at least 8 real steps (heuristic: spec.description
+ *   length > 4 KB), the workflow must have at least 4 `.step(...)` chain
+ *   calls. Catches the master-executor stub shape whose top-level chain
+ *   is just `prepare-context → lead-plan → materialize-child-workflows
+ *   → final-signoff` with the actual impl work hidden inside string
+ *   literals for child-workflow definitions (which don't run until the
+ *   master step materializes them, and which the auto-fix loop has
+ *   historically failed on).
+ *
+ * **Source-Text Analysis (AGENTS.md):** every workflow-side check
+ * inspects the parsed TypeScript AST via `ts.createSourceFile`. Imports
+ * come from `ImportDeclaration.moduleSpecifier`, identifier references
+ * from `Identifier` walks, and `.step(...)` chain calls from
+ * `CallExpression` nodes with a `step` property-access expression. This
+ * rules out the verified false-negative the reviewers on #120 flagged:
+ * a degenerate master-executor stub hiding `createGitHubStep` /
+ * `.step("...")` inside string literals (nested-string child workflow
+ * definitions) cannot fool the guard into thinking the work is there.
+ * Mirrors the same approach `analyzeWorkflowSource` uses in
+ * workforce-persona-repairer.ts — the canonical implementation for the
+ * repair-time validator. Duplicated here rather than imported to avoid a
+ * circular dependency back through the repairer module.
+ *
+ * Both checks are conservative — a healthy workflow trivially satisfies
+ * them; they only fire on the failure mode this guard addresses.
+ */
+export function detectSpecIntentMismatch(
+  spec: { description?: string; targetFiles?: readonly string[] },
+  workflowContent: string,
+): string[] {
+  const mismatches: string[] = [];
+  const description = typeof spec.description === 'string' ? spec.description : '';
+  if (!description) return mismatches;
+
+  // `(?<!\w)` instead of a leading `\b` so the `@agent-relay/...` token
+  // matches when preceded by whitespace / line start — `\b` between a
+  // word char and `@` fails because `@` itself is non-word.
+  const specRequiresPrShipping = /(?<!\w)(open\s+(a|one)\s+pull\s+request|one\s+pull\s+request\s+in|ships?\s+a\s+pr|createGitHubStep|GitHubStepExecutor|@agent-relay\/github-primitive)\b/i.test(description);
+
+  if (specRequiresPrShipping) {
+    const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
+    const importsGithubPrimitive =
+      facts.importsModule('@agent-relay/github-primitive') ||
+      facts.importsModule('@agent-relay/sdk/github');
+    const referencesPrShippingSymbol =
+      facts.referencesIdentifier('GitHubStepExecutor') ||
+      facts.referencesIdentifier('createGitHubStep');
+    if (!importsGithubPrimitive && !referencesPrShippingSymbol) {
+      mismatches.push(
+        `spec declares a PR-shipping outcome but the workflow neither imports @agent-relay/github-primitive (or @agent-relay/sdk/github) nor references GitHubStepExecutor / createGitHubStep`,
+      );
+    }
+  }
+
+  if (description.length > 4_000) {
+    const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
+    const stepInvocationCount = facts.stepInvocationCount;
+    if (stepInvocationCount < 4) {
+      mismatches.push(
+        `spec is ${Math.round(description.length / 1024)} KB but the workflow declares only ${stepInvocationCount} top-level .step(...) calls — likely a "master-executor stub" with the real impl deferred to nested-string child workflows that ricky cannot validate end-to-end`,
+      );
+    }
+  }
+
+  return mismatches;
+}
+
+interface WorkflowSourceIntentFacts {
+  importsModule(moduleSpec: string): boolean;
+  referencesIdentifier(name: string): boolean;
+  readonly stepInvocationCount: number;
+}
+
+/**
+ * Parses the workflow artifact into AST-derived facts. Mirrors
+ * `analyzeWorkflowSource` in workforce-persona-repairer.ts (the canonical
+ * implementation for the repair-time intent guard). Re-implemented here
+ * because the repairer imports from this module — sharing in the other
+ * direction would create a circular import.
+ *
+ * Unparseable sources fall through to a conservative "everything present"
+ * view so a malformed workflow is flagged via downstream checks (e.g.
+ * `validateArtifactContent`) rather than silently passing this guard.
+ */
+function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceIntentFacts {
+  let sourceFile: ts.SourceFile | undefined;
+  try {
+    sourceFile = ts.createSourceFile(
+      'ricky-workflow-artifact.ts',
+      content,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ false,
+      ts.ScriptKind.TS,
+    );
+  } catch {
+    sourceFile = undefined;
+  }
+
+  if (!sourceFile) {
+    return {
+      importsModule: () => true,
+      referencesIdentifier: () => true,
+      stepInvocationCount: Number.POSITIVE_INFINITY,
+    };
+  }
+
+  const importedModules = new Set<string>();
+  const referencedIdentifiers = new Set<string>();
+  let stepInvocationCount = 0;
+
+  const trackedIdentifiers = new Set<string>(['GitHubStepExecutor', 'createGitHubStep']);
+
+  function walk(node: ts.Node): void {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      importedModules.add(node.moduleSpecifier.text);
+    }
+    if (ts.isIdentifier(node) && trackedIdentifiers.has(node.text)) {
+      referencedIdentifiers.add(node.text);
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.name) &&
+      node.expression.name.text === 'step'
+    ) {
+      stepInvocationCount += 1;
+    }
+    ts.forEachChild(node, walk);
+  }
+
+  walk(sourceFile);
+
+  return {
+    importsModule: (moduleSpec) => importedModules.has(moduleSpec),
+    referencesIdentifier: (name) => referencedIdentifiers.has(name),
+    stepInvocationCount,
+  };
+}
+
 export function hasExplicitWorkflowRunCwd(content: string): boolean {
   const executableCode = maskTypeScriptStringsAndComments(content);
   return /\.run\s*\(\s*\{[\s\S]*?\bcwd\s*:\s*process\.cwd\s*\(\s*\)[\s\S]*?\}\s*\)/.test(executableCode);
@@ -1685,7 +1872,7 @@ export interface PersonaDebugDumpInput {
   /** Which persona pass produced the output — keeps writer and reviewer dumps separate on disk. */
   kind: 'writer' | 'reviewer';
   /** Coarse reason for the dump so the operator can tell parse failures from non-completions at a glance. */
-  reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success';
+  reason: 'noncompletion' | 'parse-error' | 'no-content' | 'success' | 'spec-intent-mismatch';
   repoRoot: string;
   /** SHA-256 digest of the task prompt, used as the dump directory name so repeated runs against the same prompt overwrite a single entry. */
   promptDigest: string;
