@@ -6,7 +6,14 @@ import { fileURLToPath } from 'node:url';
 import type { InteractiveCliResult } from '../entrypoint/interactive-cli.js';
 import type { OnboardingResult } from '../cli/onboarding.js';
 import type { LocalResponse } from '../../../local/entrypoint.js';
-import { cliMain, parseArgs, renderHelp, type CliProgressSpinner, type DetachedProcessSpawner } from './cli-main.js';
+import {
+  cliMain,
+  parseArgs,
+  renderHelp,
+  resolveSignalSalvageSpecFile,
+  type CliProgressSpinner,
+  type DetachedProcessSpawner,
+} from './cli-main.js';
 
 // ---------------------------------------------------------------------------
 // parseArgs
@@ -3529,6 +3536,12 @@ describe('cliMain', () => {
       });
 
       expect(salvage).not.toHaveBeenCalled();
+    });
+
+    it('skips signal-path salvage in cloud mode', () => {
+      expect(resolveSignalSalvageSpecFile(['cloud', '--spec-file', './spec.md', '--run'])).toBeUndefined();
+      expect(resolveSignalSalvageSpecFile(['--mode', 'cloud', '--spec-file', './spec.md', '--run'])).toBeUndefined();
+      expect(resolveSignalSalvageSpecFile(['--mode', 'local', '--spec-file', './spec.md', '--run'])).toBe('./spec.md');
     });
 
     it('still invokes the salvage runner when the interactive runner throws', async () => {

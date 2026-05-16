@@ -1,3 +1,6 @@
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { Heading, Node, Parent, Root } from 'mdast';
+
 /**
  * Spec metadata parser for the auto-salvage hook.
  *
@@ -13,10 +16,6 @@
  * to commit + push + open a PR against. This parser extracts each field
  * independently — a missing field returns `null` for that field, the caller
  * decides whether the overall spec is salvageable.
- *
- * Per the AGENTS.md source-text-analysis rule: spec markdown is documented
- * prose, not TypeScript source, so plain regex / line-based parsing is the
- * right tool here (the rule applies only to TS/JS source).
  */
 
 export interface SpecMetadata {
@@ -37,11 +36,12 @@ export interface SpecMetadata {
  * caller checks `isSalvageableSpec` to decide whether to proceed.
  */
 export function parseSpecMetadata(markdown: string): SpecMetadata {
+  const tree = parseMarkdown(markdown);
   return {
-    title: extractTitle(markdown),
-    repo: extractHeaderValue(markdown, 'Target repo'),
-    branch: extractHeaderValue(markdown, 'Target branch'),
-    worktree: extractHeaderValue(markdown, 'Worktree'),
+    title: extractTitle(tree),
+    repo: extractHeaderValue(markdown, tree, 'Target repo'),
+    branch: extractHeaderValue(markdown, tree, 'Target branch'),
+    worktree: extractHeaderValue(markdown, tree, 'Worktree'),
   };
 }
 
@@ -57,10 +57,13 @@ export function isSalvageableSpec(metadata: SpecMetadata): metadata is SpecMetad
   branch: string;
   worktree: string;
 } {
+  const repo = typeof metadata.repo === 'string' ? metadata.repo.trim() : '';
+  const branch = typeof metadata.branch === 'string' ? metadata.branch.trim() : '';
+  const worktree = typeof metadata.worktree === 'string' ? metadata.worktree.trim() : '';
   return (
-    typeof metadata.repo === 'string' && metadata.repo.length > 0 &&
-    typeof metadata.branch === 'string' && metadata.branch.length > 0 &&
-    typeof metadata.worktree === 'string' && metadata.worktree.length > 0
+    repo.length > 0 &&
+    branch.length > 0 &&
+    worktree.length > 0
   );
 }
 
@@ -74,7 +77,7 @@ export function inferPrTitle(metadata: SpecMetadata, markdown: string): string {
   const rawTitle = metadata.title ?? 'Untitled spec';
   const stripped = stripSpecPrefix(rawTitle);
   const scope = metadata.repo ? `(${metadata.repo})` : '';
-  const head = markdown.slice(0, 500).toLowerCase();
+  const head = collectSemanticIntroText(markdown, 500).toLowerCase();
   const looksLikeFix = /\b(fix|bug|regression|hotfix)\b/.test(head);
   const kind = looksLikeFix ? 'fix' : 'feat';
   if (!metadata.repo) {
@@ -87,48 +90,40 @@ function stripSpecPrefix(title: string): string {
   return title.replace(/^Spec:\s*/i, '').trim();
 }
 
-function extractTitle(markdown: string): string | null {
-  const lines = markdown.split(/\r?\n/);
-  for (const line of lines) {
-    const match = /^\s*#\s+(.+?)\s*$/.exec(line);
-    if (match && match[1] !== undefined) {
-      return match[1].trim();
-    }
+function extractTitle(tree: Root): string | null {
+  for (const node of tree.children) {
+    if (node.type !== 'heading' || node.depth !== 1) continue;
+    const title = collectInlineMarkdown(node).trim();
+    if (title.length > 0) return title;
   }
   return null;
 }
 
 /**
- * Extracts a `Header: value` line from markdown. Case-insensitive header
- * match, tolerant of bullet prefixes (`- Header:` or `* Header:`), and
- * unwraps backticks/quotes around the value.
+ * Extracts a `Header: value` line from semantic markdown nodes. We walk
+ * headings / paragraphs and ignore fenced code blocks entirely so example
+ * snippets cannot become live salvage metadata.
  */
-function extractHeaderValue(markdown: string, header: string): string | null {
+function extractHeaderValue(markdown: string, tree: Root, header: string): string | null {
   const headerPattern = escapeRegex(header);
-  // Walk line by line so we don't accidentally match a header mention inside
-  // a code fence or table. For each line: strip the leading bullet marker
-  // and any markdown emphasis runs around `Header:`, then capture the value
-  // to end of line. We normalize the leading portion by removing emphasis
-  // tokens before/after the header rather than trying to match every
-  // permutation in one regex (e.g. `- **Target repo:** \`relay\``).
-  const lines = markdown.split(/\r?\n/);
   const headerRegex = new RegExp(`^\\s*${headerPattern}\\s*:\\s*(.+?)\\s*$`, 'i');
-  for (const rawLine of lines) {
-    const normalized = normalizeHeaderLine(rawLine);
-    const match = headerRegex.exec(normalized);
-    if (match && match[1] !== undefined) {
-      return unwrapValue(match[1]);
+  let matchValue: string | null = null;
+  visitMetadataBlocks(tree, markdown, (rawBlock) => {
+    for (const line of rawBlock.split(/\r?\n/)) {
+      const normalized = normalizeHeaderLine(line);
+      const match = headerRegex.exec(normalized);
+      if (match && match[1] !== undefined) {
+        matchValue = unwrapValue(match[1]);
+        return true;
+      }
     }
-  }
-  return null;
+    return false;
+  });
+  return matchValue;
 }
 
 function normalizeHeaderLine(line: string): string {
-  // Strip a leading list marker.
-  let normalized = line.replace(/^\s*[-*]\s+/, '');
-  // Remove markdown emphasis runs (* _ pairs of length 1 or 2). We only
-  // strip them around the header portion before the first colon — the
-  // value portion is unwrapped separately in unwrapValue.
+  let normalized = line.trim();
   const colonIndex = normalized.indexOf(':');
   if (colonIndex === -1) {
     return normalized;
@@ -164,4 +159,56 @@ function unwrapValue(raw: string): string | null {
 
 function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseMarkdown(markdown: string): Root {
+  return fromMarkdown(markdown);
+}
+
+function collectSemanticIntroText(markdown: string, limit: number): string {
+  const tree = parseMarkdown(markdown);
+  let collected = '';
+  visitMetadataBlocks(tree, markdown, (blockText) => {
+    const normalized = blockText.replace(/\s+/g, ' ').trim();
+    if (normalized.length === 0) return false;
+    collected = collected.length > 0 ? `${collected} ${normalized}` : normalized;
+    return collected.length >= limit;
+  });
+  return collected.slice(0, limit);
+}
+
+function visitMetadataBlocks(node: Node, markdown: string, visit: (text: string) => boolean): boolean {
+  if (node.type === 'code') return false;
+  if (node.type === 'heading' || node.type === 'paragraph') {
+    const rawBlock = sliceMarkdown(markdown, node) ?? collectInlineMarkdown(node as Heading | Parent);
+    return visit(rawBlock);
+  }
+  if (!('children' in node) || !Array.isArray(node.children)) return false;
+  for (const child of node.children) {
+    if (visitMetadataBlocks(child, markdown, visit)) return true;
+  }
+  return false;
+}
+
+function collectInlineMarkdown(node: Heading | Parent): string {
+  return node.children.map((child) => renderInlineNode(child)).join('');
+}
+
+function renderInlineNode(node: Node): string {
+  if (node.type === 'text' && 'value' in node && typeof node.value === 'string') return node.value;
+  if (node.type === 'inlineCode' && 'value' in node && typeof node.value === 'string') return `\`${node.value}\``;
+  if (!('children' in node) || !Array.isArray(node.children)) return '';
+  const parent = node as Parent;
+  const inner = parent.children.map((child) => renderInlineNode(child)).join('');
+  if (node.type === 'strong') return `**${inner}**`;
+  if (node.type === 'emphasis') return `*${inner}*`;
+  if (node.type === 'delete') return `~~${inner}~~`;
+  return inner;
+}
+
+function sliceMarkdown(markdown: string, node: Node): string | null {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return null;
+  return markdown.slice(start, end);
 }

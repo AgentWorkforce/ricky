@@ -64,6 +64,10 @@ function createGitClient(gitBin: string): GitClient {
     async add(path, pathspec) {
       await runCommand(gitBin, ['-C', path, 'add', pathspec]);
     },
+    async hasStagedChanges(path) {
+      const result = await runCommand(gitBin, ['-C', path, 'diff', '--cached', '--name-only', '--']);
+      return result.stdout.trim().length > 0;
+    },
     async commit(path, subject, body) {
       await runCommand(gitBin, ['-C', path, 'commit', '-m', subject, '-m', body]);
     },
@@ -160,13 +164,45 @@ interface RunResult {
 interface RunOptions {
   /** When true, a non-zero exit is returned instead of thrown. */
   allowNonZero?: boolean;
+  /** Hard timeout for a single subprocess invocation. Defaults to 60s. */
+  timeoutMillis?: number;
 }
+
+const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
 
 function runCommand(bin: string, args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const timeoutMillis = options.timeoutMillis ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    const timer = timeoutMillis > 0 ? setTimeout(() => {
+      child.kill();
+      rejectOnce(new Error(`${bin} timed out after ${timeoutMillis}ms`));
+    }, timeoutMillis) : undefined;
+    timer?.unref?.();
+
+    const clearTimer = (): void => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    };
+
+    const rejectOnce = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimer();
+      rejectPromise(error);
+    };
+
+    const resolveOnce = (result: RunResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimer();
+      resolvePromise(result);
+    };
+
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
@@ -175,16 +211,16 @@ function runCommand(bin: string, args: readonly string[], options: RunOptions = 
     child.stderr?.on('data', (chunk: string) => {
       stderr += chunk;
     });
-    child.on('error', (err) => rejectPromise(err));
+    child.on('error', (err) => rejectOnce(err instanceof Error ? err : new Error(String(err))));
     child.on('close', (code) => {
+      if (settled) return;
       const exitCode = code ?? 1;
       if (exitCode !== 0 && !options.allowNonZero) {
-        rejectPromise(
-          new Error(`${bin} ${args.join(' ')} exited with code ${exitCode}: ${stderr.trim()}`),
-        );
+        const suffix = stderr.trim().length > 0 ? `: ${stderr.trim()}` : '';
+        rejectOnce(new Error(`${bin} exited with code ${exitCode}${suffix}`));
         return;
       }
-      resolvePromise({ code: exitCode, stdout, stderr });
+      resolveOnce({ code: exitCode, stdout, stderr });
     });
   });
 }

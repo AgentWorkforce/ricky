@@ -97,6 +97,28 @@ describe('parseSpecMetadata', () => {
 
     expect(parseSpecMetadata(spec).title).toBeNull();
   });
+
+  it('ignores metadata-looking lines inside fenced code blocks', () => {
+    const spec = [
+      '# Spec: fenced example',
+      '',
+      '```md',
+      'Target repo: cloud',
+      'Target branch: feat/wrong',
+      'Worktree: /tmp/wrong',
+      '```',
+      '',
+      'Target repo: relay',
+      'Target branch: feat/right',
+      'Worktree: /tmp/right',
+    ].join('\n');
+
+    expect(parseSpecMetadata(spec)).toMatchObject({
+      repo: 'relay',
+      branch: 'feat/right',
+      worktree: '/tmp/right',
+    });
+  });
 });
 
 describe('isSalvageableSpec', () => {
@@ -145,6 +167,17 @@ describe('isSalvageableSpec', () => {
         repo: '',
         branch: 'feat/x',
         worktree: '/tmp/x',
+      }),
+    ).toBe(false);
+  });
+
+  it('is false when required fields are whitespace-only strings', () => {
+    expect(
+      isSalvageableSpec({
+        title: 'whatever',
+        repo: '   ',
+        branch: '\n',
+        worktree: '\t',
       }),
     ).toBe(false);
   });

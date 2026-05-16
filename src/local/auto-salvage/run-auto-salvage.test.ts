@@ -44,7 +44,10 @@ interface StubOverrides {
   isGitWorkTree?: boolean;
   worktreeExists?: boolean;
   remoteBranchExists?: boolean;
+  hasStagedChanges?: boolean;
+  currentBranch?: string;
   existingPrs?: readonly { url: string }[];
+  listPrsError?: Error;
   createPr?: () => Promise<{ url: string }>;
 }
 
@@ -67,13 +70,14 @@ function createStubRuntime(overrides: StubOverrides = {}): StubRuntime {
     resetCalls,
     isGitWorkTree: vi.fn().mockResolvedValue(overrides.isGitWorkTree ?? true),
     status: vi.fn().mockResolvedValue(overrides.status ?? ''),
-    currentBranch: vi.fn().mockResolvedValue('feat/ship-the-thing'),
+    currentBranch: vi.fn().mockResolvedValue(overrides.currentBranch ?? 'feat/ship-the-thing'),
     reset: vi.fn().mockImplementation(async (_path: string, pathspec: string) => {
       resetCalls.push(pathspec);
     }),
     add: vi.fn().mockImplementation(async (_path: string, pathspec: string) => {
       addCalls.push(pathspec);
     }),
+    hasStagedChanges: vi.fn().mockResolvedValue(overrides.hasStagedChanges ?? true),
     commit: vi.fn().mockImplementation(async (_path: string, subject: string, body: string) => {
       commitCalls.push({ subject, body });
     }),
@@ -85,7 +89,9 @@ function createStubRuntime(overrides: StubOverrides = {}): StubRuntime {
 
   const gh: StubRuntime['gh'] = {
     createCalls,
-    listPrs: vi.fn().mockResolvedValue(overrides.existingPrs ?? []),
+    listPrs: overrides.listPrsError
+      ? vi.fn().mockRejectedValue(overrides.listPrsError)
+      : vi.fn().mockResolvedValue(overrides.existingPrs ?? []),
     createPr: vi.fn().mockImplementation(async (repo: string, branch: string, title: string, body: string) => {
       createCalls.push({ repo, branch, title, body });
       if (overrides.createPr) {
@@ -187,6 +193,28 @@ describe('runAutoSalvage', () => {
     expect(runtime.git.push).not.toHaveBeenCalled();
   });
 
+  it('fails fast when the worktree is not on the target branch', async () => {
+    const runtime = createStubRuntime({
+      status: ' M src/foo.ts\n',
+      currentBranch: 'main',
+    });
+    const result = await runAutoSalvage(FULL_SPEC, { exitCode: 124 }, runtime);
+    expect(result.outcome).toBe('failed');
+    expect(result.reason).toBe('worktree-not-on-target-branch:main');
+    expect(runtime.git.commit).not.toHaveBeenCalled();
+  });
+
+  it('skips when excluded artifact-only changes leave nothing staged', async () => {
+    const runtime = createStubRuntime({
+      status: ' M .workflow-artifacts/signoff.md\n',
+      hasStagedChanges: false,
+    });
+    const result = await runAutoSalvage(FULL_SPEC, { exitCode: 124 }, runtime);
+    expect(result.outcome).toBe('skipped');
+    expect(result.reason).toBe('no-salvageable-staged-changes');
+    expect(runtime.git.commit).not.toHaveBeenCalled();
+  });
+
   it('runs the full salvage path on a dirty worktree with no remote branch', async () => {
     const runtime = createStubRuntime({ status: ' M src/foo.ts\n?? src/new.ts\n' });
     const result = await runAutoSalvage(
@@ -210,6 +238,17 @@ describe('runAutoSalvage', () => {
     expect(runtime.gh.createCalls[0]?.branch).toBe('feat/ship-the-thing');
     expect(runtime.gh.createCalls[0]?.body).toContain('## Spec acceptance');
     expect(runtime.gh.createCalls[0]?.body).toContain('## Test plan');
+  });
+
+  it('keeps gh probe failures on the final structured log line instead of emitting a second line', async () => {
+    const runtime = createStubRuntime({
+      status: ' M src/foo.ts\n',
+      listPrsError: new Error('gh pr list exploded'),
+    });
+    const result = await runAutoSalvage(FULL_SPEC, { exitCode: 0 }, runtime);
+    expect(result.outcome).toBe('salvaged');
+    expect(runtime.loggerLines).toHaveLength(1);
+    expect(runtime.loggerLines[0]).toContain('probe-error=gh_pr_list_exploded');
   });
 
   it('emits a single structured stderr log line regardless of outcome', async () => {
@@ -243,7 +282,7 @@ describe('runAutoSalvage', () => {
       '',
       'Just some body text with no acceptance section.',
     ].join('\n');
-    const runtime = createStubRuntime({ status: ' M a\n' });
+    const runtime = createStubRuntime({ status: ' M a\n', currentBranch: 'feat/minimal' });
     await runAutoSalvage(minimalSpec, { exitCode: 0 }, runtime);
     const body = runtime.gh.createCalls[0]?.body ?? '';
     expect(body).toContain('## Spec excerpt');

@@ -25,10 +25,10 @@
  * Salvage is additive: it never swallows the original exit code. The
  * caller still exits with whatever code ricky was about to exit with.
  *
- * Per the AGENTS.md source-text-analysis rule: spec markdown is prose, so
- * line-based / regex parsing is allowed here (the rule applies only to
- * TS/JS source).
  */
+
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { Heading, Node, Parent, Root } from 'mdast';
 
 import {
   inferPrTitle,
@@ -45,6 +45,7 @@ export interface SalvageResult {
   prUrl?: string;
   worktree?: string;
   branch?: string;
+  probeError?: string;
 }
 
 export interface SalvageExitContext {
@@ -87,6 +88,8 @@ export interface GitClient {
   reset(path: string, pathspec: string): Promise<void>;
   /** `git -C <path> add <pathspec>`. */
   add(path: string, pathspec: string): Promise<void>;
+  /** Returns true when there is at least one staged change ready to commit. */
+  hasStagedChanges(path: string): Promise<boolean>;
   /** `git -C <path> commit -m <subject> -m <body>`. */
   commit(path: string, subject: string, body: string): Promise<void>;
   /** `git -C <path> push -u origin <branch>` — must NOT pass --force. */
@@ -197,43 +200,43 @@ async function tryRunAutoSalvage(
 
   // Worktree dirty. Confirm we aren't double-shipping.
   const owner = runtime.owner ?? DEFAULT_PR_OWNER;
+  let probeError: string | undefined;
   try {
     const existing = await runtime.gh.listPrs(repo, branch, owner);
     if (existing.length > 0) {
-      return {
+      return withProbeError({
         outcome: 'skipped',
         reason: 'pr-already-open-for-branch',
         worktree,
         branch,
         ...(existing[0]?.url ? { prUrl: existing[0].url } : {}),
-      };
+      }, probeError);
     }
   } catch (err) {
     // gh probe failure is not fatal — we'll discover the conflict at push
-    // time if a remote branch with the same name exists. Continue.
-    runtime.logger.log(
-      `[ricky auto-salvage] gh-pr-list probe failed: ${describeError(err)} (continuing)`,
-    );
+    // time if a remote branch with the same name exists. Continue, but keep
+    // the probe error attached to the final structured line.
+    probeError = describeError(err);
   }
 
   // Hard rule: refuse to force-push. If a remote branch already exists,
   // surface the conflict instead of clobbering it.
   try {
     if (await runtime.git.remoteBranchExists(worktree, branch)) {
-      return {
+      return withProbeError({
         outcome: 'skipped',
         reason: 'remote-branch-exists-no-force-push',
         worktree,
         branch,
-      };
+      }, probeError);
     }
   } catch (err) {
-    return {
+    return withProbeError({
       outcome: 'failed',
       reason: `git-ls-remote-failed:${describeError(err)}`,
       worktree,
       branch,
-    };
+    }, probeError);
   }
 
   // Stage everything except the workflow artifacts dir. Reset is a no-op
@@ -243,7 +246,40 @@ async function tryRunAutoSalvage(
     await runtime.git.add(worktree, '.');
     await runtime.git.reset(worktree, ARTIFACT_PATHSPEC);
   } catch (err) {
-    return { outcome: 'failed', reason: `git-add-failed:${describeError(err)}`, worktree, branch };
+    return withProbeError(
+      { outcome: 'failed', reason: `git-add-failed:${describeError(err)}`, worktree, branch },
+      probeError,
+    );
+  }
+
+  let currentBranch: string;
+  try {
+    currentBranch = await runtime.git.currentBranch(worktree);
+  } catch (err) {
+    return withProbeError(
+      { outcome: 'failed', reason: `git-current-branch-failed:${describeError(err)}`, worktree, branch },
+      probeError,
+    );
+  }
+  if (currentBranch !== branch) {
+    return withProbeError(
+      { outcome: 'failed', reason: `worktree-not-on-target-branch:${currentBranch}`, worktree, branch },
+      probeError,
+    );
+  }
+
+  try {
+    if (!(await runtime.git.hasStagedChanges(worktree))) {
+      return withProbeError(
+        { outcome: 'skipped', reason: 'no-salvageable-staged-changes', worktree, branch },
+        probeError,
+      );
+    }
+  } catch (err) {
+    return withProbeError(
+      { outcome: 'failed', reason: `git-staged-status-failed:${describeError(err)}`, worktree, branch },
+      probeError,
+    );
   }
 
   const title = inferPrTitle(metadata, specMarkdown);
@@ -251,13 +287,34 @@ async function tryRunAutoSalvage(
   try {
     await runtime.git.commit(worktree, title, commitBody);
   } catch (err) {
-    return { outcome: 'failed', reason: `git-commit-failed:${describeError(err)}`, worktree, branch };
+    return withProbeError(
+      { outcome: 'failed', reason: `git-commit-failed:${describeError(err)}`, worktree, branch },
+      probeError,
+    );
+  }
+
+  try {
+    currentBranch = await runtime.git.currentBranch(worktree);
+  } catch (err) {
+    return withProbeError(
+      { outcome: 'failed', reason: `git-current-branch-failed:${describeError(err)}`, worktree, branch },
+      probeError,
+    );
+  }
+  if (currentBranch !== branch) {
+    return withProbeError(
+      { outcome: 'failed', reason: `worktree-not-on-target-branch:${currentBranch}`, worktree, branch },
+      probeError,
+    );
   }
 
   try {
     await runtime.git.push(worktree, branch);
   } catch (err) {
-    return { outcome: 'failed', reason: `git-push-failed:${describeError(err)}`, worktree, branch };
+    return withProbeError(
+      { outcome: 'failed', reason: `git-push-failed:${describeError(err)}`, worktree, branch },
+      probeError,
+    );
   }
 
   const prBody = buildPrBody(metadata, specMarkdown, exitContext);
@@ -266,15 +323,15 @@ async function tryRunAutoSalvage(
     const pr = await runtime.gh.createPr(repo, branch, title, prBody, owner);
     prUrl = pr.url;
   } catch (err) {
-    return {
+    return withProbeError({
       outcome: 'failed',
       reason: `gh-pr-create-failed:${describeError(err)}`,
       worktree,
       branch,
-    };
+    }, probeError);
   }
 
-  return { outcome: 'salvaged', reason: 'commit-and-pr-opened', worktree, branch, prUrl };
+  return withProbeError({ outcome: 'salvaged', reason: 'commit-and-pr-opened', worktree, branch, prUrl }, probeError);
 }
 
 function emit(logger: SalvageLogger, result: SalvageResult): void {
@@ -284,6 +341,7 @@ function emit(logger: SalvageLogger, result: SalvageResult): void {
     `outcome=${result.outcome}`,
     `reason=${result.reason}`,
     `pr-url=${result.prUrl ?? ''}`,
+    ...(result.probeError ? [`probe-error=${sanitizeLogField(result.probeError)}`] : []),
   ];
   logger.log(`[ricky auto-salvage] ${fields.join(' ')}`);
 }
@@ -291,6 +349,14 @@ function emit(logger: SalvageLogger, result: SalvageResult): void {
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message.replace(/\s+/g, ' ').slice(0, 240);
   return String(err);
+}
+
+function sanitizeLogField(value: string): string {
+  return value.replace(/\s+/g, '_');
+}
+
+function withProbeError(result: SalvageResult, probeError: string | undefined): SalvageResult {
+  return probeError ? { ...result, probeError } : result;
 }
 
 function buildCommitBody(metadata: SpecMetadata, ctx: SalvageExitContext, status: string): string {
@@ -354,29 +420,51 @@ function buildPrBody(metadata: SpecMetadata, specMarkdown: string, ctx: SalvageE
 }
 
 function extractSection(markdown: string, headers: readonly string[]): string | null {
-  const lines = markdown.split(/\r?\n/);
-  const lowered = headers.map((h) => h.toLowerCase());
-  let startIndex = -1;
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? '';
-    const match = /^\s*(#{1,6})\s+(.+?)\s*$/.exec(line);
-    if (!match) continue;
-    const heading = (match[2] ?? '').toLowerCase();
-    if (lowered.some((needle) => heading.includes(needle))) {
-      startIndex = index + 1;
-      break;
-    }
+  const tree = fromMarkdown(markdown);
+  const lowered = headers.map((header) => header.toLowerCase());
+  for (let index = 0; index < tree.children.length; index += 1) {
+    const node = tree.children[index];
+    if (node?.type !== 'heading') continue;
+    const heading = collectPlainText(node).toLowerCase();
+    if (!lowered.some((needle) => heading.includes(needle))) continue;
+    const endIndex = findSectionEnd(tree, index, node.depth);
+    const contentNodes = tree.children.slice(index + 1, endIndex).filter(hasOffsets);
+    if (contentNodes.length === 0) return null;
+    const start = contentNodes[0]?.position?.start.offset;
+    const end = contentNodes.at(-1)?.position?.end.offset;
+    if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return null;
+    const section = markdown.slice(start, end).trim();
+    return section.length > 0 ? section : null;
   }
-  if (startIndex === -1) return null;
-  const collected: string[] = [];
-  for (let index = startIndex; index < lines.length; index += 1) {
-    const line = lines[index] ?? '';
-    if (/^\s*#{1,6}\s+/.test(line)) break;
-    collected.push(line);
-  }
-  const joined = collected.join('\n').trim();
-  return joined.length > 0 ? joined : null;
+  return null;
 }
 
 const ARTIFACT_PATHSPEC = '.workflow-artifacts/';
 const DEFAULT_PR_OWNER = 'AgentWorkforce';
+
+function findSectionEnd(tree: Root, startIndex: number, depth: number): number {
+  for (let index = startIndex + 1; index < tree.children.length; index += 1) {
+    const node = tree.children[index];
+    if (node?.type === 'heading' && node.depth <= depth) return index;
+  }
+  return tree.children.length;
+}
+
+function hasOffsets(node: Node): boolean {
+  return (
+    typeof node.position?.start.offset === 'number' &&
+    typeof node.position?.end.offset === 'number'
+  );
+}
+
+function collectPlainText(node: Heading | Parent): string {
+  return node.children.map((child) => renderPlainText(child)).join('');
+}
+
+function renderPlainText(node: Node): string {
+  if ((node.type === 'text' || node.type === 'inlineCode') && 'value' in node && typeof node.value === 'string') {
+    return node.value;
+  }
+  if (!('children' in node) || !Array.isArray(node.children)) return '';
+  return node.children.map((child) => renderPlainText(child)).join('');
+}

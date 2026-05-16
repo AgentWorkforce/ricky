@@ -2677,13 +2677,11 @@ function installSalvageOnSignal(): void {
 async function runSignalSalvage(signal: NodeJS.Signals): Promise<void> {
   try {
     const argv = process.argv.slice(2);
-    if (!argv.includes('--run')) return;
-    if (argv.includes('--no-auto-salvage')) return;
+    const specFile = resolveSignalSalvageSpecFile(argv);
+    if (!specFile) return;
     const env = process.env;
     const disableFlag = (env.RICKY_DISABLE_AUTO_SALVAGE ?? '').trim().toLowerCase();
     if (disableFlag === '1' || disableFlag === 'true' || disableFlag === 'yes') return;
-    const specFile = readSpecFileArg(argv);
-    if (!specFile) return;
     const cwd = env.INIT_CWD ? resolve(env.INIT_CWD) : process.cwd();
     const specPath = isAbsolute(specFile) ? specFile : resolve(cwd, specFile);
     let specMarkdown: string;
@@ -2712,18 +2710,13 @@ async function runSignalSalvage(signal: NodeJS.Signals): Promise<void> {
   }
 }
 
-function readSpecFileArg(argv: readonly string[]): string | undefined {
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === '--spec-file' || arg === '--file') {
-      const next = argv[index + 1];
-      if (next && !next.startsWith('--')) return next;
-    }
-    if (typeof arg === 'string' && (arg.startsWith('--spec-file=') || arg.startsWith('--file='))) {
-      return arg.slice(arg.indexOf('=') + 1);
-    }
-  }
-  return undefined;
+export function resolveSignalSalvageSpecFile(argv: readonly string[]): string | undefined {
+  const parsed = parseArgs([...argv]);
+  if (parsed.command !== 'run') return undefined;
+  if (!parsed.runRequested) return undefined;
+  if (parsed.mode === 'cloud') return undefined;
+  if (parsed.noAutoSalvage) return undefined;
+  return parsed.specFile;
 }
 
 function signalNumberFor(signal: NodeJS.Signals): number {
