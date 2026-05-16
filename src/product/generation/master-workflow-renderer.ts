@@ -343,6 +343,20 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
   const validationCommand = child.validationCommands[0] ?? 'npm run typecheck';
   const targetScope = child.targetFiles.length > 0 ? child.targetFiles.join(' ') : 'NO_TARGET_FILES_DECLARED';
   const marker = child.signoffMarker;
+  // Injected into every review/fix task. The master executor runs all child
+  // slices in one shared checkout, so by the time a later child is reviewed
+  // the worktree already contains earlier siblings' dirty files. Reviewers
+  // were assigning BLOCKED and fix-loops were writing BLOCKED_NO_COMMIT.md
+  // purely because `git status` showed sibling files outside this slice's
+  // declared scope — a false block that stalls the whole master plan.
+  const sharedWorktreeScopeRule =
+    `Shared-worktree scope rule: this child runs in the SAME checkout as sibling slices. `
+    + `${artifactsDir}/scope-baseline.txt is the dirty set captured before this child started. `
+    + `Files in that baseline are pre-existing sibling/parent changes — they are NOT this child's `
+    + `responsibility, NOT scope violations, and must NOT be reverted, cleaned, or counted against `
+    + `this slice. Judge scope, findings, and BLOCKED only on the delta this child introduces on top `
+    + `of the baseline (current 'git status --porcelain' minus scope-baseline.txt). Do not BLOCK or `
+    + `write BLOCKED_NO_COMMIT.md solely because unrelated sibling files are dirty.`;
 
   return `${[
     "import { workflow } from '@agent-relay/sdk/workflows';",
@@ -370,6 +384,15 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
       `mkdir -p ${shellQuote(artifactsDir)}`,
       `printf '%s\\n' ${shellQuote(spec.description)} > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
       `printf '%s\\n' ${shellQuote(targetScope)} > ${shellQuote(`${artifactsDir}/target-files.txt`)}`,
+      // Snapshot the worktree's dirty set BEFORE this child touches anything.
+      // The master executor runs every child in the SAME checkout, so by the
+      // time a later child starts, earlier siblings' changes are already
+      // dirty here. Files listed in scope-baseline.txt are pre-existing
+      // sibling/parent state this child does not own — the scope gate must
+      // judge this child only on the delta it introduces, never on this
+      // baseline. Without it, every child after the first false-blocks on
+      // sibling contamination.
+      `git status --porcelain > ${shellQuote(`${artifactsDir}/scope-baseline.txt`)} 2>/dev/null || : > ${shellQuote(`${artifactsDir}/scope-baseline.txt`)}`,
       'echo RICKY_CHILD_CONTEXT_READY',
     ].join('\n'))},`,
     '      captureOutput: true,',
@@ -381,6 +404,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     `      task: ${templateLiteral([
       `Plan this child slice: ${child.title}.`,
       `Target files: ${targetScope}.`,
+      `This child runs in a SHARED worktree alongside sibling child slices. ${artifactsDir}/scope-baseline.txt lists files already dirty before this child started — those belong to sibling/parent slices, are out of this child's ownership, and must NOT be reverted or counted as scope violations. Define this child's changed-file scope as the delta it introduces on top of that baseline.`,
       'State non-goals, ownership, validation, source changes, code changes, tests, git diff evidence, and PR URL or explicit result status.',
       `Write ${artifactsDir}/lead-plan.md ending with RICKY_CHILD_LEAD_PLAN_READY.`,
     ].join('\n'))},`,
@@ -392,6 +416,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     `      task: ${templateLiteral([
       `Implement the bounded child slice: ${child.title}.`,
       `Edit only declared targets when possible: ${targetScope}.`,
+      `Shared worktree: files in ${artifactsDir}/scope-baseline.txt are pre-existing sibling/parent changes. Do not edit, revert, stage, or clean them — leave them exactly as found.`,
       'Produce deterministic evidence, tests, and a concise result or PR URL when applicable.',
     ].join('\n'))},`,
     '      verification: { type: "exit_code", value: "0" },',
@@ -408,6 +433,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     '      dependsOn: ["initial-soft-validation"],',
     `      task: ${templateLiteral([
       'Fresh-eyes review this child slice against the lead plan, actual files, diff, and validation output.',
+      sharedWorktreeScopeRule,
       'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
       `Write ${artifactsDir}/review-claude.md ending with RICKY_CHILD_CLAUDE_REVIEW_READY.`,
     ].join('\n'))},`,
@@ -420,6 +446,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
       'Run the Claude 80-to-100 review-fix loop for this child slice.',
       `Read ${artifactsDir}/review-claude.md and the initial validation output.`,
       'Fix every valid finding within the declared scope; add or update tests/proofs for testable findings.',
+      sharedWorktreeScopeRule,
       `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
       `Write ${artifactsDir}/fix-loop-report.md ending with RICKY_CHILD_FIX_LOOP_READY.`,
     ].join('\n'))},`,
@@ -437,6 +464,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     '      dependsOn: ["post-fix-validation"],',
     `      task: ${templateLiteral([
       'Re-review the fixed child state from scratch.',
+      sharedWorktreeScopeRule,
       'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
       `Write ${artifactsDir}/final-review-claude.md ending with RICKY_CHILD_CLAUDE_FINAL_REVIEW_READY.`,
     ].join('\n'))},`,
@@ -448,6 +476,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     `      task: ${templateLiteral([
       `Read ${artifactsDir}/final-review-claude.md.`,
       'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
+      sharedWorktreeScopeRule,
       `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
       `Write ${artifactsDir}/claude-final-fix.md ending with RICKY_CHILD_CLAUDE_FINAL_FIX_READY.`,
     ].join('\n'))},`,
@@ -458,6 +487,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     '      dependsOn: ["final-fix-claude"],',
     `      task: ${templateLiteral([
       'Second-pass fresh-eyes review after the Claude loop. Read the actual files, diff, review artifacts, and validation evidence.',
+      sharedWorktreeScopeRule,
       'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
       `Write ${artifactsDir}/review-codex.md ending with RICKY_CHILD_CODEX_REVIEW_READY.`,
     ].join('\n'))},`,
@@ -469,6 +499,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     `      task: ${templateLiteral([
       `Read ${artifactsDir}/review-codex.md.`,
       'Fix every valid Codex finding and add or update tests/proofs for testable findings.',
+      sharedWorktreeScopeRule,
       `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
       `Write ${artifactsDir}/codex-fix-loop-report.md ending with RICKY_CHILD_CODEX_FIX_LOOP_READY.`,
     ].join('\n'))},`,
@@ -486,6 +517,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     '      dependsOn: ["post-codex-fix-validation"],',
     `      task: ${templateLiteral([
       'Final Codex fresh-eyes review after Codex fixes.',
+      sharedWorktreeScopeRule,
       'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
       `Write ${artifactsDir}/final-review-codex.md ending with RICKY_CHILD_CODEX_FINAL_REVIEW_READY.`,
     ].join('\n'))},`,
@@ -497,6 +529,7 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     `      task: ${templateLiteral([
       `Read ${artifactsDir}/final-review-codex.md.`,
       'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
+      sharedWorktreeScopeRule,
       `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
       `Write ${artifactsDir}/codex-final-fix.md ending with RICKY_CHILD_CODEX_FINAL_FIX_READY.`,
     ].join('\n'))},`,

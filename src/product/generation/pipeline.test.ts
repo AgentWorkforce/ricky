@@ -61,6 +61,39 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
   });
 
+  // Regression: the master executor runs every child slice in the SAME
+  // checkout (.run({ cwd: process.cwd() })), so later children see earlier
+  // siblings' dirty files. Reviewers were assigning BLOCKED and fix-loops
+  // were writing BLOCKED_NO_COMMIT.md purely because `git status` showed
+  // out-of-scope sibling files — a false block that stalled the whole
+  // master plan for hours. Each child must snapshot the pre-existing dirty
+  // set and judge scope only on its own delta.
+  it('makes master child slices baseline-aware so shared-worktree sibling dirt is not a false BLOCK', () => {
+    const result = generate({
+      spec: spec({
+        description:
+          'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['npm test'],
+      }),
+      artifactPath: 'workflows/generated/runtime-master.ts',
+    });
+
+    expect(result.masterExecutionPlan).toBeDefined();
+    const content = artifact(result).content;
+
+    // prepare-context snapshots the pre-child dirty set.
+    expect(content).toContain('scope-baseline.txt');
+    expect(content).toContain('git status --porcelain');
+
+    // The shared-worktree scope rule is injected into review/fix tasks and
+    // explicitly forbids blocking on sibling dirt.
+    expect(content).toContain('Shared-worktree scope rule');
+    expect(content).toContain('Do not BLOCK or write BLOCKED_NO_COMMIT.md solely because unrelated sibling files are dirty');
+    // It must reference the baseline as the thing to subtract.
+    expect(content).toContain("current 'git status --porcelain' minus scope-baseline.txt");
+  });
+
   // Regression: master-rendered final-hard-validation used to hardcode
   // `npm test`, which walks the entire repo's test suite from the cwd.
   // For monorepo specs that scope work to a few `packages/<pkg>/` files,
