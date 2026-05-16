@@ -66,7 +66,15 @@ export function buildFinalReviewPassGateCommand(options: FinalReviewPassGateOpti
       'Child workflow gate refused: an agent wrote BLOCKED_NO_COMMIT.md and did not produce a clean signoff. '
       + 'This needs a human decision, not an auto-retry. Evidence:',
     )} >&2`,
-    `  cat ${shellQuote(blockedPath)} >&2`,
+    // `set -e` is active above. A failing `cat` (file removed between the
+    // `-f` check and this read, file not readable, etc.) would terminate
+    // the script before `exit 3` and regress blocked routing back to a
+    // generic non-attributable exit. Guard the cat so we always reach
+    // `exit 3`; emit a fallback marker on stderr if the evidence couldn't
+    // be read so the blocked routing is still observable.
+    `  if ! cat ${shellQuote(blockedPath)} >&2; then`,
+    `    echo ${shellQuote(`${GATE_BLOCKED_MARKER}: unable to read BLOCKED_NO_COMMIT.md evidence`)} >&2`,
+    '  fi',
     '  exit 3',
     'fi',
   ];
@@ -78,6 +86,12 @@ export function buildFinalReviewPassGateCommand(options: FinalReviewPassGateOpti
       'fi',
     );
   }
-  lines.push(`echo ${options.successMarker}`);
+  // Shell-quote the success marker for consistency with every other
+  // dynamic value emitted in this script. Current callers pass the safe
+  // constant `'RICKY_CHILD_FRESH_EYES_LOOP_READY'`, but this is an exported
+  // shared builder; preserving the quoting discipline prevents future
+  // callers from accidentally injecting shell metacharacters via the
+  // option.
+  lines.push(`echo ${shellQuote(options.successMarker)}`);
   return lines.join('\n');
 }

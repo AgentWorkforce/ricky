@@ -8,7 +8,7 @@ import {
 
 const ARTIFACTS = '.workflow-artifacts/generated/demo/update-last-week';
 
-function gate(): string {
+function gate(overrides: { successMarker?: string } = {}): string {
   return buildFinalReviewPassGateCommand({
     artifactsDir: ARTIFACTS,
     checks: [
@@ -21,7 +21,7 @@ function gate(): string {
         missingDetail: `${ARTIFACTS}/codex-final-fix.md is missing RICKY_CHILD_CODEX_FINAL_FIX_READY`,
       },
     ],
-    successMarker: 'RICKY_CHILD_FRESH_EYES_LOOP_READY',
+    successMarker: overrides.successMarker ?? 'RICKY_CHILD_FRESH_EYES_LOOP_READY',
   });
 }
 
@@ -59,7 +59,22 @@ describe('buildFinalReviewPassGateCommand', () => {
 
   it('still echoes the success marker last so the gate can pass', () => {
     const command = gate();
-    expect(command.trimEnd().endsWith('echo RICKY_CHILD_FRESH_EYES_LOOP_READY')).toBe(true);
+    // shellQuote wraps the marker in single quotes for safe shell embedding.
+    expect(command.trimEnd().endsWith("echo 'RICKY_CHILD_FRESH_EYES_LOOP_READY'")).toBe(true);
+  });
+
+  it('shell-quotes the success marker (defends against future callers passing metacharacters)', () => {
+    const command = gate({ successMarker: 'DONE $(touch /tmp/pwned)' });
+    expect(command).toContain("echo 'DONE $(touch /tmp/pwned)'");
+    expect(command).not.toContain('echo DONE $(touch');
+  });
+
+  it('guards the blocked-evidence cat so a failing read does not short-circuit exit 3', () => {
+    const command = gate();
+    // The cat call must be inside an `if !` block (so set -e doesn't
+    // terminate the script if cat itself fails) followed by an
+    // unconditional `exit 3`.
+    expect(command).toMatch(/if ! cat .* >&2; then[\s\S]*?fi[\s\S]*?exit 3/);
   });
 
   it('does not leave a trailing bare `test ! -f` clause that fails opaquely', () => {
