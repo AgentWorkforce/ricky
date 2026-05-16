@@ -1,8 +1,59 @@
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
 import { intake } from '../spec-intake/index.js';
 import type { NormalizedWorkflowSpec, RawSpecPayload } from '../spec-intake/types.js';
 import { generate, validateGeneratedArtifact } from './pipeline.js';
+import { childWorkflowSource } from './master-workflow-renderer.js';
+
+interface StepConfig {
+  command?: string;
+  task?: string;
+}
+
+/**
+ * Parse a generated child workflow's TypeScript source and return each
+ * `.step("<id>", { ... })` config's `command` / `task` string values keyed
+ * by step id. AST-based (per AGENTS.md "Source-Text Analysis: Use
+ * Grammar-Aware Parsers, Not Regex") so assertions check the contract is
+ * attached to the right step rather than that text appears anywhere in the
+ * rendered blob.
+ */
+function extractStepConfigs(source: string): Map<string, StepConfig> {
+  const sourceFile = ts.createSourceFile('child.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const steps = new Map<string, StepConfig>();
+  const literalText = (node: ts.Expression): string | undefined => {
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isTemplateExpression(node)) {
+      return [node.head.text, ...node.templateSpans.map((s) => s.literal.text)].join('');
+    }
+    return undefined;
+  };
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'step'
+      && node.arguments.length >= 2
+      && ts.isStringLiteralLike(node.arguments[0])
+      && ts.isObjectLiteralExpression(node.arguments[1])
+    ) {
+      const id = node.arguments[0].text;
+      const cfg: StepConfig = {};
+      for (const prop of node.arguments[1].properties) {
+        if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
+        const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
+        if (key === 'command') cfg.command = literalText(prop.initializer);
+        if (key === 'task') cfg.task = literalText(prop.initializer);
+      }
+      steps.set(id, cfg);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return steps;
+}
 
 const RECEIVED_AT = '2026-04-26T00:00:00.000Z';
 
@@ -59,6 +110,57 @@ describe('workflow generation pipeline', () => {
       /\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/,
     );
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
+  });
+
+  // Regression: the master executor runs every child slice in the SAME
+  // checkout (.run({ cwd: process.cwd() })), so later children see earlier
+  // siblings' dirty files. Reviewers were assigning BLOCKED and fix-loops
+  // were writing BLOCKED_NO_COMMIT.md purely because `git status` showed
+  // out-of-scope sibling files — a false block that stalled the whole
+  // master plan for hours. Each child must snapshot the pre-existing dirty
+  // set and judge scope only on its own delta.
+  it('makes master child slices baseline-aware so shared-worktree sibling dirt is not a false BLOCK', () => {
+    const fixtureSpec = spec({
+      description:
+        'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+      constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+      acceptanceGates: ['npm test'],
+    });
+    const result = generate({ spec: fixtureSpec, artifactPath: 'workflows/generated/runtime-master.ts' });
+    expect(result.masterExecutionPlan).toBeDefined();
+
+    const child = result.masterExecutionPlan!.children[0];
+    const childSrc = childWorkflowSource(child, fixtureSpec);
+
+    // Parse the generated child workflow with the TypeScript AST and extract
+    // each `.step("<id>", { ... })` config object so assertions verify the
+    // contract is attached to the right steps — not that a literal string
+    // appears anywhere in the blob (AGENTS.md: parser-based, not substring).
+    const stepConfigs = extractStepConfigs(childSrc);
+
+    const prepare = stepConfigs.get('prepare-context');
+    expect(prepare, 'prepare-context step exists').toBeDefined();
+    expect(prepare!.command, 'prepare-context snapshots the pre-child dirty set')
+      .toMatch(/git status --porcelain >\s*'[^']*\/scope-baseline\.txt'/);
+
+    // Every review/fix stage that assigns BLOCKED or writes
+    // BLOCKED_NO_COMMIT.md must carry the shared-worktree scope rule.
+    const scopedStages = [
+      'review-claude', 'fix-loop',
+      'final-review-claude', 'final-fix-claude',
+      'review-codex', 'fix-loop-codex',
+      'final-review-codex', 'final-fix-codex',
+    ];
+    for (const stage of scopedStages) {
+      const cfg = stepConfigs.get(stage);
+      expect(cfg, `${stage} step exists`).toBeDefined();
+      expect(cfg!.task, `${stage} task carries the shared-worktree scope rule`)
+        .toContain('Shared-worktree scope rule');
+      expect(cfg!.task, `${stage} forbids blocking on sibling dirt`)
+        .toContain('Do not BLOCK or write BLOCKED_NO_COMMIT.md solely because unrelated sibling files are dirty');
+      expect(cfg!.task, `${stage} defines scope as the delta over the baseline`)
+        .toContain("current 'git status --porcelain' minus scope-baseline.txt");
+    }
   });
 
   // Regression: master-rendered final-hard-validation used to hardcode
