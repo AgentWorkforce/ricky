@@ -3,6 +3,8 @@ import { readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
+import ts from 'typescript';
+
 import type { ClarificationQuestion, ClarificationRequest, NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { RenderedArtifact, SkillContext, WorkflowExecutionTarget } from './types.js';
 
@@ -1329,9 +1331,7 @@ function validateArtifactContent(content: string): void {
  *   `Outcome: ... pull request`, `createGitHubStep`, `GitHubStepExecutor`,
  *   or `@agent-relay/github-primitive`, the workflow must import or
  *   reference at least one of `@agent-relay/github-primitive`,
- *   `GitHubStepExecutor`, or `createGitHubStep`. Same AST-aware check
- *   detectWorkflowIntentRegressions uses (via maskTypeScriptStringsAndComments)
- *   so a comment or string-literal echo of those symbols can't satisfy it.
+ *   `GitHubStepExecutor`, or `createGitHubStep`.
  * - Step-count floor: when the spec is large enough that the writer
  *   should produce at least 8 real steps (heuristic: spec.description
  *   length > 4 KB), the workflow must have at least 4 `.step(...)` chain
@@ -1342,8 +1342,22 @@ function validateArtifactContent(content: string): void {
  *   master step materializes them, and which the auto-fix loop has
  *   historically failed on).
  *
+ * **Source-Text Analysis (AGENTS.md):** every workflow-side check
+ * inspects the parsed TypeScript AST via `ts.createSourceFile`. Imports
+ * come from `ImportDeclaration.moduleSpecifier`, identifier references
+ * from `Identifier` walks, and `.step(...)` chain calls from
+ * `CallExpression` nodes with a `step` property-access expression. This
+ * rules out the verified false-negative the reviewers on #120 flagged:
+ * a degenerate master-executor stub hiding `createGitHubStep` /
+ * `.step("...")` inside string literals (nested-string child workflow
+ * definitions) cannot fool the guard into thinking the work is there.
+ * Mirrors the same approach `analyzeWorkflowSource` uses in
+ * workforce-persona-repairer.ts — the canonical implementation for the
+ * repair-time validator. Duplicated here rather than imported to avoid a
+ * circular dependency back through the repairer module.
+ *
  * Both checks are conservative — a healthy workflow trivially satisfies
- * them; they only fire on the failure mode this PR addresses.
+ * them; they only fire on the failure mode this guard addresses.
  */
 export function detectSpecIntentMismatch(
   spec: { description?: string; targetFiles?: readonly string[] },
@@ -1353,11 +1367,19 @@ export function detectSpecIntentMismatch(
   const description = typeof spec.description === 'string' ? spec.description : '';
   if (!description) return mismatches;
 
-  const specRequiresPrShipping = /\b(open\s+(a|one)\s+pull\s+request|one\s+pull\s+request\s+in|ships?\s+a\s+pr|createGitHubStep|GitHubStepExecutor|@agent-relay\/github-primitive)\b/i.test(description);
+  // `(?<!\w)` instead of a leading `\b` so the `@agent-relay/...` token
+  // matches when preceded by whitespace / line start — `\b` between a
+  // word char and `@` fails because `@` itself is non-word.
+  const specRequiresPrShipping = /(?<!\w)(open\s+(a|one)\s+pull\s+request|one\s+pull\s+request\s+in|ships?\s+a\s+pr|createGitHubStep|GitHubStepExecutor|@agent-relay\/github-primitive)\b/i.test(description);
+
   if (specRequiresPrShipping) {
-    const codeOnly = workflowContent; // sufficient — the AST walks below would refine
-    const importsGithubPrimitive = /from\s+['"]@agent-relay\/(github-primitive|sdk\/github)['"]/.test(codeOnly);
-    const referencesPrShippingSymbol = /\b(GitHubStepExecutor|createGitHubStep)\b/.test(codeOnly);
+    const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
+    const importsGithubPrimitive =
+      facts.importsModule('@agent-relay/github-primitive') ||
+      facts.importsModule('@agent-relay/sdk/github');
+    const referencesPrShippingSymbol =
+      facts.referencesIdentifier('GitHubStepExecutor') ||
+      facts.referencesIdentifier('createGitHubStep');
     if (!importsGithubPrimitive && !referencesPrShippingSymbol) {
       mismatches.push(
         `spec declares a PR-shipping outcome but the workflow neither imports @agent-relay/github-primitive (or @agent-relay/sdk/github) nor references GitHubStepExecutor / createGitHubStep`,
@@ -1366,7 +1388,8 @@ export function detectSpecIntentMismatch(
   }
 
   if (description.length > 4_000) {
-    const stepInvocationCount = countTopLevelStepInvocations(workflowContent);
+    const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
+    const stepInvocationCount = facts.stepInvocationCount;
     if (stepInvocationCount < 4) {
       mismatches.push(
         `spec is ${Math.round(description.length / 1024)} KB but the workflow declares only ${stepInvocationCount} top-level .step(...) calls — likely a "master-executor stub" with the real impl deferred to nested-string child workflows that ricky cannot validate end-to-end`,
@@ -1377,16 +1400,76 @@ export function detectSpecIntentMismatch(
   return mismatches;
 }
 
-function countTopLevelStepInvocations(content: string): number {
-  // Same shape as detectWorkflowIntentRegressions' counter: dot-anchored
-  // `.step("name"` chain calls. We use raw content here rather than
-  // masking because the detectSpecIntentMismatch guard is meant to fire
-  // on degenerate first-emit cases — at that point being slightly noisy
-  // (counting `.step("X")` inside a string literal) is preferable to
-  // letting a real stub slip through. The AST-grade version lives in
-  // workforce-persona-repairer.ts for the repair-validation path.
-  const matches = content.match(/\.step\(\s*['"]/g);
-  return matches ? matches.length : 0;
+interface WorkflowSourceIntentFacts {
+  importsModule(moduleSpec: string): boolean;
+  referencesIdentifier(name: string): boolean;
+  readonly stepInvocationCount: number;
+}
+
+/**
+ * Parses the workflow artifact into AST-derived facts. Mirrors
+ * `analyzeWorkflowSource` in workforce-persona-repairer.ts (the canonical
+ * implementation for the repair-time intent guard). Re-implemented here
+ * because the repairer imports from this module — sharing in the other
+ * direction would create a circular import.
+ *
+ * Unparseable sources fall through to a conservative "everything present"
+ * view so a malformed workflow is flagged via downstream checks (e.g.
+ * `validateArtifactContent`) rather than silently passing this guard.
+ */
+function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceIntentFacts {
+  let sourceFile: ts.SourceFile | undefined;
+  try {
+    sourceFile = ts.createSourceFile(
+      'ricky-workflow-artifact.ts',
+      content,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ false,
+      ts.ScriptKind.TS,
+    );
+  } catch {
+    sourceFile = undefined;
+  }
+
+  if (!sourceFile) {
+    return {
+      importsModule: () => true,
+      referencesIdentifier: () => true,
+      stepInvocationCount: Number.POSITIVE_INFINITY,
+    };
+  }
+
+  const importedModules = new Set<string>();
+  const referencedIdentifiers = new Set<string>();
+  let stepInvocationCount = 0;
+
+  const trackedIdentifiers = new Set<string>(['GitHubStepExecutor', 'createGitHubStep']);
+
+  function walk(node: ts.Node): void {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      importedModules.add(node.moduleSpecifier.text);
+    }
+    if (ts.isIdentifier(node) && trackedIdentifiers.has(node.text)) {
+      referencedIdentifiers.add(node.text);
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.name) &&
+      node.expression.name.text === 'step'
+    ) {
+      stepInvocationCount += 1;
+    }
+    ts.forEachChild(node, walk);
+  }
+
+  walk(sourceFile);
+
+  return {
+    importsModule: (moduleSpec) => importedModules.has(moduleSpec),
+    referencesIdentifier: (name) => referencedIdentifiers.has(name),
+    stepInvocationCount,
+  };
 }
 
 export function hasExplicitWorkflowRunCwd(content: string): boolean {
