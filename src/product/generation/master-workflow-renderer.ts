@@ -338,7 +338,7 @@ function renderChildRunStep(child: ChildWorkflowPlan): string[] {
   ];
 }
 
-function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowSpec): string {
+export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowSpec): string {
   const artifactsDir = child.signoffArtifactPath.replace(/\/signoff\.md$/, '');
   const validationCommand = child.validationCommands[0] ?? 'npm run typecheck';
   const targetScope = child.targetFiles.length > 0 ? child.targetFiles.join(' ') : 'NO_TARGET_FILES_DECLARED';
@@ -392,6 +392,18 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
       // judge this child only on the delta it introduces, never on this
       // baseline. Without it, every child after the first false-blocks on
       // sibling contamination.
+      //
+      // Scope/limitation: this fully fixes the dominant failure — sequential
+      // accumulation, where siblings completed before this child started
+      // (the observed update-last-week stall: 50 dirty entries, all from
+      // already-finished siblings). It does NOT fully eliminate the race for
+      // siblings running CONCURRENTLY within the same wave (master is
+      // .maxConcurrency(4)): a file a sibling dirties AFTER this snapshot is
+      // not in the baseline and could still be misattributed. A snapshot
+      // can't close that window; the durable fix is per-child git-worktree
+      // isolation, deferred as a separate, larger change (see PR
+      // "Alternative considered"). Baseline subtraction is the minimal
+      // correct fix for the failure that actually occurs in practice.
       `git status --porcelain > ${shellQuote(`${artifactsDir}/scope-baseline.txt`)} 2>/dev/null || : > ${shellQuote(`${artifactsDir}/scope-baseline.txt`)}`,
       'echo RICKY_CHILD_CONTEXT_READY',
     ].join('\n'))},`,
