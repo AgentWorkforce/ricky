@@ -98,6 +98,27 @@ describe('parseSpecMetadata', () => {
     expect(parseSpecMetadata(spec).title).toBeNull();
   });
 
+  it('extracts metadata fields authored as markdown headings', () => {
+    // Some auto-generated sub-specs put each metadata field on its own
+    // `## Target repo: …` heading line. The earlier sliceMarkdown-based
+    // visitor preserved the leading `#` tokens, so `extractHeaderValue`'s
+    // `^\s*Target repo\s*:` regex never matched. Headings should now feed
+    // the inline-rendered text into the visitor so the regex matches.
+    const spec = [
+      '# Spec: heading-form metadata',
+      '',
+      '## Target repo: `cloud`',
+      '## Target branch: `feat/heading-form`',
+      '### Worktree: `/private/tmp/cloud-heading-form`',
+    ].join('\n');
+
+    expect(parseSpecMetadata(spec)).toMatchObject({
+      repo: 'cloud',
+      branch: 'feat/heading-form',
+      worktree: '/private/tmp/cloud-heading-form',
+    });
+  });
+
   it('ignores metadata-looking lines inside fenced code blocks', () => {
     const spec = [
       '# Spec: fenced example',

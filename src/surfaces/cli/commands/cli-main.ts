@@ -2667,15 +2667,42 @@ function installSalvageOnSignal(): void {
   const handler = (signal: NodeJS.Signals): void => {
     if (firing) return;
     firing = true;
-    void runSignalSalvage(signal).finally(() => {
-      // Restore the default behavior and re-raise so the process exits
-      // with the conventional 128 + signal number code.
-      process.removeListener(signal, handler);
-      process.kill(process.pid, signal);
-    });
+    // If a salvage is already running on the normal exit path, give it a
+    // bounded grace window to finish before re-raising the signal. Without
+    // this the signal handler would call `process.kill(process.pid, signal)`
+    // immediately, terminating the in-flight salvage and losing whatever
+    // commit/push it was about to make. The grace window is the same 60s
+    // budget that `runSignalSalvage` enforces below, so the total time the
+    // CLI can spend in salvage on a SIGTERM is bounded.
+    void waitForInFlightSalvage(60_000)
+      .then(() => runSignalSalvage(signal))
+      .finally(() => {
+        // Restore the default behavior and re-raise so the process exits
+        // with the conventional 128 + signal number code.
+        process.removeListener(signal, handler);
+        process.kill(process.pid, signal);
+      });
   };
   process.on('SIGTERM', handler);
   process.on('SIGINT', handler);
+}
+
+/**
+ * Polls `salvageRunInProgress` (set by `tryStartSalvageRun` /
+ * `finishSalvageRun`) and resolves once no salvage is running or `timeoutMs`
+ * elapses, whichever comes first. Returning early is fine — `runSignalSalvage`
+ * separately calls `tryStartSalvageRun()` and will no-op if salvage is still
+ * busy. The 60s upper bound matches the per-salvage budget.
+ */
+async function waitForInFlightSalvage(timeoutMs: number): Promise<void> {
+  if (!salvageRunInProgress) return;
+  const deadline = Date.now() + timeoutMs;
+  while (salvageRunInProgress && Date.now() < deadline) {
+    await new Promise<void>((resolveTick) => {
+      const timer = setTimeout(() => resolveTick(), 50);
+      timer.unref();
+    });
+  }
 }
 
 async function runSignalSalvage(signal: NodeJS.Signals): Promise<void> {

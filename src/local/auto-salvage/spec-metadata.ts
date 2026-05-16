@@ -180,7 +180,21 @@ function collectSemanticIntroText(markdown: string, limit: number): string {
 function visitMetadataBlocks(node: Node, markdown: string, visit: (text: string) => boolean): boolean {
   if (node.type === 'code') return false;
   if (node.type === 'heading' || node.type === 'paragraph') {
-    const rawBlock = sliceMarkdown(markdown, node) ?? collectInlineMarkdown(node as Heading | Parent);
+    // Headings: prefer the inline-rendered text so `## Target repo: cloud`
+    // becomes `Target repo: cloud` (without the leading `#` tokens).
+    // sliceMarkdown returns the raw source span including the `#`s, which
+    // prevented extractHeaderValue's `^\s*Target repo\s*:` regex from
+    // matching when the field was authored as a heading.
+    //
+    // Paragraphs: keep sliceMarkdown when available because the raw source
+    // span includes hard line-breaks between sibling lines like
+    //     Target repo: cloud
+    //     Target branch: feat/foo
+    // which `collectInlineMarkdown` flattens into one line and breaks the
+    // line-by-line regex below.
+    const rawBlock = node.type === 'heading'
+      ? collectInlineMarkdown(node as Heading)
+      : (sliceMarkdown(markdown, node) ?? collectInlineMarkdown(node as Parent));
     return visit(rawBlock);
   }
   if (!('children' in node) || !Array.isArray(node.children)) return false;
