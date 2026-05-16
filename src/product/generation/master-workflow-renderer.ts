@@ -6,6 +6,7 @@ import {
 } from '../../shared/constants.js';
 import { planMasterExecution, type ChildWorkflowPlan, type MasterExecutionPlan } from '../orchestration/index.js';
 import { deriveTestCommand } from './template-renderer.js';
+import { buildFinalReviewPassGateCommand } from './final-review-gate.js';
 import type {
   DeterministicGate,
   PatternDecision,
@@ -504,13 +505,20 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
     '    .step("final-review-pass-gate", {',
     '      type: "deterministic",',
     '      dependsOn: ["final-fix-codex"],',
-    `      command: ${literal([
-      'set -e',
-      `grep -F RICKY_CHILD_CLAUDE_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/claude-final-fix.md`)}`,
-      `grep -F RICKY_CHILD_CODEX_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/codex-final-fix.md`)}`,
-      `test ! -f ${shellQuote(`${artifactsDir}/BLOCKED_NO_COMMIT.md`)}`,
-      'echo RICKY_CHILD_FRESH_EYES_LOOP_READY',
-    ].join('\n'))},`,
+    `      command: ${literal(buildFinalReviewPassGateCommand({
+      artifactsDir,
+      checks: [
+        {
+          presenceTest: `grep -qF RICKY_CHILD_CLAUDE_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/claude-final-fix.md`)}`,
+          missingDetail: `${artifactsDir}/claude-final-fix.md is missing RICKY_CHILD_CLAUDE_FINAL_FIX_READY`,
+        },
+        {
+          presenceTest: `grep -qF RICKY_CHILD_CODEX_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/codex-final-fix.md`)}`,
+          missingDetail: `${artifactsDir}/codex-final-fix.md is missing RICKY_CHILD_CODEX_FINAL_FIX_READY`,
+        },
+      ],
+      successMarker: 'RICKY_CHILD_FRESH_EYES_LOOP_READY',
+    }))},`,
     '      captureOutput: true,',
     '      failOnError: true,',
     '    })',
@@ -521,8 +529,10 @@ function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowS
       'set -e',
       validationCommand,
       'git diff --name-only',
-      `grep -F RICKY_CHILD_CLAUDE_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/claude-final-fix.md`)}`,
-      `grep -F RICKY_CHILD_CODEX_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/codex-final-fix.md`)}`,
+      // Quiet greps with explicit diagnostics — a missing marker here must
+      // not be hidden behind the previous grep's matched-line output.
+      `if ! grep -qF RICKY_CHILD_CLAUDE_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/claude-final-fix.md`)}; then echo ${shellQuote(`RICKY_CHILD_GATE_MISSING_MARKER: ${artifactsDir}/claude-final-fix.md is missing RICKY_CHILD_CLAUDE_FINAL_FIX_READY`)} >&2; exit 1; fi`,
+      `if ! grep -qF RICKY_CHILD_CODEX_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/codex-final-fix.md`)}; then echo ${shellQuote(`RICKY_CHILD_GATE_MISSING_MARKER: ${artifactsDir}/codex-final-fix.md is missing RICKY_CHILD_CODEX_FINAL_FIX_READY`)} >&2; exit 1; fi`,
       'echo RICKY_CHILD_FINAL_VALIDATION_READY',
     ].join('\n'))},`,
     '      captureOutput: true,',
