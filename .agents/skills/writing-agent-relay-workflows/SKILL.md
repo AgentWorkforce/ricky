@@ -1393,6 +1393,7 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 | Self-review step with no timeout | Set `timeout: 300_000` (5 min) — Codex hangs in non-interactive review |
 | One giant workflow per feature | Split into smaller workflows that can run in parallel waves |
 | Adding exit instructions to tasks | Runner handles self-termination automatically |
+| Interactive PTY Codex for one-shot artifact steps | Use `preset: 'worker'` plus `file_exists` or `custom` verification |
 | Setting `timeoutMs` on agents/steps | Use global `.timeout()` only |
 | Using `general` channel | Set `.channel('wf-name')` for isolation |
 | `{{steps.X.output}}` without `dependsOn: ['X']` | Output won't be available yet |
@@ -1421,6 +1422,7 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 | Single step editing 4+ files | Agents modify 1-2 then exit. Split to one file per step with verify gates |
 | Relying on agents to `git commit` | Agents emit markers without running git. Use deterministic commit step |
 | File-writing steps without `file_exists` verification | `exit_code` auto-passes even if no file written |
+| Codex login checked only with `codex login status` | Add a tiny `codex exec --ephemeral --json --sandbox read-only` preflight probe so stale refresh tokens fail before agent steps |
 | Edit gate uses `git diff --quiet` for new files/packages | `git diff` ignores untracked files and can fail a valid implementation with `NO_CHANGES`; use `git status --short -- <paths>` for materialization gates |
 | Hard-stop validation gates in product workflows | A red check stops the agent team at the exact moment it should fix the problem. Capture gate output with `failOnError: false`, add a repair agent step, rerun, and reserve hard failure for exhausted repair budget or external blockers |
 | Final acceptance before repair and dual review | Broken work can stop or commit without giving the team a final chance to fix it. Run repairable gates first, then the Claude-then-Codex review/fix loops, then final deterministic acceptance before commit/PR |
