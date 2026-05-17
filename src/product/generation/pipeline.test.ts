@@ -9,6 +9,9 @@ import { childWorkflowSource } from './master-workflow-renderer.js';
 interface StepConfig {
   command?: string;
   task?: string;
+  agent?: string;
+  type?: string;
+  dependsOn?: string[];
 }
 
 /**
@@ -46,6 +49,13 @@ function extractStepConfigs(source: string): Map<string, StepConfig> {
         const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
         if (key === 'command') cfg.command = literalText(prop.initializer);
         if (key === 'task') cfg.task = literalText(prop.initializer);
+        if (key === 'agent') cfg.agent = literalText(prop.initializer);
+        if (key === 'type') cfg.type = literalText(prop.initializer);
+        if (key === 'dependsOn' && ts.isArrayLiteralExpression(prop.initializer)) {
+          cfg.dependsOn = prop.initializer.elements
+            .map((el) => literalText(el as ts.Expression))
+            .filter((v): v is string => typeof v === 'string');
+        }
       }
       steps.set(id, cfg);
     }
@@ -110,6 +120,49 @@ describe('workflow generation pipeline', () => {
       /\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/,
     );
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
+  });
+
+  // Regression: the master template historically declared `lead-plan` as
+  // an LLM agent step that asked headless claude to read the
+  // already-deterministic master-plan.json and write a marker file.
+  // The model had nothing to actually decide, but any failure to spawn
+  // claude (a frequent runtime failure mode in cloud sandboxes) blocked
+  // the workflow at `INVALID_ARTIFACT at lead-plan` before
+  // `materialize-child-workflows` could create any source — leaving
+  // zero salvageable impl on disk. `lead-plan` must now be a
+  // deterministic step that templates the plan summary directly. The
+  // separate `lead-plan-gate` step was collapsed into the body of
+  // `lead-plan` once the LLM dependency was removed.
+  it('renders master `lead-plan` as a deterministic step that never depends on an LLM agent', () => {
+    const result = generate({
+      spec: spec({
+        description:
+          'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['npm test'],
+      }),
+      artifactPath: 'workflows/generated/runtime-master.ts',
+    });
+    expect(result.masterExecutionPlan).toBeDefined();
+    const rendered = artifact(result);
+    const stepConfigs = extractStepConfigs(rendered.content);
+    const leadPlan = stepConfigs.get('lead-plan');
+    expect(leadPlan, 'lead-plan step exists').toBeDefined();
+    // No agent assignment — the step body must drive the marker
+    // entirely via a deterministic command.
+    expect(leadPlan!.agent, 'lead-plan has no agent assignment').toBeUndefined();
+    expect(leadPlan!.type, 'lead-plan is deterministic').toBe('deterministic');
+    expect(leadPlan!.command, 'lead-plan writes the marker into lead-plan.md').toContain('RICKY_MASTER_LEAD_PLAN_READY');
+    expect(leadPlan!.command, 'lead-plan self-verifies the marker after writing').toContain('grep -F RICKY_MASTER_LEAD_PLAN_READY');
+    expect(leadPlan!.command, 'lead-plan echoes the downstream verification marker').toContain('RICKY_MASTER_LEAD_PLAN_VERIFIED');
+    // `materialize-child-workflows` formerly depended on the separate
+    // `lead-plan-gate`; with the gate folded into `lead-plan`, the
+    // dependency must move directly to `lead-plan`.
+    const materialize = stepConfigs.get('materialize-child-workflows');
+    expect(materialize, 'materialize-child-workflows step exists').toBeDefined();
+    expect(materialize!.dependsOn, 'materialize depends on lead-plan').toContain('lead-plan');
+    // The historical separate gate step is no longer rendered.
+    expect(stepConfigs.has('lead-plan-gate'), 'master template no longer declares a separate lead-plan-gate').toBe(false);
   });
 
   // Regression: the master executor runs every child slice in the SAME
@@ -330,7 +383,13 @@ describe('workflow generation pipeline', () => {
     expect(rendered).not.toMatch(/command: "set -e\\nnpx tsc --noEmit\\n/);
   });
 
-  it('uses a master workflow for broad target-file specs and leaves narrow specs on the existing renderer', () => {
+  it('uses a master workflow for very broad target-file specs and leaves narrow specs on the existing renderer', () => {
+    // The router's file-count fallback is intentionally conservative (12)
+    // so that medium-sized specs (4–11 target files) without explicit
+    // master/decomposition vocabulary route through the LLM writer
+    // instead of the canned master template. See the regression test
+    // below for the case that previously tripped at the old `>= 4`
+    // threshold.
     const broad = generate({
       spec: spec({
         description: 'Implement a broad runtime update with deterministic validation.',
@@ -339,6 +398,14 @@ describe('workflow generation pipeline', () => {
           'src/runtime/policy.ts',
           'src/runtime/telemetry.ts',
           'src/product/evals.ts',
+          'src/product/insights.ts',
+          'src/product/observability.ts',
+          'src/product/generation/template-renderer.ts',
+          'src/product/generation/pipeline.ts',
+          'src/product/orchestration/planner.ts',
+          'src/product/orchestration/master-executor.ts',
+          'src/local/auto-fix-loop.ts',
+          'src/local/runner.ts',
         ],
       }),
       artifactPath: 'workflows/generated/broad-runtime.ts',
@@ -351,14 +418,48 @@ describe('workflow generation pipeline', () => {
       artifactPath: 'workflows/generated/narrow-runtime.ts',
     });
 
-    expect(broad.masterExecutionPlan?.children.map((child) => child.workflowFilePath)).toEqual([
-      'workflows/generated/broad-runtime-children/01-update-nested-runner.ts',
-      'workflows/generated/broad-runtime-children/02-update-policy.ts',
-      'workflows/generated/broad-runtime-children/03-update-telemetry.ts',
-      'workflows/generated/broad-runtime-children/04-update-evals.ts',
-    ]);
+    expect(broad.masterExecutionPlan?.children.length).toBeGreaterThanOrEqual(4);
+    expect(broad.masterExecutionPlan?.children.map((child) => child.workflowFilePath)).toEqual(
+      expect.arrayContaining([
+        'workflows/generated/broad-runtime-children/01-update-nested-runner.ts',
+        'workflows/generated/broad-runtime-children/02-update-policy.ts',
+        'workflows/generated/broad-runtime-children/03-update-telemetry.ts',
+        'workflows/generated/broad-runtime-children/04-update-evals.ts',
+      ]),
+    );
     expect(narrow.masterExecutionPlan).toBeUndefined();
     expect(artifact(narrow).content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+  });
+
+  // Regression: at the old `targetFiles.length >= 4` threshold, every
+  // medium-sized implementation spec (5–8 declared files) was routed
+  // unconditionally through the canned master template — even when the
+  // spec text never asked to be decomposed into child workflows. The
+  // canned template's lead-plan step (previously an LLM agent step)
+  // failed at runtime when headless claude couldn't spawn, blocking
+  // `materialize-child-workflows` and leaving zero salvageable impl
+  // on disk. Specs with no explicit decomposition vocabulary and a
+  // file count below the conservative threshold must route through
+  // the LLM writer path (handled by `renderWorkflow` + persona writer)
+  // so the writer can author a single coherent workflow.
+  it('leaves medium specs (no explicit master vocab, fewer than 12 files) on the regular renderer', () => {
+    const medium = generate({
+      spec: spec({
+        description: 'Implement the cli-login flow: callback page, token-store endpoint, scope constants, and tests.',
+        targetFiles: [
+          'app/cli/callback/page.tsx',
+          'app/api/cli/auth/store-token/route.ts',
+          'lib/auth/scopes.ts',
+          'lib/auth/api-token-store.ts',
+          'lib/auth/request-auth.ts',
+          'lib/auth/request-auth.test.ts',
+        ],
+      }),
+      artifactPath: 'workflows/generated/cli-login.ts',
+    });
+
+    expect(medium.masterExecutionPlan).toBeUndefined();
+    expect(artifact(medium).content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
   });
 
   it('turns a code-writing spec into an implementation team workflow with 80-to-100 validation', () => {
