@@ -56,11 +56,26 @@ const MASTER_EXPLICIT_PATTERN =
 const IMPLEMENTATION_PATTERN =
   /\b(implement|wire|add|build|ship|migrate|refactor|replace|runtime|policy|telemetry|evals?|insights?|runner|api|cli|tests?)\b/i;
 
+// File-count fallback for the master-executor router. Bumped from 4 to 12
+// after a multi-week regression: most real implementation specs (esp.
+// per-PR sub-specs split out of a larger plan) touch 5–8 files and were
+// being unconditionally routed through the canned master template even
+// when the spec text never asked to be decomposed. That bypassed the LLM
+// writer, emitted a template whose `lead-plan` step depends on a headless
+// claude subprocess writing a marker file, and consistently blocked at
+// `INVALID_ARTIFACT at lead-plan` when that subprocess failed to spawn —
+// leaving zero impl on disk and nothing to salvage. 12 matches the
+// `maxChildren` cap of `planMasterExecution` below: specs beyond that
+// genuinely need decomposition anyway, and the LLM writer can't
+// realistically author a coherent single workflow at that scope. Specs
+// that genuinely want master-executor still opt in via MASTER_EXPLICIT_PATTERN.
+const MASTER_FILE_COUNT_THRESHOLD = 12;
+
 export function shouldUseMasterExecutionWorkflow(spec: NormalizedWorkflowSpec): boolean {
   const text = workflowText(spec);
   if (!IMPLEMENTATION_PATTERN.test(text)) return false;
   if (MASTER_EXPLICIT_PATTERN.test(text)) return true;
-  if (spec.targetFiles.length >= 4) return true;
+  if (spec.targetFiles.length >= MASTER_FILE_COUNT_THRESHOLD) return true;
   return false;
 }
 
@@ -170,6 +185,39 @@ function renderMasterSource(input: {
     '}',
     'NODE',
   ].join('\n');
+  const leadPlanSummaryLines = [
+    '# Master execution plan',
+    '',
+    `Plan source: ${input.artifactsDir}/master-plan.json`,
+    `Child workflows: ${input.plan.children.length} across ${waveCount(input.plan)} wave(s).`,
+    '',
+    '## Child ownership',
+    '',
+    ...input.plan.children.map((child) => {
+      const deps = child.dependsOn.length > 0 ? child.dependsOn.join(', ') : '(none)';
+      const targets = child.targetFiles.length > 0 ? child.targetFiles.join(', ') : '(no declared target files)';
+      return `- ${child.id} — depends on ${deps}; targets ${targets}; signoff marker ${child.signoffMarker}`;
+    }),
+    '',
+    '## Non-goals and gates',
+    '',
+    '- Each child workflow is independently 80-to-100 gated; the master executor only checks signoff markers afterward.',
+    '- Source edits happen inside child workflows, not in this lead-plan step.',
+    '',
+    'RICKY_MASTER_LEAD_PLAN_READY',
+  ];
+  const leadPlanCommand = [
+    'set -e',
+    `mkdir -p ${shellQuote(input.artifactsDir)}`,
+    `cat > ${shellQuote(`${input.artifactsDir}/lead-plan.md`)} <<'EOF'`,
+    ...leadPlanSummaryLines,
+    'EOF',
+    // Re-verify the marker landed on disk so the deterministic guarantee
+    // is self-checked and any future template edit that drops it fails
+    // loudly here instead of silently passing through.
+    `grep -F RICKY_MASTER_LEAD_PLAN_READY ${shellQuote(`${input.artifactsDir}/lead-plan.md`)} >/dev/null`,
+    'echo RICKY_MASTER_LEAD_PLAN_VERIFIED',
+  ].join('\n');
   const verifyChildrenCommand = [
     'set -e',
     ...input.plan.children.map((child) => `test -f ${shellQuote(child.workflowFilePath)}`),
@@ -207,7 +255,7 @@ function renderMasterSource(input: {
     '    .timeout(7200000)',
     `    .onError(${repairAwareOnError('master-lead')})`,
     '',
-    '    .agent("master-lead", { cli: "claude", interactive: false, role: "Plans child workflow boundaries, dependency waves, and final integration evidence.", retries: 1 })',
+    '    .agent("master-lead", { cli: "claude", interactive: false, role: "Repairs master executor failures and final integration evidence.", retries: 1 })',
     '    .agent("master-reviewer", { cli: "codex", preset: "reviewer", role: "Reviews child signoff evidence and master executor readiness.", retries: 1 })',
     '',
     '    .step("prepare-context", {',
@@ -231,29 +279,30 @@ function renderMasterSource(input: {
     '      failOnError: true,',
     '    })',
     '',
+    // `lead-plan` was historically an LLM agent step that asked
+    // `master-lead` claude to read master-plan.json and write a marker
+    // file confirming the deterministically-generated plan. There was
+    // nothing for the model to actually decide (the plan was already
+    // shaped by `planMasterExecution`), but every failure to spawn
+    // headless claude — a frequent runtime failure mode in cloud
+    // sandboxes — produced `INVALID_ARTIFACT at lead-plan`, blocking
+    // `materialize-child-workflows` and leaving zero impl on disk to
+    // salvage. Replaced with a deterministic node step that templates
+    // the plan summary directly. The downstream `lead-plan-gate` is
+    // collapsed away in favor of grepping the marker inline (the
+    // separate gate step added no value once `lead-plan` itself was
+    // deterministic).
     '    .step("lead-plan", {',
-    '      agent: "master-lead",',
-    '      dependsOn: ["prepare-context"],',
-    `      task: ${templateLiteral([
-      'Review the master execution plan at ' + `${input.artifactsDir}/master-plan.json` + '.',
-      'Confirm child workflow ownership, dependencies, non-goals, and 80-to-100 gates.',
-      'Do not edit source files in this step.',
-      `Write ${input.artifactsDir}/lead-plan.md ending with RICKY_MASTER_LEAD_PLAN_READY.`,
-    ].join('\n'))},`,
-    `      verification: { type: "file_exists", value: ${literal(`${input.artifactsDir}/lead-plan.md`)} },`,
-    '    })',
-    '',
-    '    .step("lead-plan-gate", {',
     '      type: "deterministic",',
-    '      dependsOn: ["lead-plan"],',
-    `      command: ${literal(`set -e\nif command -v rg >/dev/null 2>&1; then rg "RICKY_MASTER_LEAD_PLAN_READY" ${shellQuote(`${input.artifactsDir}/lead-plan.md`)}; else grep -F "RICKY_MASTER_LEAD_PLAN_READY" ${shellQuote(`${input.artifactsDir}/lead-plan.md`)}; fi\necho RICKY_MASTER_LEAD_PLAN_VERIFIED`)},`,
+    '      dependsOn: ["prepare-context"],',
+    `      command: ${literal(leadPlanCommand)},`,
     '      captureOutput: true,',
     '      failOnError: true,',
     '    })',
     '',
     '    .step("materialize-child-workflows", {',
     '      type: "deterministic",',
-    '      dependsOn: ["lead-plan-gate"],',
+    '      dependsOn: ["lead-plan"],',
     `      command: ${literal(materializeCommand)},`,
     '      captureOutput: true,',
     '      failOnError: true,',
@@ -620,8 +669,8 @@ function repairAwareOnError(repairAgent: string): string {
 function buildMasterTasks(plan: MasterExecutionPlan): WorkflowTask[] {
   return [
     task('prepare-context', 'Prepare master context', 'deterministic', 'Write master plan and generation-time skill evidence.', []),
-    task('lead-plan', 'Plan child execution', 'master-lead', 'Review child ownership, dependencies, and validation gates.', ['prepare-context']),
-    task('materialize-child-workflows', 'Materialize child workflows', 'deterministic', 'Write focused child workflow artifacts.', ['lead-plan-gate']),
+    task('lead-plan', 'Plan child execution', 'deterministic', 'Write and verify the lead plan summary.', ['prepare-context']),
+    task('materialize-child-workflows', 'Materialize child workflows', 'deterministic', 'Write focused child workflow artifacts.', ['lead-plan']),
     ...plan.children.map((child) =>
       task(`run-${child.id}`, `Run ${child.title}`, 'deterministic', `Run child workflow ${child.workflowFilePath} through ricky run.`, child.dependsOn.map((id) => `run-${id}`)),
     ),
@@ -634,7 +683,6 @@ function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan, spec:
   const testCommand = deriveTestCommand(spec);
   return [
     gate('skill-boundary-metadata-gate', `test -f ${artifactsDir}/skill-application-boundary.json`, 'file_exists', true, ['prepare-context'], 'pre_review'),
-    gate('lead-plan-gate', `grep -F RICKY_MASTER_LEAD_PLAN_READY ${artifactsDir}/lead-plan.md`, 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('child-workflow-file-gate', plan.children.map((child) => `test -f ${child.workflowFilePath}`).join(' && '), 'file_exists', true, ['materialize-child-workflows'], 'pre_review'),
     gate('initial-soft-validation', `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
     gate('final-review-pass-gate', `grep -F RICKY_MASTER_REVIEW_READY ${artifactsDir}/review-codex.md`, 'output_contains', true, ['review-child-evidence'], 'final'),
@@ -660,7 +708,7 @@ function buildMasterSkillEvidence(skills: SkillContext): SkillApplicationEvidenc
 
 function buildMasterToolSelections(plan: MasterExecutionPlan): ToolSelection[] {
   return [
-    { stepId: 'lead-plan', agent: 'master-lead', runner: 'claude', concurrency: 1, rule: 'master executor lead planning' },
+    { stepId: 'lead-plan', agent: 'deterministic', runner: '@agent-relay/sdk', concurrency: 1, rule: 'master executor deterministic lead plan' },
     ...plan.children.map((child) => ({
       stepId: `run-${child.id}`,
       agent: 'deterministic',
