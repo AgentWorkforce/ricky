@@ -163,6 +163,19 @@ describe('workflow generation pipeline', () => {
     expect(materialize!.dependsOn, 'materialize depends on lead-plan').toContain('lead-plan');
     // The historical separate gate step is no longer rendered.
     expect(stepConfigs.has('lead-plan-gate'), 'master template no longer declares a separate lead-plan-gate').toBe(false);
+
+    expect(rendered.tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'lead-plan', agentRole: 'deterministic', dependsOn: ['prepare-context'] }),
+      expect.objectContaining({ id: 'materialize-child-workflows', dependsOn: ['lead-plan'] }),
+    ]));
+    expect(rendered.gates.some((gate) => gate.name === 'lead-plan-gate')).toBe(false);
+    expect(rendered.toolSelections).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        stepId: 'lead-plan',
+        agent: 'deterministic',
+        runner: '@agent-relay/sdk',
+      }),
+    ]));
   });
 
   // Regression: the master executor runs every child slice in the SAME

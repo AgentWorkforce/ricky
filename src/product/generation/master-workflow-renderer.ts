@@ -255,7 +255,7 @@ function renderMasterSource(input: {
     '    .timeout(7200000)',
     `    .onError(${repairAwareOnError('master-lead')})`,
     '',
-    '    .agent("master-lead", { cli: "claude", interactive: false, role: "Plans child workflow boundaries, dependency waves, and final integration evidence.", retries: 1 })',
+    '    .agent("master-lead", { cli: "claude", interactive: false, role: "Repairs master executor failures and final integration evidence.", retries: 1 })',
     '    .agent("master-reviewer", { cli: "codex", preset: "reviewer", role: "Reviews child signoff evidence and master executor readiness.", retries: 1 })',
     '',
     '    .step("prepare-context", {',
@@ -669,8 +669,8 @@ function repairAwareOnError(repairAgent: string): string {
 function buildMasterTasks(plan: MasterExecutionPlan): WorkflowTask[] {
   return [
     task('prepare-context', 'Prepare master context', 'deterministic', 'Write master plan and generation-time skill evidence.', []),
-    task('lead-plan', 'Plan child execution', 'master-lead', 'Review child ownership, dependencies, and validation gates.', ['prepare-context']),
-    task('materialize-child-workflows', 'Materialize child workflows', 'deterministic', 'Write focused child workflow artifacts.', ['lead-plan-gate']),
+    task('lead-plan', 'Plan child execution', 'deterministic', 'Write and verify the lead plan summary.', ['prepare-context']),
+    task('materialize-child-workflows', 'Materialize child workflows', 'deterministic', 'Write focused child workflow artifacts.', ['lead-plan']),
     ...plan.children.map((child) =>
       task(`run-${child.id}`, `Run ${child.title}`, 'deterministic', `Run child workflow ${child.workflowFilePath} through ricky run.`, child.dependsOn.map((id) => `run-${id}`)),
     ),
@@ -683,7 +683,6 @@ function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan, spec:
   const testCommand = deriveTestCommand(spec);
   return [
     gate('skill-boundary-metadata-gate', `test -f ${artifactsDir}/skill-application-boundary.json`, 'file_exists', true, ['prepare-context'], 'pre_review'),
-    gate('lead-plan-gate', `grep -F RICKY_MASTER_LEAD_PLAN_READY ${artifactsDir}/lead-plan.md`, 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('child-workflow-file-gate', plan.children.map((child) => `test -f ${child.workflowFilePath}`).join(' && '), 'file_exists', true, ['materialize-child-workflows'], 'pre_review'),
     gate('initial-soft-validation', `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
     gate('final-review-pass-gate', `grep -F RICKY_MASTER_REVIEW_READY ${artifactsDir}/review-codex.md`, 'output_contains', true, ['review-child-evidence'], 'final'),
@@ -709,7 +708,7 @@ function buildMasterSkillEvidence(skills: SkillContext): SkillApplicationEvidenc
 
 function buildMasterToolSelections(plan: MasterExecutionPlan): ToolSelection[] {
   return [
-    { stepId: 'lead-plan', agent: 'master-lead', runner: 'claude', concurrency: 1, rule: 'master executor lead planning' },
+    { stepId: 'lead-plan', agent: 'deterministic', runner: '@agent-relay/sdk', concurrency: 1, rule: 'master executor deterministic lead plan' },
     ...plan.children.map((child) => ({
       stepId: `run-${child.id}`,
       agent: 'deterministic',
