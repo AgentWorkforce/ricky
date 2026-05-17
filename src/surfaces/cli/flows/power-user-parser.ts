@@ -28,6 +28,13 @@ export interface PowerUserParsedArgs {
   timezone?: string;
   runRequested?: boolean;
   noRun?: boolean;
+  /**
+   * Set when the user passes `--no-auto-salvage` (or sets
+   * `RICKY_DISABLE_AUTO_SALVAGE=1`). Disables the salvage hook that runs on
+   * `--run` exit to recover worktree work when the workflow hung before
+   * reaching `createGitHubStep`.
+   */
+  noAutoSalvage?: boolean;
   background?: boolean;
   foreground?: boolean;
   startFromStep?: string;
@@ -120,6 +127,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const workflowName = readFlagValue(effectiveArgv, '--name');
   const stdin = effectiveArgv.includes('--stdin');
   const noRun = effectiveArgv.includes('--no-run');
+  const noAutoSalvage = effectiveArgv.includes('--no-auto-salvage');
   const runRequested = (
     effectiveArgv.includes('--run') ||
     effectiveArgv.includes('--generate-and-run') ||
@@ -165,6 +173,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
     ...(stdin ? { stdin: true } : {}),
     ...(runRequested ? { runRequested: true } : {}),
     ...(noRun ? { noRun: true } : {}),
+    ...(noAutoSalvage ? { noAutoSalvage: true } : {}),
     ...(startFromStep !== undefined ? { startFromStep } : {}),
     ...(previousRunId !== undefined ? { previousRunId } : {}),
     ...(autoFix !== undefined && autoFix > 0 ? { autoFix } : {}),

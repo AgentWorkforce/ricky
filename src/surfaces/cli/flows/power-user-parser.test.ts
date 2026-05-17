@@ -80,6 +80,14 @@ describe('power user parser defaults', () => {
     expect(parsed).not.toHaveProperty('refine');
   });
 
+  it('parses --no-auto-salvage as an explicit opt-out flag', () => {
+    const enabled = parsePowerUserArgs(['local', '--spec-file', './spec.md', '--run']);
+    expect(enabled).not.toHaveProperty('noAutoSalvage');
+
+    const disabled = parsePowerUserArgs(['local', '--spec-file', './spec.md', '--run', '--no-auto-salvage']);
+    expect(disabled).toMatchObject({ noAutoSalvage: true });
+  });
+
   it('parses manual resume flags without confusing their values for artifact paths', () => {
     const parsed = parsePowerUserArgs([
       'run',

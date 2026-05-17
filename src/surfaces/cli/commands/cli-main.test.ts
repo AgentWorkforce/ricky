@@ -6,7 +6,14 @@ import { fileURLToPath } from 'node:url';
 import type { InteractiveCliResult } from '../entrypoint/interactive-cli.js';
 import type { OnboardingResult } from '../cli/onboarding.js';
 import type { LocalResponse } from '../../../local/entrypoint.js';
-import { cliMain, parseArgs, renderHelp, type CliProgressSpinner, type DetachedProcessSpawner } from './cli-main.js';
+import {
+  cliMain,
+  parseArgs,
+  renderHelp,
+  resolveSignalSalvageSpecFile,
+  type CliProgressSpinner,
+  type DetachedProcessSpawner,
+} from './cli-main.js';
 
 // ---------------------------------------------------------------------------
 // parseArgs
@@ -1053,6 +1060,7 @@ describe('cliMain', () => {
       cwd: '/repo-root',
       readFileText: vi.fn().mockResolvedValue('build a workflow'),
       runInteractive: runner,
+      runAutoSalvage: async () => null,
     });
 
     expect(runner).toHaveBeenCalledWith(
@@ -3452,6 +3460,122 @@ describe('cliMain', () => {
       } finally {
         await rm(tempRepo, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe('auto-salvage wiring', () => {
+    const FULL_SPEC = [
+      '# Spec: ship the thing',
+      '',
+      'Target repo: `cloud`',
+      'Target branch: `feat/ship-the-thing`',
+      'Worktree: `/private/tmp/cloud-ship`',
+    ].join('\n');
+
+    it('invokes the injected salvage runner with the spec markdown and resolved exit context on --run', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const salvage = vi.fn().mockResolvedValue({ outcome: 'skipped', reason: 'worktree-clean' });
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec-file', './spec.md', '--run'],
+        cwd: '/repo-root',
+        readFileText: vi.fn().mockResolvedValue(FULL_SPEC),
+        runInteractive: runner,
+        runAutoSalvage: salvage,
+      });
+
+      expect(salvage).toHaveBeenCalledTimes(1);
+      const [specArg, exitCtxArg, optsArg] = salvage.mock.calls[0]!;
+      expect(specArg).toContain('Target repo:');
+      expect(exitCtxArg).toMatchObject({ exitCode: 0 });
+      expect(optsArg).toEqual({});
+    });
+
+    it('passes disabled=true to the salvage runner when --no-auto-salvage is set', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const salvage = vi.fn().mockResolvedValue({ outcome: 'skipped', reason: 'disabled-by-flag-or-env' });
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec-file', './spec.md', '--run', '--no-auto-salvage'],
+        cwd: '/repo-root',
+        readFileText: vi.fn().mockResolvedValue(FULL_SPEC),
+        runInteractive: runner,
+        runAutoSalvage: salvage,
+      });
+
+      expect(salvage).toHaveBeenCalledTimes(1);
+      const [, , optsArg] = salvage.mock.calls[0]!;
+      expect(optsArg).toEqual({ disabled: true });
+    });
+
+    it('does not invoke the salvage runner without --run', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const salvage = vi.fn();
+
+      await cliMain({
+        argv: ['--mode', 'local', '--spec-file', './spec.md'],
+        cwd: '/repo-root',
+        readFileText: vi.fn().mockResolvedValue(FULL_SPEC),
+        runInteractive: runner,
+        runAutoSalvage: salvage,
+      });
+
+      expect(salvage).not.toHaveBeenCalled();
+    });
+
+    it('does not invoke the salvage runner when --mode cloud', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const salvage = vi.fn();
+
+      await cliMain({
+        argv: ['cloud', '--spec-file', './spec.md', '--run'],
+        cwd: '/repo-root',
+        readFileText: vi.fn().mockResolvedValue(FULL_SPEC),
+        runInteractive: runner,
+        runAutoSalvage: salvage,
+      });
+
+      expect(salvage).not.toHaveBeenCalled();
+    });
+
+    it('skips signal-path salvage in cloud mode', () => {
+      expect(resolveSignalSalvageSpecFile(['cloud', '--spec-file', './spec.md', '--run'])).toBeUndefined();
+      expect(resolveSignalSalvageSpecFile(['--mode', 'cloud', '--spec-file', './spec.md', '--run'])).toBeUndefined();
+      expect(resolveSignalSalvageSpecFile(['--mode', 'local', '--spec-file', './spec.md', '--run'])).toBe('./spec.md');
+    });
+
+    it('still invokes the salvage runner when the interactive runner throws', async () => {
+      const runner = vi.fn().mockRejectedValue(new Error('runner exploded'));
+      const salvage = vi.fn().mockResolvedValue({ outcome: 'skipped', reason: 'worktree-clean' });
+
+      await expect(
+        cliMain({
+          argv: ['--mode', 'local', '--spec-file', './spec.md', '--run'],
+          cwd: '/repo-root',
+          readFileText: vi.fn().mockResolvedValue(FULL_SPEC),
+          runInteractive: runner,
+          runAutoSalvage: salvage,
+        }),
+      ).rejects.toThrow('runner exploded');
+      expect(salvage).toHaveBeenCalledTimes(1);
+      const [, exitCtxArg] = salvage.mock.calls[0]!;
+      expect(exitCtxArg).toMatchObject({ exitCode: 1 });
+    });
+
+    it('does not propagate failures from the salvage runner', async () => {
+      const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+      const salvage = vi.fn().mockRejectedValue(new Error('salvage exploded'));
+
+      const result = await cliMain({
+        argv: ['--mode', 'local', '--spec-file', './spec.md', '--run'],
+        cwd: '/repo-root',
+        readFileText: vi.fn().mockResolvedValue(FULL_SPEC),
+        runInteractive: runner,
+        runAutoSalvage: salvage,
+      });
+
+      // Salvage failure must never mask the original exit code.
+      expect(result.exitCode).toBe(0);
     });
   });
 });

@@ -51,6 +51,13 @@ import {
 } from '../flows/workflow-summary.js';
 import { runLocalPreflight, type LocalPreflightCheck, type LocalPreflightResult } from '../flows/local-workflow-flow.js';
 import { defaultArtifactPathForWorkflowName } from '../flows/spec-intake-flow.js';
+import {
+  createDefaultSalvageRuntime,
+  runAutoSalvage,
+  type SalvageExitContext,
+  type SalvageResult,
+  type SalvageRuntime,
+} from '../../../local/auto-salvage/index.js';
 import { CLOUD_IMPLEMENTATION_AGENTS, CLOUD_OPTIONAL_INTEGRATIONS } from '../flows/cloud-workflow-flow.js';
 import { resolvePreferWorkforcePersonaWorkflowWriter } from '../flows/workforce-persona-cli-preference.js';
 import { DEFAULT_AUTO_FIX_ATTEMPTS } from '../../../shared/constants.js';
@@ -83,6 +90,8 @@ export interface ParsedArgs {
   timezone?: string;
   runRequested?: boolean;
   noRun?: boolean;
+  /** Set by `--no-auto-salvage` — disables the auto-salvage hook on `--run` exit. */
+  noAutoSalvage?: boolean;
   background?: boolean;
   foreground?: boolean;
   startFromStep?: string;
@@ -192,9 +201,21 @@ export interface CliMainDeps extends InteractiveCliDeps {
   scheduleWorkflow?: RickyScheduleWorkflow;
   /** Cloud workflow schedule listing override for deterministic schedule command tests. */
   listWorkflowSchedules?: RickyListWorkflowSchedules;
+  /**
+   * Override the auto-salvage runner for deterministic tests. Default: real
+   * git + gh subprocess calls wired through `createDefaultSalvageRuntime`.
+   * Returning `null` disables the salvage hook entirely (used by tests that
+   * don't care about salvage).
+   */
+  runAutoSalvage?: (
+    spec: string,
+    exitContext: SalvageExitContext,
+    options: { disabled?: boolean },
+  ) => Promise<SalvageResult | null>;
 }
 
 let cachedPackageVersion: string | undefined;
+let salvageRunInProgress = false;
 
 // ---------------------------------------------------------------------------
 // Argument parsing — deterministic, no external deps
@@ -219,6 +240,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.timezone !== undefined) result.timezone = parsed.timezone;
   if (parsed.runRequested) result.runRequested = true;
   if (parsed.noRun) result.noRun = true;
+  if (parsed.noAutoSalvage) result.noAutoSalvage = true;
   if (parsed.background) result.background = true;
   if (parsed.foreground) result.foreground = true;
   if (parsed.startFromStep) result.startFromStep = parsed.startFromStep;
@@ -399,6 +421,7 @@ export function renderHelp(): string[] {
     '  --artifact <path>   Alias for `ricky run <path>`',
     '  --run               Execute the generated artifact after generation',
     '  --no-run            Generate only and print the run command',
+    '  --no-auto-salvage   Disable the auto-salvage hook that recovers worktree work on --run exit',
     '  --background        Return a run id immediately; use status --run to watch',
     '  --foreground        Keep the local run attached to this process',
     '  --start-from <step> Resume a workflow from a specific step',
@@ -2000,6 +2023,11 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     progressReporter?.stop();
   } catch (error) {
     progressReporter?.stop();
+    // The runner threw mid-execution. The workflow subprocess may have
+    // produced real worktree work before the failure — try to salvage it
+    // before propagating the error to the caller. Use an exit code of 1
+    // as a proxy because no localResult is available here.
+    await tryAutoSalvage(parsed, cliHandoff, deps, 1);
     throw error;
   }
   const output: string[] = [];
@@ -2069,11 +2097,105 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     output.push(...interactiveResult.guidance);
   }
 
+  const finalExitCode = interactiveResult.localResult?.exitCode ?? (interactiveResult.ok ? 0 : 1);
+
+  await tryAutoSalvage(parsed, cliHandoff, deps, finalExitCode);
+
   return {
-    exitCode: interactiveResult.localResult?.exitCode ?? (interactiveResult.ok ? 0 : 1),
+    exitCode: finalExitCode,
     output,
     interactiveResult,
   };
+}
+
+/**
+ * Wraps the auto-salvage hook so cliMain always returns its original exit
+ * code regardless of salvage outcome. Salvage failures are never re-raised
+ * — they're logged via the salvage runtime's structured stderr line.
+ *
+ * Only fires when:
+ *   - The CLI was invoked with `--run` (we have nothing to recover from when
+ *     the user only generated an artifact).
+ *   - The mode is local (cloud runs do their own remote bookkeeping).
+ *   - A spec handoff was provided (we need the spec markdown to extract
+ *     repo / branch / worktree metadata).
+ *
+ * The salvage runtime is injectable via `deps.runAutoSalvage` — production
+ * uses the default git/gh subprocess runtime, tests pass a stub.
+ */
+async function tryAutoSalvage(
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff | undefined,
+  deps: CliMainDeps,
+  exitCode: number,
+): Promise<void> {
+  if (!parsed.runRequested) return;
+  if (parsed.mode === 'cloud') return;
+  if (!cliHandoff) return;
+  // Salvage is meaningful only for structured spec files that carry the
+  // `Target repo` / `Target branch` / `Worktree` headers the parser needs.
+  // Inline `--spec "build a workflow"` calls and the synthetic specs used
+  // in unit tests never carry those headers, so we skip the hook entirely
+  // to avoid spurious stderr noise.
+  if (!parsed.specFile) return;
+  const specMarkdown = extractSpecMarkdownForSalvage(cliHandoff);
+  if (!specMarkdown) return;
+  const exitContext: SalvageExitContext = {
+    exitCode,
+    ...(exitCode !== 0 ? { reason: `local-run-exit-${exitCode}` } : {}),
+  };
+  const salvageOptions = {
+    ...(parsed.noAutoSalvage ? { disabled: true } : {}),
+  };
+  if (!tryStartSalvageRun()) return;
+  try {
+    if (deps.runAutoSalvage) {
+      await deps.runAutoSalvage(specMarkdown, exitContext, salvageOptions);
+      return;
+    }
+    const runtime: SalvageRuntime = createDefaultSalvageRuntime();
+    await runAutoSalvage(specMarkdown, exitContext, runtime, salvageOptions);
+  } catch (error) {
+    // Salvage is additive — never let an exception in the hook surface to
+    // the caller and mask the original exit. Emit a single recovery line
+    // to stderr and continue.
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[ricky auto-salvage] hook crashed (continuing): ${message}\n`);
+  } finally {
+    finishSalvageRun();
+  }
+}
+
+function extractSpecMarkdownForSalvage(handoff: RawHandoff): string | null {
+  // CLI handoffs carry the spec either inline (--spec / --stdin) or via a
+  // spec file. The free-form / claude / mcp shapes also expose `spec` but
+  // may use a structured wrapper. We accept anything string-shaped here —
+  // the parser tolerates missing fields and returns `spec-missing-required-fields`.
+  if (handoff.source === 'cli') {
+    return specInputToMarkdown(handoff.spec);
+  }
+  if (handoff.source === 'free-form') {
+    return typeof handoff.spec === 'string' ? handoff.spec : null;
+  }
+  if (handoff.source === 'claude') {
+    return specInputToMarkdown(handoff.spec);
+  }
+  if (handoff.source === 'mcp') {
+    return handoff.spec ? specInputToMarkdown(handoff.spec) : null;
+  }
+  // structured / workflow-artifact handoffs don't carry the spec text the
+  // salvage hook needs. Skip; the salvage triggers depend on operator-
+  // authored prose.
+  return null;
+}
+
+function specInputToMarkdown(input: SpecInput): string | null {
+  if (typeof input === 'string') return input;
+  if (input && typeof input === 'object') {
+    const description = (input as { description?: unknown }).description;
+    if (typeof description === 'string') return description;
+  }
+  return null;
 }
 
 function renderLocalWorkflowJson(result: NonNullable<InteractiveCliResult['localWorkflowResult']>): string {
@@ -2505,6 +2627,7 @@ function isAutoFixValue(value: string): boolean {
 }
 
 if (isDirectCliMainInvocation()) {
+  installSalvageOnSignal();
   cliMain()
     .then((result) => {
       if (result.output.length > 0) {
@@ -2517,6 +2640,135 @@ if (isDirectCliMainInvocation()) {
       process.stderr.write(`${message}\n`);
       process.exitCode = 1;
     });
+}
+
+/**
+ * Install SIGTERM / SIGINT handlers that fire the auto-salvage hook before
+ * exit. The outer `gtimeout` wrapper used by the cloud-spawn runner
+ * eventually SIGTERMs ricky after a fixed wall-clock budget; without this
+ * handler the salvage code at the bottom of `cliMain` never runs and the
+ * worktree work is lost.
+ *
+ * Implementation notes:
+ *   - We can't `await` from a sync signal handler, so the handler kicks off
+ *     the salvage promise and waits ~60s for it to settle before forcing
+ *     exit. If salvage takes longer (rare — `git push` plus `gh pr create`
+ *     is normally <10s) we still exit so the parent process gets its SIGTERM.
+ *   - The handler reads argv directly because parsed CLI state is not in
+ *     scope here. Only `--spec-file <path>` is supported for signal-driven
+ *     salvage; inline `--spec` would also work but the spec text isn't
+ *     captured anywhere we can read it from a signal handler. In practice
+ *     all hang-prone flows use `--spec-file`.
+ *   - `--no-auto-salvage` and `RICKY_DISABLE_AUTO_SALVAGE=1` short-circuit
+ *     here just like in the in-process path.
+ */
+function installSalvageOnSignal(): void {
+  let firing = false;
+  const handler = (signal: NodeJS.Signals): void => {
+    if (firing) return;
+    firing = true;
+    // If a salvage is already running on the normal exit path, give it a
+    // bounded grace window to finish before re-raising the signal. Without
+    // this the signal handler would call `process.kill(process.pid, signal)`
+    // immediately, terminating the in-flight salvage and losing whatever
+    // commit/push it was about to make. The grace window is the same 60s
+    // budget that `runSignalSalvage` enforces below, so the total time the
+    // CLI can spend in salvage on a SIGTERM is bounded.
+    void waitForInFlightSalvage(60_000)
+      .then(() => runSignalSalvage(signal))
+      .finally(() => {
+        // Restore the default behavior and re-raise so the process exits
+        // with the conventional 128 + signal number code.
+        process.removeListener(signal, handler);
+        process.kill(process.pid, signal);
+      });
+  };
+  process.on('SIGTERM', handler);
+  process.on('SIGINT', handler);
+}
+
+/**
+ * Polls `salvageRunInProgress` (set by `tryStartSalvageRun` /
+ * `finishSalvageRun`) and resolves once no salvage is running or `timeoutMs`
+ * elapses, whichever comes first. Returning early is fine — `runSignalSalvage`
+ * separately calls `tryStartSalvageRun()` and will no-op if salvage is still
+ * busy. The 60s upper bound matches the per-salvage budget.
+ */
+async function waitForInFlightSalvage(timeoutMs: number): Promise<void> {
+  if (!salvageRunInProgress) return;
+  const deadline = Date.now() + timeoutMs;
+  while (salvageRunInProgress && Date.now() < deadline) {
+    await new Promise<void>((resolveTick) => {
+      const timer = setTimeout(() => resolveTick(), 50);
+      timer.unref();
+    });
+  }
+}
+
+async function runSignalSalvage(signal: NodeJS.Signals): Promise<void> {
+  try {
+    const argv = process.argv.slice(2);
+    const specFile = resolveSignalSalvageSpecFile(argv);
+    if (!specFile) return;
+    const env = process.env;
+    const disableFlag = (env.RICKY_DISABLE_AUTO_SALVAGE ?? '').trim().toLowerCase();
+    if (disableFlag === '1' || disableFlag === 'true' || disableFlag === 'yes') return;
+    const cwd = env.INIT_CWD ? resolve(env.INIT_CWD) : process.cwd();
+    const specPath = isAbsolute(specFile) ? specFile : resolve(cwd, specFile);
+    let specMarkdown: string;
+    try {
+      specMarkdown = await readFile(specPath, 'utf8');
+    } catch {
+      return;
+    }
+    const exitContext: SalvageExitContext = {
+      exitCode: 128 + signalNumberFor(signal),
+      reason: `signal-${signal.toLowerCase()}`,
+    };
+    const runtime = createDefaultSalvageRuntime();
+    if (!tryStartSalvageRun()) return;
+    // Race the salvage against a hard 60s budget so a hung salvage call
+    // doesn't keep the process alive past the parent SIGTERM grace window.
+    try {
+      await Promise.race([
+        runAutoSalvage(specMarkdown, exitContext, runtime),
+        new Promise<void>((resolveBudget) => {
+          const timer = setTimeout(() => resolveBudget(), 60_000);
+          timer.unref();
+        }),
+      ]);
+    } finally {
+      finishSalvageRun();
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[ricky auto-salvage] signal hook crashed: ${message}\n`);
+  }
+}
+
+export function resolveSignalSalvageSpecFile(argv: readonly string[]): string | undefined {
+  const parsed = parseArgs([...argv]);
+  if (parsed.command !== 'run') return undefined;
+  if (!parsed.runRequested) return undefined;
+  if (parsed.mode === 'cloud') return undefined;
+  if (parsed.noAutoSalvage) return undefined;
+  return parsed.specFile;
+}
+
+function tryStartSalvageRun(): boolean {
+  if (salvageRunInProgress) return false;
+  salvageRunInProgress = true;
+  return true;
+}
+
+function finishSalvageRun(): void {
+  salvageRunInProgress = false;
+}
+
+function signalNumberFor(signal: NodeJS.Signals): number {
+  if (signal === 'SIGTERM') return 15;
+  if (signal === 'SIGINT') return 2;
+  return 1;
 }
 
 function isDirectCliMainInvocation(): boolean {
