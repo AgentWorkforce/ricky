@@ -360,6 +360,88 @@ describe('workforce persona workflow writer', () => {
         }),
       ).toThrow(/structured JSON or include fenced TypeScript artifact/);
     });
+
+    // Regression: when the writer is prompted to use the Write tool, claude
+    // sometimes emits a complete ```typescript fence whose body is a
+    // *placeholder* ("// (full source above — file written to disk)")
+    // followed by a complete ```json metadata fence. Both fences parse,
+    // so the parser took the fenced-response path and threw "does not
+    // call workflow()" — even though the actual workflow source had just
+    // been written to disk and the rest of the response was structurally
+    // fine. Result: ~25 minutes of writer work discarded, and 3 more
+    // 25-minute repair attempts burned chasing the same symptom. The
+    // parser must treat the placeholder-fence case as a stdout-format
+    // mismatch and prefer the freshly-written file on disk, exactly like
+    // it already does for outright truncated stdout.
+    const placeholderFenceOutput = [
+      'The file is complete and correct. Here is the response contract output:',
+      '',
+      '```typescript',
+      '// workflows/generated/persona.ts',
+      '// (full source above — file written to disk)',
+      '```',
+      '',
+      '```json',
+      JSON.stringify({
+        artifact: {
+          path: 'workflows/generated/persona.ts',
+          language: 'typescript',
+          linesOfCode: 513,
+          writtenToDisk: true,
+        },
+        metadata: { workflowName: 'persona', agents: ['lead'] },
+      }, null, 2),
+      '```',
+    ].join('\n');
+
+    it('recovers from a placeholder ```typescript fence + complete ```json metadata fence', () => {
+      const artifactPath = 'workflows/generated/persona.ts';
+      const writerInvokedAtMs = 100;
+      const parsed = parsePersonaWorkflowResponse(placeholderFenceOutput, artifactPath, {
+        repoRoot: '/tmp/repo',
+        writerInvokedAtMs,
+        statFile: (path) => path.endsWith('persona.ts') ? { mtimeMs: writerInvokedAtMs + 1_000 } : undefined,
+        readFileText: () => workflowSource(),
+      });
+      expect(parsed.responseFormat).toBe('fenced-artifact');
+      expect(parsed.content).toContain('workflow("persona")');
+      expect(parsed.metadata).toMatchObject({ recoveredFromDisk: true, reason: 'fenced-ts-placeholder' });
+    });
+
+    it('placeholder fence path respects the freshness guard (returns undefined when mtime older than writerInvokedAtMs, letting downstream parsers decide)', () => {
+      // The new placeholder-fence helper uses the same mtime-guarded
+      // `recoverArtifactFromTruncatedOutput` as the truncated-stdout
+      // fallback — when the on-disk file is older than the writer's
+      // invocation, the helper returns undefined and lets the rest of
+      // the parser run. We exercise that here via a controlled
+      // statFile/readFileText pair so the assertion stays decoupled
+      // from any other recovery path the parser may later succeed on.
+      const artifactPath = 'workflows/generated/persona.ts';
+      // No writerInvokedAtMs at all → the helper must short-circuit and
+      // return undefined (regardless of statFile / readFileText), and
+      // because both stat and readFile are absent, every other recovery
+      // path also yields no usable workflow source. We pin that
+      // composite outcome (throws the generic parser-failure error)
+      // to lock the freshness guard in this code path.
+      expect(() =>
+        parsePersonaWorkflowResponse(placeholderFenceOutput, artifactPath, {
+          repoRoot: '/tmp/repo',
+          // writerInvokedAtMs intentionally omitted
+        }),
+      ).toThrow(/structured JSON or include fenced TypeScript artifact|missing artifact\.content/);
+    });
+
+    it('does NOT recover from a placeholder fence when on-disk content also lacks `workflow(` (no silent bypass)', () => {
+      const artifactPath = 'workflows/generated/persona.ts';
+      expect(() =>
+        parsePersonaWorkflowResponse(placeholderFenceOutput, artifactPath, {
+          repoRoot: '/tmp/repo',
+          writerInvokedAtMs: 100,
+          statFile: () => ({ mtimeMs: 200 }),
+          readFileText: () => 'export const broken = 1;',
+        }),
+      ).toThrow(/does not call workflow\(\)|structured JSON or include fenced TypeScript artifact/);
+    });
   });
 
   it('invokes the spawned harness non-interactively (no TUI flag, structured-response contract)', async () => {
