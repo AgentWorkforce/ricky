@@ -3565,17 +3565,23 @@ describe('cliMain', () => {
     it('does not propagate failures from the salvage runner', async () => {
       const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
       const salvage = vi.fn().mockRejectedValue(new Error('salvage exploded'));
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
-      const result = await cliMain({
-        argv: ['--mode', 'local', '--spec-file', './spec.md', '--run'],
-        cwd: '/repo-root',
-        readFileText: vi.fn().mockResolvedValue(FULL_SPEC),
-        runInteractive: runner,
-        runAutoSalvage: salvage,
-      });
+      try {
+        const result = await cliMain({
+          argv: ['--mode', 'local', '--spec-file', './spec.md', '--run'],
+          cwd: '/repo-root',
+          readFileText: vi.fn().mockResolvedValue(FULL_SPEC),
+          runInteractive: runner,
+          runAutoSalvage: salvage,
+        });
 
-      // Salvage failure must never mask the original exit code.
-      expect(result.exitCode).toBe(0);
+        // Salvage failure must never mask the original exit code.
+        expect(result.exitCode).toBe(0);
+        expect(stderrSpy).toHaveBeenCalledWith('[ricky auto-salvage] hook crashed (continuing): salvage exploded\n');
+      } finally {
+        stderrSpy.mockRestore();
+      }
     });
   });
 });
