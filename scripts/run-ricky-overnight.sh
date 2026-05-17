@@ -596,13 +596,19 @@ append_generated_workflows_to_queue() {
   done
 }
 
+APPEND_QUEUE_OMITTED_STALE=0
+
 append_repo_workflows_to_queue() {
   local workflow_path=""
+
+  APPEND_QUEUE_OMITTED_STALE=0
 
   while IFS= read -r workflow_path; do
     [[ -n "$workflow_path" ]] || continue
 
     if [[ -f "$workflow_path" ]] && workflow_has_stale_package_targets "$workflow_path"; then
+      APPEND_QUEUE_OMITTED_STALE=$((APPEND_QUEUE_OMITTED_STALE + 1))
+      log "omitting stale pre-package-split workflow from expanded queue: $workflow_path"
       continue
     fi
 
@@ -645,11 +651,13 @@ LAST_FILTER_REMOVED_TOTAL=0
 LAST_FILTER_REMOVED_MISSING=0
 LAST_FILTER_REMOVED_STALE=0
 LAST_FILTER_REMOVED_SATISFIED=0
+LAST_APPENDED_OMITTED_STALE=0
 EXPANDED_PROBE_QUEUE_EXHAUSTED=false
 EXPANDED_PROBE_REMOVED_TOTAL=0
 EXPANDED_PROBE_REMOVED_MISSING=0
 EXPANDED_PROBE_REMOVED_STALE=0
 EXPANDED_PROBE_REMOVED_SATISFIED=0
+EXPANDED_PROBE_APPENDED_OMITTED_STALE=0
 
 prune_tracked_workflow_file_for_repo_state() {
   local workflow_file="$1"
@@ -732,6 +740,7 @@ filter_queue_for_repo_state() {
   LAST_FILTER_REMOVED_MISSING="$removed_missing"
   LAST_FILTER_REMOVED_STALE="$removed_stale"
   LAST_FILTER_REMOVED_SATISFIED="$removed_satisfied"
+  LAST_APPENDED_OMITTED_STALE="${APPEND_QUEUE_OMITTED_STALE:-0}"
   log "queue prepared with $(queue_count) actionable workflows (${removed_count} removed: stale=${removed_stale}, satisfied=${removed_satisfied}, missing=${removed_missing})"
 }
 
@@ -744,6 +753,7 @@ fallback_to_expanded_queue_when_flight_safe_exhausted() {
   EXPANDED_PROBE_REMOVED_MISSING=0
   EXPANDED_PROBE_REMOVED_STALE=0
   EXPANDED_PROBE_REMOVED_SATISFIED=0
+  EXPANDED_PROBE_APPENDED_OMITTED_STALE=0
 
   if [[ "$QUEUE_MODE" != "flight-safe" ]]; then
     return 0
@@ -763,6 +773,7 @@ fallback_to_expanded_queue_when_flight_safe_exhausted() {
   EXPANDED_PROBE_REMOVED_MISSING="$LAST_FILTER_REMOVED_MISSING"
   EXPANDED_PROBE_REMOVED_STALE="$LAST_FILTER_REMOVED_STALE"
   EXPANDED_PROBE_REMOVED_SATISFIED="$LAST_FILTER_REMOVED_SATISFIED"
+  EXPANDED_PROBE_APPENDED_OMITTED_STALE="$LAST_APPENDED_OMITTED_STALE"
 
   if (( expanded_queue_count > 0 )); then
     log "promoting overnight queue mode to expanded for this invocation (${expanded_queue_count} actionable workflows remain)"
@@ -1464,6 +1475,7 @@ write_summary() {
 - queue_filter_removed_stale: ${LAST_FILTER_REMOVED_STALE:-0}
 - queue_filter_removed_satisfied: ${LAST_FILTER_REMOVED_SATISFIED:-0}
 - queue_filter_removed_missing: ${LAST_FILTER_REMOVED_MISSING:-0}
+- queue_append_omitted_stale: ${LAST_APPENDED_OMITTED_STALE:-0}
 - failed_workflows:
 $(sed 's/^/  - /' "$FAILED_FILE" 2>/dev/null || true)
 - skipped_workflows:
@@ -1993,17 +2005,25 @@ if (( QUEUE_TOTAL == 0 )); then
   effective_removed_stale="$LAST_FILTER_REMOVED_STALE"
   effective_removed_satisfied="$LAST_FILTER_REMOVED_SATISFIED"
   effective_removed_total="$LAST_FILTER_REMOVED_TOTAL"
+  effective_omitted_stale="${LAST_APPENDED_OMITTED_STALE:-0}"
 
   if [[ "$EXPANDED_PROBE_QUEUE_EXHAUSTED" == "true" ]]; then
     effective_removed_missing="$EXPANDED_PROBE_REMOVED_MISSING"
     effective_removed_stale="$EXPANDED_PROBE_REMOVED_STALE"
     effective_removed_satisfied="$EXPANDED_PROBE_REMOVED_SATISFIED"
     effective_removed_total="$EXPANDED_PROBE_REMOVED_TOTAL"
+    effective_omitted_stale="${EXPANDED_PROBE_APPENDED_OMITTED_STALE:-0}"
     LAST_FILTER_REMOVED_MISSING="$effective_removed_missing"
     LAST_FILTER_REMOVED_STALE="$effective_removed_stale"
     LAST_FILTER_REMOVED_SATISFIED="$effective_removed_satisfied"
     LAST_FILTER_REMOVED_TOTAL="$effective_removed_total"
+    LAST_APPENDED_OMITTED_STALE="$effective_omitted_stale"
   fi
+
+  effective_removed_stale=$((effective_removed_stale + effective_omitted_stale))
+  effective_removed_total=$((effective_removed_total + effective_omitted_stale))
+  LAST_FILTER_REMOVED_STALE="$effective_removed_stale"
+  LAST_FILTER_REMOVED_TOTAL="$effective_removed_total"
 
   CURRENT_PASS="$PASSES"
   CURRENT_INDEX=0
