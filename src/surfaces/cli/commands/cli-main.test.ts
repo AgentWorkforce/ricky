@@ -698,6 +698,31 @@ describe('cliMain', () => {
     }));
   });
 
+  it('uses deterministic workflow authoring for non-interactive policyless external handoffs', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const externalRoot = await mkdtemp(`${tmpdir()}/ricky-policyless-cli-`);
+    const runner = vi.fn().mockResolvedValue(fakeInteractiveResult());
+
+    try {
+      await cliMain({
+        argv: ['--mode', 'local', '--spec', 'generate a workflow for package checks with typecheck and tests', '--run', '--json'],
+        cwd: externalRoot,
+        runInteractive: runner,
+      });
+
+      expect(runner).toHaveBeenCalledWith(expect.objectContaining({
+        preferWorkforcePersonaWorkflowWriter: false,
+        handoff: expect.objectContaining({
+          invocationRoot: externalRoot,
+        }),
+      }));
+      expect(runner.mock.calls[0][0].handoff).not.toHaveProperty('autoFix');
+    } finally {
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
+
   it('renders the full status dashboard after selecting Status interactively', async () => {
     const runner = vi.fn().mockResolvedValue(fakeInteractiveResult({
       onboarding: {

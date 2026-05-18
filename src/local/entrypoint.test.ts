@@ -1552,6 +1552,58 @@ describe('runLocal', () => {
       }
     });
 
+    it('blocks package-check generated workflow execution before launching agents when package.json is missing', async () => {
+      const { access, mkdtemp, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const tempCwd = await mkdtemp(`${tmpdir()}/ricky-package-precheck-`);
+
+      try {
+        const result = await runLocal(
+          {
+            source: 'cli',
+            spec: 'generate a workflow for package checks with typecheck and tests',
+            stageMode: 'run',
+            invocationRoot: tempCwd,
+          },
+          { localExecutor: { workforcePersonaWriter: false } },
+        );
+
+        const generatedPath = result.generation?.artifact?.path;
+        expect(result.ok).toBe(false);
+        expect(result.exitCode).toBe(2);
+        expect(generatedPath).toMatch(/^workflows\/generated\/.+\.ts$/);
+        await expect(access(`${tempCwd}/${generatedPath}`)).resolves.toBeUndefined();
+        expect(result.execution).toMatchObject({
+          stage: 'execute',
+          status: 'blocker',
+          execution: {
+            workflow_file: generatedPath,
+            command: `@agent-relay/sdk/workflows runScriptWorkflow ${generatedPath}`,
+            cwd: tempCwd,
+            steps_completed: 0,
+            steps_total: 1,
+          },
+          blocker: {
+            code: 'UNSUPPORTED_RUNTIME',
+            category: 'unsupported',
+            detected_during: 'precheck',
+            context: {
+              missing: [`${tempCwd}/package.json`],
+              found: [`cwd=${tempCwd}`],
+            },
+          },
+          evidence: {
+            failed_step: { id: 'runtime-precheck', name: 'Local runtime precheck' },
+            side_effects: {
+              commands_invoked: [`@agent-relay/sdk/workflows runScriptWorkflow ${generatedPath}`],
+            },
+          },
+        });
+      } finally {
+        await rm(tempCwd, { recursive: true, force: true });
+      }
+    });
+
     it('writes runtime log evidence under result.cwd, not process.cwd()', async () => {
       const { mkdtemp, rm, access } = await import('node:fs/promises');
       const { tmpdir } = await import('node:os');

@@ -35,7 +35,7 @@ import type {
   CloudReadinessCheck,
   CloudReadinessSnapshot,
 } from '../flows/cloud-workflow-flow.js';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -601,7 +601,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
   const handoffMode = parsed.mode ?? 'local';
   const invocationRoot = resolveInvocationRoot(deps.cwd);
   const stageMode = parsed.runRequested ? 'run' : 'generate';
-  const runAutoFix = parsed.autoFix && stageMode === 'run'
+  const runAutoFix = parsed.autoFix && stageMode === 'run' && !shouldDisableAutoFixForPolicylessExternalHandoff(parsed, deps)
     ? { autoFix: { maxAttempts: parsed.autoFix } }
     : {};
   const retry = retryMetadataFor(parsed);
@@ -2014,7 +2014,7 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     ...cloudRecoveryDeps,
     preferWorkforcePersonaWorkflowWriter:
       deps.preferWorkforcePersonaWorkflowWriter ??
-      resolvePreferWorkforcePersonaWorkflowWriter({ workforcePersonaWriterCli: parsed.workforcePersonaWriterCli }),
+      resolveCliWorkforcePersonaWorkflowWriterPreference(parsed, cliHandoff, deps),
   };
 
   let interactiveResult: InteractiveCliResult;
@@ -2106,6 +2106,60 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     output,
     interactiveResult,
   };
+}
+
+function resolveCliWorkforcePersonaWorkflowWriterPreference(
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff | undefined,
+  deps: CliMainDeps,
+): undefined | boolean {
+  const explicitPreference = parsed.workforcePersonaWriterCli !== undefined || process.env.RICKY_WORKFORCE_PERSONA_CLI !== undefined;
+  if (explicitPreference) {
+    return resolvePreferWorkforcePersonaWorkflowWriter({ workforcePersonaWriterCli: parsed.workforcePersonaWriterCli });
+  }
+
+  if (shouldUseDeterministicWriterForPolicylessExternalHandoff(parsed, cliHandoff, deps)) {
+    return false;
+  }
+
+  return resolvePreferWorkforcePersonaWorkflowWriter({ workforcePersonaWriterCli: parsed.workforcePersonaWriterCli });
+}
+
+function shouldUseDeterministicWriterForPolicylessExternalHandoff(
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff | undefined,
+  deps: CliMainDeps,
+): boolean {
+  if (!cliHandoff || parsed.mode === 'cloud') return false;
+  if (!parsed.json && !parsed.quiet) return false;
+
+  const invocationRoot = cliHandoff.invocationRoot ?? resolveInvocationRoot(deps.cwd);
+  if (invocationRoot === cliPackageRoot()) return false;
+
+  return !hasLocalPolicyContext(invocationRoot);
+}
+
+function shouldDisableAutoFixForPolicylessExternalHandoff(
+  parsed: ParsedArgs,
+  deps: CliMainDeps,
+): boolean {
+  if (parsed.mode === 'cloud') return false;
+  if (!parsed.json && !parsed.quiet) return false;
+
+  const invocationRoot = resolveInvocationRoot(deps.cwd);
+  if (invocationRoot === cliPackageRoot()) return false;
+
+  return !hasLocalPolicyContext(invocationRoot);
+}
+
+function hasLocalPolicyContext(root: string): boolean {
+  return [
+    'package.json',
+    '.git',
+    'AGENTS.md',
+    'CLAUDE.md',
+    '.ricky',
+  ].some((candidate) => existsSync(join(root, candidate)));
 }
 
 /**

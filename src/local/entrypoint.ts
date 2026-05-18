@@ -1244,6 +1244,26 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
       const route = await resolveLocalRuntimeRoute(cwd, options.route ?? DEFAULT_LOCAL_ROUTE, options);
       const workflowId = artifact?.workflowId ?? generationStage.artifact?.workflow_id ?? workflowIdForPath(runTarget);
+      const packageContextBlocker = await precheckPackageWorkflowContext(activeRequest, cwd, runTarget);
+      if (packageContextBlocker) {
+        const execution = createBlockerExecutionStage({
+          workflowId,
+          artifactPath: runTarget,
+          cwd,
+          route,
+          blocker: packageContextBlocker,
+        });
+        warnings.push(packageContextBlocker.message);
+        nextActions.push(...packageContextBlocker.recovery.steps);
+        return {
+          ok: false,
+          artifacts: dedupeArtifacts(artifacts),
+          logs,
+          warnings,
+          nextActions,
+          ...stageResponse(includeStageContract, generationStage, execution, 2),
+        };
+      }
       const precheckBlocker = await precheckRuntimeLaunch(runTarget, cwd, route, options);
       if (precheckBlocker) {
         const execution = createBlockerExecutionStage({
@@ -1924,6 +1944,43 @@ function digestSpec(spec: string): string {
 
 function workflowIdForPath(path: string): string {
   return `wf-${digestSpec(path).slice(0, 12)}`;
+}
+
+async function precheckPackageWorkflowContext(
+  request: LocalInvocationRequest,
+  cwd: string,
+  artifactPath: string,
+): Promise<LocalClassifiedBlocker | null> {
+  if (!requiresPackageManifestForLocalRun(request)) return null;
+
+  const { access } = await import('node:fs/promises');
+  const packageJsonPath = resolve(cwd, 'package.json');
+  try {
+    await access(packageJsonPath);
+    return null;
+  } catch {
+    return blocker({
+      code: 'UNSUPPORTED_RUNTIME',
+      category: 'unsupported',
+      detectedDuring: 'precheck',
+      message: `Local package-check workflow cannot run because ${packageJsonPath} is missing.`,
+      missing: [packageJsonPath],
+      found: [`cwd=${cwd}`],
+      steps: [
+        'Run the command from a Node package workspace that contains package.json.',
+        'Generate only with `--no-run`, or create package.json before running package checks.',
+        localRunCommand(artifactPath),
+      ],
+    });
+  }
+}
+
+function requiresPackageManifestForLocalRun(request: LocalInvocationRequest): boolean {
+  if (request.source === 'workflow-artifact') return false;
+  const spec = request.spec.toLowerCase();
+  const asksForPackageChecks = /\bpackage(?:\s+checks?|\s+scripts?|\s+manager|\.json)\b/.test(spec);
+  const asksForPackageCommands = /\b(typecheck|type\s+check|tests?|vitest|npm\s+test|pnpm\s+test|yarn\s+test)\b/.test(spec);
+  return asksForPackageChecks && asksForPackageCommands;
 }
 
 async function precheckRuntimeLaunch(
