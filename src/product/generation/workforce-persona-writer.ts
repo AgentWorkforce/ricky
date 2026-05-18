@@ -1473,14 +1473,15 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
   const importedModules = new Set<string>();
   const referencedIdentifiers = new Set<string>();
   const githubExecutorClassIdentifiers = new Set<string>(['GitHubStepExecutor']);
-  const githubExecutorValueIdentifiers = new Set<string>();
+  const createGithubStepFunctionIdentifiers = new Set<string>(['createGitHubStep']);
+  const variableInitializers = new Map<string, ts.Expression>();
   let stepInvocationCount = 0;
   let hasNonGithubStep = false;
   const githubExecutorRunPropertySpans: TextSpan[] = [];
 
   const trackedIdentifiers = new Set<string>(['GitHubStepExecutor', 'createGitHubStep']);
 
-  function walk(node: ts.Node): void {
+  function collectFacts(node: ts.Node): void {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       importedModules.add(node.moduleSpecifier.text);
       const namedBindings = node.importClause?.namedBindings;
@@ -1490,14 +1491,24 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
           if (importedName === 'GitHubStepExecutor') {
             githubExecutorClassIdentifiers.add(element.name.text);
           }
+          if (importedName === 'createGitHubStep') {
+            createGithubStepFunctionIdentifiers.add(element.name.text);
+          }
         }
       }
     }
     if (ts.isIdentifier(node) && trackedIdentifiers.has(node.text)) {
       referencedIdentifiers.add(node.text);
     }
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && isGithubExecutorExpression(node.initializer)) {
-      githubExecutorValueIdentifiers.add(node.name.text);
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      variableInitializers.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, collectFacts);
+  }
+
+  function classifyWorkflowShape(node: ts.Node): void {
+    if (ts.isIdentifier(node) && trackedIdentifiers.has(node.text)) {
+      referencedIdentifiers.add(node.text);
     }
     if (
       ts.isCallExpression(node) &&
@@ -1506,7 +1517,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       node.expression.name.text === 'step'
     ) {
       stepInvocationCount += 1;
-      if (!isCreateGithubStepExpression(node.arguments[1])) {
+      if (!isCreateGithubStepExpression(resolveIdentifierInitializer(node.arguments[1]))) {
         hasNonGithubStep = true;
       }
     }
@@ -1519,20 +1530,23 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       const options = node.arguments[0];
       if (options && ts.isObjectLiteralExpression(options)) {
         for (const property of options.properties) {
-          if (
-            ts.isPropertyAssignment(property) &&
-            propertyNameText(property.name) === 'executor' &&
-            isGithubExecutorExpression(property.initializer)
-          ) {
+          const executorExpression =
+            ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'executor'
+              ? property.initializer
+              : ts.isShorthandPropertyAssignment(property) && property.name.text === 'executor'
+                ? property.name
+                : undefined;
+          if (isGithubExecutorExpression(resolveIdentifierInitializer(executorExpression))) {
             githubExecutorRunPropertySpans.push(removablePropertySpan(content, property));
           }
         }
       }
     }
-    ts.forEachChild(node, walk);
+    ts.forEachChild(node, classifyWorkflowShape);
   }
 
-  walk(sourceFile);
+  collectFacts(sourceFile);
+  classifyWorkflowShape(sourceFile);
 
   return {
     importsModule: (moduleSpec) => importedModules.has(moduleSpec),
@@ -1545,24 +1559,32 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
   function isGithubExecutorExpression(node: ts.Node | undefined): boolean {
     if (!node) return false;
     if (ts.isIdentifier(node)) {
-      return githubExecutorValueIdentifiers.has(node.text) || githubExecutorClassIdentifiers.has(node.text);
+      return githubExecutorClassIdentifiers.has(node.text);
     }
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression)) {
       return githubExecutorClassIdentifiers.has(node.expression.text);
     }
     return false;
   }
-}
 
-function isCreateGithubStepExpression(node: ts.Node | undefined): boolean {
-  if (!node || !ts.isCallExpression(node)) return false;
-  if (ts.isIdentifier(node.expression)) {
-    return node.expression.text === 'createGitHubStep';
+  function isCreateGithubStepExpression(node: ts.Node | undefined): boolean {
+    if (!node || !ts.isCallExpression(node)) return false;
+    if (ts.isIdentifier(node.expression)) {
+      return createGithubStepFunctionIdentifiers.has(node.expression.text);
+    }
+    if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.name)) {
+      return node.expression.name.text === 'createGitHubStep';
+    }
+    return false;
   }
-  if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.name)) {
-    return node.expression.name.text === 'createGitHubStep';
+
+  function resolveIdentifierInitializer(node: ts.Node | undefined, seen = new Set<string>()): ts.Node | undefined {
+    if (!node || !ts.isIdentifier(node)) return node;
+    if (seen.has(node.text)) return node;
+    seen.add(node.text);
+    const initializer = variableInitializers.get(node.text);
+    return initializer ? resolveIdentifierInitializer(initializer, seen) : node;
   }
-  return false;
 }
 
 function propertyNameText(name: ts.PropertyName): string | undefined {
