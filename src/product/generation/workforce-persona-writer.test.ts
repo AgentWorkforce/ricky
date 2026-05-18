@@ -2378,6 +2378,33 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     );
   });
 
+  it('extracts declared worktree fields from markdown text without reading fenced examples as declarations', () => {
+    const spec = {
+      description: [
+        '```text',
+        'Worktree: /private/tmp/example-only',
+        'Target branch: feat/example-only',
+        '```',
+        '- Worktree: `/private/tmp/cloud-relay-slack-bridge-outbound-streaming`',
+        '- Target branch: `feat/relay-slack-bridge-outbound-streaming`',
+      ].join('\n'),
+    };
+    const workflowWithWorktreeSetup = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("with-worktree")',
+      '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
+      '    .step("implement", { type: "deterministic", command: "git -C /private/tmp/cloud-relay-slack-bridge-outbound-streaming status --short" })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, workflowWithWorktreeSetup)).toEqual([]);
+  });
+
   it('flags implementation steps that use the declared worktree before setup', () => {
     const spec = {
       description: [
@@ -2402,6 +2429,36 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     const mismatches = detectSpecIntentMismatch(spec, workflowWithLateWorktreeSetup);
 
     expect(mismatches.some((m) => m.includes('implement uses the declared worktree before'))).toBe(true);
+  });
+
+  it('rejects unrelated worktree add commands before declared worktree usage', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-relay-slack-bridge-outbound-streaming',
+        'Target branch: feat/relay-slack-bridge-outbound-streaming',
+      ].join('\n'),
+    };
+    const workflowWithWrongWorktreeSetup = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("wrong-worktree")',
+      '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/other-worktree feat/other-branch" })',
+      '    .step("implement", { type: "deterministic", command: "git -C /private/tmp/cloud-relay-slack-bridge-outbound-streaming status --short && echo feat/relay-slack-bridge-outbound-streaming" })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, workflowWithWrongWorktreeSetup);
+
+    expect(mismatches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('no runtime git worktree add setup step'),
+      ]),
+    );
   });
 
   it('accepts workflows that create the declared worktree before implementation', () => {

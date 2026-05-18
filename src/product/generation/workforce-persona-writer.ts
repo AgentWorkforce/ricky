@@ -3,6 +3,8 @@ import { readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { InlineCode, Node, Parent, Root, Text } from 'mdast';
 import ts from 'typescript';
 
 import type { ClarificationQuestion, ClarificationRequest, NormalizedWorkflowSpec } from '../spec-intake/types.js';
@@ -1875,12 +1877,13 @@ function specListItemText(value: unknown): string | undefined {
 }
 
 function extractDeclaredWorktree(text: string): { path: string; branch?: string } | null {
-  const worktreeMatch = /^\s*(?:[-*]\s*)?(?:Worktree|Target worktree)\s*:\s*`?([^`\s]+)`?/im.exec(text);
-  if (!worktreeMatch) return null;
-  const branchMatch = /^\s*(?:[-*]\s*)?(?:Target branch|Branch)\s*:\s*`?([^`\s]+)`?/im.exec(text);
+  const fields = markdownLabelFields(text);
+  const path = fields.get('worktree') ?? fields.get('target worktree');
+  if (!path) return null;
+  const branch = fields.get('target branch') ?? fields.get('branch');
   return {
-    path: worktreeMatch[1],
-    ...(branchMatch ? { branch: branchMatch[1] } : {}),
+    path,
+    ...(branch ? { branch } : {}),
   };
 }
 
@@ -1899,7 +1902,7 @@ function analyzeDeclaredWorktreeUsage(
   let firstImplementationUseBeforeSetup: WorkflowStepCommand | undefined;
 
   for (const step of commands) {
-    const stepHasWorktreeAdd = hasGitWorktreeAddCommand(step.command);
+    const stepAddsDeclaredWorktree = addsDeclaredWorktree(step.command, declaredWorktree);
     const stepMentionsPath = commandMentionsExecutableToken(step.command, declaredWorktree.path);
     const stepMentionsBranch = declaredWorktree.branch
       ? commandMentionsExecutableToken(step.command, declaredWorktree.branch)
@@ -1910,14 +1913,14 @@ function analyzeDeclaredWorktreeUsage(
 
     if (
       !hasWorktreeAdd &&
-      !stepHasWorktreeAdd &&
+      !stepAddsDeclaredWorktree &&
       (stepMentionsPath || stepMentionsBranch) &&
       isImplementationOrTestStep(step)
     ) {
       firstImplementationUseBeforeSetup ??= step;
     }
 
-    if (stepHasWorktreeAdd) {
+    if (stepAddsDeclaredWorktree) {
       hasWorktreeAdd = true;
     }
   }
@@ -1930,19 +1933,30 @@ function analyzeDeclaredWorktreeUsage(
   };
 }
 
-function hasGitWorktreeAddCommand(commandText: string): boolean {
-  const words = shellWords(commandText);
-  for (let index = 0; index < words.length; index += 1) {
-    if (words[index] !== 'git') continue;
-    let cursor = index + 1;
-    while (cursor < words.length && words[cursor].startsWith('-')) {
-      cursor += words[cursor] === '-C' ? 2 : 1;
-    }
-    if (words[cursor] === 'worktree' && words[cursor + 1] === 'add') {
-      return true;
+function addsDeclaredWorktree(commandText: string, declaredWorktree: { path: string; branch?: string }): boolean {
+  return gitWorktreeAddArgv(commandText).some((args) => {
+    const normalizedArgs = args.map(stripTrailingSlashes);
+    const hasPath = normalizedArgs.includes(stripTrailingSlashes(declaredWorktree.path));
+    const hasBranch = !declaredWorktree.branch || normalizedArgs.includes(stripTrailingSlashes(declaredWorktree.branch));
+    return hasPath && hasBranch;
+  });
+}
+
+function gitWorktreeAddArgv(commandText: string): string[][] {
+  const addArgv: string[][] = [];
+  for (const words of shellCommandSegments(commandText)) {
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== 'git') continue;
+      let cursor = index + 1;
+      while (cursor < words.length && words[cursor].startsWith('-')) {
+        cursor += words[cursor] === '-C' ? 2 : 1;
+      }
+      if (words[cursor] === 'worktree' && words[cursor + 1] === 'add') {
+        addArgv.push(words.slice(cursor + 2));
+      }
     }
   }
-  return false;
+  return addArgv;
 }
 
 function findInvalidFileExistenceGateCommands(
@@ -1969,10 +1983,16 @@ function findInvalidFileExistenceGateCommands(
 
 function extractTestFilePaths(command: string): string[] {
   const paths: string[] = [];
-  const executableText = shellExecutableText(command);
-  const testFilePattern = /(?:^|[\s;&|()])(?:test\s+-f|\[\[?\s+-f)\s+((?:"[^"]*"|'[^']*'|[^\s;&|\]]+))/g;
-  for (const match of executableText.matchAll(testFilePattern)) {
-    paths.push(match[1]);
+  for (const words of shellCommandSegments(command)) {
+    for (let index = 0; index < words.length - 1; index += 1) {
+      const commandWord = words[index];
+      if (commandWord === 'test' && words[index + 1] === '-f' && words[index + 2]) {
+        paths.push(words[index + 2]);
+      }
+      if ((commandWord === '[' || commandWord === '[[') && words[index + 1] === '-f' && words[index + 2]) {
+        paths.push(words[index + 2]);
+      }
+    }
   }
   return paths;
 }
@@ -1993,7 +2013,7 @@ function stripTrailingSlashes(value: string): string {
 }
 
 function containsShellGlob(value: string): boolean {
-  return /[*?\[]/.test(value);
+  return value.includes('*') || value.includes('?') || value.includes('[');
 }
 
 function isDirectoryLookingPath(value: string): boolean {
@@ -2008,7 +2028,7 @@ function commandMentionsExecutableToken(command: string, expectedToken: string):
   const normalizedExpected = stripTrailingSlashes(expectedToken);
   return shellWords(command).some((word) => {
     const normalizedWord = stripTrailingSlashes(word);
-    return normalizedWord === normalizedExpected || normalizedWord.includes(normalizedExpected);
+    return normalizedWord === normalizedExpected;
   });
 }
 
@@ -2080,7 +2100,12 @@ function extractHeredocDelimiters(line: string): string[] {
 }
 
 function shellWords(command: string): string[] {
-  const words: string[] = [];
+  return shellCommandSegments(command).flat();
+}
+
+function shellCommandSegments(command: string): string[][] {
+  const segments: string[][] = [];
+  let words: string[] = [];
   let current = '';
   let quote: '"' | "'" | undefined;
   let escaped = false;
@@ -2107,7 +2132,18 @@ function shellWords(command: string): string[] {
       quote = char;
       continue;
     }
-    if (/\s/.test(char) || ';|&()<>'.includes(char)) {
+    if (char === '\n' || ';|&()'.includes(char)) {
+      if (current) {
+        words.push(current);
+        current = '';
+      }
+      if (words.length > 0) {
+        segments.push(words);
+        words = [];
+      }
+      continue;
+    }
+    if (/\s/.test(char) || '<>'.includes(char)) {
       if (current) {
         words.push(current);
         current = '';
@@ -2118,7 +2154,63 @@ function shellWords(command: string): string[] {
   }
 
   if (current) words.push(current);
-  return words;
+  if (words.length > 0) segments.push(words);
+  return segments;
+}
+
+function markdownLabelFields(markdown: string): Map<string, string> {
+  let tree: Root;
+  try {
+    tree = fromMarkdown(markdown);
+  } catch {
+    return new Map();
+  }
+
+  const fields = new Map<string, string>();
+  for (const line of markdownTextLines(tree)) {
+    const parsed = labelField(line);
+    if (parsed) fields.set(parsed.label, parsed.value);
+  }
+  return fields;
+}
+
+function markdownTextLines(tree: Root): string[] {
+  const lines: string[] = [];
+  for (const child of tree.children) {
+    if (child.type === 'code' || child.type === 'html') continue;
+    const text = markdownNodeText(child).trim();
+    if (text) lines.push(...text.split('\n').map((line) => line.trim()).filter(Boolean));
+  }
+  return lines;
+}
+
+function markdownNodeText(node: Node): string {
+  if (node.type === 'text') return (node as Text).value;
+  if (node.type === 'inlineCode') return (node as InlineCode).value;
+  if (node.type === 'break') return '\n';
+  if (!isMarkdownParent(node)) return '';
+  const separator = node.type === 'list' || node.type === 'root' ? '\n' : '';
+  return node.children.map(markdownNodeText).filter(Boolean).join(separator);
+}
+
+function isMarkdownParent(node: Node): node is Parent {
+  return Array.isArray((node as Parent).children);
+}
+
+function labelField(line: string): { label: string; value: string } | null {
+  const stripped = stripMarkdownListMarker(line);
+  const separator = stripped.indexOf(':');
+  if (separator < 0) return null;
+  const label = stripped.slice(0, separator).trim().toLowerCase();
+  const value = stripped.slice(separator + 1).trim();
+  if (!label || !value) return null;
+  return { label, value };
+}
+
+function stripMarkdownListMarker(line: string): string {
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) return trimmed.slice(2).trimStart();
+  return trimmed;
 }
 
 function propertyNameText(name: ts.PropertyName): string | undefined {
