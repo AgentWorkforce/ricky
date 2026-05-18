@@ -189,6 +189,22 @@ describe('validateWorkspaceContext', () => {
       status: 400,
     });
   });
+
+  it('returns 400 when environment is empty or non-string', () => {
+    const emptyEnvironment = { workspaceId: 'ws-001', environment: ' ' };
+    const numericEnvironment = { workspaceId: 'ws-001', environment: 123 } as unknown as CloudWorkspaceContext;
+
+    expect(validateWorkspaceContext(emptyEnvironment)).toEqual({
+      ok: false,
+      error: 'Missing or empty environment.',
+      status: 400,
+    });
+    expect(validateWorkspaceContext(numericEnvironment)).toEqual({
+      ok: false,
+      error: 'Missing or empty environment.',
+      status: 400,
+    });
+  });
 });
 
 describe('validateRequestMode', () => {
@@ -250,8 +266,8 @@ describe('validateProviderConnectionState', () => {
 
     expect(validateProviderConnectionState(connection, 'github')).toEqual({
       ok: false,
-      error: 'github provider is not connected.',
-      status: 409,
+      error: 'Invalid provider connection state.',
+      status: 400,
     });
   });
 
@@ -260,8 +276,18 @@ describe('validateProviderConnectionState', () => {
 
     expect(validateProviderConnectionState(connection, 'github')).toEqual({
       ok: false,
-      error: 'github provider is not connected.',
-      status: 409,
+      error: 'Invalid provider connection state.',
+      status: 400,
+    });
+  });
+
+  it('rejects invalid provider values at runtime', () => {
+    const connection = { provider: 'dropbox', connected: true } as unknown as ProviderConnectionState;
+
+    expect(validateProviderConnectionState(connection, 'github')).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
     });
   });
 });
@@ -283,11 +309,21 @@ describe('validateCloudRequest', () => {
     });
   });
 
-  it('rejects unscoped API-key requests', () => {
+  it('rejects API-key requests that omit workspace context', () => {
     expect(validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, undefined)).toEqual({
       ok: false,
       error: 'Missing or empty workspace ID.',
       status: 400,
+    });
+  });
+
+  it('accepts valid bearer requests with explicit workspace scope', () => {
+    expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-001' })).toEqual({
+      ok: true,
+      auth: { token: 'bearer-token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-001', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
     });
   });
 
@@ -455,6 +491,17 @@ describe('resolveAuthorizedWorkspaceScope', () => {
     });
   });
 
+  it('fails if a request tries to use a workspace outside its authorized scope', () => {
+    const authorizedScope = { workspaceId: 'api-key-workspace' };
+    const requestWorkspace = { workspaceId: 'unscoped-request-workspace' };
+
+    expect(resolveAuthorizedWorkspaceScope(authorizedScope, requestWorkspace)).toEqual({
+      ok: false,
+      error: 'Cross-workspace access denied.',
+      status: 403,
+    });
+  });
+
   it('rejects requests whose workspace differs from the authorized workspace', () => {
     const authorizedScope = { workspaceId: 'authorized-workspace' };
     const requestedScope = { workspaceId: 'untrusted-workspace' };
@@ -508,7 +555,16 @@ describe('getProviderConnectGuidance', () => {
 
   it('GitHub guidance does not include a CLI command', () => {
     const guidance = getProviderConnectGuidance('github');
+    const githubCliCommand = ['npx agent-relay cloud connect', 'github'].join(' ');
 
-    expect(guidance.instructions.join('\n')).not.toContain('npx agent-relay cloud connect github');
+    expect(guidance.instructions.join('\n')).not.toContain(githubCliCommand);
+  });
+
+  it('non-CLI providers default to dashboard-based guidance', () => {
+    const guidance = getProviderConnectGuidance('linear');
+
+    expect(guidance.dashboardUrl).toBe('/dashboard/integrations/linear');
+    expect(guidance.command).toBeUndefined();
+    expect(guidance.instructions.join('\n')).toContain('Cloud dashboard');
   });
 });

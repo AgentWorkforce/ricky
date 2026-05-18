@@ -14,13 +14,17 @@ import type {
 
 const VALID_TOKEN_TYPES = new Set(['bearer', 'api-key']);
 const VALID_REQUEST_MODES = new Set(['cloud', 'both']);
+const VALID_PROVIDER_TYPES = new Set(['google', 'github', 'slack', 'notion', 'linear']);
 
 export function validateAuthContext(auth: CloudAuthContext | undefined): AuthValidationResult {
   if (!auth || typeof auth.token !== 'string' || !auth.token.trim()) {
     return { ok: false, error: 'Missing or empty auth token.', status: 401 };
   }
 
-  if (auth.tokenType !== undefined && !VALID_TOKEN_TYPES.has(auth.tokenType)) {
+  if (
+    auth.tokenType !== undefined &&
+    (typeof auth.tokenType !== 'string' || !VALID_TOKEN_TYPES.has(auth.tokenType))
+  ) {
     return { ok: false, error: 'Invalid auth token type.', status: 400 };
   }
 
@@ -45,6 +49,13 @@ export function validateWorkspaceContext(
     return { ok: false, error: 'Missing or empty project ID.', status: 400 };
   }
 
+  if (
+    workspace.environment !== undefined &&
+    (typeof workspace.environment !== 'string' || !workspace.environment.trim())
+  ) {
+    return { ok: false, error: 'Missing or empty environment.', status: 400 };
+  }
+
   if (options.requireProject && !workspace.projectId?.trim()) {
     return { ok: false, error: 'Missing or empty project ID.', status: 400 };
   }
@@ -60,7 +71,7 @@ export function validateWorkspaceContext(
 export function validateRequestMode(mode: CloudRequestMode | string | undefined): RequestModeValidationResult {
   const resolvedMode = mode ?? 'cloud';
 
-  if (!VALID_REQUEST_MODES.has(resolvedMode)) {
+  if (typeof resolvedMode !== 'string' || !VALID_REQUEST_MODES.has(resolvedMode)) {
     return { ok: false, error: 'Invalid request mode.', status: 400 };
   }
 
@@ -71,11 +82,27 @@ export function validateProviderConnectionState(
   connection: ProviderConnectionState | undefined,
   requiredProvider: ProviderType,
 ): ProviderConnectionValidationResult {
+  if (!VALID_PROVIDER_TYPES.has(requiredProvider)) {
+    return {
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+    };
+  }
+
   if (!connection) {
     return {
       ok: false,
       error: `Missing ${requiredProvider} provider connection state.`,
       status: 409,
+    };
+  }
+
+  if (typeof connection.provider !== 'string' || !VALID_PROVIDER_TYPES.has(connection.provider)) {
+    return {
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
     };
   }
 
@@ -87,7 +114,15 @@ export function validateProviderConnectionState(
     };
   }
 
-  if (connection.connected !== true) {
+  if (typeof connection.connected !== 'boolean') {
+    return {
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+    };
+  }
+
+  if (!connection.connected) {
     return {
       ok: false,
       error: `${requiredProvider} provider is not connected.`,

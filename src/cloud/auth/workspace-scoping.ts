@@ -35,6 +35,17 @@ export function assertWorkspaceMatch(resourceWorkspaceId: string, requestWorkspa
   }
 }
 
+/**
+ * Resolve a request's workspace scope against the caller's authorized scope.
+ *
+ * Denies cross-workspace access, and denies cross-project / cross-environment
+ * access when the authorized scope pins those dimensions. When the authorized
+ * scope pins a `projectId` or `environment` and the request omits it, the
+ * authorized value is filled into the resolved scope (defaults to authorized
+ * scope rather than rejecting). Callers that require the request to name a
+ * project explicitly should compose with
+ * `validateWorkspaceContext(..., { requireProject: true })`.
+ */
 export function resolveAuthorizedWorkspaceScope(
   authorizedScope: AuthorizedWorkspaceScope,
   requestedScope: CloudWorkspaceContext,

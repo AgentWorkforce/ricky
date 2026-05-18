@@ -32,4 +32,8 @@ export {
   scopeToWorkspace,
 } from './workspace-scoping.js';
 
-export { getProviderConnectGuidance } from './provider-connect.js';
+export {
+  LINEAR_CONNECT_DASHBOARD_URL,
+  LINEAR_CONNECT_INSTRUCTIONS,
+  getProviderConnectGuidance,
+} from './provider-connect.js';
