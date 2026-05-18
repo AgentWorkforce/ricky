@@ -1,3 +1,4 @@
+export { PROVIDER_TYPES } from './types.js';
 export type {
   AuthValidationResult,
   AuthorizedWorkspaceScope,

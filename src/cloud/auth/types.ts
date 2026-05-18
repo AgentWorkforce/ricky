@@ -47,7 +47,9 @@ export type RequestModeValidationResult =
   | { ok: true; mode: CloudRequestMode }
   | { ok: false; error: string; status: number };
 
-export type ProviderType = 'google' | 'github' | 'slack' | 'notion' | 'linear';
+export const PROVIDER_TYPES = ['google', 'github', 'slack', 'notion', 'linear'] as const;
+
+export type ProviderType = (typeof PROVIDER_TYPES)[number];
 
 export interface ProviderConnectionState {
   provider: ProviderType;

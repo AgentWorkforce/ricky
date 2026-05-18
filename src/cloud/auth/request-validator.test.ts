@@ -13,6 +13,7 @@ import {
   validateRequestMode,
   validateWorkspaceContext,
 } from './index.js';
+import { PROVIDER_TYPES } from './types.js';
 import type { CloudAuthContext, CloudWorkspaceContext, ProviderConnectionState } from './types.js';
 
 describe('validateAuthContext', () => {
@@ -290,6 +291,15 @@ describe('validateProviderConnectionState', () => {
       status: 400,
     });
   });
+
+  it('runtime provider validation accepts every PROVIDER_TYPES entry', () => {
+    for (const provider of PROVIDER_TYPES) {
+      expect(validateProviderConnectionState({ provider, connected: true }, provider)).toEqual({
+        ok: true,
+        connection: { provider, connected: true },
+      });
+    }
+  });
 });
 
 describe('validateCloudRequest', () => {
@@ -317,6 +327,14 @@ describe('validateCloudRequest', () => {
     });
   });
 
+  it('fails closed when valid auth is not scoped to a workspace', () => {
+    expect(validateCloudRequest({ token: 'valid-token', tokenType: 'bearer' }, undefined)).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+    });
+  });
+
   it('accepts valid bearer requests with explicit workspace scope', () => {
     expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-001' })).toEqual({
       ok: true,
@@ -331,12 +349,12 @@ describe('validateCloudRequest', () => {
     expect(
       validateCloudRequest(
         { token: 'api-key-token', tokenType: 'api-key' },
-        { workspaceId: 'ws-001' },
+        { workspaceId: 'api-key-workspace' },
       ),
     ).toEqual({
       ok: true,
       auth: { token: 'api-key-token', tokenType: 'api-key' },
-      workspace: { workspaceId: 'ws-001', projectId: undefined, environment: undefined },
+      workspace: { workspaceId: 'api-key-workspace', projectId: undefined, environment: undefined },
       mode: 'cloud',
       providerConnection: undefined,
     });
@@ -551,6 +569,7 @@ describe('getProviderConnectGuidance', () => {
 
     expect(instructions).toContain('Nango');
     expect(instructions).toContain('Cloud dashboard');
+    expect(instructions).toContain('GitHub App installation');
   });
 
   it('GitHub guidance does not include a CLI command', () => {

@@ -1,3 +1,4 @@
+import { PROVIDER_TYPES } from './types.js';
 import type {
   AuthValidationResult,
   CloudAuthContext,
@@ -12,9 +13,9 @@ import type {
   WorkspaceScopingResult,
 } from './types.js';
 
-const VALID_TOKEN_TYPES = new Set(['bearer', 'api-key']);
-const VALID_REQUEST_MODES = new Set(['cloud', 'both']);
-const VALID_PROVIDER_TYPES = new Set(['google', 'github', 'slack', 'notion', 'linear']);
+const VALID_TOKEN_TYPES = new Set<string>(['bearer', 'api-key']);
+const VALID_REQUEST_MODES = new Set<string>(['cloud', 'both']);
+const VALID_PROVIDER_TYPES = new Set<string>(PROVIDER_TYPES);
 
 export function validateAuthContext(auth: CloudAuthContext | undefined): AuthValidationResult {
   if (!auth || typeof auth.token !== 'string' || !auth.token.trim()) {
