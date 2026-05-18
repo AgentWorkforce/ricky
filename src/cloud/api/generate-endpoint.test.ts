@@ -565,6 +565,21 @@ describe('handleCloudGenerate — runtime-invalid input', () => {
     expect(response.validation.issues[0].path).toBe('workspace.projectId');
     expect(executor.calls).toHaveLength(0);
   });
+
+  it('rejects invalid workspace.environment without throwing', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      workspace: { workspaceId: 'ws-001', environment: 9 as unknown as string },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('invalid-environment');
+    expect(response.validation.issues[0].path).toBe('workspace.environment');
+    expect(executor.calls).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

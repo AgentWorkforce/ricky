@@ -21,11 +21,7 @@ import type {
   CloudWarning,
 } from './response-types.js';
 import type { WorkforcePersonaGenerationMetadata } from '../../product/generation/index.js';
-import {
-  validateAuthContext,
-  validateRequestMode,
-  validateWorkspaceContext,
-} from '../auth/request-validator.js';
+import { validateCloudRequest } from '../auth/request-validator.js';
 
 // ---------------------------------------------------------------------------
 // Route constant
@@ -218,7 +214,8 @@ function validationFailure(
 }
 
 function authIssueDescriptor(error: string): { code: string; path: string } {
-  if (error.toLowerCase().includes('token type')) {
+  const lower = error.toLowerCase();
+  if (lower.includes('token type')) {
     return { code: 'invalid-auth-token-type', path: 'auth.tokenType' };
   }
   return { code: 'missing-auth-token', path: 'auth.token' };
@@ -239,21 +236,26 @@ function validateRequest(
   request: CloudGenerateRequest,
   requestId: string,
 ): ValidationResult {
-  const authResult = validateAuthContext(request?.auth);
-  if (!authResult.ok) {
-    const { code, path } = authIssueDescriptor(authResult.error);
-    return validationFailure(requestId, authResult.status, authResult.error, code, path);
-  }
-
-  const workspaceResult = validateWorkspaceContext(request?.workspace);
-  if (!workspaceResult.ok) {
-    const { code, path } = workspaceIssueDescriptor(workspaceResult.error);
-    return validationFailure(requestId, workspaceResult.status, workspaceResult.error, code, path);
-  }
-
-  const modeResult = validateRequestMode(request?.body?.mode);
-  if (!modeResult.ok) {
-    return validationFailure(requestId, modeResult.status, modeResult.error, 'invalid-mode', 'body.mode');
+  // Production wiring starts at the canonical Cloud request validator:
+  // validateCloudRequest -> spec intake -> generation pipeline -> result mapping.
+  const cloudRequestResult = validateCloudRequest(request?.auth, request?.workspace, {
+    mode: request?.body?.mode,
+  });
+  if (!cloudRequestResult.ok) {
+    const issue =
+      cloudRequestResult.error.toLowerCase().includes('auth') ||
+      cloudRequestResult.error.toLowerCase().includes('token')
+        ? authIssueDescriptor(cloudRequestResult.error)
+        : cloudRequestResult.error.toLowerCase().includes('mode')
+          ? { code: 'invalid-mode', path: 'body.mode' }
+          : workspaceIssueDescriptor(cloudRequestResult.error);
+    return validationFailure(
+      requestId,
+      cloudRequestResult.status,
+      cloudRequestResult.error,
+      issue.code,
+      issue.path,
+    );
   }
 
   if (!hasSpecPayload(request?.body?.spec)) {
