@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { cliMain } from '../commands/cli-main.js';
+import { runRickyCli } from '../../../sdk/index.js';
 
-const result = await cliMain();
+const result = await runRickyCli();
 
 if (result.output.length > 0) {
   process.stdout.write(`${result.output.join('\n')}\n`);

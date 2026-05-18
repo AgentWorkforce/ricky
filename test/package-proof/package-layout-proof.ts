@@ -53,6 +53,9 @@ interface PackageManifest {
   description?: unknown;
   license?: unknown;
   type?: unknown;
+  main?: unknown;
+  types?: unknown;
+  exports?: unknown;
   engines?: { node?: unknown };
   packageManager?: unknown;
   bin?: unknown;
@@ -367,6 +370,17 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
           typeof value === 'string' && value.length > 0 ? [] : [`Missing or empty package.json field: ${field}`],
         );
         const filesIsArray = Array.isArray(rootPkg.files) && rootPkg.files.length > 0;
+        const rootExport = rootPkg.exports && typeof rootPkg.exports === 'object'
+          ? (rootPkg.exports as Record<string, unknown>)['.']
+          : undefined;
+        const rootExportRecord = rootExport && typeof rootExport === 'object'
+          ? rootExport as Record<string, unknown>
+          : {};
+        const rootExportImport = rootExportRecord.import;
+        const rootExportTypes = rootExportRecord.types;
+        const hasSdkMain = rootPkg.main === './dist/index.js';
+        const hasSdkTypes = rootPkg.types === './dist/sdk/index.d.ts';
+        const hasSdkRootExport = rootExportImport === './dist/index.js' && rootExportTypes === './dist/sdk/index.d.ts';
         const publishAccess = rootPkg.publishConfig?.access;
         const hasPublishAccess = publishAccess === 'public' || publishAccess === 'restricted';
         const hasBin = packageBinTarget(rootPkg).length > 0;
@@ -377,12 +391,27 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
 
         return result(
           'package-shape-required-fields',
-          [stringIssues.length === 0, filesIsArray, hasPublishAccess, hasBin, isModule, !isPrivate, noFileProtocolDeps],
+          [
+            stringIssues.length === 0,
+            filesIsArray,
+            hasSdkMain,
+            hasSdkTypes,
+            hasSdkRootExport,
+            hasPublishAccess,
+            hasBin,
+            isModule,
+            !isPrivate,
+            noFileProtocolDeps,
+          ],
           [
             `package.json name: ${typeof rootPkg.name === 'string' ? rootPkg.name : '(missing)'}`,
             `package.json version: ${typeof rootPkg.version === 'string' ? rootPkg.version : '(missing)'}`,
             `package.json license: ${typeof rootPkg.license === 'string' ? rootPkg.license : '(missing)'}`,
             `package.json type: ${typeof rootPkg.type === 'string' ? rootPkg.type : '(missing)'}`,
+            `package.json exports["."].import: ${typeof rootExportImport === 'string' ? rootExportImport : '(missing)'}`,
+            `package.json exports["."].types: ${typeof rootExportTypes === 'string' ? rootExportTypes : '(missing)'}`,
+            `package.json main: ${typeof rootPkg.main === 'string' ? rootPkg.main : '(missing)'}`,
+            `package.json types: ${typeof rootPkg.types === 'string' ? rootPkg.types : '(missing)'}`,
             `package.json files is non-empty array: ${filesIsArray}`,
             `package.json publishConfig.access: ${typeof publishAccess === 'string' ? publishAccess : '(missing)'}`,
             `package.json bin.ricky present: ${hasBin}`,
@@ -394,6 +423,9 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
           [
             ...stringIssues,
             ...(filesIsArray ? [] : ['package.json files is missing or empty']),
+            ...(hasSdkMain ? [] : ['package.json main does not point at ./dist/index.js']),
+            ...(hasSdkTypes ? [] : ['package.json types does not point at ./dist/sdk/index.d.ts']),
+            ...(hasSdkRootExport ? [] : ['package.json exports["."] does not expose the SDK import and types targets']),
             ...(hasPublishAccess ? [] : ['package.json publishConfig.access is missing or unrecognized']),
             ...(hasBin ? [] : ['package.json bin.ricky is missing']),
             ...(isModule ? [] : ['package.json type is not "module"']),
@@ -479,17 +511,19 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
         const prepackBuilds = prepack.includes('build') || prepack.includes('bundle');
         const filesIncludesDist = Array.isArray(rootPkg.files) && rootPkg.files.includes('dist');
         const bundlerScriptExists = fileExists('scripts/bundle-cli.mjs');
+        const sdkSourceExists = fileExists('src/sdk/index.ts');
         const cliBinSourceExists = fileExists('src/surfaces/cli/bin/ricky.ts');
         const cliMainExists = fileExists('src/surfaces/cli/commands/cli-main.ts');
 
         return result(
           'bin-points-to-published-bundle',
-          [targetIsBundle, prepackBuilds, filesIncludesDist, bundlerScriptExists, cliBinSourceExists, cliMainExists],
+          [targetIsBundle, prepackBuilds, filesIncludesDist, bundlerScriptExists, sdkSourceExists, cliBinSourceExists, cliMainExists],
           [
             `package.json bin.ricky: ${binTarget || '(missing)'}`,
             `package.json scripts.prepack: ${prepack || '(missing)'}`,
             `published files include dist: ${filesIncludesDist}`,
             `scripts/bundle-cli.mjs exists: ${bundlerScriptExists}`,
+            `src/sdk/index.ts exists: ${sdkSourceExists}`,
             `src/surfaces/cli/bin/ricky.ts exists: ${cliBinSourceExists}`,
             `src/surfaces/cli/commands/cli-main.ts exists: ${cliMainExists}`,
           ],
@@ -499,6 +533,7 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
             ...(prepackBuilds ? [] : ['package.json scripts.prepack does not run the bundle/build']),
             ...(filesIncludesDist ? [] : ['package.json files does not include dist']),
             ...(bundlerScriptExists ? [] : ['Missing scripts/bundle-cli.mjs; bundle path is broken']),
+            ...(sdkSourceExists ? [] : ['Missing src/sdk/index.ts; SDK package source is gone']),
             ...(cliBinSourceExists ? [] : ['Missing src/surfaces/cli/bin/ricky.ts; CLI bin source is gone']),
             ...(cliMainExists ? [] : ['Missing src/surfaces/cli/commands/cli-main.ts; CLI main entry is gone']),
           ],

@@ -38,7 +38,7 @@ Slack is a surface, not the product identity.
 
 ## Install and Run
 
-Ricky is an npm package: `@agentworkforce/ricky`. It publishes the `ricky` bin from `dist/ricky.js`.
+Ricky is an npm package: `@agentworkforce/ricky`. It publishes the `ricky` bin from `dist/ricky.js` and the SDK from `dist/index.js`.
 
 For local development from the repo:
 
@@ -55,6 +55,28 @@ For package consumers, the intended command form is:
 npx @agentworkforce/ricky --help
 ricky --help
 ```
+
+## SDK Usage
+
+Projects can import Ricky directly instead of shelling out to the CLI:
+
+```ts
+import { createRickySdk } from '@agentworkforce/ricky';
+
+const ricky = createRickySdk({ cwd: process.cwd() });
+
+const generated = await ricky.generateLocalWorkflow({
+  spec: 'Generate a workflow that checks package health',
+  workflowName: 'package-health',
+});
+
+const run = await ricky.runLocalWorkflow({
+  workflowPath: 'workflows/generated/package-health.ts',
+  autoFixAttempts: 3,
+});
+```
+
+The SDK also exposes `generateCloudWorkflow`, `scheduleWorkflow`, `listWorkflowSchedules`, and `runCli`. The published CLI uses `runRickyCli` from the SDK, so command behavior and package imports share the same implementation boundary.
 
 ## CLI Reference
 

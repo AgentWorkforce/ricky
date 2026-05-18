@@ -25,6 +25,14 @@
     "node": ">=22.14.0"
   },
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/sdk/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "bin": {
     "ricky": "./dist/ricky.js"
   },

@@ -65,6 +65,10 @@ describe('Ricky package layout and npm-default proof', () => {
       [
         'package.json name: @agentworkforce/ricky',
         'package.json type: module',
+        'package.json exports["."].import: ./dist/index.js',
+        'package.json exports["."].types: ./dist/sdk/index.d.ts',
+        'package.json main: ./dist/index.js',
+        'package.json types: ./dist/sdk/index.d.ts',
         'package.json files is non-empty array: true',
         'package.json publishConfig.access: public',
         'package.json bin.ricky present: true',
@@ -92,6 +96,7 @@ describe('Ricky package layout and npm-default proof', () => {
         'package.json bin.ricky: ./dist/ricky.js',
         'published files include dist: true',
         'scripts/bundle-cli.mjs exists: true',
+        'src/sdk/index.ts exists: true',
         'src/surfaces/cli/bin/ricky.ts exists: true',
         'src/surfaces/cli/commands/cli-main.ts exists: true',
       ],
