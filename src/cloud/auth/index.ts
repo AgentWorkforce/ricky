@@ -9,6 +9,8 @@ export type {
   CloudRequestValidationResult,
   CloudTokenType,
   CloudWorkspaceContext,
+  ProviderConnectCliGuidance,
+  ProviderConnectDashboardGuidance,
   ProviderConnectGuidance,
   ProviderConnectionState,
   ProviderConnectionValidationResult,

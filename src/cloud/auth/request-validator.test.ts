@@ -546,10 +546,13 @@ describe('resolveAuthorizedWorkspaceScope', () => {
 });
 
 describe('getProviderConnectGuidance', () => {
-  it('Google guidance includes the exact CLI command', () => {
+  it('Google guidance is a CLI variant with the exact command', () => {
     const guidance = getProviderConnectGuidance('google');
 
+    expect(guidance.kind).toBe('cli');
+    if (guidance.kind !== 'cli') throw new Error('expected CLI guidance');
     expect(guidance.command).toBe('npx agent-relay cloud connect google');
+    expect(guidance.dashboardUrl).toBeUndefined();
     expect(guidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
   });
 
@@ -557,9 +560,11 @@ describe('getProviderConnectGuidance', () => {
     expect(getProviderConnectGuidance('google').instructions.join('\n')).toContain('OAuth');
   });
 
-  it('GitHub guidance includes dashboardUrl and no command field', () => {
+  it('GitHub guidance is a dashboard variant with no command field', () => {
     const guidance = getProviderConnectGuidance('github');
 
+    expect(guidance.kind).toBe('dashboard');
+    if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
     expect(guidance.dashboardUrl).toBe('/dashboard/integrations');
     expect(guidance.command).toBeUndefined();
   });
@@ -582,8 +587,27 @@ describe('getProviderConnectGuidance', () => {
   it('non-CLI providers default to dashboard-based guidance', () => {
     const guidance = getProviderConnectGuidance('linear');
 
+    expect(guidance.kind).toBe('dashboard');
+    if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
     expect(guidance.dashboardUrl).toBe('/dashboard/integrations/linear');
     expect(guidance.command).toBeUndefined();
     expect(guidance.instructions.join('\n')).toContain('Cloud dashboard');
+  });
+
+  it('every provider in PROVIDER_TYPES has discriminator-tagged guidance', () => {
+    for (const provider of PROVIDER_TYPES) {
+      const guidance = getProviderConnectGuidance(provider);
+      expect(guidance.provider).toBe(provider);
+      expect(guidance.kind === 'cli' || guidance.kind === 'dashboard').toBe(true);
+      if (guidance.kind === 'cli') {
+        expect(typeof guidance.command).toBe('string');
+        expect(guidance.command.length).toBeGreaterThan(0);
+        expect(guidance.dashboardUrl).toBeUndefined();
+      } else {
+        expect(typeof guidance.dashboardUrl).toBe('string');
+        expect(guidance.dashboardUrl.length).toBeGreaterThan(0);
+        expect(guidance.command).toBeUndefined();
+      }
+    }
   });
 });

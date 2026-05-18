@@ -14,6 +14,7 @@ export const LINEAR_CONNECT_INSTRUCTIONS = [
 export function getProviderConnectGuidance(provider: ProviderType): ProviderConnectGuidance {
   if (provider === 'google') {
     return {
+      kind: 'cli',
       provider: 'google',
       command: GOOGLE_CONNECT_COMMAND,
       instructions: [
@@ -26,6 +27,7 @@ export function getProviderConnectGuidance(provider: ProviderType): ProviderConn
 
   if (provider === 'github') {
     return {
+      kind: 'dashboard',
       provider: 'github',
       dashboardUrl: '/dashboard/integrations',
       instructions: [
@@ -39,6 +41,7 @@ export function getProviderConnectGuidance(provider: ProviderType): ProviderConn
 
   if (provider === 'linear') {
     return {
+      kind: 'dashboard',
       provider: 'linear',
       dashboardUrl: LINEAR_CONNECT_DASHBOARD_URL,
       instructions: LINEAR_CONNECT_INSTRUCTIONS,
@@ -46,6 +49,7 @@ export function getProviderConnectGuidance(provider: ProviderType): ProviderConn
   }
 
   return {
+    kind: 'dashboard',
     provider,
     dashboardUrl: '/dashboard/integrations',
     instructions: [

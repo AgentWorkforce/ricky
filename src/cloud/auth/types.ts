@@ -81,9 +81,21 @@ export interface CloudRequestValidationOptions {
   providerConnection?: ProviderConnectionState;
 }
 
-export interface ProviderConnectGuidance {
+interface ProviderConnectGuidanceBase {
   provider: ProviderType;
-  command?: string;
-  dashboardUrl?: string;
   instructions: string[];
 }
+
+export interface ProviderConnectCliGuidance extends ProviderConnectGuidanceBase {
+  kind: 'cli';
+  command: string;
+  dashboardUrl?: undefined;
+}
+
+export interface ProviderConnectDashboardGuidance extends ProviderConnectGuidanceBase {
+  kind: 'dashboard';
+  dashboardUrl: string;
+  command?: undefined;
+}
+
+export type ProviderConnectGuidance = ProviderConnectCliGuidance | ProviderConnectDashboardGuidance;
