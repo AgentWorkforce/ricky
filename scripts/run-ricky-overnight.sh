@@ -50,6 +50,7 @@ LAST_COMMIT_FILE="$ARTIFACT_DIR/last-commit.txt"
 QUEUE_FILE="$ARTIFACT_DIR/queue.txt"
 FAILED_FILE="$ARTIFACT_DIR/failed.txt"
 SKIPPED_FILE="$ARTIFACT_DIR/skipped.txt"
+STALE_FILE="$ARTIFACT_DIR/stale.txt"
 CHECKPOINT_FILE="$ARTIFACT_DIR/checkpoint.env"
 STOP_FILE="$ARTIFACT_DIR/STOP"
 STATE_FILE="$STATE_ROOT/checkpoint.env"
@@ -65,6 +66,7 @@ mkdir -p "$ARTIFACT_DIR" "$STATE_ROOT" "$GLOBAL_STATE_ROOT"
 : > "$LOG_FILE"
 : > "$FAILED_FILE"
 : > "$SKIPPED_FILE"
+: > "$STALE_FILE"
 
 if [[ -z "${RICKY_OVERNIGHT_STATE_DIR:-}" && -d "$LEGACY_STATE_NAMESPACE_ROOT/$QUEUE_MODE" && ! -e "$STATE_ROOT/checkpoint.env" ]]; then
   mkdir -p "$STATE_ROOT"
@@ -608,6 +610,7 @@ append_repo_workflows_to_queue() {
 
     if [[ -f "$workflow_path" ]] && workflow_has_stale_package_targets "$workflow_path"; then
       APPEND_QUEUE_OMITTED_STALE=$((APPEND_QUEUE_OMITTED_STALE + 1))
+      printf '%s\n' "$workflow_path" >> "$STALE_FILE"
       log "omitting stale pre-package-split workflow from expanded queue: $workflow_path"
       continue
     fi
@@ -717,6 +720,7 @@ filter_queue_for_repo_state() {
     fi
 
     if workflow_has_stale_package_targets "$workflow_path"; then
+      printf '%s\n' "$workflow_path" >> "$STALE_FILE"
       log "dropping stale pre-package-split workflow from queue: $workflow_path"
       removed_count=$((removed_count + 1))
       removed_stale=$((removed_stale + 1))
@@ -1476,6 +1480,8 @@ write_summary() {
 - queue_filter_removed_satisfied: ${LAST_FILTER_REMOVED_SATISFIED:-0}
 - queue_filter_removed_missing: ${LAST_FILTER_REMOVED_MISSING:-0}
 - queue_append_omitted_stale: ${LAST_APPENDED_OMITTED_STALE:-0}
+- stale_workflows:
+$(sort -u "$STALE_FILE" 2>/dev/null | sed 's/^/  - /' || true)
 - failed_workflows:
 $(sed 's/^/  - /' "$FAILED_FILE" 2>/dev/null || true)
 - skipped_workflows:
@@ -1798,6 +1804,7 @@ run_one() {
 
   if workflow_has_stale_package_targets "$workflow_path"; then
     log "skipping stale pre-package-split workflow: $workflow_path"
+    printf '%s\n' "$workflow_path" >> "$STALE_FILE"
     echo "$workflow_path" >> "$SKIPPED_FILE"
     RUN_RESULT="skipped"
     CURRENT_WORKFLOW=""
