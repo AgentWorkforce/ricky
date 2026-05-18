@@ -1037,7 +1037,14 @@ export function parsePersonaWorkflowResponse(
     const clarification = metadataJson ? parseClarificationResponse(metadataJson) : null;
     if (clarification) return { metadata: {}, responseFormat: 'needs-clarification', clarification };
     if (metadataJson && tsFence) {
-      return validateFencedResponse(tsFence, metadataJson, expectedPath);
+      // The writer is sometimes prompted to use the Write tool and only
+      // emit a placeholder ("// (file written to disk)") inside the ts
+      // fence. validateFencedResponse rejects that because the placeholder
+      // lacks a `workflow(` call. tryFencedResponseOrDiskRecovery prefers
+      // a fresh on-disk artifact in that case; it always returns or throws
+      // (never falls through to validateStructuredResponse below), so
+      // stale on-disk artifacts can't sneak in via recoverExpectedArtifactContent.
+      return tryFencedResponseOrDiskRecovery(tsFence, metadataJson, expectedPath, options);
     }
     if (metadataJson) {
       return validateStructuredResponse(metadataJson, expectedPath, 'structured-json', options);
@@ -1048,7 +1055,7 @@ export function parsePersonaWorkflowResponse(
   const metadataFence = fencedBlock(output, 'metadata');
   const metadata = metadataFence ? parseJsonObject(metadataFence) : null;
   if (tsFence && metadata) {
-    return validateFencedResponse(tsFence, metadata, expectedPath);
+    return tryFencedResponseOrDiskRecovery(tsFence, metadata, expectedPath, options);
   }
 
   // Tolerant fallback: Claude Sonnet has been observed to emit a prose
@@ -1313,6 +1320,65 @@ function validateFencedResponse(
     metadata,
     responseFormat: 'fenced-artifact',
   };
+}
+
+/**
+ * Attempt `validateFencedResponse` first; if it rejects the ts fence for
+ * lacking a `workflow(` call AND a freshly-written workflow exists on disk
+ * at `expectedPath`, prefer the disk content. The placeholder-fence pattern
+ * shows up when the writer is prompted to use the Write tool: it emits
+ * something like `// (full source above — file written to disk)` inside
+ * the ts fence and the actual source lands on disk. Returning the disk
+ * content instead of throwing keeps the writer's successful work from
+ * being discarded over a stdout-format mismatch.
+ *
+ * Always returns or throws — never `undefined`. That contract is load-
+ * bearing: if the caller could fall through to `validateStructuredResponse`
+ * on `undefined`, an unguarded `recoverExpectedArtifactContent` call could
+ * silently surface a STALE on-disk artifact from a prior writer run (no
+ * mtime check). By throwing the original "no workflow() call" error when
+ * disk recovery fails, we preserve the freshness guarantee
+ * `recoverArtifactFromTruncatedOutput` enforces via `writerInvokedAtMs`.
+ *
+ * After a successful disk read, re-validates the recovered content + the
+ * fence metadata via the full `validateFencedResponse` pipeline — so
+ * metadata-level issues (missing fields, mismatched `path`) still surface
+ * even though the on-disk content saved us from the placeholder symptom.
+ */
+function tryFencedResponseOrDiskRecovery(
+  tsFence: string,
+  metadata: Record<string, unknown>,
+  expectedPath: string,
+  options: PersonaResponseParseOptions,
+): ParsedPersonaResponse {
+  try {
+    return validateFencedResponse(tsFence, metadata, expectedPath);
+  } catch (error) {
+    if (!(error instanceof WorkforcePersonaWriterError)) throw error;
+    if (!/does not call workflow\(\)/.test(error.message)) throw error;
+    const recovered = recoverArtifactFromTruncatedOutput(expectedPath, options);
+    if (!recovered) throw error;
+    let parsed: ParsedPersonaResponse;
+    try {
+      parsed = validateFencedResponse(recovered, metadata, expectedPath);
+    } catch (recoveredError) {
+      // If the on-disk file *also* lacks `workflow(`, surface the original
+      // error — the writer genuinely produced an invalid artifact. For any
+      // other validation failure (bad metadata, mismatched path), let it
+      // bubble up so the caller sees the real symptom.
+      if (
+        recoveredError instanceof WorkforcePersonaWriterError &&
+        /does not call workflow\(\)/.test(recoveredError.message)
+      ) {
+        throw error;
+      }
+      throw recoveredError;
+    }
+    return {
+      ...parsed,
+      metadata: { ...parsed.metadata, recoveredFromDisk: true, reason: 'fenced-ts-placeholder' },
+    };
+  }
 }
 
 function validateArtifactContent(content: string): void {
