@@ -408,27 +408,45 @@ describe('workforce persona workflow writer', () => {
       expect(parsed.metadata).toMatchObject({ recoveredFromDisk: true, reason: 'fenced-ts-placeholder' });
     });
 
-    it('placeholder fence path respects the freshness guard (returns undefined when mtime older than writerInvokedAtMs, letting downstream parsers decide)', () => {
-      // The new placeholder-fence helper uses the same mtime-guarded
-      // `recoverArtifactFromTruncatedOutput` as the truncated-stdout
-      // fallback — when the on-disk file is older than the writer's
-      // invocation, the helper returns undefined and lets the rest of
-      // the parser run. We exercise that here via a controlled
-      // statFile/readFileText pair so the assertion stays decoupled
-      // from any other recovery path the parser may later succeed on.
+    it('does NOT recover from a placeholder fence when the on-disk file is STALE (mtime <= writerInvokedAtMs)', () => {
+      // Regression guard for the bypass identified during review: when
+      // `recoverArtifactFromTruncatedOutput` correctly rejects a stale
+      // on-disk file, the placeholder-fence helper used to return
+      // `undefined` and the parser fell through to
+      // `validateStructuredResponse` → `recoverExpectedArtifactContent`,
+      // which has no mtime check and would silently surface the stale
+      // artifact as if it were the current writer's output. The helper
+      // must now throw the original "does not call workflow()" error so
+      // no fallthrough is possible.
       const artifactPath = 'workflows/generated/persona.ts';
-      // No writerInvokedAtMs at all → the helper must short-circuit and
-      // return undefined (regardless of statFile / readFileText), and
-      // because both stat and readFile are absent, every other recovery
-      // path also yields no usable workflow source. We pin that
-      // composite outcome (throws the generic parser-failure error)
-      // to lock the freshness guard in this code path.
+      const writerInvokedAtMs = 1_000;
+      expect(() =>
+        parsePersonaWorkflowResponse(placeholderFenceOutput, artifactPath, {
+          repoRoot: '/tmp/repo',
+          writerInvokedAtMs,
+          statFile: () => ({ mtimeMs: writerInvokedAtMs - 1 }),
+          // Even though the on-disk file is a valid workflow, the mtime
+          // says it predates this writer run — must NOT be accepted.
+          readFileText: () => workflowSource(),
+        }),
+      ).toThrow(/does not call workflow\(\)/);
+    });
+
+    it('placeholder fence path falls through to disk recovery only when `writerInvokedAtMs` is provided', () => {
+      // Without `writerInvokedAtMs` the disk-recovery freshness guard
+      // short-circuits, so the placeholder-fence helper has no fresh
+      // file to fall back to and must re-throw the original
+      // "does not call workflow()" error rather than returning a
+      // misleading shape or silently consuming a stale artifact.
+      const artifactPath = 'workflows/generated/persona.ts';
       expect(() =>
         parsePersonaWorkflowResponse(placeholderFenceOutput, artifactPath, {
           repoRoot: '/tmp/repo',
           // writerInvokedAtMs intentionally omitted
+          statFile: () => ({ mtimeMs: Date.now() }),
+          readFileText: () => workflowSource(),
         }),
-      ).toThrow(/structured JSON or include fenced TypeScript artifact|missing artifact\.content/);
+      ).toThrow(/does not call workflow\(\)/);
     });
 
     it('does NOT recover from a placeholder fence when on-disk content also lacks `workflow(` (no silent bypass)', () => {
@@ -440,7 +458,36 @@ describe('workforce persona workflow writer', () => {
           statFile: () => ({ mtimeMs: 200 }),
           readFileText: () => 'export const broken = 1;',
         }),
-      ).toThrow(/does not call workflow\(\)|structured JSON or include fenced TypeScript artifact/);
+      ).toThrow(/does not call workflow\(\)/);
+    });
+
+    it('placeholder fence path re-validates fenced metadata against the recovered disk content (mismatched path still throws)', () => {
+      // Regression guard for CodeRabbit's metadata concern: after the
+      // helper recovers content from disk, it must re-run the full
+      // fenced-response validator on the recovered content + metadata
+      // so metadata-level issues (mismatched `path`) still surface.
+      const artifactPath = 'workflows/generated/persona.ts';
+      const writerInvokedAtMs = 100;
+      const mismatchedFenceOutput = [
+        '```typescript',
+        '// (file written to disk)',
+        '```',
+        '',
+        '```json',
+        JSON.stringify({
+          path: 'workflows/generated/SOMETHING-ELSE.ts',
+          workflowName: 'persona',
+        }, null, 2),
+        '```',
+      ].join('\n');
+      expect(() =>
+        parsePersonaWorkflowResponse(mismatchedFenceOutput, artifactPath, {
+          repoRoot: '/tmp/repo',
+          writerInvokedAtMs,
+          statFile: (path) => path.endsWith('persona.ts') ? { mtimeMs: writerInvokedAtMs + 1_000 } : undefined,
+          readFileText: () => workflowSource(),
+        }),
+      ).toThrow(/fenced metadata path .* did not match expected output path/);
     });
   });
 
