@@ -87,12 +87,13 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['adapter-runtime-smoke'],
       command: [
+        'set -eu',
         `DIR=${artifactDir}`,
         'TMP_REPO=$(mktemp -d)',
         'trap "rm -rf $TMP_REPO" EXIT',
         'RICKY_BIN="$PWD/packages/cli/bin/ricky"',
         'chmod +x "$RICKY_BIN"',
-        'python3 - <<\'PY\' "$TMP_REPO" "$RICKY_BIN" "$DIR/external-generate-and-run.json" "$DIR/external-generate-and-run.exit"',
+        'python3 - "$TMP_REPO" "$RICKY_BIN" "$DIR/external-generate-and-run.json" "$DIR/external-generate-and-run.exit" <<\'PY\' || true',
         'import json, os, subprocess, sys',
         'tmp_repo, ricky_bin, output_path, exit_path = sys.argv[1:5]',
         'command = [ricky_bin, "--mode", "local", "--spec", "generate a workflow for package checks with typecheck and tests", "--run", "--json"]',
@@ -157,7 +158,7 @@ async function main() {
         'cp "$DIR/external-generate-and-run.json" "$DIR/external-generate.json"',
         'node -e "const fs=require(\'fs\'); const data=JSON.parse(fs.readFileSync(process.argv[1], \'utf8\')); const generation=data.find((entry)=>entry.stage===\'generate\' && entry.status===\'ok\'); const execution=data.find((entry)=>entry.stage===\'execute\' && (entry.status===\'success\' || entry.status===\'blocker\')); if (!generation || !execution || !execution.execution?.workflow_file || !execution.execution?.command || (!execution.evidence && !execution.blocker)) process.exit(1);" "$DIR/external-generate-and-run.json"',
         'echo EXTERNAL_CLI_LIVE_PATH_OK',
-      ].join(' && '),
+      ].join('\n'),
       captureOutput: true,
       failOnError: true,
     })
