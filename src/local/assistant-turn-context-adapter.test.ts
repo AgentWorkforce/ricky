@@ -399,10 +399,18 @@ describe('Ricky turn-context adapter', () => {
       const assembly = await assembleRickyTurnContext(normalized, {
         assembler: createTurnContextAssembler(),
       });
+      const executionRequest = toExecutionRequest(assembly, {
+        id: `msg-${testCase.expected.requestId}`,
+        text: normalized.spec,
+        receivedAt: '2026-01-01T00:00:00.000Z',
+      });
       const assemblyMetadata = assembly.metadata as
         | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
         | undefined;
       const rickyMetadata = assemblyMetadata?.ricky;
+      const executionMetadata = executionRequest.metadata as
+        | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+        | undefined;
 
       expect(normalized, testCase.name).toMatchObject({
         _normalized: true,
@@ -495,16 +503,71 @@ describe('Ricky turn-context adapter', () => {
       expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-request-metadata'), testCase.name).toEqual(
         testCase.expected.metadata,
       );
+      expect(executionRequest, testCase.name).toMatchObject({
+        assistantId: 'ricky',
+        turnId: testCase.expected.requestId,
+        message: {
+          id: `msg-${testCase.expected.requestId}`,
+          text: testCase.expected.spec,
+        },
+        context: {
+          blocks: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'enrichment-ricky-request-summary',
+              text: expect.stringContaining(`source: ${testCase.expected.source}`),
+            }),
+            expect.objectContaining({
+              id: 'enrichment-ricky-spec-text',
+              text: testCase.expected.spec,
+            }),
+          ]),
+        },
+      });
+      expect(executionMetadata?.adapter, testCase.name).toMatchObject({
+        name: 'ricky-local-turn-context-adapter',
+        package: '@agent-assistant/turn-context',
+      });
+      expect(executionMetadata?.ricky, testCase.name).toMatchObject({
+        requestId: testCase.expected.requestId,
+        source: testCase.expected.source,
+        invocationRoot: testCase.expected.invocationRoot,
+        mode: testCase.expected.mode,
+        stageMode: testCase.expected.stageMode,
+        specPath: testCase.expected.specPath,
+        metadata: testCase.expected.metadata,
+      });
+      expect(executionMetadata?.ricky?.structuredSpec, testCase.name).toEqual(
+        testCase.expected.structuredSpec,
+      );
+      expect(executionMetadata?.ricky?.sourceMetadata, testCase.name).toEqual(
+        testCase.expected.sourceMetadata,
+      );
 
       if (testCase.expected.structuredSpec) {
         expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-structured-spec'), testCase.name).toEqual(
           testCase.expected.structuredSpec,
+        );
+        expect(executionRequest.context?.blocks, testCase.name).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 'enrichment-ricky-structured-spec',
+              text: JSON.stringify(testCase.expected.structuredSpec, null, 2),
+            }),
+          ]),
         );
       }
 
       if (testCase.expected.sourceMetadata) {
         expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-source-metadata'), testCase.name).toEqual(
           testCase.expected.sourceMetadata,
+        );
+        expect(executionRequest.context?.blocks, testCase.name).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 'enrichment-ricky-source-metadata',
+              text: JSON.stringify(testCase.expected.sourceMetadata, null, 2),
+            }),
+          ]),
         );
       }
     }
