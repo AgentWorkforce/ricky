@@ -42,7 +42,7 @@ async function main() {
     .step('run-existing-validation', {
       type: 'deterministic',
       dependsOn: ['preflight'],
-      command: 'npm run typecheck && npx tsc --noEmit && npm test --workspace @ricky/local && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx tsc --noEmit && npx vitest run src/local && npx vitest run src/surfaces/cli',
       captureOutput: true,
       failOnError: false,
     })
@@ -60,8 +60,8 @@ async function main() {
         'Validated:',
         '- npm run typecheck',
         '- npx tsc --noEmit',
-        '- npm test --workspace @ricky/local',
-        '- npm test --workspace @ricky/cli',
+        '- npx vitest run src/local',
+        '- npx vitest run src/surfaces/cli',
         '',
         'LIVE_PROOF_VALIDATION_READY',
         'EOF',
@@ -173,7 +173,7 @@ Write ${artifactDir}/final-review.md ending with FINAL_REVIEW_PASS or FINAL_REVI
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm run typecheck && npx tsc --noEmit && npm test --workspace @ricky/local && npm test --workspace @ricky/cli && npm test',
+      command: 'npm run typecheck && npx tsc --noEmit && npx vitest run src/local && npx vitest run src/surfaces/cli && npm test',
       captureOutput: true,
       failOnError: true,
     })
@@ -216,8 +216,8 @@ Write ${artifactDir}/final-review.md ending with FINAL_REVIEW_PASS or FINAL_REVI
         'Validation commands:',
         '- npm run typecheck',
         '- npx tsc --noEmit',
-        '- npm test --workspace @ricky/local',
-        '- npm test --workspace @ricky/cli',
+        '- npx vitest run src/local',
+        '- npx vitest run src/surfaces/cli',
         '- npm test',
         '- adapter runtime smoke',
         '- external CLI generate and generate-and-run proof',

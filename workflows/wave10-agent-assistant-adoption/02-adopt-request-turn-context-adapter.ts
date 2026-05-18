@@ -138,7 +138,7 @@ Prefer deterministic fakes and injected executors. Do not require live provider 
     .step('run-targeted-tests', {
       type: 'deterministic',
       dependsOn: ['test-file-gate'],
-      command: 'npm run typecheck && npx tsc --noEmit && npm test --workspace @ricky/local && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx tsc --noEmit && npx vitest run src/local && npx vitest run src/surfaces/cli',
       captureOutput: true,
       failOnError: false,
     })
@@ -153,8 +153,8 @@ Validation output:
 Commands to rerun:
 - npm run typecheck
 - npx tsc --noEmit
-- npm test --workspace @ricky/local
-- npm test --workspace @ricky/cli
+- npx vitest run src/local
+- npx vitest run src/surfaces/cli
 
 Do not widen scope beyond the request/turn context adapter.
 
@@ -191,7 +191,7 @@ Write ${artifactDir}/final-review.md ending with FINAL_REVIEW_PASS or FINAL_REVI
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm run typecheck && npx tsc --noEmit && npm test --workspace @ricky/local && npm test --workspace @ricky/cli && npm test',
+      command: 'npm run typecheck && npx tsc --noEmit && npx vitest run src/local && npx vitest run src/surfaces/cli && npm test',
       captureOutput: true,
       failOnError: true,
     })
@@ -209,8 +209,8 @@ Write ${artifactDir}/final-review.md ending with FINAL_REVIEW_PASS or FINAL_REVI
         'Validation commands:',
         '- npm run typecheck',
         '- npx tsc --noEmit',
-        '- npm test --workspace @ricky/local',
-        '- npm test --workspace @ricky/cli',
+        '- npx vitest run src/local',
+        '- npx vitest run src/surfaces/cli',
         '- npm test',
         '',
         'Completion note:',

@@ -41,6 +41,59 @@ interface PreservationCase {
 }
 
 describe('Ricky turn-context adapter', () => {
+  it('uses the installed turn-context assembler as the production backing adapter', async () => {
+    const normalized = await normalizeRequest({
+      source: 'cli',
+      spec: {
+        description: 'generate a local workflow through the production turn-context adapter',
+        stageMode: 'generate',
+        targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+      },
+      specFile: 'specs/issue-11.production-adapter.json',
+      requestId: 'req-production-turn-context-adapter',
+      invocationRoot: '/repo/production-adapter',
+      metadata: { issue: 11, proof: 'production-adapter' },
+      cliMetadata: { argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.production-adapter.json'] },
+    });
+
+    const assembly = await assembleRickyTurnContext(normalized);
+    const assemblyMetadata = assembly.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(assembly.assistantId).toBe('ricky');
+    expect(assembly.turnId).toBe('req-production-turn-context-adapter');
+    expect(assemblyMetadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expect(assemblyMetadata?.ricky).toMatchObject({
+      requestId: 'req-production-turn-context-adapter',
+      source: 'cli',
+      invocationRoot: '/repo/production-adapter',
+      mode: 'local',
+      stageMode: 'generate',
+      specPath: 'specs/issue-11.production-adapter.json',
+      metadata: {
+        issue: 11,
+        proof: 'production-adapter',
+        argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.production-adapter.json'],
+      },
+    });
+    expect(assembly.context.blocks.map((block) => block.id)).toEqual(
+      expect.arrayContaining([
+        'enrichment-ricky-request-summary',
+        'enrichment-ricky-spec-text',
+        'enrichment-ricky-structured-spec',
+        'enrichment-ricky-source-metadata',
+        'enrichment-ricky-request-metadata',
+      ]),
+    );
+    expect(assembly.harnessProjection.instructions.developerPrompt).toContain(
+      'Current mode: ricky-local:local:generate',
+    );
+  });
+
   it('round-trips every handoff surface through normalizeRequest and the real turn-context-backed adapter', async () => {
     const cases: PreservationCase[] = [
       {

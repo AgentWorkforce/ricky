@@ -1641,37 +1641,59 @@ runner_output_size() {
 start_runner() {
   local workflow_path="$1"
   local runner_output="$2"
+  local runner_pid_file="$ARTIFACT_DIR/runner.pid"
+  local launched_pid=""
 
   RUNNER_EXPECTS_DETACHED_PGID="false"
+  rm -f "$runner_pid_file"
 
   if command -v setsid >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
     setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+    RUNNER_START_PID="$!"
+    return 0
   elif command -v python3 >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
-    log "setsid unavailable; detaching runner via python3 setsid fallback" >&2
-    python3 - "$RUNNER" "$workflow_path" "$runner_output" <<'PY' &
-import os
+    log "setsid unavailable; detaching runner via python3 subprocess fallback" >&2
+    python3 - "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file" <<'PY'
+import subprocess
 import sys
 
-runner, workflow_path, runner_output = sys.argv[1:4]
-os.setsid()
-stream = os.open(runner_output, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-os.dup2(stream, 1)
-os.dup2(stream, 2)
-os.close(stream)
-os.execvp(runner, [runner, 'run', workflow_path])
+runner, workflow_path, runner_output, runner_pid_file = sys.argv[1:5]
+with open(runner_output, 'ab', buffering=0) as stream:
+    proc = subprocess.Popen(
+        [runner, 'run', workflow_path],
+        stdin=subprocess.DEVNULL,
+        stdout=stream,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+with open(runner_pid_file, 'w', encoding='utf-8') as handle:
+    handle.write(f"{proc.pid}\n")
 PY
   elif command -v perl >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
-    log "setsid unavailable; detaching runner via perl setsid fallback" >&2
-    perl -e 'use POSIX qw(setsid); my ($runner, $workflow, $output) = @ARGV; open my $fh, q{>>}, $output or die "open $output: $!"; setsid() or die "setsid: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!";' "$RUNNER" "$workflow_path" "$runner_output" &
+    log "setsid unavailable; detaching runner via perl subprocess fallback" >&2
+    perl -e 'use strict; use warnings; use POSIX qw(setsid); my ($runner, $workflow, $output, $pidfile) = @ARGV; my $pid = fork(); die "fork: $!" unless defined $pid; if ($pid == 0) { setsid() or die "setsid: $!"; open STDIN, q{<}, q{/dev/null} or die "stdin: $!"; open my $fh, q{>>}, $output or die "open $output: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!"; } open my $pidfh, q{>}, $pidfile or die "open $pidfile: $!"; print {$pidfh} "$pid\n"; close $pidfh or die "close $pidfile: $!";' "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file"
   else
     log "setsid unavailable and no python3/perl fallback found; launching runner without detached process-group isolation" >&2
     "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+    RUNNER_START_PID="$!"
+    return 0
   fi
 
-  RUNNER_START_PID="$!"
+  if [[ -f "$runner_pid_file" ]]; then
+    launched_pid="$(tr -d '[:space:]' < "$runner_pid_file")"
+  fi
+
+  if [[ -z "$launched_pid" ]]; then
+    log "detached runner launcher did not record a child pid" >&2
+    RUNNER_START_PID=""
+    return 1
+  fi
+
+  RUNNER_START_PID="$launched_pid"
 }
 
 resolve_runner_pgid() {
