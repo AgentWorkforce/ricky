@@ -3919,7 +3919,8 @@ describe('runLocal', () => {
     });
 
     it('preserves generate-and-run stage semantics and Ricky blocker evidence fields', async () => {
-      const successExecutor = memoryLocalExecutorOptions({ stdout: ['generate-and-run completed'] });
+      const generateAndRunLaunches: RunRequest[] = [];
+      const generateAndRunWrites: RecordedWrite[] = [];
       const success = await runLocal(
         {
           source: 'mcp',
@@ -3929,7 +3930,22 @@ describe('runLocal', () => {
           },
           requestId: 'req-issue-11-generate-and-run',
         },
-        { localExecutor: successExecutor },
+        {
+          localExecutor: {
+            cwd: '/repo',
+            artifactWriter: {
+              async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+                generateAndRunWrites.push({ path, content, cwd });
+              },
+            },
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                generateAndRunLaunches.push(request);
+                return coordinatorResult(request, { stdout: ['generate-and-run completed'] });
+              },
+            },
+          },
+        },
       );
 
       expect(success.ok).toBe(true);
@@ -3962,7 +3978,24 @@ describe('runLocal', () => {
           '[local] runtime status: passed',
         ]),
       );
-      expect(successExecutor.runner.invocations).toHaveLength(1);
+      expect(workflowArtifactWrites(generateAndRunWrites)).toHaveLength(1);
+      expect(generateAndRunLaunches).toHaveLength(1);
+      expect(generateAndRunLaunches[0]).toMatchObject({
+        workflowFile: success.generation?.artifact?.path,
+        cwd: '/repo',
+        metadata: {
+          requestId: 'req-issue-11-generate-and-run',
+          source: 'mcp',
+          route: 'generate',
+          generatedWorkflowId: success.generation?.artifact?.workflow_id,
+          assistantTurnContext: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-generate-and-run',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          },
+        },
+      });
 
       const blocked = await runLocal(
         {

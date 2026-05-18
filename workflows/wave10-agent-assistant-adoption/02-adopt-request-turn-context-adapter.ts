@@ -34,6 +34,7 @@ async function main() {
       type: 'deterministic',
       command: [
         `DIR=${artifactDir}`,
+        'rm -rf "$DIR"',
         'mkdir -p "$DIR"',
         'test -f docs/product/ricky-agent-assistant-usage-audit.md',
         'test -f docs/product/ricky-agent-assistant-adoption-boundary.md',
@@ -51,7 +52,7 @@ async function main() {
     .step('install-turn-context-dependency', {
       type: 'deterministic',
       dependsOn: ['preflight'],
-      command: 'npm install --workspace @ricky/local',
+      command: 'npm install',
       captureOutput: true,
       failOnError: true,
     })
