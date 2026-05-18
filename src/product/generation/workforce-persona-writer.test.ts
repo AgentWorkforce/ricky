@@ -2196,6 +2196,47 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
     });
   });
 
+  it('keeps a GitHub-only workflow with identifier-backed GitHub steps intact', () => {
+    const githubOnlyWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
+      'const githubStepExecutor = new GitHubStepExecutor();',
+      'const openPrStep = createGitHubStep({ action: "openPullRequest", branch: "feat/foo" });',
+      'async function main() {',
+      '  await workflow("github-only")',
+      '    .step("open-pr", openPrStep)',
+      '    .run({ cwd: process.cwd(), executor: githubStepExecutor });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(stripGlobalGithubExecutorForMixedWorkflow(githubOnlyWorkflow)).toEqual({
+      content: githubOnlyWorkflow,
+      stripped: false,
+    });
+  });
+
+  it('removes an arbitrary-name GitHubStepExecutor run executor from mixed workflows', () => {
+    const mixedWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
+      'const executor = new GitHubStepExecutor();',
+      'async function main() {',
+      '  await workflow("mixed")',
+      '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .run({ cwd: process.cwd(), executor });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const result = stripGlobalGithubExecutorForMixedWorkflow(mixedWorkflow);
+
+    expect(result.stripped).toBe(true);
+    expect(result.content).toContain('.run({ cwd: process.cwd() });');
+    expect(result.content).not.toContain('executor });');
+  });
+
   it('removes inline GitHubStepExecutor global run executors from mixed workflows', () => {
     const mixedWorkflow = [
       'import { workflow } from "@agent-relay/sdk/workflows";',
