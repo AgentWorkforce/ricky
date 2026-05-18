@@ -2042,7 +2042,7 @@ if (( QUEUE_TOTAL == 0 )); then
   elif (( effective_removed_missing > 0 )); then
     mark_status "blocked" "queue exhausted because remaining workflows are missing: stale=${effective_removed_stale}, satisfied=${effective_removed_satisfied}, missing=${effective_removed_missing}"
   elif (( effective_removed_stale > 0 )); then
-    mark_status "complete" "queue exhausted with no actionable workflows; omitted migration-blocked stale workflows: stale=${effective_removed_stale}, satisfied=${effective_removed_satisfied}, missing=${effective_removed_missing}"
+    mark_status "blocked" "queue exhausted because remaining workflows are migration-blocked stale workflows: stale=${effective_removed_stale}, satisfied=${effective_removed_satisfied}, missing=${effective_removed_missing}"
   else
     mark_status "complete" "queue exhausted with no actionable workflows after repo-state filtering"
   fi
