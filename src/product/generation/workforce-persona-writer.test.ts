@@ -44,6 +44,8 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('Matched Ricky generation skills');
     expect(task).toContain('80-to-100 fix loop');
     expect(task).toContain('never pass GitHubStepExecutor as the global `.run({ executor })`');
+    expect(task).toContain('If the normalized spec declares `Worktree: <absolute path>`');
+    expect(task).toContain('Never use `test -f` for a worktree/repository directory');
     expect(task).toContain('deterministic sanity gate');
     expect(task).toContain('POSIX grep, git grep');
     expect(task).toContain('If using rg, guard it with command -v rg');
@@ -2280,6 +2282,89 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     const mismatches = detectSpecIntentMismatch(spec, stub);
     expect(mismatches.length).toBeGreaterThanOrEqual(1);
     expect(mismatches.some((m) => m.includes('PR-shipping outcome'))).toBe(true);
+  });
+
+  it('flags workflows that ignore a spec-declared worktree setup contract', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-relay-slack-bridge-outbound-streaming',
+        'Target branch: feat/relay-slack-bridge-outbound-streaming',
+      ].join('\n'),
+    };
+    const workflowWithoutWorktreeSetup = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("missing-worktree")',
+      '    .step("implement", { type: "deterministic", command: "npm test" })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, workflowWithoutWorktreeSetup);
+
+    expect(mismatches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('does not contain that exact worktree path'),
+        expect.stringContaining('no runtime git worktree add setup step'),
+        expect.stringContaining('does not contain that exact branch name'),
+      ]),
+    );
+  });
+
+  it('accepts workflows that create the declared worktree before implementation', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-relay-slack-bridge-outbound-streaming',
+        'Target branch: feat/relay-slack-bridge-outbound-streaming',
+      ].join('\n'),
+    };
+    const workflowWithWorktreeSetup = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("with-worktree")',
+      '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
+      '    .step("implement", { type: "deterministic", command: "git -C /private/tmp/cloud-relay-slack-bridge-outbound-streaming status --short && test -d /private/tmp/cloud-relay-slack-bridge-outbound-streaming" })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, workflowWithWorktreeSetup)).toEqual([]);
+  });
+
+  it('flags test -f gates over declared worktree directories and glob paths', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-relay-slack-bridge-outbound-streaming',
+        'Target branch: feat/relay-slack-bridge-outbound-streaming',
+      ].join('\n'),
+    };
+    const workflowWithBadFileGates = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("bad-file-gates")',
+      '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
+      '    .step("bad-directory-gate", { type: "deterministic", command: "test -f /private/tmp/cloud-relay-slack-bridge-outbound-streaming" })',
+      '    .step("bad-glob-gate", { type: "deterministic", command: "test -f packages/web/app/api/v1/slack/*" })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, workflowWithBadFileGates);
+
+    expect(mismatches.some((m) => m.includes('declared worktree directory'))).toBe(true);
+    expect(mismatches.some((m) => m.includes('glob path'))).toBe(true);
   });
 });
 

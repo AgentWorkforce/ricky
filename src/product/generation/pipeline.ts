@@ -19,6 +19,7 @@ import { renderMasterExecutionWorkflow, shouldUseMasterExecutionWorkflow } from 
 import { renderWorkflow } from './template-renderer.js';
 import {
   applyPersonaArtifactToRenderedArtifact,
+  detectSpecIntentMismatch,
   hasExplicitWorkflowRunCwd,
   writeWorkflowWithWorkforcePersona,
   WorkforcePersonaClarificationError,
@@ -120,7 +121,12 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
     };
     const personaResult = await writeWorkflowWithWorkforcePersona(input.spec, writerOptions);
     let finalArtifact = applyPersonaArtifactToRenderedArtifact(artifact, personaResult);
-    let validation = validateGeneratedArtifact(finalArtifact, baseResult.patternDecision, baseResult.skillContext, input.spec);
+    let validation = validateWorkforcePersonaArtifact(
+      finalArtifact,
+      baseResult.patternDecision,
+      baseResult.skillContext,
+      input.spec,
+    );
     let finalPersonaMetadata = personaResult.metadata;
     const repairAttempts = resolvePrewriteRepairAttempts(input.workforcePersonaWriter?.repairAttempts);
     const previousRepairAttempts: WorkforcePersonaPrewriteRepairAttempt[] = [];
@@ -137,7 +143,12 @@ export async function generateWithWorkforcePersona(input: GenerationInput): Prom
         },
       });
       const repairedArtifact = applyPersonaArtifactToRenderedArtifact(artifact, repairResult);
-      const repairValidation = validateGeneratedArtifact(repairedArtifact, baseResult.patternDecision, baseResult.skillContext, input.spec);
+      const repairValidation = validateWorkforcePersonaArtifact(
+        repairedArtifact,
+        baseResult.patternDecision,
+        baseResult.skillContext,
+        input.spec,
+      );
 
       if (repairValidation.valid) {
         finalArtifact = repairedArtifact;
@@ -424,7 +435,7 @@ async function runWorkforcePersonaReviewPass(
       },
     });
     const repairedArtifact = applyPersonaArtifactToRenderedArtifact(inputs.baseArtifact, repairResult);
-    const repairedValidation = validateGeneratedArtifact(
+    const repairedValidation = validateWorkforcePersonaArtifact(
       repairedArtifact,
       inputs.basePatternDecision,
       inputs.baseSkillContext,
@@ -661,6 +672,24 @@ export function validateGeneratedArtifact(
     hasDeterministicGates,
     hasReviewStage,
   };
+}
+
+function validateWorkforcePersonaArtifact(
+  artifact: RenderedArtifact,
+  patternDecision: PatternDecision,
+  skillContext: SkillContext,
+  spec: NormalizedWorkflowSpec,
+): GenerationValidationResult {
+  const validation = validateGeneratedArtifact(artifact, patternDecision, skillContext, spec);
+  const specIntentIssues = detectSpecIntentMismatch(spec, artifact.content).map((mismatch) =>
+    blockingIssue(
+      'validation',
+      'WORKFORCE_PERSONA_SPEC_INTENT_MISMATCH',
+      `Workforce persona writer output does not satisfy spec-declared intent: ${mismatch}.`,
+    ),
+  );
+
+  return addValidationIssues(validation, specIntentIssues);
 }
 
 function requiresRepairAwareRetry(content: string): boolean {
@@ -949,9 +978,21 @@ function addValidationWarning(
   validation: GenerationValidationResult,
   issue: GenerationIssue,
 ): GenerationValidationResult {
+  return addValidationIssues(validation, [issue]);
+}
+
+function addValidationIssues(
+  validation: GenerationValidationResult,
+  issues: GenerationIssue[],
+): GenerationValidationResult {
+  if (issues.length === 0) return validation;
+  const errors = issues.filter((issue) => issue.severity === 'error').map((issue) => issue.message);
+  const warnings = issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message);
   return {
     ...validation,
-    warnings: [...validation.warnings, issue.message],
-    issues: [...validation.issues, issue],
+    valid: validation.valid && !issues.some((issue) => issue.blocking),
+    errors: [...validation.errors, ...errors],
+    warnings: [...validation.warnings, ...warnings],
+    issues: [...validation.issues, ...issues],
   };
 }

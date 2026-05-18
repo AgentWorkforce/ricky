@@ -372,11 +372,11 @@ export async function writeWorkflowWithWorkforcePersona(
     parsed = { ...parsed, content: artifactContent };
   }
 
-  // Validate the writer's first emit against the spec's declared intent.
-  // The pre-write repair loop in pipeline.ts re-invokes the writer on
-  // throw, so this gives the writer a chance to fix a degenerate
-  // "master-executor stub" output before that output ever reaches disk
-  // or the runtime-launch step. Observed 2026-05-16 driving the cloud
+  // Diagnose the writer's first emit against the spec's declared intent.
+  // pipeline.ts folds these same checks into pre-write validation, which
+  // gives the writer a chance to fix a degenerate or unsafe output before
+  // that output ever reaches disk or the runtime-launch step. Observed
+  // 2026-05-16 driving the cloud
   // MCP cloud-spawn split: writer occasionally emits a 180-line stub
   // whose top-level steps are just `prepare-context → lead-plan →
   // materialize-child-workflows → final-signoff` with the actual impl
@@ -388,13 +388,6 @@ export async function writeWorkflowWithWorkforcePersona(
   const specIntentMismatches = detectSpecIntentMismatch(spec, artifactContent);
   if (specIntentMismatches.length > 0) {
     await dumpDebug('spec-intent-mismatch');
-    throw new WorkforcePersonaWriterError(
-      `Workforce persona writer output does not satisfy spec-declared intent: ${specIntentMismatches.join('; ')}.`,
-      [
-        ...resolved.warnings,
-        `The pre-write repair loop will re-invoke the writer with this failure as feedback.`,
-      ],
-    );
   }
 
   await dumpDebug('success');
@@ -410,7 +403,12 @@ export async function writeWorkflowWithWorkforcePersona(
       harness: selection.runtime.harness,
       model: selection.runtime.model,
       promptDigest,
-      warnings: [...resolved.warnings],
+      warnings: [
+        ...resolved.warnings,
+        ...specIntentMismatches.map((mismatch) =>
+          `Workforce persona writer output does not satisfy spec-declared intent: ${mismatch}.`,
+        ),
+      ],
       runId: result.workflowRunId ?? runId,
       source: resolved.source,
       selectedIntent: resolved.intent,
@@ -755,6 +753,8 @@ export function buildWorkflowPersonaTask(
     '- Verification must include typecheck/test commands when relevant plus git-diff evidence; diff/manifest gates must combine git diff --name-only with git ls-files --others --exclude-standard so newly-created files are visible.',
     '- Run with an explicit cwd: .run({ cwd: process.cwd() }).',
     '- For mixed workflows with agent/deterministic steps plus GitHub primitive steps, never pass GitHubStepExecutor as the global `.run({ executor })`; it only executes GitHub integration steps and will reject non-github steps. Keep `.run({ cwd: process.cwd() })` and attach PR shipping through `createGitHubStep(...)` steps.',
+    '- If the normalized spec declares `Worktree: <absolute path>`, create or refresh that worktree in an early deterministic step with `git worktree add`, use that exact path for implementation/test/git commands, and include the declared `Target branch` in the workflow. Do not assume the worktree already exists.',
+    '- Use `test -f` only for known files. Never use `test -f` for a worktree/repository directory, a package directory, an API route directory, or any path containing glob wildcards; use `test -d`, `find`, `git ls-files`, or a Node filesystem assertion instead.',
     '- Preserve Agent Relay workflow authoring rules: deterministic gates are evidence, agents do production work, and every generated workflow must be locally dry-runnable.',
     '- Include the literal marker IMPLEMENTATION_WORKFLOW_CONTRACT in implementation workflows.',
     '- When the normalized spec asks to implement product/backend/webapp/runtime behavior, the workflow must edit source files, add or update tests, require a non-empty diff outside transient artifact directories, and report a PR URL or explicit result status.',
@@ -1434,12 +1434,13 @@ function validateArtifactContent(content: string): void {
  * them; they only fire on the failure mode this guard addresses.
  */
 export function detectSpecIntentMismatch(
-  spec: { description?: string; targetFiles?: readonly string[] },
+  spec: SpecIntentLike,
   workflowContent: string,
 ): string[] {
   const mismatches: string[] = [];
-  const description = typeof spec.description === 'string' ? spec.description : '';
+  const description = specIntentText(spec);
   if (!description) return mismatches;
+  const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
 
   // `(?<!\w)` instead of a leading `\b` so the `@agent-relay/...` token
   // matches when preceded by whitespace / line start — `\b` between a
@@ -1447,7 +1448,6 @@ export function detectSpecIntentMismatch(
   const specRequiresPrShipping = /(?<!\w)(open\s+(a|one)\s+pull\s+request|one\s+pull\s+request\s+in|ships?\s+a\s+pr|createGitHubStep|GitHubStepExecutor|@agent-relay\/github-primitive)\b/i.test(description);
 
   if (specRequiresPrShipping) {
-    const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
     const importsGithubPrimitive =
       facts.importsModule('@agent-relay/github-primitive') ||
       facts.importsModule('@agent-relay/sdk/github');
@@ -1462,13 +1462,39 @@ export function detectSpecIntentMismatch(
   }
 
   if (description.length > 4_000) {
-    const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
     const stepInvocationCount = facts.stepInvocationCount;
     if (stepInvocationCount < 4) {
       mismatches.push(
         `spec is ${Math.round(description.length / 1024)} KB but the workflow declares only ${stepInvocationCount} top-level .step(...) calls — likely a "master-executor stub" with the real impl deferred to nested-string child workflows that ricky cannot validate end-to-end`,
       );
     }
+  }
+
+  const declaredWorktree = extractDeclaredWorktree(description);
+  if (declaredWorktree) {
+    const commandText = facts.stepCommands.map((step) => step.command).join('\n');
+    if (!workflowContent.includes(declaredWorktree.path)) {
+      mismatches.push(
+        `spec declares Worktree: ${declaredWorktree.path} but the workflow source does not contain that exact worktree path`,
+      );
+    }
+    if (!hasGitWorktreeAddCommand(commandText)) {
+      mismatches.push(
+        `spec declares Worktree: ${declaredWorktree.path} but the workflow has no runtime git worktree add setup step before implementation`,
+      );
+    }
+    if (declaredWorktree.branch && !workflowContent.includes(declaredWorktree.branch)) {
+      mismatches.push(
+        `spec declares Target branch: ${declaredWorktree.branch} but the workflow source does not contain that exact branch name`,
+      );
+    }
+  }
+
+  const invalidFileGates = findInvalidFileExistenceGateCommands(facts.stepCommands, declaredWorktree?.path);
+  if (invalidFileGates.length > 0) {
+    mismatches.push(
+      `workflow contains invalid test -f file gate(s): ${invalidFileGates.join('; ')}`,
+    );
   }
 
   return mismatches;
@@ -1494,11 +1520,27 @@ interface WorkflowSourceIntentFacts {
   readonly stepInvocationCount: number;
   readonly hasNonGithubStep: boolean;
   readonly githubExecutorRunPropertySpans: TextSpan[];
+  readonly stepCommands: WorkflowStepCommand[];
 }
 
 interface TextSpan {
   start: number;
   end: number;
+}
+
+interface WorkflowStepCommand {
+  stepName: string;
+  command: string;
+}
+
+interface SpecIntentLike {
+  description?: string;
+  targetContext?: string | null;
+  targetFiles?: readonly string[];
+  desiredAction?: { summary?: string };
+  constraints?: readonly unknown[];
+  acceptanceGates?: readonly unknown[];
+  evidenceRequirements?: readonly unknown[];
 }
 
 /**
@@ -1533,6 +1575,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       stepInvocationCount: Number.POSITIVE_INFINITY,
       hasNonGithubStep: false,
       githubExecutorRunPropertySpans: [],
+      stepCommands: [],
     };
   }
   const workflowSourceFile = sourceFile;
@@ -1545,6 +1588,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
   let stepInvocationCount = 0;
   let hasNonGithubStep = false;
   const githubExecutorRunPropertySpans: TextSpan[] = [];
+  const stepCommands: WorkflowStepCommand[] = [];
 
   const trackedIdentifiers = new Set<string>(['GitHubStepExecutor', 'createGitHubStep']);
   const githubPrimitiveModules = new Set([
@@ -1608,6 +1652,8 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       if (!isCreateGithubStepExpression(resolveIdentifierInitializer(node.arguments[1]))) {
         hasNonGithubStep = true;
       }
+      const command = stepCommandLiteral(node);
+      if (command) stepCommands.push(command);
     }
     if (
       ts.isCallExpression(node) &&
@@ -1642,6 +1688,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     stepInvocationCount,
     hasNonGithubStep,
     githubExecutorRunPropertySpans,
+    stepCommands,
   };
 
   function isGithubExecutorExpression(node: ts.Node | undefined): boolean {
@@ -1766,6 +1813,18 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       .filter((binding) => binding.scopeStart <= referenceStart && referenceStart < binding.scopeEnd)
       .sort((left, right) => right.declarationStart - left.declarationStart)[0];
   }
+
+  function stepCommandLiteral(node: ts.CallExpression): WorkflowStepCommand | null {
+    const [rawStepName, rawConfig] = node.arguments;
+    const config = resolveIdentifierInitializer(rawConfig);
+    if (!config || !ts.isObjectLiteralExpression(config)) return null;
+    const command = propertyLiteralText(config, 'command');
+    if (command === undefined) return null;
+    return {
+      stepName: rawStepName && ts.isStringLiteralLike(rawStepName) ? rawStepName.text : '(unknown-step)',
+      command,
+    };
+  }
 }
 
 type GithubIdentifierBindingKind = 'executorClass' | 'createStepFunction' | 'githubNamespace';
@@ -1785,9 +1844,114 @@ interface VariableInitializerBinding extends IdentifierDeclaration {
   initializer: ts.Expression;
 }
 
+function specIntentText(spec: SpecIntentLike): string {
+  return [
+    spec.description,
+    spec.targetContext,
+    spec.desiredAction?.summary,
+    ...(spec.constraints ?? []).map(specListItemText),
+    ...(spec.acceptanceGates ?? []).map(specListItemText),
+    ...(spec.evidenceRequirements ?? []).map(specListItemText),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join('\n');
+}
+
+function specListItemText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!isRecord(value)) return undefined;
+  for (const key of ['constraint', 'gate', 'requirement']) {
+    const candidate = value[key];
+    if (typeof candidate === 'string') return candidate;
+  }
+  return undefined;
+}
+
+function extractDeclaredWorktree(text: string): { path: string; branch?: string } | null {
+  const worktreeMatch = /^\s*(?:[-*]\s*)?(?:Worktree|Target worktree)\s*:\s*`?([^`\s]+)`?/im.exec(text);
+  if (!worktreeMatch) return null;
+  const branchMatch = /^\s*(?:[-*]\s*)?(?:Target branch|Branch)\s*:\s*`?([^`\s]+)`?/im.exec(text);
+  return {
+    path: worktreeMatch[1],
+    ...(branchMatch ? { branch: branchMatch[1] } : {}),
+  };
+}
+
+function hasGitWorktreeAddCommand(commandText: string): boolean {
+  return /\bgit(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+))?\s+worktree\s+add\b/.test(commandText.replace(/\\\n/g, ' '));
+}
+
+function findInvalidFileExistenceGateCommands(
+  commands: readonly WorkflowStepCommand[],
+  declaredWorktreePath: string | undefined,
+): string[] {
+  const invalid: string[] = [];
+  for (const step of commands) {
+    for (const testedPath of extractTestFilePaths(step.command)) {
+      const unquotedPath = unquoteShellToken(testedPath);
+      const normalizedPath = stripTrailingSlashes(unquotedPath);
+      const normalizedWorktree = declaredWorktreePath ? stripTrailingSlashes(declaredWorktreePath) : undefined;
+      if (containsShellGlob(unquotedPath)) {
+        invalid.push(`${step.stepName} uses test -f on glob path ${testedPath}`);
+      } else if (normalizedWorktree && normalizedPath === normalizedWorktree) {
+        invalid.push(`${step.stepName} uses test -f on declared worktree directory ${testedPath}`);
+      } else if (unquotedPath.endsWith('/')) {
+        invalid.push(`${step.stepName} uses test -f on directory-looking path ${testedPath}`);
+      }
+    }
+  }
+  return invalid;
+}
+
+function extractTestFilePaths(command: string): string[] {
+  const paths: string[] = [];
+  const testFilePattern = /(?:^|[\s;&|()])(?:test\s+-f|\[\[?\s+-f)\s+((?:"[^"]*"|'[^']*'|[^\s;&|\]]+))/g;
+  for (const match of command.matchAll(testFilePattern)) {
+    paths.push(match[1]);
+  }
+  return paths;
+}
+
+function unquoteShellToken(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function stripTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/g, '');
+}
+
+function containsShellGlob(value: string): boolean {
+  return /[*?\[]/.test(value);
+}
+
 function propertyNameText(name: ts.PropertyName): string | undefined {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
+  }
+  return undefined;
+}
+
+function propertyLiteralText(object: ts.ObjectLiteralExpression, propertyName: string): string | undefined {
+  for (const property of object.properties) {
+    if (!ts.isPropertyAssignment(property) || propertyNameText(property.name) !== propertyName) continue;
+    return literalText(property.initializer);
+  }
+  return undefined;
+}
+
+function literalText(node: ts.Expression): string | undefined {
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) {
+    return [
+      node.head.text,
+      ...node.templateSpans.map((span) => `\${...}${span.literal.text}`),
+    ].join('');
   }
   return undefined;
 }
