@@ -557,7 +557,10 @@ on_exit() {
     if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
       local recovered_status=""
 
-      if artifact_runner_logs_show_success "$ARTIFACT_DIR" && ! artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR"; then
+      if artifact_runner_logs_show_success "$ARTIFACT_DIR" && (
+        ! artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR" ||
+        artifact_active_workflow_runner_log_shows_success "$ARTIFACT_DIR"
+      ); then
         STATUS_REASON="runner completed before harness status flush"
         recovered_status="complete"
       elif artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR"; then
