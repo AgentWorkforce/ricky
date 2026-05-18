@@ -804,8 +804,8 @@ sync_repo_with_origin_main_if_safe() {
     return 0
   fi
 
-  if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-    log "skipping origin/main sync because repo has tracked local modifications"
+  if [[ -n "$(git status --porcelain --untracked-files=no -- . ':(exclude)tmp/' ':(exclude).workflow-artifacts/' ':(exclude).trajectories/')" ]]; then
+    log "skipping origin/main sync because repo has tracked local meaningful modifications"
     return 0
   fi
 
