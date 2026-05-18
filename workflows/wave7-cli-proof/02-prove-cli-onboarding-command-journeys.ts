@@ -48,11 +48,11 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,320p" packages/cli/src/commands/cli-main.test.ts',
+        'sed -n "1,320p" src/surfaces/cli/commands/cli-main.test.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,360p" packages/cli/src/entrypoint/interactive-cli.test.ts',
+        'sed -n "1,360p" src/surfaces/cli/entrypoint/interactive-cli.test.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,280p" packages/cli/src/cli/onboarding.test.ts',
+        'sed -n "1,280p" src/surfaces/cli/cli/onboarding.test.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -61,23 +61,23 @@ async function main() {
       agent: 'impl-claude',
       dependsOn: ['read-backlog-and-spec', 'read-cli-tests-context'],
       task: `Implement or extend proof coverage only in these files:
-- packages/cli/src/commands/cli-main.test.ts
-- packages/cli/src/entrypoint/interactive-cli.test.ts
-- packages/cli/src/cli/proof/onboarding-proof.ts
-- packages/cli/src/cli/proof/onboarding-proof.test.ts
+- src/surfaces/cli/commands/cli-main.test.ts
+- src/surfaces/cli/entrypoint/interactive-cli.test.ts
+- src/surfaces/cli/cli/proof/onboarding-proof.ts
+- src/surfaces/cli/cli/proof/onboarding-proof.test.ts
 
 Requirements:
 - prove default/local/setup/welcome/status/generate journeys only for commands that actually exist after the preceding CLI conformance slice
 - include fixture coverage for inline spec, spec file, stdin, missing spec, and missing file recovery
 - include a proof artifact that summarizes each command, expected output class, and blocker/recovery class
 - keep proof deterministic, with no live provider or live relay dependency`,
-      verification: { type: 'file_exists', value: 'packages/cli/src/cli/proof/onboarding-proof.ts' },
+      verification: { type: 'file_exists', value: 'src/surfaces/cli/cli/proof/onboarding-proof.ts' },
     })
     .step('proof-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-command-journey-proof'],
       command: [
-        'grep -Eq "setup|welcome|status|generate|stdin|spec file|missing file|recovery" packages/cli/src/commands/cli-main.test.ts packages/cli/src/entrypoint/interactive-cli.test.ts packages/cli/src/cli/proof/onboarding-proof.ts packages/cli/src/cli/proof/onboarding-proof.test.ts',
+        'grep -Eq "setup|welcome|status|generate|stdin|spec file|missing file|recovery" src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/proof/onboarding-proof.ts src/surfaces/cli/cli/proof/onboarding-proof.test.ts',
         'echo CLI_COMMAND_JOURNEY_PROOF_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,

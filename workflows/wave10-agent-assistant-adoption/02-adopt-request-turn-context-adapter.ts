@@ -39,10 +39,10 @@ async function main() {
         'test -f docs/product/ricky-agent-assistant-adoption-boundary.md',
         'test -f docs/product/ricky-local-execution-contract-reuse-evaluation.md',
         'npm view @agent-assistant/turn-context version > "$DIR/turn-context-registry-version.txt"',
-        'sed -n "1,220p" packages/local/src/request-normalizer.ts > "$DIR/request-normalizer.before.txt"',
-        'sed -n "1,260p" packages/local/src/entrypoint.ts > "$DIR/local-entrypoint.before.txt"',
-        'sed -n "1,160p" packages/local/src/index.ts > "$DIR/local-index.before.txt"',
-        'sed -n "1,120p" packages/local/package.json > "$DIR/local-package.before.json"',
+        'sed -n "1,220p" src/local/request-normalizer.ts > "$DIR/request-normalizer.before.txt"',
+        'sed -n "1,260p" src/local/entrypoint.ts > "$DIR/local-entrypoint.before.txt"',
+        'sed -n "1,160p" src/local/index.ts > "$DIR/local-index.before.txt"',
+        'sed -n "1,120p" package.json > "$DIR/local-package.before.json"',
         'echo PREFLIGHT_OK',
       ].join(' && '),
       captureOutput: true,
@@ -63,10 +63,10 @@ async function main() {
 You are not alone in the codebase. Preserve unrelated edits and do not revert work outside this slice.
 
 Owned write scope:
-- packages/local/src/assistant-turn-context-adapter.ts
-- packages/local/src/index.ts
-- packages/local/src/entrypoint.ts
-- packages/local/package.json
+- src/local/assistant-turn-context-adapter.ts
+- src/local/index.ts
+- src/local/entrypoint.ts
+- package.json
 - docs/product/ricky-agent-assistant-adoption-proof.md
 - package-lock.json only for workspace dependency sync needed to materialize the declared @agent-assistant/turn-context dependency
 
@@ -88,12 +88,12 @@ Use the docs from #9, #10, and #12 as the decision source. Do not broaden into s
       command: [
         `DIR=${artifactDir}`,
         '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > "$DIR/changed-files.txt"',
-        'test -f packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -F "@agent-assistant/turn-context" packages/local/package.json package-lock.json packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -F "createTurnContextAssembler" packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -F "toRickyTurnContextInput" packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -F "assembleRickyTurnContext" packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -R "assembleRickyTurnContext" packages/local/src/entrypoint.ts packages/local/src/index.ts',
+        'test -f src/local/assistant-turn-context-adapter.ts',
+        'grep -F "@agent-assistant/turn-context" package.json package-lock.json src/local/assistant-turn-context-adapter.ts',
+        'grep -F "createTurnContextAssembler" src/local/assistant-turn-context-adapter.ts',
+        'grep -F "toRickyTurnContextInput" src/local/assistant-turn-context-adapter.ts',
+        'grep -F "assembleRickyTurnContext" src/local/assistant-turn-context-adapter.ts',
+        'grep -R "assembleRickyTurnContext" src/local/entrypoint.ts src/local/index.ts',
         'grep -Eiq "real shared reuse|@agent-assistant/turn-context|still Ricky-owned|LocalResponse" docs/product/ricky-agent-assistant-adoption-proof.md',
         'echo ADAPTER_FILE_GATE_OK',
       ].join(' && '),
@@ -108,8 +108,8 @@ Use the docs from #9, #10, and #12 as the decision source. Do not broaden into s
 You are not alone in the codebase. Work with the implementation as it exists; do not revert unrelated edits.
 
 Owned write scope:
-- packages/local/src/assistant-turn-context-adapter.test.ts
-- packages/local/src/entrypoint.test.ts only if needed to prove the adapter is in the live local path
+- src/local/assistant-turn-context-adapter.test.ts
+- src/local/entrypoint.test.ts only if needed to prove the adapter is in the live local path
 
 Required test proof:
 - CLI, MCP, Claude, structured, free-form, and workflow-artifact handoffs round-trip through normalizeRequest() and the turn-context adapter without dropping request id, source, structured payloads, source metadata, invocation root, mode, stage mode, spec path, or metadata.
@@ -125,10 +125,10 @@ Prefer deterministic fakes and injected executors. Do not require live provider 
       type: 'deterministic',
       dependsOn: ['add-preservation-tests'],
       command: [
-        'test -f packages/local/src/assistant-turn-context-adapter.test.ts',
-        'grep -Eiq "cli|mcp|claude|structured|free-form|workflow-artifact" packages/local/src/assistant-turn-context-adapter.test.ts',
-        'grep -Eiq "requestId|sourceMetadata|invocationRoot|stageMode|structuredSpec|specPath" packages/local/src/assistant-turn-context-adapter.test.ts',
-        'grep -F "@agent-assistant/turn-context" packages/local/src/assistant-turn-context-adapter.ts',
+        'test -f src/local/assistant-turn-context-adapter.test.ts',
+        'grep -Eiq "cli|mcp|claude|structured|free-form|workflow-artifact" src/local/assistant-turn-context-adapter.test.ts',
+        'grep -Eiq "requestId|sourceMetadata|invocationRoot|stageMode|structuredSpec|specPath" src/local/assistant-turn-context-adapter.test.ts',
+        'grep -F "@agent-assistant/turn-context" src/local/assistant-turn-context-adapter.ts',
         'echo TEST_FILE_GATE_OK',
       ].join(' && '),
       captureOutput: true,

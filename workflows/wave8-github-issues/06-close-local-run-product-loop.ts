@@ -15,9 +15,9 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/close-local-run-product-loop',
-        'sed -n "1,260p" packages/cli/src/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/close-local-run-product-loop/cli-main.txt',
-        'sed -n "1,260p" packages/cli/src/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/close-local-run-product-loop/interactive-cli.txt',
-        'sed -n "1,360p" packages/local/src/entrypoint.ts > .workflow-artifacts/wave8-github-issues/close-local-run-product-loop/local-entrypoint.txt',
+        'sed -n "1,260p" src/surfaces/cli/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/close-local-run-product-loop/cli-main.txt',
+        'sed -n "1,260p" src/surfaces/cli/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/close-local-run-product-loop/interactive-cli.txt',
+        'sed -n "1,360p" src/local/entrypoint.ts > .workflow-artifacts/wave8-github-issues/close-local-run-product-loop/local-entrypoint.txt',
         'echo INSPECT_CURRENT_SURFACE_OK',
       ].join(' && '),
       captureOutput: true,

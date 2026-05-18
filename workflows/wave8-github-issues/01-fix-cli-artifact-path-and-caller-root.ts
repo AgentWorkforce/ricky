@@ -34,9 +34,9 @@ async function main() {
         'mkdir -p .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root',
         'printf "%s\\n" "Issue #1: fix generated workflow artifact path mismatch in interactive/local CLI" "Summary: Ricky prints workflows/generated/... but current CLI path can write under packages/cli/workflows/generated/..." "Acceptance: printed artifact path matches disk, next npx --no-install agent-relay run command points to that file, no packages/cli/workflows/generated write for repo-root contract." > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-1.md',
         'printf "%s\\n" "Issue #2: preserve caller repo root through CLI to interactive to local generation path" "Summary: real invocation cwd/caller repo root must survive CLI, interactive entrypoint, and local executor handoff." "Acceptance: generated workflow writes use caller repo root, reported paths and run commands are relative to that same repo, tests prove root propagation." > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/issue-2.md',
-        'sed -n "1,280p" packages/cli/src/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/cli-main.before.txt',
-        'sed -n "1,320p" packages/cli/src/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/interactive-cli.before.txt',
-        'sed -n "1,360p" packages/local/src/entrypoint.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/local-entrypoint.before.txt',
+        'sed -n "1,280p" src/surfaces/cli/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/cli-main.before.txt',
+        'sed -n "1,320p" src/surfaces/cli/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/interactive-cli.before.txt',
+        'sed -n "1,360p" src/local/entrypoint.ts > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/local-entrypoint.before.txt',
         'echo PREPARE_CONTEXT_OK',
       ].join(' && '),
       captureOutput: true,
@@ -50,7 +50,7 @@ async function main() {
         'REPO_ROOT=$(pwd)',
         'TMP_REPO=$(mktemp -d)',
         'trap "rm -rf $TMP_REPO" EXIT',
-        '(cd "$TMP_REPO" && "$REPO_ROOT/node_modules/.bin/tsx" "$REPO_ROOT/packages/cli/src/commands/cli-main.ts" --mode local --spec "generate a workflow for package checks") > "$OUT" 2>&1 || true',
+        '(cd "$TMP_REPO" && "$REPO_ROOT/node_modules/.bin/tsx" "$REPO_ROOT/src/surfaces/cli/commands/cli-main.ts" --mode local --spec "generate a workflow for package checks") > "$OUT" 2>&1 || true',
         'ARTIFACT=$(sed -n "s/.*Artifact: //p" "$OUT" | head -1)',
         'if test -n "$ARTIFACT" && test -f "$TMP_REPO/$ARTIFACT"; then echo "REPRO_CURRENTLY_PASSING"; else echo "REPRO_CONFIRMED_MISSING_REPO_ROOT_ARTIFACT"; fi',
         'if test -n "$ARTIFACT" && test -d "$REPO_ROOT/packages/cli/$(dirname "$ARTIFACT")"; then find "$REPO_ROOT/packages/cli/$(dirname "$ARTIFACT")" -type f > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/package-cli-generated-files.txt; fi',
@@ -72,10 +72,10 @@ Acceptance contract:
 - do not write packages/cli/workflows/generated when the user-facing contract says workflows/generated
 
 Likely files:
-- packages/cli/src/commands/cli-main.ts
-- packages/cli/src/entrypoint/interactive-cli.ts
-- packages/local/src/entrypoint.ts
-- packages/local/src/request-normalizer.ts if request metadata needs the invocation root
+- src/surfaces/cli/commands/cli-main.ts
+- src/surfaces/cli/entrypoint/interactive-cli.ts
+- src/local/entrypoint.ts
+- src/local/request-normalizer.ts if request metadata needs the invocation root
 
 Use the existing injectable seams rather than introducing global mutable state.`,
       verification: { type: 'exit_code', value: '0' },
@@ -102,7 +102,7 @@ Prefer deterministic temp directories and injected readers/runners. Do not requi
       command: [
         '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/changed-files.txt',
         'if grep -Eq "packages/(cli|local)/src/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/changed-files.txt; then echo POST_IMPLEMENTATION_FILE_GATE_OK; elif grep -Fq "REPRO_CURRENTLY_PASSING" .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-root/repro-output.txt && git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"; then echo POST_IMPLEMENTATION_ALREADY_SATISFIED; else echo "EXPECTED_CHANGED_FILES_OR_TRUTHFUL_NOOP" >&2; exit 1; fi',
-        'grep -R "INIT_CWD\\|cwd\\|Artifact:\\|npx --no-install agent-relay run" packages/cli/src packages/local/src >/dev/null',
+        'grep -R "INIT_CWD\\|cwd\\|Artifact:\\|npx --no-install agent-relay run" src/surfaces/cli src/local >/dev/null',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -139,7 +139,7 @@ Write .workflow-artifacts/wave8-github-issues/fix-cli-artifact-path-and-caller-r
         'REPO_ROOT=$(pwd)',
         'TMP_REPO=$(mktemp -d)',
         'trap "rm -rf $TMP_REPO" EXIT',
-        '(cd "$TMP_REPO" && "$REPO_ROOT/node_modules/.bin/tsx" "$REPO_ROOT/packages/cli/src/commands/cli-main.ts" --mode local --spec "generate a workflow for package checks") > "$OUT" 2>&1 || (cat "$OUT"; exit 1)',
+        '(cd "$TMP_REPO" && "$REPO_ROOT/node_modules/.bin/tsx" "$REPO_ROOT/src/surfaces/cli/commands/cli-main.ts" --mode local --spec "generate a workflow for package checks") > "$OUT" 2>&1 || (cat "$OUT"; exit 1)',
         'ARTIFACT=$(sed -n "s/.*Artifact: //p" "$OUT" | head -1)',
         'test -n "$ARTIFACT" || (echo "Missing Artifact line"; cat "$OUT"; exit 1)',
         'echo "reported artifact: $ARTIFACT"',

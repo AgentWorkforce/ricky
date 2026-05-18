@@ -39,10 +39,10 @@ async function main() {
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop',
         'printf "%s\\n" "Issue #3: close Ricky interactive/local loop from generated artifact to run outcome or classified blocker" "Summary: local mode currently stops at accept spec, generate artifact, return artifact, and next command; product needs an explicit stronger contract." "Acceptance: product decision is explicit, execution success returns concrete outcome/evidence, failed execution returns a classified blocker, tests cover success and blocker paths, user output separates artifact generation from execution result." > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/issue-3.md',
-        'sed -n "1,380p" packages/local/src/entrypoint.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/local-entrypoint.before.txt',
-        'sed -n "1,320p" packages/runtime/src/local-coordinator.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/local-coordinator.before.txt',
-        'sed -n "1,320p" packages/runtime/src/diagnostics/failure-diagnosis.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/failure-diagnosis.before.txt',
-        'sed -n "1,320p" packages/cli/src/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/interactive-cli.before.txt',
+        'sed -n "1,380p" src/local/entrypoint.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/local-entrypoint.before.txt',
+        'sed -n "1,320p" src/runtime/local-coordinator.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/local-coordinator.before.txt',
+        'sed -n "1,320p" src/runtime/diagnostics/failure-diagnosis.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/failure-diagnosis.before.txt',
+        'sed -n "1,320p" src/surfaces/cli/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/interactive-cli.before.txt',
         'echo PREPARE_CONTEXT_OK',
       ].join(' && '),
       captureOutput: true,
@@ -92,11 +92,11 @@ Acceptance contract:
 - preserve the existing stop-after-generation behavior when the product contract keeps it as a supported mode
 
 Likely files:
-- packages/local/src/entrypoint.ts
-- packages/runtime/src/local-coordinator.ts
-- packages/runtime/src/evidence/capture.ts
-- packages/runtime/src/diagnostics/failure-diagnosis.ts
-- packages/cli/src/entrypoint/interactive-cli.ts
+- src/local/entrypoint.ts
+- src/runtime/local-coordinator.ts
+- src/runtime/evidence/capture.ts
+- src/runtime/diagnostics/failure-diagnosis.ts
+- src/surfaces/cli/entrypoint/interactive-cli.ts
 - shared model files if response contracts need typed evidence.`,
       verification: { type: 'exit_code', value: '0' },
     })
@@ -120,7 +120,7 @@ Prefer deterministic fake coordinators and command runners. Do not require live 
       command: [
         'git diff --name-only > .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/changed-files.txt',
         'grep -Eq "packages/(local|runtime|cli|shared)/src/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/close-local-execution-outcome-loop/changed-files.txt',
-        'grep -R "execution result\\|runtime status\\|blocker\\|evidence\\|returnGeneratedArtifactOnly" packages/local/src packages/runtime/src packages/cli/src packages/shared/src >/dev/null',
+        'grep -R "execution result\\|runtime status\\|blocker\\|evidence\\|returnGeneratedArtifactOnly" src/local src/runtime src/surfaces/cli src/shared >/dev/null',
         'echo POST_IMPLEMENTATION_FILE_GATE_OK',
       ].join(' && '),
       captureOutput: true,

@@ -32,7 +32,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return',
-        'mkdir -p packages/local/src/proof',
+        'mkdir -p src/local/proof',
         'echo LOCAL_BYOH_PROOF_READY',
       ].join(' && '),
       captureOutput: true,
@@ -48,7 +48,7 @@ async function main() {
     .step('read-local-implementation-context', {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
-      command: "python3 - <<'PY'\nfrom pathlib import Path\nfor path in sorted(Path('packages/local/src').rglob('*')):\n    if path.is_file():\n        print(f'FILE: {path}')\n        print(path.read_text())\n        print('\\n---\\n')\nPY",
+      command: "python3 - <<'PY'\nfrom pathlib import Path\nfor path in sorted(Path('src/local').rglob('*')):\n    if path.is_file():\n        print(f'FILE: {path}')\n        print(path.read_text())\n        print('\\n---\\n')\nPY",
       captureOutput: true,
       failOnError: true,
     })
@@ -64,8 +64,8 @@ async function main() {
       agent: 'impl-claude',
       dependsOn: ['read-backlog-plan', 'read-local-implementation-context', 'read-workflow-standards'],
       task: `Implement the Ricky local/BYOH proof surface in only these files:
-- packages/local/src/proof/local-entrypoint-proof.ts
-- packages/local/src/proof/local-entrypoint-proof.test.ts
+- src/local/proof/local-entrypoint-proof.ts
+- src/local/proof/local-entrypoint-proof.test.ts
 
 Requirements:
 - prove spec handoff from CLI, MCP, Claude-style structured handoff, and workflow artifact path
@@ -75,15 +75,15 @@ Requirements:
 - tests should evaluate user-visible contract behavior, not implementation trivia
 
 Write the files to disk, then exit cleanly.`,
-      verification: { type: 'file_exists', value: 'packages/local/src/proof/local-entrypoint-proof.ts' },
+      verification: { type: 'file_exists', value: 'src/local/proof/local-entrypoint-proof.ts' },
     })
     .step('proof-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-local-proof'],
       command: [
-        'test -f packages/local/src/proof/local-entrypoint-proof.ts',
-        'test -f packages/local/src/proof/local-entrypoint-proof.test.ts',
-        "grep -q 'local\\|artifact\\|log\\|warning\\|spec' packages/local/src/proof/local-entrypoint-proof.ts packages/local/src/proof/local-entrypoint-proof.test.ts",
+        'test -f src/local/proof/local-entrypoint-proof.ts',
+        'test -f src/local/proof/local-entrypoint-proof.test.ts',
+        "grep -q 'local\\|artifact\\|log\\|warning\\|spec' src/local/proof/local-entrypoint-proof.ts src/local/proof/local-entrypoint-proof.test.ts",
         'echo LOCAL_BYOH_PROOF_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -157,9 +157,9 @@ Write the files to disk, then exit cleanly.`,
       type: 'deterministic',
       dependsOn: ['fix-proof'],
       command: [
-        'test -f packages/local/src/proof/local-entrypoint-proof.ts',
-        'test -f packages/local/src/proof/local-entrypoint-proof.test.ts',
-        "grep -q 'local\\|artifact\\|log\\|warning\\|spec' packages/local/src/proof/local-entrypoint-proof.ts packages/local/src/proof/local-entrypoint-proof.test.ts",
+        'test -f src/local/proof/local-entrypoint-proof.ts',
+        'test -f src/local/proof/local-entrypoint-proof.test.ts',
+        "grep -q 'local\\|artifact\\|log\\|warning\\|spec' src/local/proof/local-entrypoint-proof.ts src/local/proof/local-entrypoint-proof.test.ts",
         'echo LOCAL_BYOH_PROOF_POST_FIX_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -224,9 +224,9 @@ Write the files to disk, then exit cleanly.`,
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only -- packages/local/src workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(packages/local/src/|workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return\\.ts|\\.workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return/)"',
-        '! printf "%s\n" "$changed" | grep -Ev "^(packages/local/src/|workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return\\.ts|\\.workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return/)"',
+        'changed="$(git diff --name-only -- src/local workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return)"',
+        'printf "%s\n" "$changed" | grep -Eq "^(src/local/|workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return\\.ts|\\.workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return/)"',
+        '! printf "%s\n" "$changed" | grep -Ev "^(src/local/|workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return\\.ts|\\.workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return/)"',
         'echo LOCAL_BYOH_PROOF_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -241,7 +241,7 @@ Write the files to disk, then exit cleanly.`,
         '',
         'Validation commands:',
         '- npx tsc --noEmit',
-        '- npx vitest run packages/local/src/proof/ packages/local/src/',
+        '- npx vitest run src/local/proof/ src/local/',
         '',
         'Expected proof contract:',
         '- local spec handoff is demonstrated',

@@ -34,9 +34,9 @@ async function main() {
         'mkdir -p .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist',
         'printf "%s\\n" "Issue #4: tighten Ricky onboarding and readiness messaging to match true interactive behavior" "Summary: onboarding/readiness copy must not imply smoother execution depth than current product proves." "Acceptance: first-run and interactive copy do not overclaim, local mode distinguishes artifact return from execution result, recovery guidance is concrete and current." > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-4.md',
         'printf "%s\\n" "Issue #7: add cofounder interactive/onboarding readiness checklist" "Summary: create a live-testing checklist for first-run onboarding, local mode selection, spec handoff, artifact existence, next command truth, recovery guidance, and execution-vs-generation clarity." "Acceptance: short repo doc exists, tuned for interactive/onboarding rather than internal detail, usable during cofounder testing." > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/issue-7.md',
-        'sed -n "1,360p" packages/cli/src/cli/onboarding.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/onboarding.before.txt',
-        'sed -n "1,320p" packages/cli/src/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/cli-main.before.txt',
-        'sed -n "1,320p" packages/cli/src/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/interactive-cli.before.txt',
+        'sed -n "1,360p" src/surfaces/cli/cli/onboarding.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/onboarding.before.txt',
+        'sed -n "1,320p" src/surfaces/cli/commands/cli-main.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/cli-main.before.txt',
+        'sed -n "1,320p" src/surfaces/cli/entrypoint/interactive-cli.ts > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/interactive-cli.before.txt',
         'ls docs/product > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/docs-product.before.txt',
         'echo PREPARE_CONTEXT_OK',
       ].join(' && '),
@@ -79,9 +79,9 @@ Required coverage:
 - cofounder checklist doc contains the readiness areas from issue #7
 
 Likely files:
-- packages/cli/src/cli/onboarding.test.ts
-- packages/cli/src/commands/cli-main.test.ts
-- packages/cli/src/entrypoint/interactive-cli.test.ts
+- src/surfaces/cli/cli/onboarding.test.ts
+- src/surfaces/cli/commands/cli-main.test.ts
+- src/surfaces/cli/entrypoint/interactive-cli.test.ts
 - docs/product/ricky-cofounder-interactive-readiness-checklist.md`,
       verification: { type: 'exit_code', value: '0' },
     })
@@ -91,10 +91,10 @@ Likely files:
       command: [
         '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt',
         'grep -F "docs/product/ricky-cofounder-interactive-readiness-checklist.md" .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt',
-        'grep -Eq "packages/cli/src/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt',
-        'if grep -Ev "^(docs/product/ricky-cofounder-interactive-readiness-checklist\\.md|packages/cli/src/.+\\.(ts|test\\.ts)|workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist\\.ts|\\.workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/.*)$" .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt; then echo "UNRELATED_CHANGED_FILES" >&2; exit 1; fi',
+        'grep -Eq "src/surfaces/cli/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt',
+        'if grep -Ev "^(docs/product/ricky-cofounder-interactive-readiness-checklist\\.md|src/surfaces/cli/.+\\.(ts|test\\.ts)|workflows/wave8-github-issues/04-tighten-onboarding-readiness-copy-and-checklist\\.ts|\\.workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/.*)$" .workflow-artifacts/wave8-github-issues/tighten-onboarding-readiness-copy-and-checklist/changed-files.txt; then echo "UNRELATED_CHANGED_FILES" >&2; exit 1; fi',
         'grep -Ei "first-run|local mode|spec handoff|generated artifact|next command|recovery|execution|generation" docs/product/ricky-cofounder-interactive-readiness-checklist.md',
-        'grep -R "artifact generation\\|execution result\\|--spec-file\\|--stdin" packages/cli/src docs/product/ricky-cofounder-interactive-readiness-checklist.md >/dev/null',
+        'grep -R "artifact generation\\|execution result\\|--spec-file\\|--stdin" src/surfaces/cli docs/product/ricky-cofounder-interactive-readiness-checklist.md >/dev/null',
         'echo POST_IMPLEMENTATION_FILE_GATE_OK',
       ].join(' && '),
       captureOutput: true,

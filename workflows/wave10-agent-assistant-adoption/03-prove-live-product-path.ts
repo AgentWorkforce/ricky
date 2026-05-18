@@ -31,7 +31,7 @@ async function main() {
         'mkdir -p "$DIR"',
         'test -f .workflow-artifacts/wave10-agent-assistant-adoption/adopt-request-turn-context-adapter/signoff.md',
         'grep -F "RICKY_TURN_CONTEXT_ADOPTION_IMPLEMENTED" .workflow-artifacts/wave10-agent-assistant-adoption/adopt-request-turn-context-adapter/signoff.md',
-        'grep -F "@agent-assistant/turn-context" packages/local/package.json packages/local/src/assistant-turn-context-adapter.ts',
+        'grep -F "@agent-assistant/turn-context" package.json src/local/assistant-turn-context-adapter.ts',
         'test -f packages/cli/bin/ricky',
         'gh auth status >/dev/null 2>&1 || (echo "ERROR: gh CLI must be authenticated to close issues" && exit 1)',
         'echo PREFLIGHT_OK',
@@ -75,7 +75,7 @@ async function main() {
       dependsOn: ['fix-validation'],
       command: [
         `DIR=${artifactDir}`,
-        'npx tsx --eval "(async () => { const { normalizeRequest, assembleRickyTurnContext } = await import(\'./packages/local/src/index.ts\'); const request = await normalizeRequest({ source: \'cli\', spec: { description: \'generate a workflow for package checks\', stageMode: \'run\' }, mode: \'local\', stageMode: \'run\', invocationRoot: process.cwd(), cliMetadata: { handoff: \'live-proof\' }, requestId: \'req-wave10-live-proof\' }); const assembly = await assembleRickyTurnContext(request); console.log(JSON.stringify({ assistantId: assembly.assistantId, turnId: assembly.turnId, metadata: assembly.metadata, blocks: assembly.context.blocks.map((block) => block.id), developerSegments: assembly.instructions.developerSegments.map((segment) => segment.id) }, null, 2)); })().catch((error) => { console.error(error); process.exit(1); });" > "$DIR/adapter-runtime-smoke.json"',
+        'npx tsx --eval "(async () => { const { normalizeRequest, assembleRickyTurnContext } = await import(\'./src/local/index.ts\'); const request = await normalizeRequest({ source: \'cli\', spec: { description: \'generate a workflow for package checks\', stageMode: \'run\' }, mode: \'local\', stageMode: \'run\', invocationRoot: process.cwd(), cliMetadata: { handoff: \'live-proof\' }, requestId: \'req-wave10-live-proof\' }); const assembly = await assembleRickyTurnContext(request); console.log(JSON.stringify({ assistantId: assembly.assistantId, turnId: assembly.turnId, metadata: assembly.metadata, blocks: assembly.context.blocks.map((block) => block.id), developerSegments: assembly.instructions.developerSegments.map((segment) => segment.id) }, null, 2)); })().catch((error) => { console.error(error); process.exit(1); });" > "$DIR/adapter-runtime-smoke.json"',
         'grep -F "req-wave10-live-proof" "$DIR/adapter-runtime-smoke.json"',
         'grep -Eiq "cli|stageMode|source|ricky" "$DIR/adapter-runtime-smoke.json"',
         'echo ADAPTER_RUNTIME_SMOKE_OK',
