@@ -70,7 +70,14 @@ function readJson<T extends Record<string, unknown>>(relPath: string): T {
 }
 
 function readText(relPath: string): string {
-  return readFileSync(join(repoRoot(), relPath), 'utf-8');
+  try {
+    return readFileSync(join(repoRoot(), relPath), 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return '';
+    }
+    throw error;
+  }
 }
 
 function pathExists(relPath: string): boolean {
@@ -111,7 +118,17 @@ function listFiles(relPath = '.'): string[] {
 
   const files: string[] = [];
   const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
+
+    for (const entry of entries) {
       const absPath = join(dir, entry.name);
       const repoPath = toRepoPath(absPath);
 
