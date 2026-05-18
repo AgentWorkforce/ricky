@@ -21,6 +21,11 @@ import type {
   CloudWarning,
 } from './response-types.js';
 import type { WorkforcePersonaGenerationMetadata } from '../../product/generation/index.js';
+import {
+  validateAuthContext,
+  validateRequestMode,
+  validateWorkspaceContext,
+} from '../auth/request-validator.js';
 
 // ---------------------------------------------------------------------------
 // Route constant
@@ -152,74 +157,113 @@ function describeSpec(spec: CloudGenerateRequest['body']['spec']): string {
     return spec;
   }
 
-  if (spec.kind === 'natural-language') {
-    return spec.text;
+  if (spec && typeof spec === 'object' && (spec as { kind?: string }).kind === 'natural-language') {
+    const text = (spec as { text?: unknown }).text;
+    return typeof text === 'string' ? text : '';
   }
 
-  return JSON.stringify(spec.document);
+  if (spec && typeof spec === 'object' && (spec as { kind?: string }).kind === 'structured') {
+    const document = (spec as { document?: unknown }).document;
+    return document && typeof document === 'object' ? JSON.stringify(document) : '';
+  }
+
+  return '';
 }
 
-function hasSpecPayload(spec: CloudGenerateRequest['body']['spec'] | undefined): boolean {
+function hasSpecPayload(spec: unknown): boolean {
   if (typeof spec === 'string') {
     return spec.trim().length > 0;
   }
 
-  if (!spec) {
+  if (!spec || typeof spec !== 'object') {
     return false;
   }
 
-  if (spec.kind === 'natural-language') {
-    return spec.text.trim().length > 0;
+  const kind = (spec as { kind?: unknown }).kind;
+
+  if (kind === 'natural-language') {
+    const text = (spec as { text?: unknown }).text;
+    return typeof text === 'string' && text.trim().length > 0;
   }
 
-  if (spec.kind === 'structured') {
-    return Object.keys(spec.document).length > 0;
+  if (kind === 'structured') {
+    const document = (spec as { document?: unknown }).document;
+    return (
+      !!document &&
+      typeof document === 'object' &&
+      !Array.isArray(document) &&
+      Object.keys(document as Record<string, unknown>).length > 0
+    );
   }
 
   return false;
+}
+
+function validationFailure(
+  requestId: string,
+  status: number,
+  message: string,
+  code: string,
+  path: string,
+): ValidationFailure {
+  return {
+    ok: false,
+    response: errorResponse(
+      requestId,
+      status,
+      message,
+      failedValidation(code, message, path),
+    ),
+  };
+}
+
+function authIssueDescriptor(error: string): { code: string; path: string } {
+  if (error.toLowerCase().includes('token type')) {
+    return { code: 'invalid-auth-token-type', path: 'auth.tokenType' };
+  }
+  return { code: 'missing-auth-token', path: 'auth.token' };
+}
+
+function workspaceIssueDescriptor(error: string): { code: string; path: string } {
+  const lower = error.toLowerCase();
+  if (lower.includes('project id')) {
+    return { code: 'invalid-project-id', path: 'workspace.projectId' };
+  }
+  if (lower.includes('environment')) {
+    return { code: 'invalid-environment', path: 'workspace.environment' };
+  }
+  return { code: 'missing-workspace-id', path: 'workspace.workspaceId' };
 }
 
 function validateRequest(
   request: CloudGenerateRequest,
   requestId: string,
 ): ValidationResult {
-  // Auth is required and must have a non-empty token
-  if (!request.auth?.token?.trim()) {
-    return {
-      ok: false,
-      response: errorResponse(
-        requestId,
-        401,
-        'Missing or empty auth token.',
-        failedValidation('missing-auth-token', 'Missing or empty auth token.', 'auth.token'),
-      ),
-    };
+  const authResult = validateAuthContext(request?.auth);
+  if (!authResult.ok) {
+    const { code, path } = authIssueDescriptor(authResult.error);
+    return validationFailure(requestId, authResult.status, authResult.error, code, path);
   }
 
-  // Workspace is required
-  if (!request.workspace?.workspaceId?.trim()) {
-    return {
-      ok: false,
-      response: errorResponse(
-        requestId,
-        400,
-        'Missing or empty workspace ID.',
-        failedValidation('missing-workspace-id', 'Missing or empty workspace ID.', 'workspace.workspaceId'),
-      ),
-    };
+  const workspaceResult = validateWorkspaceContext(request?.workspace);
+  if (!workspaceResult.ok) {
+    const { code, path } = workspaceIssueDescriptor(workspaceResult.error);
+    return validationFailure(requestId, workspaceResult.status, workspaceResult.error, code, path);
   }
 
-  // Body spec is required
-  if (!hasSpecPayload(request.body?.spec)) {
-    return {
-      ok: false,
-      response: errorResponse(
-        requestId,
-        400,
-        'Missing or empty spec in request body.',
-        failedValidation('missing-spec', 'Missing or empty spec in request body.', 'body.spec'),
-      ),
-    };
+  const modeResult = validateRequestMode(request?.body?.mode);
+  if (!modeResult.ok) {
+    return validationFailure(requestId, modeResult.status, modeResult.error, 'invalid-mode', 'body.mode');
+  }
+
+  if (!hasSpecPayload(request?.body?.spec)) {
+    return validationFailure(
+      requestId,
+      400,
+      'Missing or empty spec in request body.',
+      'missing-spec',
+      'body.spec',
+    );
   }
 
   return { ok: true };

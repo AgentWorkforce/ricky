@@ -14,10 +14,12 @@ export type {
 
 export type {
   CloudAuthContext,
+  CloudAutoFixApprovalBoundary,
   CloudGenerateMode,
   CloudGenerateRequest,
   CloudGenerateRequestBody,
   CloudNaturalLanguageSpecPayload,
+  CloudRickyAutoFixPolicy,
   CloudStructuredSpecPayload,
   CloudWorkflowSpecPayload,
   CloudWorkspaceContext,

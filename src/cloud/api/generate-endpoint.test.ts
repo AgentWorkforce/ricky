@@ -172,7 +172,7 @@ describe('handleCloudGenerate — success path', () => {
     const executor = mockExecutor();
     const request = validRequest({
       auth: { token: 'my-token', tokenType: 'api-key' },
-      workspace: { workspaceId: 'ws-prod', environment: 'production' },
+      workspace: { workspaceId: 'ws-prod', projectId: 'proj-001', environment: 'production' },
     });
 
     await handleCloudGenerate(request, testOptions(executor));
@@ -181,6 +181,7 @@ describe('handleCloudGenerate — success path', () => {
     expect(executor.calls[0].auth.token).toBe('my-token');
     expect(executor.calls[0].auth.tokenType).toBe('api-key');
     expect(executor.calls[0].workspace.workspaceId).toBe('ws-prod');
+    expect(executor.calls[0].workspace.projectId).toBe('proj-001');
     expect(executor.calls[0].workspace.environment).toBe('production');
   });
 
@@ -442,6 +443,127 @@ describe('handleCloudGenerate — default executor', () => {
 
     expect(response.ok).toBe(true);
     expect(response.followUpActions.some((a) => a.action === 'run-local')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Runtime-invalid request input
+// ---------------------------------------------------------------------------
+
+describe('handleCloudGenerate — runtime-invalid input', () => {
+  it('rejects non-string auth.token without throwing', async () => {
+    const executor = mockExecutor();
+    const request = {
+      auth: { token: 123 as unknown as string },
+      workspace: { workspaceId: 'ws-001' },
+      body: { spec: 'build something' },
+    } as CloudGenerateRequest;
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(401);
+    expect(response.validation.issues[0].code).toBe('missing-auth-token');
+    expect(response.validation.issues[0].path).toBe('auth.token');
+    expect(executor.calls).toHaveLength(0);
+    expect(response.runReceipt).toEqual({
+      executionRequested: false,
+      requestId: TEST_REQUEST_ID,
+      status: 'not_requested',
+    });
+  });
+
+  it('rejects invalid auth.tokenType values', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      auth: { token: 'test-token', tokenType: 'session' as unknown as 'bearer' },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('invalid-auth-token-type');
+    expect(response.validation.issues[0].path).toBe('auth.tokenType');
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects non-string workspace.workspaceId without throwing', async () => {
+    const executor = mockExecutor();
+    const request = {
+      auth: { token: 'test-token' },
+      workspace: { workspaceId: 42 as unknown as string },
+      body: { spec: 'build something' },
+    } as CloudGenerateRequest;
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('missing-workspace-id');
+    expect(response.validation.issues[0].path).toBe('workspace.workspaceId');
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects invalid body.mode values', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      body: { spec: 'build something', mode: 'local' as unknown as 'cloud' },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('invalid-mode');
+    expect(response.validation.issues[0].path).toBe('body.mode');
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects malformed structured spec missing the kind discriminant', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      body: { spec: { document: { name: 'demo' } } as unknown as CloudGenerateRequest['body']['spec'] },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('missing-spec');
+    expect(response.validation.issues[0].path).toBe('body.spec');
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects malformed natural-language spec with non-string text', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      body: {
+        spec: { kind: 'natural-language', text: 99 as unknown as string } as CloudGenerateRequest['body']['spec'],
+      },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('missing-spec');
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects invalid workspace.projectId without throwing', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      workspace: { workspaceId: 'ws-001', projectId: 7 as unknown as string },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('invalid-project-id');
+    expect(response.validation.issues[0].path).toBe('workspace.projectId');
+    expect(executor.calls).toHaveLength(0);
   });
 });
 

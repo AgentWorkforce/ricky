@@ -5,33 +5,24 @@
  * there is no implicit fallback or ambient credential resolution.
  */
 
-// ---------------------------------------------------------------------------
-// Auth context — required on every Cloud request
-// ---------------------------------------------------------------------------
-
-export interface CloudAuthContext {
-  /** Bearer token or API key for the Cloud API. */
-  token: string;
-  /** Optional token type hint (default: 'bearer'). */
-  tokenType?: 'bearer' | 'api-key';
-}
+import type {
+  CloudAuthContext as CanonicalCloudAuthContext,
+  CloudRequestMode,
+  CloudWorkspaceContext as CanonicalCloudWorkspaceContext,
+} from '../auth/types.js';
 
 // ---------------------------------------------------------------------------
-// Workspace context — scopes the request to a Cloud workspace
+// Auth and workspace context — required on every Cloud request
 // ---------------------------------------------------------------------------
 
-export interface CloudWorkspaceContext {
-  /** The workspace ID this request targets. */
-  workspaceId: string;
-  /** Optional environment override (e.g. 'staging', 'production'). */
-  environment?: string;
-}
+export type CloudAuthContext = CanonicalCloudAuthContext;
+export type CloudWorkspaceContext = CanonicalCloudWorkspaceContext;
 
 // ---------------------------------------------------------------------------
 // Generate request body
 // ---------------------------------------------------------------------------
 
-export type CloudGenerateMode = 'cloud' | 'both';
+export type CloudGenerateMode = CloudRequestMode;
 
 export type CloudAutoFixApprovalBoundary =
   | 'code_push'
