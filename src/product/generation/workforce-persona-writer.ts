@@ -1915,7 +1915,7 @@ function analyzeDeclaredWorktreeUsage(
       !hasWorktreeAdd &&
       !stepAddsDeclaredWorktree &&
       (stepMentionsPath || stepMentionsBranch) &&
-      isImplementationOrTestStep(step)
+      commandUsesDeclaredWorktree(step.command, declaredWorktree)
     ) {
       firstImplementationUseBeforeSetup ??= step;
     }
@@ -2016,12 +2016,28 @@ function containsShellGlob(value: string): boolean {
   return value.includes('*') || value.includes('?') || value.includes('[');
 }
 
+const COMMON_EXTENSIONLESS_FILE_NAMES = new Set([
+  'dockerfile',
+  'makefile',
+  'readme',
+  'procfile',
+  'license',
+  'notice',
+  'changelog',
+]);
+
 function isDirectoryLookingPath(value: string): boolean {
   if (!value || /[$`{}]/.test(value)) return false;
   const segments = value.split(/[\\/]+/).filter(Boolean);
   if (segments.length < 2) return false;
   const lastSegment = segments[segments.length - 1];
-  return Boolean(lastSegment && lastSegment !== '.' && lastSegment !== '..' && !lastSegment.includes('.'));
+  return Boolean(
+    lastSegment &&
+    lastSegment !== '.' &&
+    lastSegment !== '..' &&
+    !lastSegment.includes('.') &&
+    !COMMON_EXTENSIONLESS_FILE_NAMES.has(lastSegment.toLowerCase()),
+  );
 }
 
 function commandMentionsExecutableToken(command: string, expectedToken: string): boolean {
@@ -2032,8 +2048,44 @@ function commandMentionsExecutableToken(command: string, expectedToken: string):
   });
 }
 
-function isImplementationOrTestStep(step: WorkflowStepCommand): boolean {
-  return /\b(impl|implement|test|verify|valid|build|typecheck|lint|repair|fix|run|execute|review|signoff)\b/i.test(step.stepName);
+function commandUsesDeclaredWorktree(commandText: string, declaredWorktree: { path: string; branch?: string }): boolean {
+  const normalizedPath = stripTrailingSlashes(declaredWorktree.path);
+  const normalizedBranch = declaredWorktree.branch ? stripTrailingSlashes(declaredWorktree.branch) : undefined;
+  return shellCommandSegments(commandText).some((words) => {
+    const normalizedWords = words.map(stripTrailingSlashes);
+    const mentionsDeclaredToken =
+      normalizedWords.includes(normalizedPath) ||
+      (normalizedBranch !== undefined && normalizedWords.includes(normalizedBranch));
+    return mentionsDeclaredToken && isRuntimeWorktreeCommand(words);
+  });
+}
+
+function isRuntimeWorktreeCommand(words: readonly string[]): boolean {
+  const command = firstShellCommandWord(words);
+  if (!command) return false;
+  return [
+    'git',
+    'test',
+    '[',
+    '[[',
+    'npm',
+    'pnpm',
+    'yarn',
+    'node',
+    'npx',
+    'tsx',
+    'tsc',
+    'vitest',
+    'find',
+    'ls',
+    'cat',
+    'grep',
+    'rg',
+  ].includes(command);
+}
+
+function firstShellCommandWord(words: readonly string[]): string | undefined {
+  return words.find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(word));
 }
 
 function shellExecutableText(command: string): string {
