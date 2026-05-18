@@ -365,6 +365,13 @@ export async function writeWorkflowWithWorkforcePersona(
     throw new WorkforcePersonaWriterError('Workforce persona response did not include workflow artifact content.');
   }
 
+  let artifactContent = parsed.content;
+  const githubExecutorSanitization = stripGlobalGithubExecutorForMixedWorkflow(artifactContent);
+  if (githubExecutorSanitization.stripped) {
+    artifactContent = githubExecutorSanitization.content;
+    parsed = { ...parsed, content: artifactContent };
+  }
+
   // Validate the writer's first emit against the spec's declared intent.
   // The pre-write repair loop in pipeline.ts re-invokes the writer on
   // throw, so this gives the writer a chance to fix a degenerate
@@ -378,7 +385,7 @@ export async function writeWorkflowWithWorkforcePersona(
   // `Outcome: **one pull request in <repo>**`. detectWorkflowIntentRegressions
   // (PR #109) only fires for repairs vs originals; this guard catches
   // the case where the FIRST emit is already the degenerate shape.
-  const specIntentMismatches = detectSpecIntentMismatch(spec, parsed.content);
+  const specIntentMismatches = detectSpecIntentMismatch(spec, artifactContent);
   if (specIntentMismatches.length > 0) {
     await dumpDebug('spec-intent-mismatch');
     throw new WorkforcePersonaWriterError(
@@ -394,7 +401,7 @@ export async function writeWorkflowWithWorkforcePersona(
   const responseFormat = parsed.responseFormat as WorkforcePersonaWriterMetadata['responseFormat'];
   return {
     artifact: {
-      content: parsed.content,
+      content: artifactContent,
       metadata: parsed.metadata,
     },
     metadata: {
@@ -747,6 +754,7 @@ export function buildWorkflowPersonaTask(
     '- Before calling `.run(...)`, load repo-local `.env.local` and `.env` values into `process.env` without overwriting existing shell exports, so local BYOH runs inherit common project configuration. If the workflow requires named env vars, add a fast deterministic preflight/assertion that prints `MISSING_ENV_VAR: NAME` before long-running agent steps.',
     '- Verification must include typecheck/test commands when relevant plus git-diff evidence; diff/manifest gates must combine git diff --name-only with git ls-files --others --exclude-standard so newly-created files are visible.',
     '- Run with an explicit cwd: .run({ cwd: process.cwd() }).',
+    '- For mixed workflows with agent/deterministic steps plus GitHub primitive steps, never pass GitHubStepExecutor as the global `.run({ executor })`; it only executes GitHub integration steps and will reject non-github steps. Keep `.run({ cwd: process.cwd() })` and attach PR shipping through `createGitHubStep(...)` steps.',
     '- Preserve Agent Relay workflow authoring rules: deterministic gates are evidence, agents do production work, and every generated workflow must be locally dry-runnable.',
     '- Include the literal marker IMPLEMENTATION_WORKFLOW_CONTRACT in implementation workflows.',
     '- When the normalized spec asks to implement product/backend/webapp/runtime behavior, the workflow must edit source files, add or update tests, require a non-empty diff outside transient artifact directories, and report a PR URL or explicit result status.',
@@ -1400,10 +1408,31 @@ export function detectSpecIntentMismatch(
   return mismatches;
 }
 
+export function stripGlobalGithubExecutorForMixedWorkflow(
+  workflowContent: string,
+): { content: string; stripped: boolean } {
+  const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
+  if (!facts.hasNonGithubStep || facts.githubExecutorRunPropertySpans.length === 0) {
+    return { content: workflowContent, stripped: false };
+  }
+
+  return {
+    content: removeTextSpans(workflowContent, facts.githubExecutorRunPropertySpans),
+    stripped: true,
+  };
+}
+
 interface WorkflowSourceIntentFacts {
   importsModule(moduleSpec: string): boolean;
   referencesIdentifier(name: string): boolean;
   readonly stepInvocationCount: number;
+  readonly hasNonGithubStep: boolean;
+  readonly githubExecutorRunPropertySpans: TextSpan[];
+}
+
+interface TextSpan {
+  start: number;
+  end: number;
 }
 
 /**
@@ -1436,21 +1465,39 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       importsModule: () => true,
       referencesIdentifier: () => true,
       stepInvocationCount: Number.POSITIVE_INFINITY,
+      hasNonGithubStep: false,
+      githubExecutorRunPropertySpans: [],
     };
   }
 
   const importedModules = new Set<string>();
   const referencedIdentifiers = new Set<string>();
+  const githubExecutorClassIdentifiers = new Set<string>(['GitHubStepExecutor']);
+  const githubExecutorValueIdentifiers = new Set<string>();
   let stepInvocationCount = 0;
+  let hasNonGithubStep = false;
+  const githubExecutorRunPropertySpans: TextSpan[] = [];
 
   const trackedIdentifiers = new Set<string>(['GitHubStepExecutor', 'createGitHubStep']);
 
   function walk(node: ts.Node): void {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       importedModules.add(node.moduleSpecifier.text);
+      const namedBindings = node.importClause?.namedBindings;
+      if (namedBindings && ts.isNamedImports(namedBindings)) {
+        for (const element of namedBindings.elements) {
+          const importedName = element.propertyName?.text ?? element.name.text;
+          if (importedName === 'GitHubStepExecutor') {
+            githubExecutorClassIdentifiers.add(element.name.text);
+          }
+        }
+      }
     }
     if (ts.isIdentifier(node) && trackedIdentifiers.has(node.text)) {
       referencedIdentifiers.add(node.text);
+    }
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && isGithubExecutorExpression(node.initializer)) {
+      githubExecutorValueIdentifiers.add(node.name.text);
     }
     if (
       ts.isCallExpression(node) &&
@@ -1459,6 +1506,28 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       node.expression.name.text === 'step'
     ) {
       stepInvocationCount += 1;
+      if (!isCreateGithubStepExpression(node.arguments[1])) {
+        hasNonGithubStep = true;
+      }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.name) &&
+      node.expression.name.text === 'run'
+    ) {
+      const options = node.arguments[0];
+      if (options && ts.isObjectLiteralExpression(options)) {
+        for (const property of options.properties) {
+          if (
+            ts.isPropertyAssignment(property) &&
+            propertyNameText(property.name) === 'executor' &&
+            isGithubExecutorExpression(property.initializer)
+          ) {
+            githubExecutorRunPropertySpans.push(removablePropertySpan(content, property));
+          }
+        }
+      }
     }
     ts.forEachChild(node, walk);
   }
@@ -1469,7 +1538,77 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     importsModule: (moduleSpec) => importedModules.has(moduleSpec),
     referencesIdentifier: (name) => referencedIdentifiers.has(name),
     stepInvocationCount,
+    hasNonGithubStep,
+    githubExecutorRunPropertySpans,
   };
+
+  function isGithubExecutorExpression(node: ts.Node | undefined): boolean {
+    if (!node) return false;
+    if (ts.isIdentifier(node)) {
+      return githubExecutorValueIdentifiers.has(node.text) || githubExecutorClassIdentifiers.has(node.text);
+    }
+    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression)) {
+      return githubExecutorClassIdentifiers.has(node.expression.text);
+    }
+    return false;
+  }
+}
+
+function isCreateGithubStepExpression(node: ts.Node | undefined): boolean {
+  if (!node || !ts.isCallExpression(node)) return false;
+  if (ts.isIdentifier(node.expression)) {
+    return node.expression.text === 'createGitHubStep';
+  }
+  if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.name)) {
+    return node.expression.name.text === 'createGitHubStep';
+  }
+  return false;
+}
+
+function propertyNameText(name: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+    return name.text;
+  }
+  return undefined;
+}
+
+function removablePropertySpan(content: string, property: ts.ObjectLiteralElementLike): TextSpan {
+  let start = property.getFullStart();
+  let end = property.getEnd();
+
+  let after = end;
+  while (after < content.length && /[ \t]/.test(content[after])) after += 1;
+  if (content[after] === ',') {
+    end = after + 1;
+    let next = end;
+    while (next < content.length && /\s/.test(content[next])) next += 1;
+    if (content[next] === '}') {
+      let before = start - 1;
+      while (before >= 0 && /[ \t]/.test(content[before])) before -= 1;
+      if (content[before] === ',') {
+        start = before;
+      }
+    } else if (content[end] === '\r' && content[end + 1] === '\n') {
+      end += 2;
+    } else if (content[end] === '\n' || content[end] === '\r') {
+      end += 1;
+    }
+    return { start, end };
+  }
+
+  let before = start - 1;
+  while (before >= 0 && /[ \t]/.test(content[before])) before -= 1;
+  if (content[before] === ',') {
+    start = before;
+  }
+
+  return { start, end };
+}
+
+function removeTextSpans(content: string, spans: TextSpan[]): string {
+  return [...spans]
+    .sort((left, right) => right.start - left.start)
+    .reduce((current, span) => current.slice(0, span.start) + current.slice(span.end), content);
 }
 
 export function hasExplicitWorkflowRunCwd(content: string): boolean {
