@@ -118,7 +118,7 @@ async function main() {
         '            "message": "Ricky CLI generate-and-run timed out after 45s in an external temp repo.",',
         '            "detected_during": "external-cli-live-path",',
         '            "recovery": {',
-        '                "actionable": true,',
+        '                "actionable": True,',
         '                "steps": [',
         '                    "Inspect the external CLI generation path for hanging persona generation or missing temp-repo policy context.",',
         '                    "Re-run the bounded external CLI proof after fixing the generation hang."',
