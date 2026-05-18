@@ -2366,6 +2366,74 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
     expect(result.content).not.toContain('executor });');
   });
 
+  it('resolves same-named step variables by lexical scope instead of file-wide name', () => {
+    const githubOnlyWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
+      'const githubStepExecutor = new GitHubStepExecutor();',
+      'async function main() {',
+      '  const openPrStep = createGitHubStep({ action: "openPullRequest", branch: "feat/foo" });',
+      '  await workflow("github-only")',
+      '    .step("open-pr", openPrStep)',
+      '    .run({ cwd: process.cwd(), executor: githubStepExecutor });',
+      '}',
+      'async function unrelated() {',
+      '  const openPrStep = { type: "deterministic", command: "true" };',
+      '  return openPrStep;',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(stripGlobalGithubExecutorForMixedWorkflow(githubOnlyWorkflow)).toEqual({
+      content: githubOnlyWorkflow,
+      stripped: false,
+    });
+  });
+
+  it('resolves same-named executor variables by lexical scope instead of file-wide name', () => {
+    const mixedWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  const executor = new GitHubStepExecutor();',
+      '  await workflow("mixed")',
+      '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .run({ cwd: process.cwd(), executor });',
+      '}',
+      'async function unrelated() {',
+      '  const executor = { run() { return undefined; } };',
+      '  return executor;',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const result = stripGlobalGithubExecutorForMixedWorkflow(mixedWorkflow);
+
+    expect(result.stripped).toBe(true);
+    expect(result.content).toContain('.run({ cwd: process.cwd() });');
+    expect(result.content).not.toContain('executor });');
+  });
+
+  it('does not treat same-named imports from unrelated modules as GitHub primitives', () => {
+    const lookalikeWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { GitHubStepExecutor, createGitHubStep } from "@example/not-github";',
+      'const executor = new GitHubStepExecutor();',
+      'async function main() {',
+      '  await workflow("lookalike")',
+      '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
+      '    .step("not-github", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .run({ cwd: process.cwd(), executor });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(stripGlobalGithubExecutorForMixedWorkflow(lookalikeWorkflow)).toEqual({
+      content: lookalikeWorkflow,
+      stripped: false,
+    });
+  });
   it('removes inline GitHubStepExecutor global run executors from mixed workflows', () => {
     const mixedWorkflow = [
       'import { workflow } from "@agent-relay/sdk/workflows";',
