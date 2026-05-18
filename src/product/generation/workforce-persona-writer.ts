@@ -3,6 +3,8 @@ import { readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { InlineCode, Node, Parent, Root, Text } from 'mdast';
 import ts from 'typescript';
 
 import type { ClarificationQuestion, ClarificationRequest, NormalizedWorkflowSpec } from '../spec-intake/types.js';
@@ -372,11 +374,11 @@ export async function writeWorkflowWithWorkforcePersona(
     parsed = { ...parsed, content: artifactContent };
   }
 
-  // Validate the writer's first emit against the spec's declared intent.
-  // The pre-write repair loop in pipeline.ts re-invokes the writer on
-  // throw, so this gives the writer a chance to fix a degenerate
-  // "master-executor stub" output before that output ever reaches disk
-  // or the runtime-launch step. Observed 2026-05-16 driving the cloud
+  // Diagnose the writer's first emit against the spec's declared intent.
+  // pipeline.ts folds these same checks into pre-write validation, which
+  // gives the writer a chance to fix a degenerate or unsafe output before
+  // that output ever reaches disk or the runtime-launch step. Observed
+  // 2026-05-16 driving the cloud
   // MCP cloud-spawn split: writer occasionally emits a 180-line stub
   // whose top-level steps are just `prepare-context → lead-plan →
   // materialize-child-workflows → final-signoff` with the actual impl
@@ -388,13 +390,6 @@ export async function writeWorkflowWithWorkforcePersona(
   const specIntentMismatches = detectSpecIntentMismatch(spec, artifactContent);
   if (specIntentMismatches.length > 0) {
     await dumpDebug('spec-intent-mismatch');
-    throw new WorkforcePersonaWriterError(
-      `Workforce persona writer output does not satisfy spec-declared intent: ${specIntentMismatches.join('; ')}.`,
-      [
-        ...resolved.warnings,
-        `The pre-write repair loop will re-invoke the writer with this failure as feedback.`,
-      ],
-    );
   }
 
   await dumpDebug('success');
@@ -410,7 +405,12 @@ export async function writeWorkflowWithWorkforcePersona(
       harness: selection.runtime.harness,
       model: selection.runtime.model,
       promptDigest,
-      warnings: [...resolved.warnings],
+      warnings: [
+        ...resolved.warnings,
+        ...specIntentMismatches.map((mismatch) =>
+          `Workforce persona writer output does not satisfy spec-declared intent: ${mismatch}.`,
+        ),
+      ],
       runId: result.workflowRunId ?? runId,
       source: resolved.source,
       selectedIntent: resolved.intent,
@@ -755,6 +755,8 @@ export function buildWorkflowPersonaTask(
     '- Verification must include typecheck/test commands when relevant plus git-diff evidence; diff/manifest gates must combine git diff --name-only with git ls-files --others --exclude-standard so newly-created files are visible.',
     '- Run with an explicit cwd: .run({ cwd: process.cwd() }).',
     '- For mixed workflows with agent/deterministic steps plus GitHub primitive steps, never pass GitHubStepExecutor as the global `.run({ executor })`; it only executes GitHub integration steps and will reject non-github steps. Keep `.run({ cwd: process.cwd() })` and attach PR shipping through `createGitHubStep(...)` steps.',
+    '- If the normalized spec declares `Worktree: <absolute path>`, create or refresh that worktree in an early deterministic step with `git worktree add`, use that exact path for implementation/test/git commands, and include the declared `Target branch` in the workflow. Do not assume the worktree already exists.',
+    '- Use `test -f` only for known files. Never use `test -f` for a worktree/repository directory, a package directory, an API route directory, or any path containing glob wildcards; use `test -d`, `find`, `git ls-files`, or a Node filesystem assertion instead.',
     '- Preserve Agent Relay workflow authoring rules: deterministic gates are evidence, agents do production work, and every generated workflow must be locally dry-runnable.',
     '- Include the literal marker IMPLEMENTATION_WORKFLOW_CONTRACT in implementation workflows.',
     '- When the normalized spec asks to implement product/backend/webapp/runtime behavior, the workflow must edit source files, add or update tests, require a non-empty diff outside transient artifact directories, and report a PR URL or explicit result status.',
@@ -1434,12 +1436,14 @@ function validateArtifactContent(content: string): void {
  * them; they only fire on the failure mode this guard addresses.
  */
 export function detectSpecIntentMismatch(
-  spec: { description?: string; targetFiles?: readonly string[] },
+  spec: SpecIntentLike,
   workflowContent: string,
 ): string[] {
   const mismatches: string[] = [];
-  const description = typeof spec.description === 'string' ? spec.description : '';
+  const description = specIntentText(spec);
   if (!description) return mismatches;
+  const descriptionLength = spec.description?.length ?? 0;
+  const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
 
   // `(?<!\w)` instead of a leading `\b` so the `@agent-relay/...` token
   // matches when preceded by whitespace / line start — `\b` between a
@@ -1447,7 +1451,6 @@ export function detectSpecIntentMismatch(
   const specRequiresPrShipping = /(?<!\w)(open\s+(a|one)\s+pull\s+request|one\s+pull\s+request\s+in|ships?\s+a\s+pr|createGitHubStep|GitHubStepExecutor|@agent-relay\/github-primitive)\b/i.test(description);
 
   if (specRequiresPrShipping) {
-    const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
     const importsGithubPrimitive =
       facts.importsModule('@agent-relay/github-primitive') ||
       facts.importsModule('@agent-relay/sdk/github');
@@ -1461,14 +1464,44 @@ export function detectSpecIntentMismatch(
     }
   }
 
-  if (description.length > 4_000) {
-    const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
+  if (descriptionLength > 4_000) {
     const stepInvocationCount = facts.stepInvocationCount;
     if (stepInvocationCount < 4) {
       mismatches.push(
-        `spec is ${Math.round(description.length / 1024)} KB but the workflow declares only ${stepInvocationCount} top-level .step(...) calls — likely a "master-executor stub" with the real impl deferred to nested-string child workflows that ricky cannot validate end-to-end`,
+        `spec description is ${Math.round(descriptionLength / 1024)} KB but the workflow declares only ${stepInvocationCount} top-level .step(...) calls — likely a "master-executor stub" with the real impl deferred to nested-string child workflows that ricky cannot validate end-to-end`,
       );
     }
+  }
+
+  const declaredWorktree = extractDeclaredWorktree(description);
+  if (declaredWorktree) {
+    const usage = analyzeDeclaredWorktreeUsage(facts.stepCommands, declaredWorktree);
+    if (!usage.mentionsPath) {
+      mismatches.push(
+        `spec declares Worktree: ${declaredWorktree.path} but no executable workflow step command contains that exact worktree path`,
+      );
+    }
+    if (!usage.hasWorktreeAdd) {
+      mismatches.push(
+        `spec declares Worktree: ${declaredWorktree.path} but the workflow has no runtime git worktree add setup step before implementation`,
+      );
+    } else if (usage.firstImplementationUseBeforeSetup) {
+      mismatches.push(
+        `spec declares Worktree: ${declaredWorktree.path} but ${usage.firstImplementationUseBeforeSetup.stepName} uses the declared worktree before a runtime git worktree add setup step`,
+      );
+    }
+    if (declaredWorktree.branch && !usage.mentionsBranch) {
+      mismatches.push(
+        `spec declares Target branch: ${declaredWorktree.branch} but no executable workflow step command contains that exact branch name`,
+      );
+    }
+  }
+
+  const invalidFileGates = findInvalidFileExistenceGateCommands(facts.stepCommands, declaredWorktree?.path);
+  if (invalidFileGates.length > 0) {
+    mismatches.push(
+      `workflow contains invalid test -f file gate(s): ${invalidFileGates.join('; ')}`,
+    );
   }
 
   return mismatches;
@@ -1494,11 +1527,28 @@ interface WorkflowSourceIntentFacts {
   readonly stepInvocationCount: number;
   readonly hasNonGithubStep: boolean;
   readonly githubExecutorRunPropertySpans: TextSpan[];
+  readonly stepCommands: WorkflowStepCommand[];
 }
 
 interface TextSpan {
   start: number;
   end: number;
+}
+
+interface WorkflowStepCommand {
+  stepName: string;
+  command: string;
+  sourceStart: number;
+}
+
+interface SpecIntentLike {
+  description?: string;
+  targetContext?: string | null;
+  targetFiles?: readonly string[];
+  desiredAction?: { summary?: string };
+  constraints?: readonly unknown[];
+  acceptanceGates?: readonly unknown[];
+  evidenceRequirements?: readonly unknown[];
 }
 
 /**
@@ -1533,6 +1583,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       stepInvocationCount: Number.POSITIVE_INFINITY,
       hasNonGithubStep: false,
       githubExecutorRunPropertySpans: [],
+      stepCommands: [],
     };
   }
   const workflowSourceFile = sourceFile;
@@ -1545,6 +1596,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
   let stepInvocationCount = 0;
   let hasNonGithubStep = false;
   const githubExecutorRunPropertySpans: TextSpan[] = [];
+  const stepCommands: WorkflowStepCommand[] = [];
 
   const trackedIdentifiers = new Set<string>(['GitHubStepExecutor', 'createGitHubStep']);
   const githubPrimitiveModules = new Set([
@@ -1608,6 +1660,8 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       if (!isCreateGithubStepExpression(resolveIdentifierInitializer(node.arguments[1]))) {
         hasNonGithubStep = true;
       }
+      const command = stepCommandLiteral(node);
+      if (command) stepCommands.push(command);
     }
     if (
       ts.isCallExpression(node) &&
@@ -1642,6 +1696,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     stepInvocationCount,
     hasNonGithubStep,
     githubExecutorRunPropertySpans,
+    stepCommands: [...stepCommands].sort((left, right) => left.sourceStart - right.sourceStart),
   };
 
   function isGithubExecutorExpression(node: ts.Node | undefined): boolean {
@@ -1766,6 +1821,21 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       .filter((binding) => binding.scopeStart <= referenceStart && referenceStart < binding.scopeEnd)
       .sort((left, right) => right.declarationStart - left.declarationStart)[0];
   }
+
+  function stepCommandLiteral(node: ts.CallExpression): WorkflowStepCommand | null {
+    const [rawStepName, rawConfig] = node.arguments;
+    const config = resolveIdentifierInitializer(rawConfig);
+    if (!config || !ts.isObjectLiteralExpression(config)) return null;
+    const command = propertyLiteralText(config, 'command');
+    if (command === undefined) return null;
+    return {
+      stepName: rawStepName && ts.isStringLiteralLike(rawStepName) ? rawStepName.text : '(unknown-step)',
+      command,
+      sourceStart: ts.isPropertyAccessExpression(node.expression)
+        ? node.expression.name.getStart(workflowSourceFile)
+        : node.getStart(workflowSourceFile),
+    };
+  }
 }
 
 type GithubIdentifierBindingKind = 'executorClass' | 'createStepFunction' | 'githubNamespace';
@@ -1785,9 +1855,439 @@ interface VariableInitializerBinding extends IdentifierDeclaration {
   initializer: ts.Expression;
 }
 
+function specIntentText(spec: SpecIntentLike): string {
+  return [
+    spec.description,
+    spec.targetContext,
+    spec.desiredAction?.summary,
+    ...(spec.constraints ?? []).map(specListItemText),
+    ...(spec.acceptanceGates ?? []).map(specListItemText),
+    ...(spec.evidenceRequirements ?? []).map(specListItemText),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join('\n');
+}
+
+function specListItemText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!isRecord(value)) return undefined;
+  for (const key of ['constraint', 'gate', 'requirement']) {
+    const candidate = value[key];
+    if (typeof candidate === 'string') return candidate;
+  }
+  return undefined;
+}
+
+function extractDeclaredWorktree(text: string): { path: string; branch?: string } | null {
+  const fields = markdownLabelFields(text);
+  const path = fields.get('worktree') ?? fields.get('target worktree');
+  if (!path) return null;
+  const branch = fields.get('target branch') ?? fields.get('branch');
+  return {
+    path,
+    ...(branch ? { branch } : {}),
+  };
+}
+
+function analyzeDeclaredWorktreeUsage(
+  commands: readonly WorkflowStepCommand[],
+  declaredWorktree: { path: string; branch?: string },
+): {
+  mentionsPath: boolean;
+  mentionsBranch: boolean;
+  hasWorktreeAdd: boolean;
+  firstImplementationUseBeforeSetup?: WorkflowStepCommand;
+} {
+  let mentionsPath = false;
+  let mentionsBranch = declaredWorktree.branch === undefined;
+  let hasWorktreeAdd = false;
+  let firstImplementationUseBeforeSetup: WorkflowStepCommand | undefined;
+
+  for (const step of commands) {
+    const stepAddsDeclaredWorktree = addsDeclaredWorktree(step.command, declaredWorktree);
+    const stepMentionsPath = commandMentionsExecutableToken(step.command, declaredWorktree.path);
+    const stepMentionsBranch = declaredWorktree.branch
+      ? commandMentionsExecutableToken(step.command, declaredWorktree.branch)
+      : false;
+
+    mentionsPath ||= stepMentionsPath;
+    mentionsBranch ||= stepMentionsBranch;
+
+    if (
+      !hasWorktreeAdd &&
+      !stepAddsDeclaredWorktree &&
+      (stepMentionsPath || stepMentionsBranch) &&
+      commandUsesDeclaredWorktree(step.command, declaredWorktree)
+    ) {
+      firstImplementationUseBeforeSetup ??= step;
+    }
+
+    if (stepAddsDeclaredWorktree) {
+      hasWorktreeAdd = true;
+    }
+  }
+
+  return {
+    mentionsPath,
+    mentionsBranch,
+    hasWorktreeAdd,
+    ...(firstImplementationUseBeforeSetup ? { firstImplementationUseBeforeSetup } : {}),
+  };
+}
+
+function addsDeclaredWorktree(commandText: string, declaredWorktree: { path: string; branch?: string }): boolean {
+  return gitWorktreeAddArgv(commandText).some((args) => {
+    const normalizedArgs = args.map(stripTrailingSlashes);
+    const hasPath = normalizedArgs.includes(stripTrailingSlashes(declaredWorktree.path));
+    const hasBranch = !declaredWorktree.branch || normalizedArgs.includes(stripTrailingSlashes(declaredWorktree.branch));
+    return hasPath && hasBranch;
+  });
+}
+
+function gitWorktreeAddArgv(commandText: string): string[][] {
+  const addArgv: string[][] = [];
+  for (const words of shellCommandSegments(commandText)) {
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== 'git') continue;
+      let cursor = index + 1;
+      while (cursor < words.length && words[cursor].startsWith('-')) {
+        cursor += words[cursor] === '-C' ? 2 : 1;
+      }
+      if (words[cursor] === 'worktree' && words[cursor + 1] === 'add') {
+        addArgv.push(words.slice(cursor + 2));
+      }
+    }
+  }
+  return addArgv;
+}
+
+function findInvalidFileExistenceGateCommands(
+  commands: readonly WorkflowStepCommand[],
+  declaredWorktreePath: string | undefined,
+): string[] {
+  const invalid: string[] = [];
+  for (const step of commands) {
+    for (const testedPath of extractTestFilePaths(step.command)) {
+      const unquotedPath = unquoteShellToken(testedPath);
+      const normalizedPath = stripTrailingSlashes(unquotedPath);
+      const normalizedWorktree = declaredWorktreePath ? stripTrailingSlashes(declaredWorktreePath) : undefined;
+      if (containsShellGlob(unquotedPath)) {
+        invalid.push(`${step.stepName} uses test -f on glob path ${testedPath}`);
+      } else if (normalizedWorktree && normalizedPath === normalizedWorktree) {
+        invalid.push(`${step.stepName} uses test -f on declared worktree directory ${testedPath}`);
+      } else if (unquotedPath.endsWith('/') || isDirectoryLookingPath(normalizedPath)) {
+        invalid.push(`${step.stepName} uses test -f on directory-looking path ${testedPath}`);
+      }
+    }
+  }
+  return invalid;
+}
+
+function extractTestFilePaths(command: string): string[] {
+  const paths: string[] = [];
+  for (const words of shellCommandSegments(command)) {
+    for (let index = 0; index < words.length - 1; index += 1) {
+      const commandWord = words[index];
+      if (commandWord === 'test' && words[index + 1] === '-f' && words[index + 2]) {
+        paths.push(words[index + 2]);
+      }
+      if ((commandWord === '[' || commandWord === '[[') && words[index + 1] === '-f' && words[index + 2]) {
+        paths.push(words[index + 2]);
+      }
+    }
+  }
+  return paths;
+}
+
+function unquoteShellToken(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function stripTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/g, '');
+}
+
+function containsShellGlob(value: string): boolean {
+  return value.includes('*') || value.includes('?') || value.includes('[');
+}
+
+const COMMON_EXTENSIONLESS_FILE_NAMES = new Set([
+  'dockerfile',
+  'makefile',
+  'readme',
+  'procfile',
+  'license',
+  'notice',
+  'changelog',
+]);
+
+function isDirectoryLookingPath(value: string): boolean {
+  if (!value || /[$`{}]/.test(value)) return false;
+  const segments = value.split(/[\\/]+/).filter(Boolean);
+  if (segments.length < 2) return false;
+  const lastSegment = segments[segments.length - 1];
+  return Boolean(
+    lastSegment &&
+    lastSegment !== '.' &&
+    lastSegment !== '..' &&
+    !lastSegment.includes('.') &&
+    !COMMON_EXTENSIONLESS_FILE_NAMES.has(lastSegment.toLowerCase()),
+  );
+}
+
+function commandMentionsExecutableToken(command: string, expectedToken: string): boolean {
+  const normalizedExpected = stripTrailingSlashes(expectedToken);
+  return shellWords(command).some((word) => {
+    const normalizedWord = stripTrailingSlashes(word);
+    return normalizedWord === normalizedExpected;
+  });
+}
+
+function commandUsesDeclaredWorktree(commandText: string, declaredWorktree: { path: string; branch?: string }): boolean {
+  const normalizedPath = stripTrailingSlashes(declaredWorktree.path);
+  const normalizedBranch = declaredWorktree.branch ? stripTrailingSlashes(declaredWorktree.branch) : undefined;
+  return shellCommandSegments(commandText).some((words) => {
+    const normalizedWords = words.map(stripTrailingSlashes);
+    const mentionsDeclaredToken =
+      normalizedWords.includes(normalizedPath) ||
+      (normalizedBranch !== undefined && normalizedWords.includes(normalizedBranch));
+    return mentionsDeclaredToken && isRuntimeWorktreeCommand(words);
+  });
+}
+
+function isRuntimeWorktreeCommand(words: readonly string[]): boolean {
+  const command = firstShellCommandWord(words);
+  if (!command) return false;
+  return [
+    'git',
+    'test',
+    '[',
+    '[[',
+    'npm',
+    'pnpm',
+    'yarn',
+    'node',
+    'npx',
+    'tsx',
+    'tsc',
+    'vitest',
+    'find',
+    'ls',
+    'cat',
+    'grep',
+    'rg',
+  ].includes(command);
+}
+
+function firstShellCommandWord(words: readonly string[]): string | undefined {
+  return words.find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(word));
+}
+
+function shellExecutableText(command: string): string {
+  return shellExecutableLines(command).join('\n');
+}
+
+function shellExecutableLines(command: string): string[] {
+  const lines = command.replace(/\\\r?\n/g, ' ').split(/\r?\n/);
+  const executableLines: string[] = [];
+  const heredocDelimiters: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, '');
+    if (heredocDelimiters.length > 0) {
+      if (line.trim() === heredocDelimiters[0]) {
+        heredocDelimiters.shift();
+      }
+      continue;
+    }
+
+    const executableLine = stripShellLineComment(line);
+    executableLines.push(executableLine);
+    heredocDelimiters.push(...extractHeredocDelimiters(executableLine));
+  }
+
+  return executableLines;
+}
+
+function stripShellLineComment(line: string): string {
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '#' && (index === 0 || /\s/.test(line[index - 1]))) {
+      return line.slice(0, index);
+    }
+  }
+  return line;
+}
+
+function extractHeredocDelimiters(line: string): string[] {
+  const delimiters: string[] = [];
+  const heredocPattern = /<<-?\s*(?:\\?(['"]?)([A-Za-z_][A-Za-z0-9_./-]*)\1)/g;
+  for (const match of line.matchAll(heredocPattern)) {
+    delimiters.push(match[2]);
+  }
+  return delimiters;
+}
+
+function shellWords(command: string): string[] {
+  return shellCommandSegments(command).flat();
+}
+
+function shellCommandSegments(command: string): string[][] {
+  const segments: string[][] = [];
+  let words: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+
+  for (const char of shellExecutableText(command)) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '\n' || ';|&()'.includes(char)) {
+      if (current) {
+        words.push(current);
+        current = '';
+      }
+      if (words.length > 0) {
+        segments.push(words);
+        words = [];
+      }
+      continue;
+    }
+    if (/\s/.test(char) || '<>'.includes(char)) {
+      if (current) {
+        words.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) words.push(current);
+  if (words.length > 0) segments.push(words);
+  return segments;
+}
+
+function markdownLabelFields(markdown: string): Map<string, string> {
+  let tree: Root;
+  try {
+    tree = fromMarkdown(markdown);
+  } catch {
+    return new Map();
+  }
+
+  const fields = new Map<string, string>();
+  for (const line of markdownTextLines(tree)) {
+    const parsed = labelField(line);
+    if (parsed) fields.set(parsed.label, parsed.value);
+  }
+  return fields;
+}
+
+function markdownTextLines(tree: Root): string[] {
+  const lines: string[] = [];
+  for (const child of tree.children) {
+    if (child.type === 'code' || child.type === 'html') continue;
+    const text = markdownNodeText(child).trim();
+    if (text) lines.push(...text.split('\n').map((line) => line.trim()).filter(Boolean));
+  }
+  return lines;
+}
+
+function markdownNodeText(node: Node): string {
+  if (node.type === 'text') return (node as Text).value;
+  if (node.type === 'inlineCode') return (node as InlineCode).value;
+  if (node.type === 'break') return '\n';
+  if (!isMarkdownParent(node)) return '';
+  const separator = node.type === 'list' || node.type === 'root' ? '\n' : '';
+  return node.children.map(markdownNodeText).filter(Boolean).join(separator);
+}
+
+function isMarkdownParent(node: Node): node is Parent {
+  return Array.isArray((node as Parent).children);
+}
+
+function labelField(line: string): { label: string; value: string } | null {
+  const stripped = stripMarkdownListMarker(line);
+  const separator = stripped.indexOf(':');
+  if (separator < 0) return null;
+  const label = stripped.slice(0, separator).trim().toLowerCase();
+  const value = stripped.slice(separator + 1).trim();
+  if (!label || !value) return null;
+  return { label, value };
+}
+
+function stripMarkdownListMarker(line: string): string {
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) return trimmed.slice(2).trimStart();
+  return trimmed;
+}
+
 function propertyNameText(name: ts.PropertyName): string | undefined {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
+  }
+  return undefined;
+}
+
+function propertyLiteralText(object: ts.ObjectLiteralExpression, propertyName: string): string | undefined {
+  for (const property of object.properties) {
+    if (!ts.isPropertyAssignment(property) || propertyNameText(property.name) !== propertyName) continue;
+    return literalText(property.initializer);
+  }
+  return undefined;
+}
+
+function literalText(node: ts.Expression): string | undefined {
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) {
+    return [
+      node.head.text,
+      ...node.templateSpans.map((span) => `\${...}${span.literal.text}`),
+    ].join('');
   }
   return undefined;
 }
