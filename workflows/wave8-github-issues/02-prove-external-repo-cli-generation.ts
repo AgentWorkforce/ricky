@@ -97,7 +97,7 @@ Write .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation
       command: [
         'TMP_REPO=$(mktemp -d)',
         'trap "rm -rf $TMP_REPO" EXIT',
-        'RICKY_BIN="$PWD/packages/cli/bin/ricky"',
+        'RICKY_BIN="$PWD/dist/ricky.js"',
         'test -f "$RICKY_BIN"',
         'chmod +x "$RICKY_BIN"',
         '(cd "$TMP_REPO" && INIT_CWD="$TMP_REPO" "$RICKY_BIN" --mode local --spec "generate a workflow for external package checks") > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/external-repo-smoke.txt 2>&1',
