@@ -494,8 +494,14 @@ describe('Ricky turn-context adapter', () => {
           'ricky-request-metadata',
         ]),
       );
-      expect(contextBlockContent(assembly.context.blocks, 'enrichment-ricky-request-summary'), testCase.name).toContain(
-        `source: ${testCase.expected.source}`,
+      const requestSummary = contextBlockContent(assembly.context.blocks, 'enrichment-ricky-request-summary');
+      expect(requestSummary, testCase.name).toContain(`source: ${testCase.expected.source}`);
+      expect(requestSummary, testCase.name).toContain(`requestId: ${testCase.expected.requestId}`);
+      expect(requestSummary, testCase.name).toContain(`mode: ${testCase.expected.mode}`);
+      expect(requestSummary, testCase.name).toContain(`stageMode: ${testCase.expected.stageMode}`);
+      expect(requestSummary, testCase.name).toContain(`invocationRoot: ${testCase.expected.invocationRoot}`);
+      expect(requestSummary, testCase.name).toContain(
+        `specPath: ${testCase.expected.specPath ?? '(not supplied)'}`,
       );
       expect(contextBlockContent(assembly.context.blocks, 'enrichment-ricky-spec-text'), testCase.name).toBe(
         testCase.expected.spec,
@@ -523,6 +529,16 @@ describe('Ricky turn-context adapter', () => {
           ]),
         },
       });
+      const executionSummary = executionRequest.context?.blocks.find(
+        (block) => block.id === 'enrichment-ricky-request-summary',
+      )?.text;
+      expect(executionSummary, testCase.name).toContain(`requestId: ${testCase.expected.requestId}`);
+      expect(executionSummary, testCase.name).toContain(`mode: ${testCase.expected.mode}`);
+      expect(executionSummary, testCase.name).toContain(`stageMode: ${testCase.expected.stageMode}`);
+      expect(executionSummary, testCase.name).toContain(`invocationRoot: ${testCase.expected.invocationRoot}`);
+      expect(executionSummary, testCase.name).toContain(
+        `specPath: ${testCase.expected.specPath ?? '(not supplied)'}`,
+      );
       expect(executionMetadata?.adapter, testCase.name).toMatchObject({
         name: 'ricky-local-turn-context-adapter',
         package: '@agent-assistant/turn-context',
