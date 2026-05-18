@@ -1,4 +1,4 @@
-import { createTurnContextAssembler } from '@agent-assistant/turn-context';
+import { createTurnContextAssembler, toExecutionRequest } from '@agent-assistant/turn-context';
 import { describe, expect, it } from 'vitest';
 
 import type { LocalInvocationRequest, RawHandoff } from './index.js';
@@ -92,6 +92,100 @@ describe('Ricky turn-context adapter', () => {
     expect(assembly.harnessProjection.instructions.developerPrompt).toContain(
       'Current mode: ricky-local:local:generate',
     );
+  });
+
+  it('projects preserved Ricky request metadata through the real turn-context execution request adapter', async () => {
+    const structuredSpec = {
+      description: 'generate a workflow that proves execution request projection keeps Ricky request context',
+      targetFiles: ['src/local/assistant-turn-context-adapter.test.ts'],
+      stageMode: 'run',
+    };
+    const normalized = await normalizeRequest({
+      source: 'cli',
+      spec: structuredSpec,
+      specFile: 'specs/issue-11.execution-request.json',
+      requestId: 'req-issue-11-execution-request',
+      invocationRoot: '/repo/execution-request',
+      executionPreference: 'both',
+      metadata: { issue: 11, proof: 'execution-request-projection' },
+      cliMetadata: { argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.execution-request.json'] },
+    });
+
+    const assembly = await assembleRickyTurnContext(normalized);
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-issue-11-execution-request',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const metadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(executionRequest).toMatchObject({
+      assistantId: 'ricky',
+      turnId: 'req-issue-11-execution-request',
+      message: {
+        id: 'msg-issue-11-execution-request',
+        text: 'generate a workflow that proves execution request projection keeps Ricky request context',
+      },
+      instructions: {
+        responseStyle: { preferMarkdown: true },
+      },
+      context: {
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-summary',
+            text: expect.stringContaining('source: cli'),
+            metadata: expect.objectContaining({ source: 'ricky-local', importance: 'high' }),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-spec-text',
+            text: normalized.spec,
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-structured-spec',
+            text: JSON.stringify(structuredSpec, null, 2),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-source-metadata',
+            text: JSON.stringify(
+              {
+                cli: {
+                  argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.execution-request.json'],
+                  specFile: 'specs/issue-11.execution-request.json',
+                },
+              },
+              null,
+              2,
+            ),
+          }),
+        ]),
+      },
+    });
+    expect(metadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expect(metadata?.ricky).toMatchObject({
+      requestId: 'req-issue-11-execution-request',
+      source: 'cli',
+      invocationRoot: '/repo/execution-request',
+      mode: 'both',
+      stageMode: 'run',
+      specPath: 'specs/issue-11.execution-request.json',
+      metadata: {
+        issue: 11,
+        proof: 'execution-request-projection',
+        argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.execution-request.json'],
+      },
+    });
+    expect(metadata?.ricky?.structuredSpec).toEqual(structuredSpec);
+    expect(metadata?.ricky?.sourceMetadata).toEqual({
+      cli: {
+        argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.execution-request.json'],
+        specFile: 'specs/issue-11.execution-request.json',
+      },
+    });
   });
 
   it('round-trips every handoff surface through normalizeRequest and the real turn-context-backed adapter', async () => {
