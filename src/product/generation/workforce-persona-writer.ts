@@ -1440,6 +1440,7 @@ export function detectSpecIntentMismatch(
   const mismatches: string[] = [];
   const description = specIntentText(spec);
   if (!description) return mismatches;
+  const descriptionLength = spec.description?.length ?? 0;
   const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
 
   // `(?<!\w)` instead of a leading `\b` so the `@agent-relay/...` token
@@ -1461,31 +1462,35 @@ export function detectSpecIntentMismatch(
     }
   }
 
-  if (description.length > 4_000) {
+  if (descriptionLength > 4_000) {
     const stepInvocationCount = facts.stepInvocationCount;
     if (stepInvocationCount < 4) {
       mismatches.push(
-        `spec is ${Math.round(description.length / 1024)} KB but the workflow declares only ${stepInvocationCount} top-level .step(...) calls — likely a "master-executor stub" with the real impl deferred to nested-string child workflows that ricky cannot validate end-to-end`,
+        `spec description is ${Math.round(descriptionLength / 1024)} KB but the workflow declares only ${stepInvocationCount} top-level .step(...) calls — likely a "master-executor stub" with the real impl deferred to nested-string child workflows that ricky cannot validate end-to-end`,
       );
     }
   }
 
   const declaredWorktree = extractDeclaredWorktree(description);
   if (declaredWorktree) {
-    const commandText = facts.stepCommands.map((step) => step.command).join('\n');
-    if (!workflowContent.includes(declaredWorktree.path)) {
+    const usage = analyzeDeclaredWorktreeUsage(facts.stepCommands, declaredWorktree);
+    if (!usage.mentionsPath) {
       mismatches.push(
-        `spec declares Worktree: ${declaredWorktree.path} but the workflow source does not contain that exact worktree path`,
+        `spec declares Worktree: ${declaredWorktree.path} but no executable workflow step command contains that exact worktree path`,
       );
     }
-    if (!hasGitWorktreeAddCommand(commandText)) {
+    if (!usage.hasWorktreeAdd) {
       mismatches.push(
         `spec declares Worktree: ${declaredWorktree.path} but the workflow has no runtime git worktree add setup step before implementation`,
       );
-    }
-    if (declaredWorktree.branch && !workflowContent.includes(declaredWorktree.branch)) {
+    } else if (usage.firstImplementationUseBeforeSetup) {
       mismatches.push(
-        `spec declares Target branch: ${declaredWorktree.branch} but the workflow source does not contain that exact branch name`,
+        `spec declares Worktree: ${declaredWorktree.path} but ${usage.firstImplementationUseBeforeSetup.stepName} uses the declared worktree before a runtime git worktree add setup step`,
+      );
+    }
+    if (declaredWorktree.branch && !usage.mentionsBranch) {
+      mismatches.push(
+        `spec declares Target branch: ${declaredWorktree.branch} but no executable workflow step command contains that exact branch name`,
       );
     }
   }
@@ -1531,6 +1536,7 @@ interface TextSpan {
 interface WorkflowStepCommand {
   stepName: string;
   command: string;
+  sourceStart: number;
 }
 
 interface SpecIntentLike {
@@ -1688,7 +1694,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     stepInvocationCount,
     hasNonGithubStep,
     githubExecutorRunPropertySpans,
-    stepCommands,
+    stepCommands: [...stepCommands].sort((left, right) => left.sourceStart - right.sourceStart),
   };
 
   function isGithubExecutorExpression(node: ts.Node | undefined): boolean {
@@ -1823,6 +1829,9 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     return {
       stepName: rawStepName && ts.isStringLiteralLike(rawStepName) ? rawStepName.text : '(unknown-step)',
       command,
+      sourceStart: ts.isPropertyAccessExpression(node.expression)
+        ? node.expression.name.getStart(workflowSourceFile)
+        : node.getStart(workflowSourceFile),
     };
   }
 }
@@ -1875,8 +1884,65 @@ function extractDeclaredWorktree(text: string): { path: string; branch?: string 
   };
 }
 
+function analyzeDeclaredWorktreeUsage(
+  commands: readonly WorkflowStepCommand[],
+  declaredWorktree: { path: string; branch?: string },
+): {
+  mentionsPath: boolean;
+  mentionsBranch: boolean;
+  hasWorktreeAdd: boolean;
+  firstImplementationUseBeforeSetup?: WorkflowStepCommand;
+} {
+  let mentionsPath = false;
+  let mentionsBranch = declaredWorktree.branch === undefined;
+  let hasWorktreeAdd = false;
+  let firstImplementationUseBeforeSetup: WorkflowStepCommand | undefined;
+
+  for (const step of commands) {
+    const stepHasWorktreeAdd = hasGitWorktreeAddCommand(step.command);
+    const stepMentionsPath = commandMentionsExecutableToken(step.command, declaredWorktree.path);
+    const stepMentionsBranch = declaredWorktree.branch
+      ? commandMentionsExecutableToken(step.command, declaredWorktree.branch)
+      : false;
+
+    mentionsPath ||= stepMentionsPath;
+    mentionsBranch ||= stepMentionsBranch;
+
+    if (
+      !hasWorktreeAdd &&
+      !stepHasWorktreeAdd &&
+      (stepMentionsPath || stepMentionsBranch) &&
+      isImplementationOrTestStep(step)
+    ) {
+      firstImplementationUseBeforeSetup ??= step;
+    }
+
+    if (stepHasWorktreeAdd) {
+      hasWorktreeAdd = true;
+    }
+  }
+
+  return {
+    mentionsPath,
+    mentionsBranch,
+    hasWorktreeAdd,
+    ...(firstImplementationUseBeforeSetup ? { firstImplementationUseBeforeSetup } : {}),
+  };
+}
+
 function hasGitWorktreeAddCommand(commandText: string): boolean {
-  return /\bgit(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+))?\s+worktree\s+add\b/.test(commandText.replace(/\\\n/g, ' '));
+  const words = shellWords(commandText);
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] !== 'git') continue;
+    let cursor = index + 1;
+    while (cursor < words.length && words[cursor].startsWith('-')) {
+      cursor += words[cursor] === '-C' ? 2 : 1;
+    }
+    if (words[cursor] === 'worktree' && words[cursor + 1] === 'add') {
+      return true;
+    }
+  }
+  return false;
 }
 
 function findInvalidFileExistenceGateCommands(
@@ -1893,7 +1959,7 @@ function findInvalidFileExistenceGateCommands(
         invalid.push(`${step.stepName} uses test -f on glob path ${testedPath}`);
       } else if (normalizedWorktree && normalizedPath === normalizedWorktree) {
         invalid.push(`${step.stepName} uses test -f on declared worktree directory ${testedPath}`);
-      } else if (unquotedPath.endsWith('/')) {
+      } else if (unquotedPath.endsWith('/') || isDirectoryLookingPath(normalizedPath)) {
         invalid.push(`${step.stepName} uses test -f on directory-looking path ${testedPath}`);
       }
     }
@@ -1903,8 +1969,9 @@ function findInvalidFileExistenceGateCommands(
 
 function extractTestFilePaths(command: string): string[] {
   const paths: string[] = [];
+  const executableText = shellExecutableText(command);
   const testFilePattern = /(?:^|[\s;&|()])(?:test\s+-f|\[\[?\s+-f)\s+((?:"[^"]*"|'[^']*'|[^\s;&|\]]+))/g;
-  for (const match of command.matchAll(testFilePattern)) {
+  for (const match of executableText.matchAll(testFilePattern)) {
     paths.push(match[1]);
   }
   return paths;
@@ -1927,6 +1994,131 @@ function stripTrailingSlashes(value: string): string {
 
 function containsShellGlob(value: string): boolean {
   return /[*?\[]/.test(value);
+}
+
+function isDirectoryLookingPath(value: string): boolean {
+  if (!value || /[$`{}]/.test(value)) return false;
+  const segments = value.split(/[\\/]+/).filter(Boolean);
+  if (segments.length < 2) return false;
+  const lastSegment = segments[segments.length - 1];
+  return Boolean(lastSegment && lastSegment !== '.' && lastSegment !== '..' && !lastSegment.includes('.'));
+}
+
+function commandMentionsExecutableToken(command: string, expectedToken: string): boolean {
+  const normalizedExpected = stripTrailingSlashes(expectedToken);
+  return shellWords(command).some((word) => {
+    const normalizedWord = stripTrailingSlashes(word);
+    return normalizedWord === normalizedExpected || normalizedWord.includes(normalizedExpected);
+  });
+}
+
+function isImplementationOrTestStep(step: WorkflowStepCommand): boolean {
+  return /\b(impl|implement|test|verify|valid|build|typecheck|lint|repair|fix|run|execute|review|signoff)\b/i.test(step.stepName);
+}
+
+function shellExecutableText(command: string): string {
+  return shellExecutableLines(command).join('\n');
+}
+
+function shellExecutableLines(command: string): string[] {
+  const lines = command.replace(/\\\r?\n/g, ' ').split(/\r?\n/);
+  const executableLines: string[] = [];
+  const heredocDelimiters: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, '');
+    if (heredocDelimiters.length > 0) {
+      if (line.trim() === heredocDelimiters[0]) {
+        heredocDelimiters.shift();
+      }
+      continue;
+    }
+
+    const executableLine = stripShellLineComment(line);
+    executableLines.push(executableLine);
+    heredocDelimiters.push(...extractHeredocDelimiters(executableLine));
+  }
+
+  return executableLines;
+}
+
+function stripShellLineComment(line: string): string {
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '#' && (index === 0 || /\s/.test(line[index - 1]))) {
+      return line.slice(0, index);
+    }
+  }
+  return line;
+}
+
+function extractHeredocDelimiters(line: string): string[] {
+  const delimiters: string[] = [];
+  const heredocPattern = /<<-?\s*(?:\\?(['"]?)([A-Za-z_][A-Za-z0-9_./-]*)\1)/g;
+  for (const match of line.matchAll(heredocPattern)) {
+    delimiters.push(match[2]);
+  }
+  return delimiters;
+}
+
+function shellWords(command: string): string[] {
+  const words: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+
+  for (const char of shellExecutableText(command)) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char) || ';|&()<>'.includes(char)) {
+      if (current) {
+        words.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) words.push(current);
+  return words;
 }
 
 function propertyNameText(name: ts.PropertyName): string | undefined {
