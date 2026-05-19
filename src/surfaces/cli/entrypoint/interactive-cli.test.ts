@@ -1147,7 +1147,9 @@ describe('runInteractiveCli', () => {
 
     expect(result.ok).toBe(false);
     expect(result.guidance.join('\n')).toMatch(/Generation failed/i);
-    expect(result.guidance.join('\n')).toMatch(/provider offline/i);
+    expect(result.guidance.join('\n')).toMatch(/Cloud generation failed before validation completed/i);
+    expect(result.guidance.join('\n')).toMatch(/request ID/i);
+    expect(result.guidance.join('\n')).not.toMatch(/provider offline/i);
   });
 
   it('in both mode, runs cloud after a successful local pass when cloud context exists', async () => {
