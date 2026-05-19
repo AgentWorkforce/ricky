@@ -19,14 +19,26 @@ const VALID_PROVIDER_TYPES = new Set<string>(PROVIDER_TYPES);
 
 export function validateAuthContext(auth: CloudAuthContext | undefined): AuthValidationResult {
   if (!auth || typeof auth.token !== 'string' || !auth.token.trim()) {
-    return { ok: false, error: 'Missing or empty auth token.', status: 401 };
+    return {
+      ok: false,
+      error: 'Missing or empty auth token.',
+      status: 401,
+      code: 'missing-auth-token',
+      path: 'auth.token',
+    };
   }
 
   if (
     auth.tokenType !== undefined &&
     (typeof auth.tokenType !== 'string' || !VALID_TOKEN_TYPES.has(auth.tokenType))
   ) {
-    return { ok: false, error: 'Invalid auth token type.', status: 400 };
+    return {
+      ok: false,
+      error: 'Invalid auth token type.',
+      status: 400,
+      code: 'invalid-auth-token-type',
+      path: 'auth.tokenType',
+    };
   }
 
   return {
@@ -43,22 +55,46 @@ export function validateWorkspaceContext(
   options: { requireProject?: boolean } = {},
 ): WorkspaceScopingResult {
   if (!workspace || typeof workspace.workspaceId !== 'string' || !workspace.workspaceId.trim()) {
-    return { ok: false, error: 'Missing or empty workspace ID.', status: 400 };
+    return {
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    };
   }
 
   if (workspace.projectId !== undefined && (typeof workspace.projectId !== 'string' || !workspace.projectId.trim())) {
-    return { ok: false, error: 'Missing or empty project ID.', status: 400 };
+    return {
+      ok: false,
+      error: 'Missing or empty project ID.',
+      status: 400,
+      code: 'invalid-project-id',
+      path: 'workspace.projectId',
+    };
   }
 
   if (
     workspace.environment !== undefined &&
     (typeof workspace.environment !== 'string' || !workspace.environment.trim())
   ) {
-    return { ok: false, error: 'Missing or empty environment.', status: 400 };
+    return {
+      ok: false,
+      error: 'Missing or empty environment.',
+      status: 400,
+      code: 'invalid-environment',
+      path: 'workspace.environment',
+    };
   }
 
   if (options.requireProject && !workspace.projectId?.trim()) {
-    return { ok: false, error: 'Missing or empty project ID.', status: 400 };
+    return {
+      ok: false,
+      error: 'Missing or empty project ID.',
+      status: 400,
+      code: 'invalid-project-id',
+      path: 'workspace.projectId',
+    };
   }
 
   return {
@@ -73,7 +109,13 @@ export function validateRequestMode(mode: CloudRequestMode | string | undefined)
   const resolvedMode = mode === undefined ? 'cloud' : mode;
 
   if (typeof resolvedMode !== 'string' || !VALID_REQUEST_MODES.has(resolvedMode)) {
-    return { ok: false, error: 'Invalid request mode.', status: 400 };
+    return {
+      ok: false,
+      error: 'Invalid request mode.',
+      status: 400,
+      code: 'invalid-mode',
+      path: 'body.mode',
+    };
   }
 
   return { ok: true, mode: resolvedMode as CloudRequestMode };
@@ -88,6 +130,8 @@ export function validateProviderConnectionState(
       ok: false,
       error: 'Invalid required provider.',
       status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
     };
   }
 
@@ -96,6 +140,8 @@ export function validateProviderConnectionState(
       ok: false,
       error: `Missing ${requiredProvider} provider connection state.`,
       status: 409,
+      code: 'missing-provider-connection',
+      path: 'providerConnection',
     };
   }
 
@@ -104,6 +150,8 @@ export function validateProviderConnectionState(
       ok: false,
       error: 'Invalid provider connection state.',
       status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
     };
   }
 
@@ -112,6 +160,8 @@ export function validateProviderConnectionState(
       ok: false,
       error: `Provider connection mismatch: expected ${requiredProvider}.`,
       status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
     };
   }
 
@@ -120,6 +170,8 @@ export function validateProviderConnectionState(
       ok: false,
       error: 'Invalid provider connection state.',
       status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
     };
   }
 
@@ -128,6 +180,8 @@ export function validateProviderConnectionState(
       ok: false,
       error: `${requiredProvider} provider is not connected.`,
       status: 409,
+      code: 'provider-not-connected',
+      path: 'providerConnection',
     };
   }
 
