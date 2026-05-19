@@ -236,6 +236,28 @@ describe('workflow health analytics', () => {
     ]);
   });
 
+  it('uses the latest available pattern config when newer evidence omits optional config', () => {
+    const report = analyzeHealth({
+      runs: [
+        record(run({ runId: 'shape-1', startedAt: '2026-04-26T00:00:01.000Z' }), {
+          config: { pattern: 'pipeline' },
+          workflowShape: {
+            steps: Array.from({ length: 6 }, (_, index) => ({ id: `independent-${index}` })),
+          },
+        }),
+        record(run({ runId: 'shape-2', startedAt: '2026-04-26T00:00:02.000Z' })),
+      ],
+    });
+
+    expect(report.findings).toEqual([
+      expect.objectContaining({
+        category: 'pattern_choice',
+        affectedRunIds: ['shape-1', 'shape-2'],
+        evidence: [expect.objectContaining({ value: 6, threshold: 5 })],
+      }),
+    ]);
+  });
+
   it('detects flaky workflows and duration outliers', () => {
     const report = analyzeHealth({
       runs: [

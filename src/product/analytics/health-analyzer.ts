@@ -264,12 +264,12 @@ function oversizedStepFindings(bucket: WorkflowBucket): HealthFinding[] {
 
 function patternChoiceFindings(bucket: WorkflowBucket): HealthFinding[] {
   const findings: HealthFinding[] = [];
-  const latestRun = bucket.runs.at(-1);
-  if (!latestRun?.record.config?.pattern) {
+  const latestRun = latestRunWithPattern(bucket.runs);
+  if (!latestRun) {
     return findings;
   }
 
-  const pattern = latestRun.record.config.pattern;
+  const pattern = latestRun.record.config!.pattern!;
   const shape = latestRun.record.workflowShape ?? shapeFromMetadata(latestRun.record.config);
   const failureClasses = bucket.runs.map((run) => run.classification.failureClass);
   const deadlockCount = failureClasses.filter((failureClass) => failureClass === FailureClass.Deadlock).length;
@@ -554,6 +554,15 @@ function latestPattern(runs: ClassifiedRun[]): SwarmPattern | undefined {
   for (let i = runs.length - 1; i >= 0; i--) {
     if (runs[i].record.config?.pattern) {
       return runs[i].record.config!.pattern;
+    }
+  }
+  return undefined;
+}
+
+function latestRunWithPattern(runs: ClassifiedRun[]): ClassifiedRun | undefined {
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (runs[i].record.config?.pattern) {
+      return runs[i];
     }
   }
   return undefined;
