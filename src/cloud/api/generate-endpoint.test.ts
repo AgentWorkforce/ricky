@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import type {
   CloudExecutor,
+  CloudGenerateEndpointOptions,
   CloudGenerateRequest,
   CloudGenerateResponse,
   CloudGenerateResult,
 } from './index.js';
 import { CLOUD_GENERATE_METHOD, CLOUD_GENERATE_ROUTE, handleCloudGenerate } from './index.js';
+import type { AuthorizedWorkspaceScope } from '../auth/types.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -21,9 +23,13 @@ const DEFAULT_TEST_ARTIFACT = {
   content: '// generated',
 };
 
-function testOptions(executor?: CloudExecutor) {
+function testOptions(
+  executor?: CloudExecutor,
+  authorizedWorkspaceScope: AuthorizedWorkspaceScope = { workspaceId: 'ws-001' },
+): CloudGenerateEndpointOptions {
   return {
     executor,
+    authorizedWorkspaceScope,
     requestIdFactory: () => TEST_REQUEST_ID,
   };
 }
@@ -46,6 +52,10 @@ function mockExecutor(
   const artifacts = Object.prototype.hasOwnProperty.call(result ?? {}, 'artifacts')
     ? result?.artifacts ?? []
     : [DEFAULT_TEST_ARTIFACT];
+  const validation: CloudGenerateResult['validation'] =
+    Object.prototype.hasOwnProperty.call(result ?? {}, 'validation')
+      ? result?.validation
+      : { ok: true, status: 'passed', issues: [] };
   return {
     calls,
     async generate(request: CloudGenerateRequest): Promise<CloudGenerateResult> {
@@ -54,7 +64,7 @@ function mockExecutor(
         artifacts,
         warnings: result?.warnings ?? [],
         assumptions: result?.assumptions,
-        validation: result?.validation,
+        validation,
         runReceipt: result?.runReceipt,
         generationMetadata: result?.generationMetadata,
         followUpActions: result?.followUpActions ?? [],
@@ -80,6 +90,7 @@ describe('CLOUD_GENERATE_ROUTE', () => {
   it('exposes the correct route path', () => {
     expect(CLOUD_GENERATE_ROUTE).toBe('/api/v1/ricky/workflows/generate');
     expect(CLOUD_GENERATE_ROUTE.startsWith('/api/v1/ricky/')).toBe(true);
+    expect(CLOUD_GENERATE_ROUTE.includes('/workflows/')).toBe(true);
     expect(CLOUD_GENERATE_ROUTE.endsWith('/workflows/generate')).toBe(true);
   });
 
@@ -185,6 +196,80 @@ describe('handleCloudGenerate — validation', () => {
     expect(response.status).toBe(400);
     expect(response.validation.issues[0].path).toBe('body.spec');
   });
+
+  it('rejects requests when no authorized workspace scope is supplied', async () => {
+    const executor = mockExecutor();
+    const response = await handleCloudGenerate(validRequest(), {
+      executor,
+      requestIdFactory: () => TEST_REQUEST_ID,
+    });
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(403);
+    expect(response.validation).toEqual({
+      ok: false,
+      status: 'failed',
+      issues: [
+        {
+          code: 'missing-authorized-workspace-scope',
+          message: 'Missing authorized workspace scope.',
+          path: 'workspace.workspaceId',
+        },
+      ],
+    });
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects cross-workspace requests before executor invocation', async () => {
+    const executor = mockExecutor();
+    const response = await handleCloudGenerate(
+      validRequest({ workspace: { workspaceId: 'ws-other' } }),
+      testOptions(executor, { workspaceId: 'ws-001' }),
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(403);
+    expect(response.validation.issues[0]).toEqual({
+      code: 'cross-workspace-access',
+      message: 'Cross-workspace access denied.',
+      path: 'workspace.workspaceId',
+    });
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects cross-project requests before executor invocation', async () => {
+    const executor = mockExecutor();
+    const response = await handleCloudGenerate(
+      validRequest({ workspace: { workspaceId: 'ws-001', projectId: 'proj-other' } }),
+      testOptions(executor, { workspaceId: 'ws-001', projectId: 'proj-allowed' }),
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(403);
+    expect(response.validation.issues[0]).toEqual({
+      code: 'cross-project-access',
+      message: 'Cross-project access denied.',
+      path: 'workspace.projectId',
+    });
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects cross-environment requests before executor invocation', async () => {
+    const executor = mockExecutor();
+    const response = await handleCloudGenerate(
+      validRequest({ workspace: { workspaceId: 'ws-001', environment: 'staging' } }),
+      testOptions(executor, { workspaceId: 'ws-001', environment: 'production' }),
+    );
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(403);
+    expect(response.validation.issues[0]).toEqual({
+      code: 'cross-environment-access',
+      message: 'Cross-environment access denied.',
+      path: 'workspace.environment',
+    });
+    expect(executor.calls).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -236,7 +321,14 @@ describe('handleCloudGenerate — success path', () => {
       workspace: { workspaceId: 'ws-prod', projectId: 'proj-001', environment: 'production' },
     });
 
-    await handleCloudGenerate(request, testOptions(executor));
+    await handleCloudGenerate(
+      request,
+      testOptions(executor, {
+        workspaceId: 'ws-prod',
+        projectId: 'proj-001',
+        environment: 'production',
+      }),
+    );
 
     expect(executor.calls).toHaveLength(1);
     expect(executor.calls[0].auth.token).toBe('my-token');
@@ -244,6 +336,29 @@ describe('handleCloudGenerate — success path', () => {
     expect(executor.calls[0].workspace.workspaceId).toBe('ws-prod');
     expect(executor.calls[0].workspace.projectId).toBe('proj-001');
     expect(executor.calls[0].workspace.environment).toBe('production');
+  });
+
+  it('passes only the resolved authorized workspace scope to the executor', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      workspace: { workspaceId: 'ws-prod' },
+    });
+
+    await handleCloudGenerate(
+      request,
+      testOptions(executor, {
+        workspaceId: 'ws-prod',
+        projectId: 'proj-authorized',
+        environment: 'production',
+      }),
+    );
+
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0].workspace).toEqual({
+      workspaceId: 'ws-prod',
+      projectId: 'proj-authorized',
+      environment: 'production',
+    });
   });
 
   it('passes spec, mode, and metadata through to the executor', async () => {
@@ -473,6 +588,60 @@ describe('handleCloudGenerate — success path', () => {
     expect(response.followUpActions[0]).toEqual({ action: 'revise-spec', label: 'Revise Spec' });
   });
 
+  it('does not claim validation passed when executor returns artifacts without validation', async () => {
+    const calls: CloudGenerateRequest[] = [];
+    const executor: CloudExecutor = {
+      async generate(request: CloudGenerateRequest): Promise<CloudGenerateResult> {
+        calls.push(request);
+        return {
+          artifacts: [
+            {
+              path: 'out/unvalidated-workflow.ts',
+              type: 'text/typescript',
+              content: '// generated without validation',
+            },
+          ],
+          warnings: [],
+          followUpActions: [{ action: 'review', label: 'Review' }],
+        };
+      },
+    };
+
+    const response = await handleCloudGenerate(validRequest(), testOptions(executor));
+
+    expect(calls).toHaveLength(1);
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(500);
+    expect(response.artifacts).toEqual([
+      {
+        path: 'out/unvalidated-workflow.ts',
+        type: 'text/typescript',
+        content: '// generated without validation',
+      },
+    ]);
+    expect(response.validation).toEqual({
+      ok: false,
+      status: 'skipped',
+      issues: [
+        {
+          code: 'missing-executor-validation',
+          message: 'Cloud generation returned artifacts without validation evidence.',
+          path: 'validation',
+        },
+      ],
+    });
+    expect(response.validation.status).not.toBe('passed');
+    expect(response.warnings[0]).toEqual({
+      severity: 'error',
+      message: 'Cloud generation returned artifacts without validation evidence.',
+    });
+    expect(response.followUpActions[0]).toEqual({
+      action: 'validate-artifacts',
+      label: 'Validate Artifacts',
+      description: 'Run the workflow artifact validator before accepting this generated bundle.',
+    });
+  });
+
   it('fails closed when executor produces no artifacts', async () => {
     const executor = mockExecutor({ artifacts: [] });
     const response = await handleCloudGenerate(validRequest(), testOptions(executor));
@@ -559,6 +728,7 @@ describe('handleCloudGenerate — error path', () => {
 describe('handleCloudGenerate — default executor', () => {
   it('fails closed with the default executor when no runtime is wired', async () => {
     const response = await handleCloudGenerate(validRequest(), {
+      authorizedWorkspaceScope: { workspaceId: 'ws-001' },
       requestIdFactory: () => TEST_REQUEST_ID,
     });
 
@@ -585,6 +755,7 @@ describe('handleCloudGenerate — default executor', () => {
   it('default executor suggests local run for mode=both', async () => {
     const request = validRequest({ body: { spec: 'test', mode: 'both' } });
     const response = await handleCloudGenerate(request, {
+      authorizedWorkspaceScope: { workspaceId: 'ws-001' },
       requestIdFactory: () => TEST_REQUEST_ID,
     });
 

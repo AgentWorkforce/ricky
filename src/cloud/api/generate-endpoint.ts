@@ -27,6 +27,8 @@ import type {
 } from './response-types.js';
 import type { WorkforcePersonaGenerationMetadata } from '../../product/generation/index.js';
 import { validateCloudRequest } from '../auth/request-validator.js';
+import { resolveAuthorizedWorkspaceScope } from '../auth/workspace-scoping.js';
+import type { AuthorizedWorkspaceScope } from '../auth/types.js';
 
 // ---------------------------------------------------------------------------
 // Route constant
@@ -110,6 +112,7 @@ interface ValidationFailure {
 
 interface ValidationSuccess {
   ok: true;
+  request: CloudGenerateRequest;
 }
 
 type ValidationResult = ValidationFailure | ValidationSuccess;
@@ -123,10 +126,6 @@ const VALID_GENERATION_MODES = new Set<CloudGenerationMode>([
   'generate-and-return-artifacts',
   'generate-and-run',
 ]);
-
-function passedValidation(): CloudValidationStatus {
-  return { ok: true, status: 'passed', issues: [] };
-}
 
 function missingGeneratedArtifactsValidation(
   validation: CloudValidationStatus | undefined,
@@ -154,6 +153,20 @@ function skippedValidation(): CloudValidationStatus {
   // Validation never ran (e.g., executor threw before producing a result).
   // Reporting `passed` would falsely claim the artifact bundle was checked.
   return { ok: false, status: 'skipped', issues: [] };
+}
+
+function missingExecutorValidation(): CloudValidationStatus {
+  return {
+    ok: false,
+    status: 'skipped',
+    issues: [
+      {
+        code: 'missing-executor-validation',
+        message: 'Cloud generation returned artifacts without validation evidence.',
+        path: 'validation',
+      },
+    ],
+  };
 }
 
 function notRequestedRunReceipt(requestId: string): CloudRunReceipt {
@@ -255,6 +268,13 @@ function missingGeneratedArtifactsWarning(): CloudWarning {
   };
 }
 
+function missingExecutorValidationWarning(): CloudWarning {
+  return {
+    severity: 'error',
+    message: 'Cloud generation returned artifacts without validation evidence.',
+  };
+}
+
 function warningsWithMissingArtifactBlocker(warnings: CloudWarning[]): CloudWarning[] {
   if (warnings.some((warning) => warning.severity === 'error')) {
     return warnings;
@@ -274,6 +294,23 @@ function followUpsWithRuntimeWiringAction(
       label: 'Wire Cloud Runtime',
       description: 'Connect a generation runtime that returns validated workflow artifacts.',
     },
+  ];
+}
+
+function followUpsWithValidationAction(
+  followUpActions: CloudFollowUpAction[],
+): CloudFollowUpAction[] {
+  if (followUpActions.some((action) => action.action === 'validate-artifacts')) {
+    return followUpActions;
+  }
+
+  return [
+    {
+      action: 'validate-artifacts',
+      label: 'Validate Artifacts',
+      description: 'Run the workflow artifact validator before accepting this generated bundle.',
+    },
+    ...followUpActions,
   ];
 }
 
@@ -347,6 +384,7 @@ function validationFailure(
 function validateRequest(
   request: CloudGenerateRequest,
   requestId: string,
+  authorizedWorkspaceScope: AuthorizedWorkspaceScope | undefined,
 ): ValidationResult {
   // Production wiring starts at the canonical Cloud request validator:
   // validateCloudRequest -> spec intake -> generation pipeline -> result mapping.
@@ -362,6 +400,32 @@ function validateRequest(
       cloudRequestResult.error,
       cloudRequestResult.code,
       cloudRequestResult.path,
+      request,
+    );
+  }
+
+  if (!authorizedWorkspaceScope) {
+    return validationFailure(
+      requestId,
+      403,
+      'Missing authorized workspace scope.',
+      'missing-authorized-workspace-scope',
+      'workspace.workspaceId',
+      request,
+    );
+  }
+
+  const scopedWorkspaceResult = resolveAuthorizedWorkspaceScope(
+    authorizedWorkspaceScope,
+    cloudRequestResult.workspace,
+  );
+  if (!scopedWorkspaceResult.ok) {
+    return validationFailure(
+      requestId,
+      scopedWorkspaceResult.status,
+      scopedWorkspaceResult.error,
+      scopedWorkspaceResult.code,
+      scopedWorkspaceResult.path,
       request,
     );
   }
@@ -389,7 +453,14 @@ function validateRequest(
     );
   }
 
-  return { ok: true };
+  return {
+    ok: true,
+    request: {
+      auth: cloudRequestResult.auth,
+      workspace: scopedWorkspaceResult.scope,
+      body: request.body,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +469,13 @@ function validateRequest(
 
 export interface CloudGenerateEndpointOptions {
   executor?: CloudExecutor;
+  /**
+   * Workspace scope resolved from the caller's verified token/session.
+   *
+   * The endpoint fails closed without this scope so executor work only starts
+   * after W3-01 authorization scoping has been applied.
+   */
+  authorizedWorkspaceScope?: AuthorizedWorkspaceScope;
   /** Override request ID generation for deterministic tests. */
   requestIdFactory?: () => string;
 }
@@ -419,33 +497,47 @@ export async function handleCloudGenerate(
   request: CloudGenerateRequest,
   options: CloudGenerateEndpointOptions = {},
 ): Promise<CloudGenerateResponse> {
-  const { executor = defaultCloudExecutor, requestIdFactory = generateRequestId } = options;
+  const {
+    executor = defaultCloudExecutor,
+    authorizedWorkspaceScope,
+    requestIdFactory = generateRequestId,
+  } = options;
   const requestId = requestIdFactory();
 
   // Validate
-  const validation = validateRequest(request, requestId);
+  const validation = validateRequest(request, requestId, authorizedWorkspaceScope);
   if (!validation.ok) {
     return validation.response;
   }
+  const scopedRequest = validation.request;
 
   // Execute
   try {
-    const result = await executor.generate(request);
+    const result = await executor.generate(scopedRequest);
     const producedArtifacts = result.artifacts.length > 0;
     const resultValidation = producedArtifacts
-      ? result.validation ?? passedValidation()
+      ? result.validation ?? missingExecutorValidation()
       : missingGeneratedArtifactsValidation(result.validation);
-    const validationPassed = resultValidation.ok !== false;
+    const validationPassed = resultValidation.ok === true && resultValidation.status === 'passed';
+    const missingValidationEvidence = producedArtifacts && result.validation === undefined;
     const artifacts = producedArtifacts
       ? appendGenerationMetadataArtifacts(result.artifacts, result.generationMetadata)
       : result.artifacts;
-    const generationMode = resolveGenerationMode(request.body.generationMode);
+    const generationMode = resolveGenerationMode(scopedRequest.body.generationMode);
     return {
       ok: validationPassed,
-      status: validationPassed ? 200 : result.validation?.ok === false ? 422 : 500,
+      status: validationPassed
+        ? 200
+        : result.validation?.ok === false && result.validation.status === 'failed'
+          ? 422
+          : 500,
       artifacts,
-      artifactBundle: artifactBundle(artifacts, request),
-      warnings: producedArtifacts ? result.warnings : warningsWithMissingArtifactBlocker(result.warnings),
+      artifactBundle: artifactBundle(artifacts, scopedRequest),
+      warnings: producedArtifacts
+        ? missingValidationEvidence
+          ? [missingExecutorValidationWarning(), ...result.warnings]
+          : result.warnings
+        : warningsWithMissingArtifactBlocker(result.warnings),
       assumptions: result.assumptions ?? [],
       validation: resultValidation,
       runReceipt: {
@@ -454,7 +546,9 @@ export async function handleCloudGenerate(
         requestId,
       },
       followUpActions: producedArtifacts
-        ? result.followUpActions
+        ? missingValidationEvidence
+          ? followUpsWithValidationAction(result.followUpActions)
+          : result.followUpActions
         : followUpsWithRuntimeWiringAction(result.followUpActions),
       requestId,
     };
@@ -463,11 +557,11 @@ export async function handleCloudGenerate(
       ok: false,
       status: 500,
       artifacts: [],
-      artifactBundle: artifactBundle([], request),
+      artifactBundle: artifactBundle([], scopedRequest),
       warnings: [executorFailureWarning(requestId)],
       assumptions: [],
       validation: skippedValidation(),
-      runReceipt: defaultRunReceipt(requestId, resolveGenerationMode(request.body.generationMode)),
+      runReceipt: defaultRunReceipt(requestId, resolveGenerationMode(scopedRequest.body.generationMode)),
       followUpActions: [
         { action: 'retry', label: 'Retry', description: 'Retry the Cloud generate request.' },
       ],

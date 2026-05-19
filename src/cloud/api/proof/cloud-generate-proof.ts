@@ -18,6 +18,7 @@ import type {
   CloudGenerateResult,
 } from '../index.js';
 import { handleCloudGenerate } from '../index.js';
+import type { AuthorizedWorkspaceScope } from '../../auth/types.js';
 
 // ---------------------------------------------------------------------------
 // Proof types
@@ -68,9 +69,13 @@ const DEFAULT_PROOF_ARTIFACT = {
   content: '// generated',
 };
 
-function proofOptions(executor?: CloudExecutor) {
+function proofOptions(
+  executor?: CloudExecutor,
+  authorizedWorkspaceScope: AuthorizedWorkspaceScope = { workspaceId: 'ws-proof-001' },
+) {
   return {
     executor,
+    authorizedWorkspaceScope,
     requestIdFactory: () => PROOF_REQUEST_ID,
   };
 }
@@ -93,6 +98,10 @@ function mockExecutor(
   const artifacts = Object.prototype.hasOwnProperty.call(result ?? {}, 'artifacts')
     ? result?.artifacts ?? []
     : [DEFAULT_PROOF_ARTIFACT];
+  const validation: CloudGenerateResult['validation'] =
+    Object.prototype.hasOwnProperty.call(result ?? {}, 'validation')
+      ? result?.validation
+      : { ok: true, status: 'passed', issues: [] };
   return {
     calls,
     async generate(request: CloudGenerateRequest): Promise<CloudGenerateResult> {
@@ -100,6 +109,7 @@ function mockExecutor(
       return {
         artifacts,
         warnings: result?.warnings ?? [],
+        validation,
         followUpActions: result?.followUpActions ?? [],
       };
     },
@@ -325,7 +335,7 @@ export function getCloudProofCases(): CloudProofCase[] {
           validRequest({
             workspace: { workspaceId: 'ws-prod-42', environment: 'production' },
           }),
-          proofOptions(executor),
+          proofOptions(executor, { workspaceId: 'ws-prod-42' }),
         );
 
         const req = executor.calls[0];
@@ -384,6 +394,7 @@ export function getCloudProofCases(): CloudProofCase[] {
         'follow-up actions tell the caller to wire the real runtime.',
       async evaluate() {
         const response = await handleCloudGenerate(validRequest(), {
+          authorizedWorkspaceScope: { workspaceId: 'ws-proof-001' },
           requestIdFactory: () => PROOF_REQUEST_ID,
         });
 
