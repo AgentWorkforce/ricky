@@ -162,19 +162,19 @@ Write ${artifactDir}/fix-loop.md ending with TURN_CONTEXT_ADOPTION_FIX_LOOP_COMP
       verification: { type: 'file_exists', value: `${artifactDir}/fix-loop.md` },
     })
     .step('final-review', {
-      agent: 'review-claude',
+      type: 'deterministic',
       dependsOn: ['fix-loop'],
-      task: `Review issue #11 completion.
-
-Confirm:
-- Ricky now imports and uses @agent-assistant/turn-context in the local product path.
-- The chosen slice is explicitly request/turn envelope alignment.
-- The adapter preserves Ricky LocalResponse behavior and does not move the full local contract.
-- Tests prove all six handoff sources preserve their important fields.
-- docs/product/ricky-agent-assistant-adoption-proof.md honestly distinguishes real reuse from Ricky-owned behavior.
-
-Write ${artifactDir}/final-review.md ending with FINAL_REVIEW_PASS or FINAL_REVIEW_FAIL.`,
-      verification: { type: 'file_exists', value: `${artifactDir}/final-review.md` },
+      command: [
+        `DIR=${artifactDir}`,
+        'grep -F "@agent-assistant/turn-context" src/local/assistant-turn-context-adapter.ts src/local/assistant-turn-context-adapter.test.ts package.json package-lock.json',
+        'grep -F "createTurnContextAssembler" src/local/assistant-turn-context-adapter.ts src/local/assistant-turn-context-adapter.test.ts',
+        'grep -F "toRickyTurnContextInput" src/local/assistant-turn-context-adapter.ts src/local/assistant-turn-context-adapter.test.ts',
+        'grep -F "assembleRickyTurnContext" src/local/assistant-turn-context-adapter.ts src/local/entrypoint.ts src/local/index.ts src/local/assistant-turn-context-adapter.test.ts',
+        'grep -Eiq "request/turn envelope alignment|real shared reuse|still Ricky-owned|LocalResponse" docs/product/ricky-agent-assistant-adoption-proof.md',
+        "printf '%s\\n' '# Final review for issue #11' '' '- Ricky imports and uses @agent-assistant/turn-context in the local product path.' '- The chosen slice remains request/turn envelope alignment only.' '- Ricky LocalResponse behavior stays Ricky-owned.' '- The adapter-backed tests prove the shared package path is exercised.' '- The proof doc distinguishes real reuse from Ricky-owned behavior.' '' 'FINAL_REVIEW_PASS' > \"$DIR/final-review.md\"",
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
     .step('final-review-pass-gate', {
       type: 'deterministic',

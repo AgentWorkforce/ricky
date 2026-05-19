@@ -1,3 +1,4 @@
+import * as turnContextPackage from '@agent-assistant/turn-context';
 import { createTurnContextAssembler, toExecutionRequest } from '@agent-assistant/turn-context';
 import { describe, expect, it } from 'vitest';
 
@@ -66,12 +67,26 @@ describe('Ricky turn-context adapter', () => {
     });
 
     const assembly = await assembleRickyTurnContext(normalized);
+    const packageBackedAssembly = await turnContextPackage
+      .createTurnContextAssembler()
+      .assemble(toRickyTurnContextInput(normalized));
     const assemblyMetadata = assembly.metadata as
       | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
       | undefined;
 
+    expect(turnContextPackage.createTurnContextAssembler).toBe(createTurnContextAssembler);
     expect(assembly.assistantId).toBe('ricky');
     expect(assembly.turnId).toBe('req-production-turn-context-adapter');
+    expect(packageBackedAssembly).toMatchObject({
+      assistantId: 'ricky',
+      turnId: 'req-production-turn-context-adapter',
+      context: {
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ id: 'enrichment-ricky-request-summary' }),
+          expect.objectContaining({ id: 'enrichment-ricky-spec-text' }),
+        ]),
+      },
+    });
     expect(assemblyMetadata?.adapter).toMatchObject({
       name: 'ricky-local-turn-context-adapter',
       package: '@agent-assistant/turn-context',
