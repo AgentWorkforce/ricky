@@ -128,6 +128,24 @@ function passedValidation(): CloudValidationStatus {
   return { ok: true, status: 'passed', issues: [] };
 }
 
+function missingGeneratedArtifactsValidation(
+  validation: CloudValidationStatus | undefined,
+): CloudValidationStatus {
+  const issues = validation?.ok === false ? validation.issues : [];
+  return {
+    ok: false,
+    status: 'failed',
+    issues: [
+      ...issues,
+      {
+        code: 'missing-generated-artifacts',
+        message: 'Cloud generation produced no workflow artifacts.',
+        path: 'artifacts',
+      },
+    ],
+  };
+}
+
 function failedValidation(code: string, message: string, path: string): CloudValidationStatus {
   return { ok: false, status: 'failed', issues: [{ code, message, path }] };
 }
@@ -228,6 +246,35 @@ function executorFailureWarning(requestId: string): CloudWarning {
     severity: 'error',
     message: `Cloud generation failed before validation completed. Retry the request or contact support with request ID ${requestId}.`,
   };
+}
+
+function missingGeneratedArtifactsWarning(): CloudWarning {
+  return {
+    severity: 'error',
+    message: 'Cloud generation produced no workflow artifacts; the generation runtime may not be wired.',
+  };
+}
+
+function warningsWithMissingArtifactBlocker(warnings: CloudWarning[]): CloudWarning[] {
+  if (warnings.some((warning) => warning.severity === 'error')) {
+    return warnings;
+  }
+  return [missingGeneratedArtifactsWarning(), ...warnings];
+}
+
+function followUpsWithRuntimeWiringAction(
+  followUpActions: CloudFollowUpAction[],
+): CloudFollowUpAction[] {
+  if (followUpActions.length > 0) {
+    return followUpActions;
+  }
+  return [
+    {
+      action: 'wire-runtime',
+      label: 'Wire Cloud Runtime',
+      description: 'Connect a generation runtime that returns validated workflow artifacts.',
+    },
+  ];
 }
 
 function describeSpec(spec: CloudGenerateRequest['body']['spec']): string {
@@ -384,16 +431,21 @@ export async function handleCloudGenerate(
   // Execute
   try {
     const result = await executor.generate(request);
-    const resultValidation = result.validation ?? passedValidation();
+    const producedArtifacts = result.artifacts.length > 0;
+    const resultValidation = producedArtifacts
+      ? result.validation ?? passedValidation()
+      : missingGeneratedArtifactsValidation(result.validation);
     const validationPassed = resultValidation.ok !== false;
-    const artifacts = appendGenerationMetadataArtifacts(result.artifacts, result.generationMetadata);
+    const artifacts = producedArtifacts
+      ? appendGenerationMetadataArtifacts(result.artifacts, result.generationMetadata)
+      : result.artifacts;
     const generationMode = resolveGenerationMode(request.body.generationMode);
     return {
       ok: validationPassed,
-      status: validationPassed ? 200 : 422,
+      status: validationPassed ? 200 : result.validation?.ok === false ? 422 : 500,
       artifacts,
       artifactBundle: artifactBundle(artifacts, request),
-      warnings: result.warnings,
+      warnings: producedArtifacts ? result.warnings : warningsWithMissingArtifactBlocker(result.warnings),
       assumptions: result.assumptions ?? [],
       validation: resultValidation,
       runReceipt: {
@@ -401,7 +453,9 @@ export async function handleCloudGenerate(
         ...result.runReceipt,
         requestId,
       },
-      followUpActions: result.followUpActions,
+      followUpActions: producedArtifacts
+        ? result.followUpActions
+        : followUpsWithRuntimeWiringAction(result.followUpActions),
       requestId,
     };
   } catch {

@@ -15,6 +15,12 @@ import { CLOUD_GENERATE_METHOD, CLOUD_GENERATE_ROUTE, handleCloudGenerate } from
 /** Deterministic request ID for test assertions. */
 const TEST_REQUEST_ID = 'ricky-cloud-test-000';
 
+const DEFAULT_TEST_ARTIFACT = {
+  path: 'out/workflow.ts',
+  type: 'text/typescript',
+  content: '// generated',
+};
+
 function testOptions(executor?: CloudExecutor) {
   return {
     executor,
@@ -37,12 +43,15 @@ function mockExecutor(
   result?: Partial<CloudGenerateResult>,
 ): CloudExecutor & { calls: CloudGenerateRequest[] } {
   const calls: CloudGenerateRequest[] = [];
+  const artifacts = Object.prototype.hasOwnProperty.call(result ?? {}, 'artifacts')
+    ? result?.artifacts ?? []
+    : [DEFAULT_TEST_ARTIFACT];
   return {
     calls,
     async generate(request: CloudGenerateRequest): Promise<CloudGenerateResult> {
       calls.push(request);
       return {
-        artifacts: result?.artifacts ?? [],
+        artifacts,
         warnings: result?.warnings ?? [],
         assumptions: result?.assumptions,
         validation: result?.validation,
@@ -71,6 +80,7 @@ describe('CLOUD_GENERATE_ROUTE', () => {
   it('exposes the correct route path', () => {
     expect(CLOUD_GENERATE_ROUTE).toBe('/api/v1/ricky/workflows/generate');
     expect(CLOUD_GENERATE_ROUTE.startsWith('/api/v1/ricky/')).toBe(true);
+    expect(CLOUD_GENERATE_ROUTE.endsWith('/workflows/generate')).toBe(true);
   });
 
   it('exposes the POST method for transport mounting', () => {
@@ -460,15 +470,41 @@ describe('handleCloudGenerate — success path', () => {
     expect(response.followUpActions[0]).toEqual({ action: 'revise-spec', label: 'Revise Spec' });
   });
 
-  it('returns empty artifacts and warnings when executor produces none', async () => {
-    const executor = mockExecutor();
+  it('fails closed when executor produces no artifacts', async () => {
+    const executor = mockExecutor({ artifacts: [] });
     const response = await handleCloudGenerate(validRequest(), testOptions(executor));
 
-    expect(response.ok).toBe(true);
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(500);
     expect(response.artifacts).toEqual([]);
-    expect(response.warnings).toEqual([]);
+    expect(response.artifactBundle).toEqual({
+      artifacts: [],
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    });
+    expect(response.warnings[0]).toEqual({
+      severity: 'error',
+      message: 'Cloud generation produced no workflow artifacts; the generation runtime may not be wired.',
+    });
     expect(response.assumptions).toEqual([]);
-    expect(response.followUpActions).toEqual([]);
+    expect(response.validation).toEqual({
+      ok: false,
+      status: 'failed',
+      issues: [
+        {
+          code: 'missing-generated-artifacts',
+          message: 'Cloud generation produced no workflow artifacts.',
+          path: 'artifacts',
+        },
+      ],
+    });
+    expect(response.followUpActions).toEqual([
+      {
+        action: 'wire-runtime',
+        label: 'Wire Cloud Runtime',
+        description: 'Connect a generation runtime that returns validated workflow artifacts.',
+      },
+    ]);
   });
 });
 
@@ -513,15 +549,28 @@ describe('handleCloudGenerate — error path', () => {
 // ---------------------------------------------------------------------------
 
 describe('handleCloudGenerate — default executor', () => {
-  it('works with the default executor (no options besides requestId)', async () => {
+  it('fails closed with the default executor when no runtime is wired', async () => {
     const response = await handleCloudGenerate(validRequest(), {
       requestIdFactory: () => TEST_REQUEST_ID,
     });
 
-    expect(response.ok).toBe(true);
-    expect(response.status).toBe(200);
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(500);
+    expect(response.artifacts).toEqual([]);
     expect(response.warnings.some((w) => w.message.includes('stub'))).toBe(true);
+    expect(response.warnings.some((w) => w.severity === 'error')).toBe(true);
     expect(response.assumptions.some((a) => a.key === 'runtime-not-wired')).toBe(true);
+    expect(response.validation).toEqual({
+      ok: false,
+      status: 'failed',
+      issues: [
+        {
+          code: 'missing-generated-artifacts',
+          message: 'Cloud generation produced no workflow artifacts.',
+          path: 'artifacts',
+        },
+      ],
+    });
     expect(response.followUpActions.some((a) => a.action === 'wire-runtime')).toBe(true);
   });
 
@@ -531,7 +580,8 @@ describe('handleCloudGenerate — default executor', () => {
       requestIdFactory: () => TEST_REQUEST_ID,
     });
 
-    expect(response.ok).toBe(true);
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(500);
     expect(response.followUpActions.some((a) => a.action === 'run-local')).toBe(true);
   });
 });
