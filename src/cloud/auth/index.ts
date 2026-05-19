@@ -37,6 +37,7 @@ export {
   resolveAuthorizedWorkspaceScope,
   scopeToWorkspace,
 } from './workspace-scoping.js';
+export type { WorkspaceScopedQuery } from './workspace-scoping.js';
 
 export {
   CLOUD_INTEGRATIONS_DASHBOARD_URL,

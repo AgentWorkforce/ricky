@@ -4,7 +4,7 @@ import type {
   CloudWorkspaceContext,
 } from './types.js';
 
-type WorkspaceScopedQuery<T extends Record<string, unknown>> = Omit<T, 'workspaceId'> & {
+export type WorkspaceScopedQuery<T extends Record<string, unknown>> = Omit<T, 'workspaceId'> & {
   workspaceId: string;
 };
 
