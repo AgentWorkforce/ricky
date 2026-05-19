@@ -600,6 +600,7 @@ describe('getProviderConnectGuidance', () => {
     expect(guidance.dashboardUrl).toBe('/dashboard/integrations/linear');
     expect(guidance.command).toBeUndefined();
     expect(guidance.instructions.join('\n')).toContain('Cloud dashboard');
+    expect(guidance.instructions.join('\n')).toContain('Linear workspace');
   });
 
   it('every provider in PROVIDER_TYPES has discriminator-tagged guidance', () => {
