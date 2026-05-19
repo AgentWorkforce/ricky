@@ -552,6 +552,14 @@ describe('Ricky turn-context adapter', () => {
       expect(requestSummaryBlock, testCase.name).toMatchObject({
         source: 'ricky-local',
         importance: 'high',
+        metadata: {
+          requestId: testCase.expected.requestId,
+          source: testCase.expected.source,
+          mode: testCase.expected.mode,
+          stageMode: testCase.expected.stageMode,
+          invocationRoot: testCase.expected.invocationRoot,
+          specPath: testCase.expected.specPath,
+        },
       });
       const requestSummary = requestSummaryBlock.content;
       expect(requestSummary, testCase.name).toContain(`source: ${testCase.expected.source}`);
