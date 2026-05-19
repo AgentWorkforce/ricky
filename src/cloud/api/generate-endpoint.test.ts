@@ -751,6 +751,8 @@ describe('handleCloudGenerate — success path', () => {
       type: 'application/json',
       content: expect.stringContaining('"personaId": "agent-relay-workflow"'),
     });
+    expect(response.artifactBundle.artifacts).toBe(response.artifacts);
+    expect(response.artifactBundle.artifacts[1]).toEqual(response.artifacts[1]);
     expect(response.artifacts[1].content).toContain('"runId": "run-persona-001"');
     expect(response.artifacts[1].content).toContain('"promptDigest": "aaaaaaaa');
   });
