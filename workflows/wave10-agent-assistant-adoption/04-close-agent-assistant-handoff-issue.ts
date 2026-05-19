@@ -24,7 +24,7 @@ async function main() {
         'grep -F "RICKY_AGENT_ASSISTANT_ADOPTION_LIVE_PROOF_COMPLETE" .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/signoff.md',
         'test -f docs/product/ricky-agent-assistant-adoption-proof.md',
         'test -f docs/product/ricky-agent-assistant-live-proof.md',
-        'gh auth status >/dev/null 2>&1 || (echo "ERROR: gh CLI must be authenticated to close issue #14" && exit 1)',
+        '/opt/homebrew/bin/gh auth status >/dev/null 2>&1 || (echo "ERROR: gh CLI must be authenticated to close issue #14" && exit 1)',
         'echo PREFLIGHT_OK',
       ].join(' && '),
       captureOutput: true,

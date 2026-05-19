@@ -26,7 +26,7 @@ async function main() {
         'test -f docs/product/ricky-agent-assistant-usage-audit.md',
         'test -f docs/product/ricky-agent-assistant-adoption-boundary.md',
         'test -f docs/product/ricky-local-execution-contract-reuse-evaluation.md',
-        'gh auth status >/dev/null 2>&1 || (echo "ERROR: gh CLI must be authenticated to close issues" && exit 1)',
+        '/opt/homebrew/bin/gh auth status >/dev/null 2>&1 || (echo "ERROR: gh CLI must be authenticated to close issues" && exit 1)',
         'for issue in 9 10 12; do gh issue view "$issue" --json number,state,title,url > "$DIR/issue-$issue.json"; done',
         'echo PREFLIGHT_OK',
       ].join(' && '),
