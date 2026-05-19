@@ -1173,6 +1173,16 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:src/surfaces/cli/entrypoint/index.ts 2>/dev/null \
         && grep -Eq 'runOnboarding|runLocal|handleCloudGenerate|diagnose' src/surfaces/cli/entrypoint/interactive-cli.ts
       ;;
+    workflows/wave4-local-byoh/09-implement-cli-command-surface.ts)
+      git cat-file -e HEAD:src/surfaces/cli/commands/cli-main.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/commands/cli-main.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/commands/index.ts 2>/dev/null \
+        && grep -Eq 'help|mode|interactive|runInteractiveCli' src/surfaces/cli/commands/cli-main.ts src/surfaces/cli/commands/cli-main.test.ts \
+        && grep -q '"bin"' package.json \
+        && grep -q '"start"' package.json \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts >/dev/null
+      ;;
     workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts)
       git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.ts 2>/dev/null \
         && git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.test.ts 2>/dev/null \
