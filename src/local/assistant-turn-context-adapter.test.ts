@@ -452,6 +452,13 @@ describe('Ricky turn-context adapter', () => {
         name: 'ricky-local-turn-context-adapter',
         package: '@agent-assistant/turn-context',
       });
+      expect(adapterInput, testCase.name).toMatchObject({
+        assistantId: 'ricky',
+        turnId: testCase.expected.requestId,
+        shaping: {
+          mode: `ricky-local:${testCase.expected.mode}:${testCase.expected.stageMode}`,
+        },
+      });
       expect(adapterInput.enrichment?.candidates, testCase.name).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -641,6 +648,19 @@ describe('Ricky turn-context adapter', () => {
             }),
           ]),
         );
+      } else {
+        expect(
+          adapterInput.enrichment?.candidates?.some((candidate) => candidate.id === 'ricky-structured-spec'),
+          testCase.name,
+        ).toBe(false);
+        expect(
+          assembly.context.blocks.some((block) => block.id === 'enrichment-ricky-structured-spec'),
+          testCase.name,
+        ).toBe(false);
+        expect(
+          executionRequest.context?.blocks.some((block) => block.id === 'enrichment-ricky-structured-spec'),
+          testCase.name,
+        ).toBe(false);
       }
 
       if (testCase.expected.sourceMetadata) {
@@ -667,6 +687,19 @@ describe('Ricky turn-context adapter', () => {
             }),
           ]),
         );
+      } else {
+        expect(
+          adapterInput.enrichment?.candidates?.some((candidate) => candidate.id === 'ricky-source-metadata'),
+          testCase.name,
+        ).toBe(false);
+        expect(
+          assembly.context.blocks.some((block) => block.id === 'enrichment-ricky-source-metadata'),
+          testCase.name,
+        ).toBe(false);
+        expect(
+          executionRequest.context?.blocks.some((block) => block.id === 'enrichment-ricky-source-metadata'),
+          testCase.name,
+        ).toBe(false);
       }
     }
   });
