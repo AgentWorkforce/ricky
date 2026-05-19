@@ -5,6 +5,8 @@ import {
   CLOUD_INTEGRATIONS_DASHBOARD_URL,
   GITHUB_CONNECT_INSTRUCTIONS,
   GOOGLE_CONNECT_COMMAND,
+  LINEAR_CONNECT_DASHBOARD_URL,
+  LINEAR_CONNECT_INSTRUCTIONS,
   PROVIDER_TYPES,
   assertWorkspaceMatch,
   createWorkspaceScopedQuery,
@@ -763,11 +765,22 @@ describe('getProviderConnectGuidance', () => {
 
     expect(guidance.kind).toBe('dashboard');
     if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
-    expect(guidance.dashboardUrl).toBe('/dashboard/integrations/linear');
+    expect(guidance.dashboardUrl).toBe(LINEAR_CONNECT_DASHBOARD_URL);
     expect(guidance.command).toBeUndefined();
     expect(guidance.instructions.join('\n')).toContain('Cloud dashboard');
     expect(guidance.instructions.join('\n')).toContain('Linear workspace');
     expect(guidance.instructions.join('\n')).toContain('Ricky OAuth Actor app');
+  });
+
+  it('Linear guidance uses the canonical hosted connection instructions', () => {
+    const guidance = getProviderConnectGuidance('linear');
+
+    expect(guidance.kind).toBe('dashboard');
+    if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+    expect(guidance.dashboardUrl).toBe(LINEAR_CONNECT_DASHBOARD_URL);
+    expect(guidance.instructions).toBe(LINEAR_CONNECT_INSTRUCTIONS);
+    expect(Object.isFrozen(LINEAR_CONNECT_INSTRUCTIONS)).toBe(true);
+    expect(guidance.instructions.join('\n')).not.toContain('npx agent-relay cloud connect linear');
   });
 
   it('optional dashboard providers expose hosted guidance without CLI commands', () => {

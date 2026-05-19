@@ -12,11 +12,11 @@ export interface LinearConnectGuidance {
 export { LINEAR_CONNECT_DASHBOARD_URL, LINEAR_CONNECT_INSTRUCTIONS };
 
 export function getLinearConnectGuidance(): LinearConnectGuidance {
-  return {
+  return Object.freeze({
     provider: 'linear',
     dashboardUrl: LINEAR_CONNECT_DASHBOARD_URL,
     instructions: LINEAR_CONNECT_INSTRUCTIONS,
-  };
+  });
 }
 
 export function renderLinearConnectGuidance(): string[] {
