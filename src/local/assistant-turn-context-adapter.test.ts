@@ -675,6 +675,10 @@ describe('Ricky turn-context adapter', () => {
           ]),
         },
       });
+      expect(executionRequest.metadata, testCase.name).toEqual(assembly.metadata);
+      expect(executionRequest.context?.blocks.map((block) => block.id), testCase.name).toEqual(
+        assembly.context.blocks.map((block) => block.id),
+      );
       const executionSummary = executionRequest.context?.blocks.find(
         (block) => block.id === 'enrichment-ricky-request-summary',
       )?.text;
