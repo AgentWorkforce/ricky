@@ -3982,6 +3982,14 @@ describe('runLocal', () => {
           workflow_id: 'req-issue-11-artifact',
           spec_digest: expect.any(String),
         },
+        decisions: {
+          assistant_turn_context: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-artifact',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          },
+        },
       });
       expect(result.execution).toMatchObject({
         stage: 'execute',
@@ -4044,6 +4052,12 @@ describe('runLocal', () => {
       expectNoTurnContextFallback(success.logs);
       expect(success.exitCode).toBe(0);
       expect(success.generation).toMatchObject({ stage: 'generate', status: 'ok' });
+      expect(success.generation?.decisions?.assistant_turn_context).toMatchObject({
+        assistant_id: 'ricky',
+        turn_id: 'req-issue-11-generate-and-run',
+        adapter: 'ricky-local-turn-context-adapter',
+        package: '@agent-assistant/turn-context',
+      });
       expect(success.execution).toMatchObject({
         stage: 'execute',
         status: 'success',
@@ -4115,6 +4129,14 @@ describe('runLocal', () => {
           path: 'workflows/issue-11/missing-runtime.workflow.ts',
           workflow_id: 'req-issue-11-blocker',
           spec_digest: expect.any(String),
+        },
+        decisions: {
+          assistant_turn_context: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-blocker',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          },
         },
       });
       expect(blocked.execution).toMatchObject({
