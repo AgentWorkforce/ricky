@@ -17,7 +17,12 @@ import {
   validateRequestMode,
   validateWorkspaceContext,
 } from './index.js';
-import type { CloudAuthContext, CloudWorkspaceContext, ProviderConnectionState } from './types.js';
+import type {
+  CloudAuthContext,
+  CloudRequestValidationOptions,
+  CloudWorkspaceContext,
+  ProviderConnectionState,
+} from './types.js';
 
 describe('validateAuthContext', () => {
   const missingTokenFailure = {
@@ -424,6 +429,34 @@ describe('validateCloudRequest', () => {
         { requiredProvider: 'dropbox' as never },
       ),
     ).toEqual({
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects empty required provider values at runtime', () => {
+    expect(
+      validateCloudRequest(
+        { token: 'token' },
+        { workspaceId: 'ws-001' },
+        { requiredProvider: '' as never },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects null required provider values at runtime', () => {
+    const options = { requiredProvider: null } as unknown as CloudRequestValidationOptions;
+
+    expect(validateCloudRequest({ token: 'token' }, { workspaceId: 'ws-001' }, options)).toEqual({
       ok: false,
       error: 'Invalid required provider.',
       status: 400,

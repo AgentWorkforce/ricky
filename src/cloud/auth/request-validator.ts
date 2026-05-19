@@ -232,7 +232,7 @@ export function validateCloudRequest(
   }
 
   let providerConnection: ProviderConnectionState | undefined;
-  if (options.requiredProvider) {
+  if (options.requiredProvider !== undefined) {
     const providerResult = validateProviderConnectionState(
       options.providerConnection,
       options.requiredProvider,
