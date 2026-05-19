@@ -1860,16 +1860,32 @@ if latest:
 PY
 }
 
+runner_output_declares_expected_workflow() {
+  local runner_output="$1"
+  local expected_workflow_name="$2"
+
+  [[ -n "$expected_workflow_name" && -f "$runner_output" ]] || return 1
+
+  grep -Fq "Workflow \"$expected_workflow_name-workflow\"" "$runner_output" || \
+    grep -Fq "Workflow \"$expected_workflow_name\"" "$runner_output"
+}
+
 runner_executed_unexpected_workflow() {
   local workflow_path="$1"
   local runs_start_line="${2:-0}"
+  local runner_output="${3:-}"
   local expected_workflow_name=""
   local actual_workflow_name=""
 
   expected_workflow_name="$(extract_declared_workflow_name "$workflow_path")"
-  actual_workflow_name="$(latest_runtime_workflow_name_after_line "$runs_start_line")"
 
   [[ -n "$expected_workflow_name" ]] || return 1
+  if runner_output_declares_expected_workflow "$runner_output" "$expected_workflow_name"; then
+    return 1
+  fi
+
+  actual_workflow_name="$(latest_runtime_workflow_name_after_line "$runs_start_line")"
+
   [[ -n "$actual_workflow_name" ]] || return 1
   if [[ "$expected_workflow_name" == "$actual_workflow_name" || "$actual_workflow_name" == "$expected_workflow_name-workflow" ]]; then
     return 1
@@ -2002,7 +2018,7 @@ run_one() {
   RUN_PGID=""
   persist_checkpoint
 
-  if runner_executed_unexpected_workflow "$workflow_path" "$workflow_runs_start_line"; then
+  if runner_executed_unexpected_workflow "$workflow_path" "$workflow_runs_start_line" "$runner_output"; then
     echo "$workflow_path" >> "$FAILED_FILE"
     inspect_repo_changes
     mark_status "blocked" "runner workflow identity mismatch: $workflow_path"

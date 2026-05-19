@@ -55,4 +55,17 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain('if runner_output_idle_for_too_long "$last_progress_epoch" "$(date +%s)"; then');
     expect(overnightScript).toContain('workflow runner produced no meaningful progress for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path');
   });
+
+  it('trusts the active runner log when it clearly declares the expected workflow identity', () => {
+    expect(overnightScript).toContain('runner_output_declares_expected_workflow()');
+    expect(overnightScript).toContain('grep -Fq "Workflow');
+    expect(overnightScript).toContain('$expected_workflow_name-workflow');
+    expect(overnightScript).toContain('"$runner_output"');
+    expect(overnightScript).toContain(
+      'if runner_output_declares_expected_workflow "$runner_output" "$expected_workflow_name"; then',
+    );
+    expect(overnightScript).toContain(
+      'runner_executed_unexpected_workflow "$workflow_path" "$workflow_runs_start_line" "$runner_output"',
+    );
+  });
 });
