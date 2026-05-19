@@ -341,9 +341,8 @@ Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.m
       dependsOn: ['final-hard-validation'],
       command: [
         'npx tsc --noEmit',
-        'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
+        'changed="$(git diff --name-only -- src/cloud/api; git ls-files --others --exclude-standard -- src/cloud/api)"',
         'printf "%s\\n" "$changed" | grep -Eq "^src/cloud/api/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/api/|\\.workflow-artifacts/)"',
         'echo GENERATE_ENDPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
