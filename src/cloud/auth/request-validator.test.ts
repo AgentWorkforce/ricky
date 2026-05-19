@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   WorkspaceScopingError,
   CLOUD_INTEGRATIONS_DASHBOARD_URL,
+  GITHUB_CONNECT_GUIDANCE,
   GITHUB_CONNECT_INSTRUCTIONS,
+  GOOGLE_CONNECT_GUIDANCE,
   GOOGLE_CONNECT_COMMAND,
+  GOOGLE_CONNECT_INSTRUCTIONS,
+  LINEAR_CONNECT_GUIDANCE,
   LINEAR_CONNECT_DASHBOARD_URL,
   LINEAR_CONNECT_INSTRUCTIONS,
   PROVIDER_TYPES,
@@ -722,6 +726,8 @@ describe('getProviderConnectGuidance', () => {
     if (guidance.kind !== 'cli') throw new Error('expected CLI guidance');
     expect(GOOGLE_CONNECT_COMMAND).toBe(expectedCommand);
     expect(guidance.command).toBe(expectedCommand);
+    expect(guidance).toBe(GOOGLE_CONNECT_GUIDANCE);
+    expect(guidance.instructions).toBe(GOOGLE_CONNECT_INSTRUCTIONS);
     expect(guidance.dashboardUrl).toBeUndefined();
     expect(guidance.instructions[0]).toBe(`Run: ${expectedCommand}`);
     expect(guidance.instructions.join('\n')).toContain(expectedCommand);
@@ -739,6 +745,7 @@ describe('getProviderConnectGuidance', () => {
 
     expect(guidance.kind).toBe('dashboard');
     if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+    expect(guidance).toBe(GITHUB_CONNECT_GUIDANCE);
     expect(guidance.dashboardUrl).toBe(CLOUD_INTEGRATIONS_DASHBOARD_URL);
     expect(guidance.command).toBeUndefined();
   });
@@ -777,6 +784,7 @@ describe('getProviderConnectGuidance', () => {
 
     expect(guidance.kind).toBe('dashboard');
     if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+    expect(guidance).toBe(LINEAR_CONNECT_GUIDANCE);
     expect(guidance.dashboardUrl).toBe(LINEAR_CONNECT_DASHBOARD_URL);
     expect(guidance.instructions).toBe(LINEAR_CONNECT_INSTRUCTIONS);
     expect(Object.isFrozen(LINEAR_CONNECT_INSTRUCTIONS)).toBe(true);
@@ -799,6 +807,7 @@ describe('getProviderConnectGuidance', () => {
     for (const provider of PROVIDER_TYPES) {
       const guidance = getProviderConnectGuidance(provider);
       expect(guidance.provider).toBe(provider);
+      expect(guidance).toBe(getProviderConnectGuidance(provider));
       expect(guidance.kind === 'cli' || guidance.kind === 'dashboard').toBe(true);
       expect(Object.isFrozen(guidance)).toBe(true);
       expect(Object.isFrozen(guidance.instructions)).toBe(true);
@@ -816,6 +825,38 @@ describe('getProviderConnectGuidance', () => {
 });
 
 describe('Cloud auth module contract', () => {
+  it('covers the Cloud API request acceptance contract without provider calls', () => {
+    expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toMatchObject({
+      ok: false,
+      code: 'missing-auth-token',
+      status: 401,
+    });
+
+    expect(validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, undefined)).toMatchObject({
+      ok: false,
+      code: 'missing-workspace-id',
+      status: 400,
+    });
+
+    expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-001' })).toMatchObject({
+      ok: true,
+      auth: { token: 'bearer-token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-001' },
+      mode: 'cloud',
+    });
+
+    expect(resolveAuthorizedWorkspaceScope({ workspaceId: 'ws-001' }, { workspaceId: 'ws-002' })).toMatchObject({
+      ok: false,
+      code: 'cross-workspace-access',
+      status: 403,
+    });
+
+    expect(getProviderConnectGuidance('google').instructions.join('\n')).toContain(
+      'npx agent-relay cloud connect google',
+    );
+    expect(getProviderConnectGuidance('github').instructions.join('\n')).toMatch(/Cloud dashboard|Nango/);
+  });
+
   it('fails closed for every supported token type when workspace context is absent', () => {
     for (const auth of [
       { token: 'bearer-token', tokenType: 'bearer' },
