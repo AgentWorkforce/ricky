@@ -89,6 +89,28 @@ describe('Ricky turn-context adapter', () => {
         'enrichment-ricky-request-metadata',
       ]),
     );
+    expect(assembly.context.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'enrichment-ricky-request-summary',
+          source: 'ricky-local',
+          importance: 'high',
+        }),
+        expect.objectContaining({
+          id: 'enrichment-ricky-source-metadata',
+          content: JSON.stringify(
+            {
+              cli: {
+                argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.production-adapter.json'],
+                specFile: 'specs/issue-11.production-adapter.json',
+              },
+            },
+            null,
+            2,
+          ),
+        }),
+      ]),
+    );
     expect(assembly.harnessProjection.instructions.developerPrompt).toContain(
       'Current mode: ricky-local:local:generate',
     );
