@@ -723,6 +723,9 @@ describe('getProviderConnectGuidance', () => {
     expect(guidance.dashboardUrl).toBeUndefined();
     expect(guidance.instructions[0]).toBe(`Run: ${expectedCommand}`);
     expect(guidance.instructions.join('\n')).toContain(expectedCommand);
+    expect(guidance.instructions).toContain(
+      'Once connected, Cloud workflows can access Google-integrated services.',
+    );
   });
 
   it('Google guidance instructions mention OAuth', () => {
