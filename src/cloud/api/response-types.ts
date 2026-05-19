@@ -114,13 +114,8 @@ export interface CloudGenerateResponse {
   status: number;
   /** The generated artifacts, kept top-level for existing callers. */
   artifacts: CloudArtifact[];
-  /**
-   * Explicit artifact bundle response contract for Cloud API callers.
-   *
-   * Optional in the type to keep existing callers (and their fixtures) compiling.
-   * The endpoint implementation always populates this field.
-   */
-  artifactBundle?: CloudArtifactBundle;
+  /** Explicit artifact bundle response contract for Cloud API callers. */
+  artifactBundle: CloudArtifactBundle;
   /** Warnings and assumptions surfaced during generation. */
   warnings: CloudWarning[];
   /** Explicit assumptions made while interpreting or generating from the spec. */

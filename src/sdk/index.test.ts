@@ -90,6 +90,11 @@ describe('Ricky SDK', () => {
       ok: true,
       status: 200,
       artifacts: [],
+      artifactBundle: {
+        artifacts: [],
+        generationMode: 'generate-and-return-artifacts',
+        targetMode: 'cloud',
+      },
       warnings: [],
       assumptions: [],
       validation: { ok: true, status: 'passed', issues: [] },

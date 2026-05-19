@@ -323,7 +323,7 @@ describe('handleCloudGenerate — success path', () => {
       generationMode: 'generate-and-return-artifacts',
       targetMode: 'both',
     });
-    expect(response.artifactBundle?.artifacts[0]).toMatchObject({
+    expect(response.artifactBundle.artifacts[0]).toMatchObject({
       path: expect.stringContaining('route-contract.ts'),
       type: 'text/typescript',
     });
@@ -516,8 +516,8 @@ describe('handleCloudGenerate — success path', () => {
       requestId: TEST_REQUEST_ID,
       status: 'skipped',
     });
-    expect(response.artifactBundle?.generationMode).toBe('generate-and-run');
-    expect(response.artifactBundle?.targetMode).toBe('cloud');
+    expect(response.artifactBundle.generationMode).toBe('generate-and-run');
+    expect(response.artifactBundle.targetMode).toBe('cloud');
   });
 
   it('returns the artifact bundle response contract with warnings, assumptions, and follow-ups', async () => {
@@ -571,8 +571,8 @@ describe('handleCloudGenerate — success path', () => {
       generationMode: 'generate-and-return-artifacts',
       targetMode: 'cloud',
     });
-    expect(response.artifactBundle?.artifacts).toBe(response.artifacts);
-    expect(response.artifactBundle?.artifacts[0]).toMatchObject({
+    expect(response.artifactBundle.artifacts).toBe(response.artifacts);
+    expect(response.artifactBundle.artifacts[0]).toMatchObject({
       path: 'workflows/generated-workflow.ts',
       type: 'text/typescript',
       content: expect.stringContaining('workflow'),
