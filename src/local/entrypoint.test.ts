@@ -4,9 +4,13 @@ import type {
   CliHandoff,
   ClaudeHandoff,
   LocalExecutorOptions,
+  LocalEntrypointInput,
+  LocalExecutionStageResult,
+  LocalGenerationStageResult,
   LocalExecutor,
   LocalInvocationRequest,
   LocalResponse,
+  LocalStageMode,
   McpHandoff,
   RawHandoff,
   StructuredSpecHandoff,
@@ -635,6 +639,42 @@ describe('normalizeRequest', () => {
 // ---------------------------------------------------------------------------
 
 describe('runLocal', () => {
+  it('exports public local invocation contracts from the local barrel', () => {
+    const stageMode: LocalStageMode = 'generate-and-run';
+    const input: LocalEntrypointInput = {
+      _normalized: true,
+      source: 'cli',
+      spec: 'generate a local workflow',
+      mode: 'local',
+      stageMode,
+      metadata: {},
+    };
+    const generation: LocalGenerationStageResult = {
+      stage: 'generate',
+      status: 'ok',
+    };
+    const execution: LocalExecutionStageResult = {
+      stage: 'execute',
+      status: 'success',
+      execution: {
+        workflow_id: 'wf-public-contract',
+        artifact_path: 'workflows/generated/public-contract.ts',
+        command: '@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/public-contract.ts',
+        workflow_file: 'workflows/generated/public-contract.ts',
+        cwd: '/repo',
+        started_at: '2026-01-01T00:00:00.000Z',
+        finished_at: '2026-01-01T00:00:01.000Z',
+        duration_ms: 1000,
+        steps_completed: 1,
+        steps_total: 1,
+      },
+    };
+
+    expect(input.stageMode).toBe('generate-and-run');
+    expect(generation.status).toBe('ok');
+    expect(execution.status).toBe('success');
+  });
+
   it('normalizes and executes a CLI handoff through the injected executor', async () => {
     const executor = mockExecutor();
     const result = await runLocal(
