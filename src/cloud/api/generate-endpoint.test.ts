@@ -371,6 +371,7 @@ describe('handleCloudGenerate — success path', () => {
       generationMode: 'generate-and-return-artifacts',
       targetMode: 'cloud',
     });
+    expect(response.artifactBundle?.artifacts).toBe(response.artifacts);
     expect(response.artifactBundle?.artifacts[0]).toMatchObject({
       path: 'workflows/generated-workflow.ts',
       type: 'text/typescript',
@@ -682,6 +683,42 @@ describe('handleCloudGenerate — runtime-invalid input', () => {
     expect(response.validation.issues[0].code).toBe('invalid-environment');
     expect(response.validation.issues[0].path).toBe('workspace.environment');
     expect(executor.calls).toHaveLength(0);
+  });
+
+  it('echoes caller-requested mode and generationMode on shape-rejection bundles', async () => {
+    const request = validRequest({
+      body: { spec: '', mode: 'both', generationMode: 'generate-and-run' },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(mockExecutor()));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('missing-spec');
+    expect(response.artifactBundle).toEqual({
+      artifacts: [],
+      generationMode: 'generate-and-run',
+      targetMode: 'both',
+    });
+  });
+
+  it('defaults bundle mode when caller-requested mode is invalid', async () => {
+    const request = validRequest({
+      body: {
+        spec: 'build something',
+        mode: 'local' as unknown as 'cloud',
+        generationMode: 'run-only' as unknown as CloudGenerateRequest['body']['generationMode'],
+      },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(mockExecutor()));
+
+    expect(response.ok).toBe(false);
+    expect(response.artifactBundle).toEqual({
+      artifacts: [],
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    });
   });
 });
 

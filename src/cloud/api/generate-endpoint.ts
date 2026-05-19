@@ -181,11 +181,29 @@ function artifactBundle(
   };
 }
 
+function safeBundleMode(
+  request: CloudGenerateRequest | undefined,
+): { generationMode: CloudGenerationMode; targetMode: CloudGenerateMode } {
+  // Echo the caller's requested mode only when it parses cleanly; invalid
+  // values fall back to defaults so a shape-rejection response never carries
+  // forward an unrecognized enum.
+  const mode = request?.body?.mode;
+  const targetMode: CloudGenerateMode =
+    mode === 'cloud' || mode === 'both' ? mode : 'cloud';
+  const generationMode = request?.body?.generationMode;
+  const resolvedGenerationMode: CloudGenerationMode =
+    generationMode !== undefined && VALID_GENERATION_MODES.has(generationMode)
+      ? generationMode
+      : 'generate-and-return-artifacts';
+  return { generationMode: resolvedGenerationMode, targetMode };
+}
+
 function errorResponse(
   requestId: string,
   status: number,
   message: string,
   validation: CloudValidationStatus,
+  request: CloudGenerateRequest | undefined,
 ): CloudGenerateResponse {
   return {
     ok: false,
@@ -193,8 +211,7 @@ function errorResponse(
     artifacts: [],
     artifactBundle: {
       artifacts: [],
-      generationMode: 'generate-and-return-artifacts',
-      targetMode: 'cloud',
+      ...safeBundleMode(request),
     },
     warnings: [{ severity: 'error', message }],
     assumptions: [],
@@ -258,6 +275,7 @@ function validationFailure(
   message: string,
   code: string,
   path: string,
+  request: CloudGenerateRequest | undefined,
 ): ValidationFailure {
   return {
     ok: false,
@@ -266,6 +284,7 @@ function validationFailure(
       status,
       message,
       failedValidation(code, message, path),
+      request,
     ),
   };
 }
@@ -288,6 +307,7 @@ function validateRequest(
       cloudRequestResult.error,
       cloudRequestResult.code,
       cloudRequestResult.path,
+      request,
     );
   }
 
@@ -298,6 +318,7 @@ function validateRequest(
       'Missing or empty spec in request body.',
       'missing-spec',
       'body.spec',
+      request,
     );
   }
 
@@ -309,6 +330,7 @@ function validateRequest(
       'Invalid generation mode.',
       'invalid-generation-mode',
       'body.generationMode',
+      request,
     );
   }
 
