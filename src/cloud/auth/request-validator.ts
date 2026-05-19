@@ -2,6 +2,7 @@ import { PROVIDER_TYPES } from './types.js';
 import type {
   AuthValidationResult,
   CloudAuthContext,
+  CloudValidationFailure,
   CloudRequestMode,
   CloudRequestValidationOptions,
   CloudRequestValidationResult,
@@ -17,6 +18,26 @@ const VALID_TOKEN_TYPES = new Set<string>(['bearer', 'api-key']);
 const VALID_REQUEST_MODES = new Set<string>(['cloud', 'both']);
 const VALID_PROVIDER_TYPES = new Set<string>(PROVIDER_TYPES);
 const TOKEN_WHITESPACE_PATTERN = /\s/;
+
+function isProviderType(value: unknown): value is ProviderType {
+  return typeof value === 'string' && VALID_PROVIDER_TYPES.has(value);
+}
+
+function validateRequiredProvider(
+  requiredProvider: unknown,
+): { ok: true; provider: ProviderType } | CloudValidationFailure {
+  if (!isProviderType(requiredProvider)) {
+    return {
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    };
+  }
+
+  return { ok: true, provider: requiredProvider };
+}
 
 export function validateAuthContext(auth: CloudAuthContext | undefined): AuthValidationResult {
   if (!auth || typeof auth.token !== 'string' || !auth.token.trim()) {
@@ -133,23 +154,19 @@ export function validateRequestMode(mode: CloudRequestMode | string | undefined)
 }
 
 export function validateProviderConnectionState(
-  connection: ProviderConnectionState | null | undefined,
+  connection: unknown,
   requiredProvider: ProviderType,
 ): ProviderConnectionValidationResult {
-  if (!VALID_PROVIDER_TYPES.has(requiredProvider)) {
-    return {
-      ok: false,
-      error: 'Invalid required provider.',
-      status: 400,
-      code: 'invalid-required-provider',
-      path: 'providerConnection',
-    };
+  const providerResult = validateRequiredProvider(requiredProvider);
+  if (!providerResult.ok) {
+    return providerResult;
   }
+  const provider = providerResult.provider;
 
   if (connection === undefined) {
     return {
       ok: false,
-      error: `Missing ${requiredProvider} provider connection state.`,
+      error: `Missing ${provider} provider connection state.`,
       status: 409,
       code: 'missing-provider-connection',
       path: 'providerConnection',
@@ -166,7 +183,8 @@ export function validateProviderConnectionState(
     };
   }
 
-  if (typeof connection.provider !== 'string' || !VALID_PROVIDER_TYPES.has(connection.provider)) {
+  const providerConnection = connection as Record<string, unknown>;
+  if (!isProviderType(providerConnection.provider)) {
     return {
       ok: false,
       error: 'Invalid provider connection state.',
@@ -176,17 +194,17 @@ export function validateProviderConnectionState(
     };
   }
 
-  if (connection.provider !== requiredProvider) {
+  if (providerConnection.provider !== provider) {
     return {
       ok: false,
-      error: `Provider connection mismatch: expected ${requiredProvider}.`,
+      error: `Provider connection mismatch: expected ${provider}.`,
       status: 400,
       code: 'invalid-provider-connection',
       path: 'providerConnection',
     };
   }
 
-  if (typeof connection.connected !== 'boolean') {
+  if (typeof providerConnection.connected !== 'boolean') {
     return {
       ok: false,
       error: 'Invalid provider connection state.',
@@ -196,17 +214,23 @@ export function validateProviderConnectionState(
     };
   }
 
-  if (!connection.connected) {
+  if (!providerConnection.connected) {
     return {
       ok: false,
-      error: `${requiredProvider} provider is not connected.`,
+      error: `${provider} provider is not connected.`,
       status: 409,
       code: 'provider-not-connected',
       path: 'providerConnection',
     };
   }
 
-  return { ok: true, connection };
+  return {
+    ok: true,
+    connection: {
+      provider: providerConnection.provider,
+      connected: providerConnection.connected,
+    },
+  };
 }
 
 export function validateCloudRequest(
