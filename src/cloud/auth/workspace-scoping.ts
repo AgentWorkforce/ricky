@@ -4,6 +4,10 @@ import type {
   CloudWorkspaceContext,
 } from './types.js';
 
+type WorkspaceScopedQuery<T extends Record<string, unknown>> = Omit<T, 'workspaceId'> & {
+  workspaceId: string;
+};
+
 export class WorkspaceScopingError extends Error {
   readonly workspaceId: string;
   readonly requestedWorkspaceId: string;
@@ -25,8 +29,14 @@ export function scopeToWorkspace<T extends { workspaceId: string }>(
   return resource.workspaceId === requestedWorkspaceId ? resource : null;
 }
 
-export function createWorkspaceScopedQuery(workspaceId: string): { workspaceId: string } {
-  return { workspaceId };
+export function createWorkspaceScopedQuery<T extends Record<string, unknown> = Record<string, never>>(
+  workspaceId: string,
+  query?: T,
+): WorkspaceScopedQuery<T> {
+  return {
+    ...query,
+    workspaceId,
+  } as WorkspaceScopedQuery<T>;
 }
 
 export function assertWorkspaceMatch(resourceWorkspaceId: string, requestWorkspaceId: string): void {

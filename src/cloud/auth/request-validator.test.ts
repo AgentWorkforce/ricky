@@ -533,6 +533,20 @@ describe('createWorkspaceScopedQuery', () => {
 
     expect(query.workspaceId).toBe(' Ws-Prod ');
   });
+
+  it('forces workspaceId over caller-provided query filters', () => {
+    const query = createWorkspaceScopedQuery('authorized-workspace', {
+      workspaceId: 'untrusted-workspace',
+      projectId: 'proj-001',
+      status: 'active',
+    });
+
+    expect(query).toEqual({
+      workspaceId: 'authorized-workspace',
+      projectId: 'proj-001',
+      status: 'active',
+    });
+  });
 });
 
 describe('assertWorkspaceMatch', () => {
