@@ -125,7 +125,9 @@ describe('Ricky Cloud generate proof', () => {
     expect(result.passed).toBe(true);
     expect(evidence).toContain('ok: false');
     expect(evidence).toContain('status: 500');
-    expect(evidence).toContain('Cloud runtime unavailable');
+    expect(evidence).toContain('Cloud generation failed');
+    expect(evidence).toContain('ricky-cloud-proof-000');
+    expect(evidence).not.toContain('Cloud runtime unavailable');
     expect(evidence).toContain('retry action present: true');
   });
 });

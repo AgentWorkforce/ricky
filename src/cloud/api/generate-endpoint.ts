@@ -205,20 +205,28 @@ function errorResponse(
   validation: CloudValidationStatus,
   request: CloudGenerateRequest | undefined,
 ): CloudGenerateResponse {
+  const bundleMode = safeBundleMode(request);
   return {
     ok: false,
     status,
     artifacts: [],
     artifactBundle: {
       artifacts: [],
-      ...safeBundleMode(request),
+      ...bundleMode,
     },
     warnings: [{ severity: 'error', message }],
     assumptions: [],
     validation,
-    runReceipt: notRequestedRunReceipt(requestId),
+    runReceipt: defaultRunReceipt(requestId, bundleMode.generationMode),
     followUpActions: [],
     requestId,
+  };
+}
+
+function executorFailureWarning(requestId: string): CloudWarning {
+  return {
+    severity: 'error',
+    message: `Cloud generation failed before validation completed. Retry the request or contact support with request ID ${requestId}.`,
   };
 }
 
@@ -396,14 +404,13 @@ export async function handleCloudGenerate(
       followUpActions: result.followUpActions,
       requestId,
     };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch {
     return {
       ok: false,
       status: 500,
       artifacts: [],
       artifactBundle: artifactBundle([], request),
-      warnings: [{ severity: 'error', message: `Cloud generation failed: ${message}` }],
+      warnings: [executorFailureWarning(requestId)],
       assumptions: [],
       validation: skippedValidation(),
       runReceipt: defaultRunReceipt(requestId, resolveGenerationMode(request.body.generationMode)),

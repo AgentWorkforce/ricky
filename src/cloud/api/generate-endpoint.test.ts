@@ -477,14 +477,16 @@ describe('handleCloudGenerate — success path', () => {
 // ---------------------------------------------------------------------------
 
 describe('handleCloudGenerate — error path', () => {
-  it('catches executor errors and returns 500 with the error message', async () => {
+  it('catches executor errors and returns 500 with a sanitized retry warning', async () => {
     const executor = failingExecutor('connection timeout');
     const response = await handleCloudGenerate(validRequest(), testOptions(executor));
 
     expect(response.ok).toBe(false);
     expect(response.status).toBe(500);
     expect(response.warnings[0].severity).toBe('error');
-    expect(response.warnings[0].message).toContain('connection timeout');
+    expect(response.warnings[0].message).toContain('Cloud generation failed');
+    expect(response.warnings[0].message).toContain(TEST_REQUEST_ID);
+    expect(response.warnings[0].message).not.toContain('connection timeout');
     expect(response.followUpActions[0].action).toBe('retry');
     expect(response.validation).toEqual({ ok: false, status: 'skipped', issues: [] });
   });
@@ -499,7 +501,9 @@ describe('handleCloudGenerate — error path', () => {
 
     expect(response.ok).toBe(false);
     expect(response.status).toBe(500);
-    expect(response.warnings[0].message).toContain('string error');
+    expect(response.warnings[0].message).toContain('Cloud generation failed');
+    expect(response.warnings[0].message).toContain(TEST_REQUEST_ID);
+    expect(response.warnings[0].message).not.toContain('string error');
     expect(response.validation).toEqual({ ok: false, status: 'skipped', issues: [] });
   });
 });
@@ -699,6 +703,11 @@ describe('handleCloudGenerate — runtime-invalid input', () => {
       artifacts: [],
       generationMode: 'generate-and-run',
       targetMode: 'both',
+    });
+    expect(response.runReceipt).toEqual({
+      executionRequested: true,
+      requestId: TEST_REQUEST_ID,
+      status: 'skipped',
     });
   });
 

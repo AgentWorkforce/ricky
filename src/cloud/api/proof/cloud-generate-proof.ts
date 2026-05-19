@@ -396,7 +396,7 @@ export function getCloudProofCases(): CloudProofCase[] {
     // --- Error path ---
     {
       name: 'executor-error-path',
-      description: 'When the executor throws, the response is ok=false, 500, with error details and retry action.',
+      description: 'When the executor throws, the response is ok=false, 500, with a sanitized warning and retry action.',
       async evaluate() {
         const failingExecutor: CloudExecutor = {
           async generate(): Promise<CloudGenerateResult> {
@@ -410,7 +410,9 @@ export function getCloudProofCases(): CloudProofCase[] {
           response.status === 500,
           response.warnings.length > 0,
           response.warnings[0].severity === 'error',
-          response.warnings[0].message.includes('Cloud runtime unavailable'),
+          response.warnings[0].message.includes('Cloud generation failed'),
+          response.warnings[0].message.includes(PROOF_REQUEST_ID),
+          !response.warnings[0].message.includes('Cloud runtime unavailable'),
           response.followUpActions.some((a) => a.action === 'retry'),
           response.requestId === PROOF_REQUEST_ID,
         ];
