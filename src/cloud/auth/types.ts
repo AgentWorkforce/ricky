@@ -113,8 +113,8 @@ export interface CloudRequestValidationOptions {
   requireProject?: boolean;
   /** Require a connected provider before accepting the request. */
   requiredProvider?: ProviderType;
-  /** Current provider connection state for provider-backed requests. */
-  providerConnection?: ProviderConnectionState;
+  /** Current provider connection state for provider-backed request input. */
+  providerConnection?: ProviderConnectionState | null;
 }
 
 interface ProviderConnectGuidanceBase {

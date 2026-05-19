@@ -276,6 +276,28 @@ describe('validateProviderConnectionState', () => {
     });
   });
 
+  it('rejects null provider connection state as malformed', () => {
+    expect(validateProviderConnectionState(null, 'github')).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects primitive provider connection state as malformed', () => {
+    const connection = 'github' as unknown as ProviderConnectionState;
+
+    expect(validateProviderConnectionState(connection, 'github')).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
+    });
+  });
+
   it('rejects invalid provider values at runtime', () => {
     const connection = { provider: 'dropbox', connected: true } as unknown as ProviderConnectionState;
 
@@ -393,6 +415,22 @@ describe('validateCloudRequest', () => {
       error: 'Invalid required provider.',
       status: 400,
       code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects malformed provider state after auth, workspace, and mode pass', () => {
+    expect(
+      validateCloudRequest(
+        { token: 'token' },
+        { workspaceId: 'ws-001' },
+        { requiredProvider: 'github', providerConnection: null },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
       path: 'providerConnection',
     });
   });

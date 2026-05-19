@@ -122,7 +122,7 @@ export function validateRequestMode(mode: CloudRequestMode | string | undefined)
 }
 
 export function validateProviderConnectionState(
-  connection: ProviderConnectionState | undefined,
+  connection: ProviderConnectionState | null | undefined,
   requiredProvider: ProviderType,
 ): ProviderConnectionValidationResult {
   if (!VALID_PROVIDER_TYPES.has(requiredProvider)) {
@@ -135,12 +135,22 @@ export function validateProviderConnectionState(
     };
   }
 
-  if (!connection) {
+  if (connection === undefined) {
     return {
       ok: false,
       error: `Missing ${requiredProvider} provider connection state.`,
       status: 409,
       code: 'missing-provider-connection',
+      path: 'providerConnection',
+    };
+  }
+
+  if (connection === null || typeof connection !== 'object') {
+    return {
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
       path: 'providerConnection',
     };
   }
