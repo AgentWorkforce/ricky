@@ -70,6 +70,7 @@ function failingExecutor(message = 'Cloud runtime unavailable'): CloudExecutor {
 describe('CLOUD_GENERATE_ROUTE', () => {
   it('exposes the correct route path', () => {
     expect(CLOUD_GENERATE_ROUTE).toBe('/api/v1/ricky/workflows/generate');
+    expect(CLOUD_GENERATE_ROUTE.startsWith('/api/v1/ricky/')).toBe(true);
   });
 
   it('exposes the POST method for transport mounting', () => {
