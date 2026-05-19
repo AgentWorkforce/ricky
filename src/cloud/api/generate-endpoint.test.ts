@@ -85,6 +85,9 @@ describe('CLOUD_GENERATE_ROUTE', () => {
 
   it('exposes the POST method for transport mounting', () => {
     expect(CLOUD_GENERATE_METHOD).toBe('POST');
+    expect(`${CLOUD_GENERATE_METHOD} ${CLOUD_GENERATE_ROUTE}`).toBe(
+      'POST /api/v1/ricky/workflows/generate',
+    );
   });
 });
 
