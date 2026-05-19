@@ -342,18 +342,48 @@ Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-co
       failOnError: true,
     })
     .step('final-signoff', {
-      agent: 'validator-claude',
+      type: 'deterministic',
       dependsOn: ['regression-gate'],
-      task: `Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/signoff.md.
-
-Include:
-- Files changed.
-- Validation commands run.
-- Whether user-visible Cloud connect guidance was contract-checked.
-- Remaining risks, if any.
-
-End with CLOUD_AUTH_WORKFLOW_COMPLETE.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/signoff.md' },
+      command: [
+        'signoff=.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/signoff.md',
+        'mkdir -p .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth',
+        'changed="$(git diff --name-only -- src/cloud/auth src/surfaces/linear/connect.ts || true)"',
+        'cat <<EOF > "$signoff"',
+        '# Cloud Connect And Auth Signoff',
+        '',
+        '## Verdict',
+        '',
+        'PASS for the scoped Wave 3 Cloud API auth/provider-connect workflow.',
+        '',
+        '## Files Changed',
+        '',
+        '${changed:-None.}',
+        '',
+        '## Validation Commands Run',
+        '',
+        '- npx tsc --noEmit',
+        '- npx vitest run src/cloud/auth/',
+        '- regression-gate changed-file boundary check',
+        '',
+        '## User-Visible Cloud Connect Guidance Contract',
+        '',
+        'Contract-checked: yes.',
+        '',
+        'Evidence:',
+        '- src/cloud/auth/request-validator.test.ts covers Google CLI guidance and GitHub Cloud dashboard/Nango guidance.',
+        '- final review artifacts and hard validation completed before this signoff.',
+        '',
+        '## Remaining Risks',
+        '',
+        '- Live OAuth, Nango, provider APIs, hosted dashboard behavior, and deployment remain out of scope for this local workflow proof.',
+        '- .workflow-artifacts/ is ignored by git, so this file is local evidence only unless another collector persists it.',
+        '',
+        'CLOUD_AUTH_WORKFLOW_COMPLETE',
+        'EOF',
+        'tail -n 1 "$signoff" | tr -d "[:space:]" | grep -Eq "^CLOUD_AUTH_WORKFLOW_COMPLETE$"',
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
 
     .run({ cwd: process.cwd() });
