@@ -126,7 +126,7 @@ export interface CloudRequestValidationOptions {
 
 interface ProviderConnectGuidanceBase {
   provider: ProviderType;
-  instructions: string[];
+  instructions: readonly string[];
 }
 
 export interface ProviderConnectCliGuidance extends ProviderConnectGuidanceBase {

@@ -777,6 +777,21 @@ describe('getProviderConnectGuidance', () => {
 });
 
 describe('Cloud auth module contract', () => {
+  it('fails closed for every supported token type when workspace context is absent', () => {
+    for (const auth of [
+      { token: 'bearer-token', tokenType: 'bearer' },
+      { token: 'api-key-token', tokenType: 'api-key' },
+    ] satisfies CloudAuthContext[]) {
+      expect(validateCloudRequest(auth, undefined)).toEqual({
+        ok: false,
+        error: 'Missing or empty workspace ID.',
+        status: 400,
+        code: 'missing-workspace-id',
+        path: 'workspace.workspaceId',
+      });
+    }
+  });
+
   it('rejects missing API keys before accepting API-key requests', () => {
     expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toEqual({
       ok: false,
@@ -885,9 +900,17 @@ describe('Cloud auth module contract', () => {
 
   it('keeps provider connect guidance user-visible and provider-specific', () => {
     const googleGuidance = getProviderConnectGuidance('google');
+    expect(googleGuidance.provider).toBe('google');
+    expect(googleGuidance.kind).toBe('cli');
     expect(googleGuidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
+    if (googleGuidance.kind !== 'cli') throw new Error('expected Google CLI guidance');
+    expect(googleGuidance.command).toBe('npx agent-relay cloud connect google');
 
     const githubGuidance = getProviderConnectGuidance('github');
+    expect(githubGuidance.provider).toBe('github');
+    expect(githubGuidance.kind).toBe('dashboard');
+    if (githubGuidance.kind !== 'dashboard') throw new Error('expected GitHub dashboard guidance');
+    expect(githubGuidance.command).toBeUndefined();
     expect(githubGuidance.instructions.join('\n')).toContain('Cloud dashboard');
     expect(githubGuidance.instructions.join('\n')).toContain('Nango');
   });

@@ -6,7 +6,7 @@ import {
 export interface LinearConnectGuidance {
   provider: 'linear';
   dashboardUrl: string;
-  instructions: string[];
+  instructions: readonly string[];
 }
 
 export { LINEAR_CONNECT_DASHBOARD_URL, LINEAR_CONNECT_INSTRUCTIONS };

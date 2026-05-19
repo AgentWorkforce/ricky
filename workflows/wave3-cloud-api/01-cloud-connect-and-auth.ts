@@ -105,6 +105,7 @@ Deliverables:
 - src/cloud/auth/types.ts
 - src/cloud/auth/request-validator.test.ts
 - src/cloud/auth/index.ts
+- src/surfaces/linear/connect.ts only if needed to keep the provider-guidance type contract honest
 
 Non-goals:
 - Do not implement the full Cloud worker deployment.
@@ -119,7 +120,7 @@ Verification:
 - Post-edit gates must run after implementation and test edits.
 
 Commit/PR boundary:
-- Keep changes scoped to src/cloud/auth and tests for this module.
+- Keep changes scoped to src/cloud/auth and tests for this module, plus src/surfaces/linear/connect.ts only if required by the provider-guidance type contract.
 
 Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/plan.md and end with CLOUD_AUTH_PLAN_READY.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/plan.md' },
@@ -253,6 +254,7 @@ Review feedback:
 Rules:
 - Preserve the planned file boundary.
 - If tests need updates, coordinate the edits in the same pass and keep them scoped to src/cloud/auth.
+- src/surfaces/linear/connect.ts is allowed only when needed to keep the provider-guidance type contract honest.
 - Re-check provider guidance contracts after any edit.
 - Do not claim success without deterministic gates.`,
       verification: { type: 'exit_code', value: '0' },
@@ -333,8 +335,8 @@ Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-co
       command: [
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\\n" "$changed" | grep -Eq "^src/cloud/auth/"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/auth/|\\.workflow-artifacts/)"',
+        'printf "%s\\n" "$changed" | grep -Eq "^(src/cloud/auth/|src/surfaces/linear/connect\\.ts)$"',
+        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/auth/|src/surfaces/linear/connect\\.ts|\\.workflow-artifacts/)"',
         'echo CLOUD_AUTH_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,

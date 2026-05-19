@@ -3,8 +3,8 @@ import type { ProviderConnectGuidance, ProviderType } from './types.js';
 export const GOOGLE_CONNECT_COMMAND = 'npx agent-relay cloud connect google';
 export const CLOUD_INTEGRATIONS_DASHBOARD_URL = '/dashboard/integrations';
 
-function createConnectInstructions(...instructions: string[]): string[] {
-  return Object.freeze(instructions) as string[];
+function createConnectInstructions(...instructions: string[]): readonly string[] {
+  return Object.freeze(instructions);
 }
 
 function freezeGuidance<T extends ProviderConnectGuidance>(guidance: T): T {
