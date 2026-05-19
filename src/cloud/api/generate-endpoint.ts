@@ -270,48 +270,24 @@ function validationFailure(
   };
 }
 
-function authIssueDescriptor(error: string): { code: string; path: string } {
-  const lower = error.toLowerCase();
-  if (lower.includes('token type')) {
-    return { code: 'invalid-auth-token-type', path: 'auth.tokenType' };
-  }
-  return { code: 'missing-auth-token', path: 'auth.token' };
-}
-
-function workspaceIssueDescriptor(error: string): { code: string; path: string } {
-  const lower = error.toLowerCase();
-  if (lower.includes('project id')) {
-    return { code: 'invalid-project-id', path: 'workspace.projectId' };
-  }
-  if (lower.includes('environment')) {
-    return { code: 'invalid-environment', path: 'workspace.environment' };
-  }
-  return { code: 'missing-workspace-id', path: 'workspace.workspaceId' };
-}
-
 function validateRequest(
   request: CloudGenerateRequest,
   requestId: string,
 ): ValidationResult {
   // Production wiring starts at the canonical Cloud request validator:
   // validateCloudRequest -> spec intake -> generation pipeline -> result mapping.
+  // The validator returns discriminated `code` + `path` so we never have to
+  // recover them by matching against the user-facing error string.
   const cloudRequestResult = validateCloudRequest(request?.auth, request?.workspace, {
     mode: request?.body?.mode,
   });
   if (!cloudRequestResult.ok) {
-    const issue =
-      cloudRequestResult.error.toLowerCase().includes('auth') ||
-      cloudRequestResult.error.toLowerCase().includes('token')
-        ? authIssueDescriptor(cloudRequestResult.error)
-        : cloudRequestResult.error.toLowerCase().includes('mode')
-          ? { code: 'invalid-mode', path: 'body.mode' }
-          : workspaceIssueDescriptor(cloudRequestResult.error);
     return validationFailure(
       requestId,
       cloudRequestResult.status,
       cloudRequestResult.error,
-      issue.code,
-      issue.path,
+      cloudRequestResult.code,
+      cloudRequestResult.path,
     );
   }
 
