@@ -579,6 +579,55 @@ describe('handleCloudGenerate — success path', () => {
     });
   });
 
+  it('returns generated file artifact fields for Cloud API clients', async () => {
+    const executor = mockExecutor({
+      artifacts: [
+        {
+          path: 'workflows/cloud-generated-workflow.ts',
+          type: 'text/typescript',
+          content: 'export const generatedWorkflow = workflow("cloud-generated");',
+        },
+      ],
+      warnings: [{ severity: 'info', message: 'Assumed workflow artifact path.' }],
+      assumptions: [{ key: 'artifact-path', message: 'Used the default workflows directory.' }],
+      followUpActions: [
+        {
+          action: 'open-generated-file',
+          label: 'Open Generated File',
+          description: 'Inspect the returned workflow file before committing it.',
+        },
+      ],
+    });
+
+    const response = await handleCloudGenerate(validRequest(), testOptions(executor));
+
+    expect(response.ok).toBe(true);
+    expect(response.artifacts).toEqual([
+      {
+        path: 'workflows/cloud-generated-workflow.ts',
+        type: 'text/typescript',
+        content: 'export const generatedWorkflow = workflow("cloud-generated");',
+      },
+    ]);
+    expect(response.artifactBundle.artifacts[0]).toEqual({
+      path: 'workflows/cloud-generated-workflow.ts',
+      type: 'text/typescript',
+      content: expect.stringContaining('cloud-generated'),
+    });
+    expect(response.warnings[0]).toEqual({
+      severity: 'info',
+      message: 'Assumed workflow artifact path.',
+    });
+    expect(response.assumptions[0]).toEqual({
+      key: 'artifact-path',
+      message: 'Used the default workflows directory.',
+    });
+    expect(response.followUpActions[0]).toMatchObject({
+      action: 'open-generated-file',
+      label: 'Open Generated File',
+    });
+  });
+
   it('appends Workforce persona generation metadata as a cloud artifact when provided', async () => {
     const executor = mockExecutor({
       artifacts: [
