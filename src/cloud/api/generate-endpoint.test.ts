@@ -277,6 +277,73 @@ describe('handleCloudGenerate — validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('handleCloudGenerate — success path', () => {
+  it('returns the POST route response contract for Cloud generation callers', async () => {
+    const artifact = {
+      path: 'workflows/route-contract.ts',
+      type: 'text/typescript',
+      content: 'export const workflow = "route-contract";',
+    };
+    const executor = mockExecutor({
+      artifacts: [artifact],
+      warnings: [{ severity: 'warning', message: 'Spec omitted schedule details.' }],
+      assumptions: [{ key: 'schedule', message: 'Used manual trigger by default.' }],
+      followUpActions: [
+        {
+          action: 'review-generated-files',
+          label: 'Review Generated Files',
+          description: 'Inspect generated workflow artifacts before enabling Cloud execution.',
+        },
+      ],
+    });
+
+    const response = await handleCloudGenerate(
+      validRequest({
+        body: {
+          spec: 'generate the endpoint route contract workflow',
+          mode: 'both',
+          generationMode: 'generate-and-return-artifacts',
+        },
+      }),
+      testOptions(executor),
+    );
+
+    expect(`${CLOUD_GENERATE_METHOD} ${CLOUD_GENERATE_ROUTE}`).toBe(
+      'POST /api/v1/ricky/workflows/generate',
+    );
+    expect(response.ok).toBe(true);
+    expect(response.status).toBe(200);
+    expect(response.artifacts).toEqual([artifact]);
+    expect(response.artifacts[0]).toMatchObject({
+      path: 'workflows/route-contract.ts',
+      type: 'text/typescript',
+      content: expect.stringContaining('route-contract'),
+    });
+    expect(response.artifactBundle).toEqual({
+      artifacts: response.artifacts,
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'both',
+    });
+    expect(response.artifactBundle?.artifacts[0]).toMatchObject({
+      path: expect.stringContaining('route-contract.ts'),
+      type: 'text/typescript',
+    });
+    expect(response.warnings).toEqual([
+      { severity: 'warning', message: 'Spec omitted schedule details.' },
+    ]);
+    expect(response.assumptions).toEqual([
+      { key: 'schedule', message: 'Used manual trigger by default.' },
+    ]);
+    expect(response.followUpActions).toEqual([
+      {
+        action: 'review-generated-files',
+        label: 'Review Generated Files',
+        description: 'Inspect generated workflow artifacts before enabling Cloud execution.',
+      },
+    ]);
+    expect(response.validation).toEqual({ ok: true, status: 'passed', issues: [] });
+    expect(response.requestId).toBe(TEST_REQUEST_ID);
+  });
+
   it('delegates to the injected executor and returns 200', async () => {
     const executor = mockExecutor({
       artifacts: [{ path: 'out/workflow.ts', type: 'text/typescript', content: '// generated' }],
