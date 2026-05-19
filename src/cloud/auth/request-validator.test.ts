@@ -616,3 +616,60 @@ describe('getProviderConnectGuidance', () => {
     }
   });
 });
+
+describe('Cloud auth module contract', () => {
+  it('rejects missing API keys before accepting API-key requests', () => {
+    expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toEqual({
+      ok: false,
+      error: 'Missing or empty auth token.',
+      status: 401,
+      code: 'missing-auth-token',
+      path: 'auth.token',
+    });
+  });
+
+  it('rejects otherwise valid auth when workspace context is missing', () => {
+    expect(validateCloudRequest({ token: 'cloud-token', tokenType: 'bearer' }, undefined)).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    });
+  });
+
+  it('accepts valid scoped bearer and API-key requests', () => {
+    expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-bearer' })).toMatchObject({
+      ok: true,
+      auth: { token: 'bearer-token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-bearer' },
+      mode: 'cloud',
+    });
+
+    expect(
+      validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, { workspaceId: 'ws-api-key' }),
+    ).toMatchObject({
+      ok: true,
+      auth: { token: 'api-key-token', tokenType: 'api-key' },
+      workspace: { workspaceId: 'ws-api-key' },
+      mode: 'cloud',
+    });
+  });
+
+  it('rejects workspace mismatches instead of accepting unscoped access', () => {
+    expect(resolveAuthorizedWorkspaceScope({ workspaceId: 'authorized-ws' }, { workspaceId: 'requested-ws' })).toEqual({
+      ok: false,
+      error: 'Cross-workspace access denied.',
+      status: 403,
+    });
+  });
+
+  it('keeps provider connect guidance user-visible and provider-specific', () => {
+    const googleGuidance = getProviderConnectGuidance('google');
+    expect(googleGuidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
+
+    const githubGuidance = getProviderConnectGuidance('github');
+    expect(githubGuidance.instructions.join('\n')).toContain('Cloud dashboard');
+    expect(githubGuidance.instructions.join('\n')).toContain('Nango');
+  });
+});
