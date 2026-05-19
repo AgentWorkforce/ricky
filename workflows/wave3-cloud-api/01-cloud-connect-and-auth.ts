@@ -26,7 +26,7 @@ async function main() {
       retries: 2,
     })
     .agent('reviewer-claude', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'reviewer',
       role: 'Product reviewer for Cloud onboarding/auth alignment and user-visible connection guidance.',
       retries: 1,
@@ -38,7 +38,7 @@ async function main() {
       retries: 1,
     })
     .agent('validator-claude', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'worker',
       role: 'Validation owner who runs the 80-to-100 loop and signs off only after hard gates and regression checks pass.',
       retries: 2,

@@ -18,7 +18,7 @@ async function main() {
       retries: 2,
     })
     .agent('review-claude', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'reviewer',
       role: 'Reviews whether the live proof demonstrates real adoption without weakening the product path.',
       retries: 1,
