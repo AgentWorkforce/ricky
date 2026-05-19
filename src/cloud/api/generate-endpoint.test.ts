@@ -91,6 +91,13 @@ describe('CLOUD_GENERATE_ROUTE', () => {
     expect(CLOUD_GENERATE_ROUTE).toBe('/api/v1/ricky/workflows/generate');
     expect(CLOUD_GENERATE_ROUTE.startsWith('/api/v1/ricky/')).toBe(true);
     expect(CLOUD_GENERATE_ROUTE.includes('/workflows/')).toBe(true);
+    expect(CLOUD_GENERATE_ROUTE.split('/').filter(Boolean)).toEqual([
+      'api',
+      'v1',
+      'ricky',
+      'workflows',
+      'generate',
+    ]);
     expect(CLOUD_GENERATE_ROUTE.endsWith('/workflows/generate')).toBe(true);
   });
 
