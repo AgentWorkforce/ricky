@@ -498,6 +498,11 @@ describe('handleCloudGenerate — success path', () => {
         },
       ],
     });
+    expect(response.runReceipt).toEqual({
+      executionRequested: false,
+      requestId: TEST_REQUEST_ID,
+      status: 'not_requested',
+    });
     expect(response.followUpActions).toEqual([
       {
         action: 'wire-runtime',
