@@ -75,8 +75,17 @@ export function shouldUseMasterExecutionWorkflow(spec: NormalizedWorkflowSpec): 
   const text = workflowText(spec);
   if (!IMPLEMENTATION_PATTERN.test(text)) return false;
   if (MASTER_EXPLICIT_PATTERN.test(text)) return true;
+  if (hasSinglePrWorktreeContract(text)) return false;
   if (spec.targetFiles.length >= MASTER_FILE_COUNT_THRESHOLD) return true;
   return false;
+}
+
+function hasSinglePrWorktreeContract(text: string): boolean {
+  return (
+    /\b(?:Outcome\s*:\s*)?(?:exactly\s+)?one\s+pull\s+request\b/i.test(text) &&
+    /^\s*(?:[-*]\s*)?(?:Worktree|Target worktree)\s*:/im.test(text) &&
+    /^\s*(?:[-*]\s*)?(?:Target branch|Branch)\s*:/im.test(text)
+  );
 }
 
 export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput): RenderedMasterWorkflow {
