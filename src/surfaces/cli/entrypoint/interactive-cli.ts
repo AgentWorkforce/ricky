@@ -1150,6 +1150,15 @@ async function executeCloudPath(
 
     const response = await handleCloudGenerate(flow.request, {
       executor: deps.cloudExecutor,
+      authorizedWorkspaceScope: {
+        workspaceId: flow.request.workspace.workspaceId,
+        ...(flow.request.workspace.projectId !== undefined
+          ? { projectId: flow.request.workspace.projectId }
+          : {}),
+        ...(flow.request.workspace.environment !== undefined
+          ? { environment: flow.request.workspace.environment }
+          : {}),
+      },
     });
 
     if (!response.ok) {
