@@ -477,6 +477,31 @@ describe('handleCloudGenerate — success path', () => {
     expect(executor.calls[0].body.mode).toBe('cloud');
   });
 
+  it('preserves structured JSON spec payloads for Cloud generation', async () => {
+    const executor = mockExecutor();
+    const structuredSpec = {
+      name: 'json-spec-workflow',
+      steps: [{ name: 'generate', gate: 'tsc --noEmit' }],
+    };
+    const request = validRequest({
+      body: {
+        spec: {
+          kind: 'structured',
+          format: 'json',
+          document: structuredSpec,
+        },
+      },
+    });
+
+    await handleCloudGenerate(request, testOptions(executor));
+
+    expect(executor.calls[0].body.spec).toEqual({
+      kind: 'structured',
+      format: 'json',
+      document: structuredSpec,
+    });
+  });
+
   it('accepts natural-language spec payloads and preserves Cloud response evidence', async () => {
     const artifact = {
       path: 'workflows/natural-language-workflow.ts',
