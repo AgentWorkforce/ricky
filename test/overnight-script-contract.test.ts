@@ -32,4 +32,11 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain('stale_workflows:');
     expect(overnightScript).toContain("$(sort -u \"$STALE_FILE\" 2>/dev/null | sed 's/^/  - /' || true)");
   });
+
+  it('waits on the detached launcher wrapper instead of the detached runner pid', () => {
+    expect(overnightScript).toContain('RUNNER_WAIT_PID=""');
+    expect(overnightScript).toContain('raise SystemExit(proc.wait())');
+    expect(overnightScript).toContain('waitpid($pid, 0); exit($? >> 8);');
+    expect(overnightScript).toContain('if ! wait "${RUNNER_WAIT_PID:-$runner_pid}"; then');
+  });
 });

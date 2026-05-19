@@ -94,6 +94,7 @@ RUN_PID="$$"
 RUN_PGID=""
 SCRIPT_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
 RUNNER_START_PID=""
+RUNNER_WAIT_PID=""
 RUNNER_EXPECTS_DETACHED_PGID="false"
 STATUS_MARKED="false"
 RESTORED_ARTIFACT_DIR=""
@@ -1648,17 +1649,19 @@ start_runner() {
   local launched_pid=""
 
   RUNNER_EXPECTS_DETACHED_PGID="false"
+  RUNNER_WAIT_PID=""
   rm -f "$runner_pid_file"
 
   if command -v setsid >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
     setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
     RUNNER_START_PID="$!"
+    RUNNER_WAIT_PID="$RUNNER_START_PID"
     return 0
   elif command -v python3 >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
     log "setsid unavailable; detaching runner via python3 subprocess fallback" >&2
-    python3 - "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file" <<'PY'
+    python3 - "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file" <<'PY' &
 import subprocess
 import sys
 
@@ -1674,15 +1677,19 @@ with open(runner_output, 'ab', buffering=0) as stream:
     )
 with open(runner_pid_file, 'w', encoding='utf-8') as handle:
     handle.write(f"{proc.pid}\n")
+raise SystemExit(proc.wait())
 PY
+    RUNNER_WAIT_PID="$!"
   elif command -v perl >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
     log "setsid unavailable; detaching runner via perl subprocess fallback" >&2
-    perl -e 'use strict; use warnings; use POSIX qw(setsid); my ($runner, $workflow, $output, $pidfile) = @ARGV; my $pid = fork(); die "fork: $!" unless defined $pid; if ($pid == 0) { setsid() or die "setsid: $!"; open STDIN, q{<}, q{/dev/null} or die "stdin: $!"; open my $fh, q{>>}, $output or die "open $output: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!"; } open my $pidfh, q{>}, $pidfile or die "open $pidfile: $!"; print {$pidfh} "$pid\n"; close $pidfh or die "close $pidfile: $!";' "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file"
+    perl -e 'use strict; use warnings; use POSIX qw(setsid); my ($runner, $workflow, $output, $pidfile) = @ARGV; my $pid = fork(); die "fork: $!" unless defined $pid; if ($pid == 0) { setsid() or die "setsid: $!"; open STDIN, q{<}, q{/dev/null} or die "stdin: $!"; open my $fh, q{>>}, $output or die "open $output: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!"; } open my $pidfh, q{>}, $pidfile or die "open $pidfile: $!"; print {$pidfh} "$pid\n"; close $pidfh or die "close $pidfile: $!"; waitpid($pid, 0); exit($? >> 8);' "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file" &
+    RUNNER_WAIT_PID="$!"
   else
     log "setsid unavailable and no python3/perl fallback found; launching runner without detached process-group isolation" >&2
     "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
     RUNNER_START_PID="$!"
+    RUNNER_WAIT_PID="$RUNNER_START_PID"
     return 0
   fi
 
@@ -1697,6 +1704,7 @@ PY
   fi
 
   RUNNER_START_PID="$launched_pid"
+  [[ -n "$RUNNER_WAIT_PID" ]] || RUNNER_WAIT_PID="$RUNNER_START_PID"
 }
 
 resolve_runner_pgid() {
@@ -1919,7 +1927,7 @@ run_one() {
     sleep "$POLL_SECONDS"
   done
 
-  if ! wait "$runner_pid"; then
+  if ! wait "${RUNNER_WAIT_PID:-$runner_pid}"; then
     runner_exit=$?
   fi
   RUN_PID="$$"
