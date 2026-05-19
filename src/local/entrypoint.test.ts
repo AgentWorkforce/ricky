@@ -4256,6 +4256,20 @@ describe('runLocal', () => {
             turn_id: testCase.expected.requestId,
             adapter: 'ricky-local-turn-context-adapter',
             package: '@agent-assistant/turn-context',
+            context_blocks: expect.arrayContaining([
+              'enrichment-ricky-request-summary',
+              'enrichment-ricky-spec-text',
+              'enrichment-ricky-request-metadata',
+              ...(testCase.expected.structuredSpec ? ['enrichment-ricky-structured-spec'] : []),
+              ...(testCase.expected.sourceMetadata ? ['enrichment-ricky-source-metadata'] : []),
+            ]),
+            enrichment_ids: expect.arrayContaining([
+              'ricky-request-summary',
+              'ricky-spec-text',
+              'ricky-request-metadata',
+              ...(testCase.expected.structuredSpec ? ['ricky-structured-spec'] : []),
+              ...(testCase.expected.sourceMetadata ? ['ricky-source-metadata'] : []),
+            ]),
           });
           expect(result.execution, testCase.name).toBeUndefined();
         }
