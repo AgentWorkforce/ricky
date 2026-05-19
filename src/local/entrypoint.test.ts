@@ -2619,6 +2619,225 @@ describe('runLocal', () => {
     expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
   });
 
+  it('normalizes CLI, MCP, and Claude specs into explicit local adapter requests', async () => {
+    const handoffs: Array<{
+      name: string;
+      handoff: RawHandoff;
+      expected: Partial<LocalInvocationRequest>;
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            description: 'generate a local CLI workflow',
+            workflowFile: 'workflows/local-cli.workflow.ts',
+          },
+          cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+          requestId: 'req-cli-contract',
+        },
+        expected: {
+          source: 'cli',
+          spec: 'generate a local CLI workflow',
+          metadata: { argv: ['ricky', 'generate', '--local'] },
+          requestId: 'req-cli-contract',
+        },
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            prompt: 'generate a local MCP workflow',
+            workflowFile: 'workflows/local-mcp.workflow.ts',
+          },
+          mcpMetadata: { toolCallId: 'tool-contract' },
+        },
+        expected: {
+          source: 'mcp',
+          spec: 'generate a local MCP workflow',
+          metadata: { toolCallId: 'tool-contract', toolName: 'ricky.generate' },
+        },
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            request: 'generate a local Claude workflow',
+            workflowFile: 'workflows/local-claude.workflow.ts',
+          },
+          conversationId: 'conv-contract',
+          turnId: 'turn-contract',
+        },
+        expected: {
+          source: 'claude',
+          spec: 'generate a local Claude workflow',
+          metadata: { conversationId: 'conv-contract', turnId: 'turn-contract' },
+        },
+      },
+    ];
+
+    for (const { name, handoff, expected } of handoffs) {
+      const executor = mockExecutor({
+        logs: [`[mock] accepted ${name} handoff locally`],
+      });
+      const result = await runLocal(handoff, { executor });
+
+      expect(result.ok, name).toBe(true);
+      expect(executor.calls, name).toHaveLength(1);
+      expect(executor.calls[0], name).toMatchObject({
+        _normalized: true,
+        mode: 'local',
+        ...expected,
+      });
+      expect(result.logs, name).toEqual([`[mock] accepted ${name} handoff locally`]);
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), name).toBe(false);
+    }
+  });
+
+  it('reads workflow artifact inputs from invocationRoot and routes the relative artifact path locally', async () => {
+    const artifactPath = 'workflows/wave4-local-byoh/relative-entrypoint.workflow.ts';
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'workflow-artifact',
+        artifactPath,
+        invocationRoot: '/caller/repo',
+        requestId: 'req-artifact-invocation-root',
+      },
+      {
+        artifactReader,
+        localExecutor: {
+          cwd: '/ignored/package/root',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                stdout: ['artifact executed from captured caller root'],
+              });
+            },
+          },
+          artifactWriter: {
+            async writeArtifact(): Promise<void> {
+              throw new Error('workflow artifact handoff must not generate a replacement artifact');
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(artifactReader.reads).toEqual([`/caller/repo/${artifactPath}`]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile: artifactPath,
+      cwd: '/caller/repo',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        requestId: 'req-artifact-invocation-root',
+        source: 'workflow-artifact',
+        route: 'execute',
+      },
+    });
+    expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from workflow-artifact',
+        '[local] mode: local',
+        `[local] spec path: ${artifactPath}`,
+        '[local] spec intake route: execute',
+        `[local] runtime command: @agent-relay/sdk/workflows runScriptWorkflow ${artifactPath}`,
+        '[stdout] artifact executed from captured caller root',
+      ]),
+    );
+    expect(result.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+  });
+
+  it('returns local artifact, logs, and environment recovery warnings without Cloud fallback', async () => {
+    const workflowFile = 'workflows/wave4-local-byoh/env-warning.workflow.ts';
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: {
+          description: 'run the local workflow artifact',
+          targetRepo: 'ricky',
+          workflowFile,
+        },
+        stageMode: 'run',
+      },
+      {
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                status: 'failed',
+                exitCode: 1,
+                stdout: ['local runtime started'],
+                stderr: ['MISSING_ENV_VAR: AGENT_RELAY_API_KEY, GITHUB_TOKEN'],
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.artifacts).toEqual([{ path: workflowFile, type: 'text/typescript' }]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile,
+      cwd: '/workspace/ricky',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        source: 'cli',
+        route: 'execute',
+      },
+    });
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: execute',
+        '[local] runtime status: failed',
+        '[stdout] local runtime started',
+        '[stderr] MISSING_ENV_VAR: AGENT_RELAY_API_KEY, GITHUB_TOKEN',
+      ]),
+    );
+    expect(result.execution).toMatchObject({
+      stage: 'execute',
+      status: 'blocker',
+      blocker: {
+        code: 'MISSING_ENV_VAR',
+        category: 'environment',
+        context: {
+          missing: ['AGENT_RELAY_API_KEY', 'GITHUB_TOKEN'],
+        },
+      },
+      evidence: {
+        logs: {
+          tail: ['local runtime started', 'MISSING_ENV_VAR: AGENT_RELAY_API_KEY, GITHUB_TOKEN'],
+          truncated: false,
+        },
+      },
+    });
+    expect(result.warnings).toEqual([
+      'Required runtime environment is missing: MISSING_ENV_VAR: AGENT_RELAY_API_KEY, GITHUB_TOKEN.',
+    ]);
+    expect(result.nextActions).toEqual([
+      'export AGENT_RELAY_API_KEY=...',
+      'export GITHUB_TOKEN=...',
+    ]);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+    expect(result.nextActions.some((action) => action.includes('promote to Cloud'))).toBe(false);
+  });
+
   it('surfaces injected local coordinator environment failures without Cloud fallback', async () => {
     const launches: RunRequest[] = [];
     const result = await runLocal(
