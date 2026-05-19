@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   CliHandoff,
   ClaudeHandoff,
+  LocalAssistantTurnContextDecision,
   LocalExecutorOptions,
   LocalEntrypointInput,
   LocalExecutionStageResult,
@@ -235,6 +236,25 @@ function coordinatorResult(request: RunRequest, overrides: Partial<CoordinatorRe
 
 function expectNoTurnContextFallback(logs: string[]): void {
   expect(logs.some((line) => line.startsWith('[local] turn context adapter skipped:'))).toBe(false);
+}
+
+function expectIssue11AssistantTurnContext(
+  actual: LocalAssistantTurnContextDecision | undefined,
+  expectedTurnId: string,
+  expectedBlocks: string[],
+): void {
+  expect(actual).toMatchObject({
+    assistant_id: 'ricky',
+    turn_id: expectedTurnId,
+    adapter: 'ricky-local-turn-context-adapter',
+    package: '@agent-assistant/turn-context',
+    context_blocks: expect.arrayContaining(expectedBlocks),
+    enrichment_ids: expect.arrayContaining([
+      'ricky-request-summary',
+      'ricky-spec-text',
+      'ricky-request-metadata',
+    ]),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1438,6 +1458,377 @@ describe('runLocal', () => {
     });
     expect(result.execution).toBeUndefined();
     expect(localExecutor.runner.invocations).toHaveLength(0);
+  });
+
+  describe('regression: issue #11 turn-context adapter in local path', () => {
+    it('keeps generation-only LocalResponse fields while exercising the real adapter-backed turn context', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          requestId: 'req-issue-11-generation-only',
+          spec: {
+            description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            targetFiles: ['src/local/entrypoint.ts'],
+            stageMode: 'generate',
+          },
+          specFile: 'specs/issue-11-generation.json',
+          invocationRoot: '/repo/issue-11-generation',
+          metadata: { issue: 11, proof: 'generation-only' },
+          cliMetadata: { argv: ['ricky', 'run', '--spec-file', 'specs/issue-11-generation.json'] },
+        },
+        {
+          localExecutor: {
+            ...localExecutor,
+            returnGeneratedArtifactOnly: true,
+          },
+        },
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        artifacts: [
+          {
+            path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+            type: 'text/typescript',
+            content: expect.stringContaining('workflow('),
+          },
+        ],
+        logs: expect.arrayContaining([
+          '[local] received spec from cli',
+          '[local] mode: local',
+          '[local] stage mode: generate',
+          '[local] spec path: specs/issue-11-generation.json',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime launch skipped: returning generated artifact only',
+        ]),
+        nextActions: [
+          expect.stringMatching(/^Run the generated workflow locally: ricky run workflows\/generated\/.+\.ts$/),
+          'Inspect the generated workflow artifact and choose whether to run it locally.',
+        ],
+        exitCode: 0,
+        generation: {
+          stage: 'generate',
+          status: 'ok',
+          artifact: {
+            path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+            workflow_id: expect.any(String),
+            spec_digest: expect.any(String),
+            target_files: expect.arrayContaining(['src/local/entrypoint.ts']),
+          },
+          next: {
+            run_command: expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
+            run_mode_hint: expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
+          },
+        },
+      });
+      expect(result.execution).toBeUndefined();
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+      expect(result.artifacts[0].path).toBe(result.generation?.artifact?.path);
+      expect(localExecutor.runner.invocations).toHaveLength(0);
+      expectNoTurnContextFallback(result.logs);
+      expectIssue11AssistantTurnContext(
+        result.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-generation-only',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-source-metadata',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+    });
+
+    it('preserves artifact-run and generate-and-run stage semantics through the adapter-observed local runtime', async () => {
+      const artifactPath = 'workflows/wave4-local-byoh/issue-11-ready.workflow.ts';
+      const artifactLaunches: RunRequest[] = [];
+      const artifactResult = await runLocal(
+        {
+          source: 'workflow-artifact',
+          artifactPath,
+          requestId: 'req-issue-11-artifact-run',
+          invocationRoot: '/repo/issue-11-artifact',
+          metadata: { issue: 11, proof: 'artifact-run' },
+        },
+        {
+          artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          localExecutor: {
+            cwd: '/ignored/local-executor-cwd',
+            artifactWriter: {
+              async writeArtifact(): Promise<void> {
+                throw new Error('artifact-run should not generate a replacement workflow');
+              },
+            },
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                artifactLaunches.push(request);
+                return coordinatorResult(request, { stdout: ['artifact run completed'] });
+              },
+            },
+          },
+        },
+      );
+
+      expect(artifactResult.ok).toBe(true);
+      expect(artifactResult.exitCode).toBe(0);
+      expect(artifactResult.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from workflow-artifact',
+          '[local] mode: local',
+          '[local] stage mode: run',
+          `[local] spec path: ${artifactPath}`,
+          '[local] spec intake route: execute',
+          '[local] runtime status: passed',
+          '[stdout] artifact run completed',
+        ]),
+      );
+      expect(artifactResult.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+      expect(artifactResult.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: artifactPath,
+          workflow_id: 'req-issue-11-artifact-run',
+          spec_digest: expect.any(String),
+        },
+        next: {
+          run_command: `ricky run ${artifactPath}`,
+          run_mode_hint: `ricky run ${artifactPath}`,
+        },
+      });
+      expect(artifactResult.execution).toMatchObject({
+        stage: 'execute',
+        status: 'success',
+        execution: {
+          artifact_path: artifactPath,
+          workflow_file: artifactPath,
+          cwd: '/repo/issue-11-artifact',
+        },
+        evidence: {
+          side_effects: {
+            commands_invoked: [`@agent-relay/sdk/workflows runScriptWorkflow ${artifactPath}`],
+          },
+          assertions: [
+            {
+              name: 'runtime_exit_code',
+              status: 'pass',
+              detail: 'Runtime exited with code 0.',
+            },
+          ],
+        },
+      });
+      expect(artifactLaunches).toHaveLength(1);
+      expect(artifactLaunches[0]).toMatchObject({
+        workflowFile: artifactPath,
+        cwd: '/repo/issue-11-artifact',
+        metadata: {
+          requestId: 'req-issue-11-artifact-run',
+          source: 'workflow-artifact',
+          route: 'execute',
+          assistantTurnContext: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-artifact-run',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          },
+        },
+      });
+      expectNoTurnContextFallback(artifactResult.logs);
+      expectIssue11AssistantTurnContext(
+        artifactResult.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-artifact-run',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+
+      const generateAndRunExecutor = memoryLocalExecutorOptions({ stdout: ['generate-and-run completed'] });
+      const generateAndRunResult = await runLocal(
+        {
+          source: 'mcp',
+          requestId: 'req-issue-11-generate-and-run',
+          invocationRoot: '/repo/issue-11-generate-and-run',
+          executionPreference: 'auto',
+          arguments: {
+            prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'generate-and-run',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          mcpMetadata: { toolCallId: 'tool-issue-11-generate-and-run' },
+        },
+        { localExecutor: generateAndRunExecutor },
+      );
+
+      expect(generateAndRunResult.ok).toBe(true);
+      expect(generateAndRunResult.exitCode).toBe(0);
+      expect(generateAndRunResult.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from mcp',
+          '[local] mode: both',
+          '[local] stage mode: run',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime status: passed',
+          '[stdout] generate-and-run completed',
+        ]),
+      );
+      expect(generateAndRunResult.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+          workflow_id: expect.any(String),
+          spec_digest: expect.any(String),
+          target_files: expect.arrayContaining(['src/local/entrypoint.ts']),
+        },
+      });
+      expect(generateAndRunResult.execution).toMatchObject({
+        stage: 'execute',
+        status: 'success',
+        evidence: {
+          logs: {
+            tail: ['generate-and-run completed'],
+            truncated: false,
+          },
+        },
+      });
+      expect(generateAndRunExecutor.runner.invocations).toHaveLength(1);
+      expectNoTurnContextFallback(generateAndRunResult.logs);
+      expectIssue11AssistantTurnContext(
+        generateAndRunResult.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-generate-and-run',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-source-metadata',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+    });
+
+    it('keeps Ricky blocker and evidence fields when adapter-observed local execution fails', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 127,
+        stdout: ['runtime attempted launch'],
+        stderr: ['agent-relay: command not found'],
+      });
+      const result = await runLocal(
+        {
+          source: 'claude',
+          requestId: 'req-issue-11-blocker',
+          invocationRoot: '/repo/issue-11-blocker',
+          stageMode: 'generate-and-run',
+          spec: {
+            request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          conversationId: 'conversation-issue-11-blocker',
+          turnId: 'turn-issue-11-blocker',
+          metadata: { issue: 11, proof: 'blocker-evidence' },
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).toBe(2);
+      expect(result.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+          workflow_id: expect.any(String),
+          spec_digest: expect.any(String),
+          target_files: expect.arrayContaining(['src/local/entrypoint.ts']),
+        },
+      });
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'blocker',
+        execution: {
+          artifact_path: result.generation?.artifact?.path,
+          workflow_file: result.generation?.artifact?.path,
+          cwd: '/repo/issue-11-blocker',
+          steps_completed: 0,
+          steps_total: 1,
+        },
+        blocker: {
+          code: 'MISSING_BINARY',
+          category: 'dependency',
+          detected_during: 'launch',
+          message: expect.stringContaining('Runtime dependency is unavailable'),
+          recovery: {
+            actionable: true,
+            steps: [
+              'npm install',
+              expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
+            ],
+          },
+          context: {
+            missing: ['@agent-relay/sdk/workflows runtime'],
+            found: ['cwd=/repo/issue-11-blocker'],
+          },
+        },
+        evidence: {
+          outcome_summary: expect.stringContaining('blocked during local runtime execution'),
+          failed_step: { id: 'runtime-launch', name: 'Local runtime execution' },
+          exit_code: 127,
+          logs: {
+            tail: ['runtime attempted launch', 'agent-relay: command not found'],
+            truncated: false,
+          },
+          side_effects: {
+            files_written: expect.arrayContaining([result.generation?.artifact?.path]),
+            commands_invoked: [
+              expect.stringMatching(/^@agent-relay\/sdk\/workflows runScriptWorkflow workflows\/generated\/.+\.ts$/),
+            ],
+          },
+          assertions: [
+            {
+              name: 'runtime_exit_code',
+              status: 'fail',
+              detail: 'Runtime exit code: 127.',
+            },
+          ],
+        },
+      });
+      expect(result.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from claude',
+          '[local] mode: local',
+          '[local] stage mode: run',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime status: failed',
+          '[stdout] runtime attempted launch',
+          '[stderr] agent-relay: command not found',
+        ]),
+      );
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Runtime dependency is unavailable'),
+        ]),
+      );
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+      expect(result.nextActions).toEqual(result.execution?.blocker?.recovery.steps);
+      expect(localExecutor.runner.invocations).toHaveLength(1);
+      expectNoTurnContextFallback(result.logs);
+      expectIssue11AssistantTurnContext(
+        result.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-blocker',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-source-metadata',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+    });
   });
 
   it('continues from generated artifact into execution evidence when run mode is explicit', async () => {
