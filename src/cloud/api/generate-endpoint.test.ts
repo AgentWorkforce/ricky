@@ -1198,6 +1198,7 @@ describe('Cloud vs local path distinction', () => {
     expect('validation' in response).toBe(true);
     expect('runReceipt' in response).toBe(true);
     // LocalResponse has 'logs' and 'nextActions' — Cloud has 'followUpActions' and no 'logs'
+    expect('followUpActions' in response).toBe(true);
     expect('logs' in response).toBe(false);
     expect('nextActions' in response).toBe(false);
   });
