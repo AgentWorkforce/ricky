@@ -59,6 +59,7 @@ async function main() {
     .step('implement-adapter', {
       agent: 'impl-codex',
       dependsOn: ['install-turn-context-dependency'],
+      timeoutMs: 420_000,
       task: `Implement GitHub issue #11 as the preferred request/turn envelope alignment slice.
 
 You are not alone in the codebase. Preserve unrelated edits and do not revert work outside this slice.
@@ -104,6 +105,7 @@ Use the docs from #9, #10, and #12 as the decision source. Do not broaden into s
     .step('add-preservation-tests', {
       agent: 'test-codex',
       dependsOn: ['adapter-file-gate'],
+      timeoutMs: 420_000,
       task: `Add tests for the issue #11 adapter slice.
 
 You are not alone in the codebase. Work with the implementation as it exists; do not revert unrelated edits.
@@ -145,6 +147,7 @@ Prefer deterministic fakes and injected executors. Do not require live provider 
     .step('fix-loop', {
       agent: 'impl-codex',
       dependsOn: ['run-targeted-tests'],
+      timeoutMs: 420_000,
       task: `This is the 80-to-100 fix loop for issue #11. Fix any validation failure and rerun until green.
 
 Validation output:
