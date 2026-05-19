@@ -76,8 +76,8 @@ function expectIssue11RickyMetadata(
     mode: expected.mode,
     stageMode: expected.stageMode,
     specPath: expected.specPath,
-    metadata: expected.metadata,
   });
+  expect(actual?.metadata, `${label}.metadata`).toEqual(expected.metadata);
   expect(actual?.structuredSpec, `${label}.structuredSpec`).toEqual(expected.structuredSpec);
   expect(actual?.sourceMetadata, `${label}.sourceMetadata`).toEqual(expected.sourceMetadata);
 }
