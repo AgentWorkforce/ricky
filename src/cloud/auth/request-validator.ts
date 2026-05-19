@@ -70,7 +70,7 @@ export function validateWorkspaceContext(
 }
 
 export function validateRequestMode(mode: CloudRequestMode | string | undefined): RequestModeValidationResult {
-  const resolvedMode = mode ?? 'cloud';
+  const resolvedMode = mode === undefined ? 'cloud' : mode;
 
   if (typeof resolvedMode !== 'string' || !VALID_REQUEST_MODES.has(resolvedMode)) {
     return { ok: false, error: 'Invalid request mode.', status: 400 };

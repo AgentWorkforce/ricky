@@ -228,6 +228,14 @@ describe('validateRequestMode', () => {
       status: 400,
     });
   });
+
+  it('rejects null request mode instead of defaulting it', () => {
+    expect(validateRequestMode(null as unknown as string)).toEqual({
+      ok: false,
+      error: 'Invalid request mode.',
+      status: 400,
+    });
+  });
 });
 
 describe('validateProviderConnectionState', () => {
