@@ -39,4 +39,9 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain('waitpid($pid, 0); exit($? >> 8);');
     expect(overnightScript).toContain('if ! wait "${RUNNER_WAIT_PID:-$runner_pid}"; then');
   });
+
+  it('briefly waits for fallback launchers to record the detached child pid before declaring startup failure', () => {
+    expect(overnightScript).toContain('while [[ ! -s "$runner_pid_file" && "$pid_wait_attempt" -lt 20 ]]; do');
+    expect(overnightScript).toContain('sleep 0.1');
+  });
 });

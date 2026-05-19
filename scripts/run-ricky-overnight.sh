@@ -1693,6 +1693,12 @@ PY
     return 0
   fi
 
+  local pid_wait_attempt="0"
+  while [[ ! -s "$runner_pid_file" && "$pid_wait_attempt" -lt 20 ]]; do
+    sleep 0.1
+    pid_wait_attempt="$((pid_wait_attempt + 1))"
+  done
+
   if [[ -f "$runner_pid_file" ]]; then
     launched_pid="$(tr -d '[:space:]' < "$runner_pid_file")"
   fi
