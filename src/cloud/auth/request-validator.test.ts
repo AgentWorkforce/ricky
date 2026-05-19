@@ -825,6 +825,40 @@ describe('getProviderConnectGuidance', () => {
 });
 
 describe('Cloud auth module contract', () => {
+  it('enforces the broker-facing Cloud auth request and guidance contract', () => {
+    expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toMatchObject({
+      ok: false,
+      code: 'missing-auth-token',
+      status: 401,
+    });
+
+    expect(validateCloudRequest({ token: 'bearer-token' }, undefined)).toMatchObject({
+      ok: false,
+      code: 'missing-workspace-id',
+      status: 400,
+    });
+
+    expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-001' })).toMatchObject({
+      ok: true,
+      auth: { token: 'bearer-token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-001' },
+      mode: 'cloud',
+    });
+
+    expect(resolveAuthorizedWorkspaceScope({ workspaceId: 'ws-001' }, { workspaceId: 'ws-002' })).toMatchObject({
+      ok: false,
+      code: 'cross-workspace-access',
+      status: 403,
+    });
+
+    const googleGuidance = getProviderConnectGuidance('google');
+    expect(googleGuidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
+
+    const githubGuidance = getProviderConnectGuidance('github');
+    expect(githubGuidance.instructions.join('\n')).toContain('Cloud dashboard');
+    expect(githubGuidance.instructions.join('\n')).toContain('Nango');
+  });
+
   it('covers the Cloud API request acceptance contract without provider calls', () => {
     expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toMatchObject({
       ok: false,
