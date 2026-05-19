@@ -47,7 +47,6 @@ npm run typecheck
 npx tsc --noEmit
 npx vitest run src/local
 npx vitest run src/surfaces/cli
-npm test
 ```
 
 The adoption proof also confirms the shared adapter is called by the real local executor before product intake, workflow generation, artifact selection, runtime prechecks, or coordinator launch. That makes this a runtime-path adoption, not copied types or documentation-only alignment.
@@ -56,7 +55,7 @@ The adoption proof also confirms the shared adapter is called by the real local 
 
 The external generate artifact returned `status: ok`, wrote the generated workflow file, and printed the user-facing next commands for foreground and background execution.
 
-The external generate-and-run artifact returned `status: success` for the execute stage. It recorded workflow name `wf-51009be3b0c7`, execution run `0337391c29279f9a3218d9c1`, stdout and stderr log paths under Ricky local state, and `Auto-fix: repaired after 1/7 attempt(s)`.
+The external generate-and-run artifact returned `status: success` for the execute stage. It recorded workflow name `wf-51009be3b0c7`, execution run `1393dd51eb0d6e11ea232bfc`, stdout and stderr log paths under Ricky local state, and `Auto-fix: repaired after 1/7 attempt(s)`.
 
 The execute-stage assertion `external_cli_execution` passed with detail that the printed next command executed successfully in the external temp repo. The captured process exit artifact is `0`.
 
