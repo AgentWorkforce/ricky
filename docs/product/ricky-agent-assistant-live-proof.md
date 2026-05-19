@@ -4,7 +4,7 @@ GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the liv
 
 ## What was adopted
 
-Ricky adopted `@agent-assistant/turn-context` as a bounded request/turn envelope primitive through `ricky-local-turn-context-adapter`.
+Ricky adopted `@agent-assistant/turn-context` as a bounded request/turn envelope primitive through the `ricky-local-turn-context-adapter`.
 
 The captured adapter smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter package `@agent-assistant/turn-context`, adapter version `1`, CLI source metadata, structured spec data, invocation root, local mode, run stage mode, and request metadata provenance.
 
@@ -22,7 +22,7 @@ Ricky still owns request normalization, workflow generation, workflow artifacts,
 
 The adapter runtime smoke proof exercised assistant `ricky` with source `cli`, `mode: local`, `stageMode: run`, invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`, and structured spec description `generate a workflow for package checks`.
 
-The external product path then invoked the user-facing Ricky CLI:
+The external product path invoked the user-facing Ricky CLI:
 
 ```text
 ricky --mode local --spec generate a workflow for package checks with typecheck and tests --no-workforce-persona
@@ -40,7 +40,7 @@ The generated workflow was then executed through the user-facing run command:
 ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
 ```
 
-This proves the adoption was present while moving through generate and run, not only in an isolated unit path.
+This proves the adoption was present while moving through generate and run, not only in an isolated adapter path.
 
 ## Deterministic test proof
 
@@ -72,7 +72,7 @@ Run: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-
 Background: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts --background
 ```
 
-The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `932626ac9037e47c553dce39`, stdout and stderr log paths under Ricky local state, and the assertion `external_cli_execution: pass`.
+The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `a8f0bc4e4e72e441f6219406`, stdout and stderr log paths under Ricky local state, and the assertion `external_cli_execution: pass`.
 
 The execution also recorded `Auto-fix: repaired after 1/7 attempt(s)`, proving the user-facing run path completed through Ricky's existing repair loop.
 
