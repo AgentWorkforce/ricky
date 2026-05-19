@@ -16,6 +16,7 @@ export type {
   CloudAuthContext,
   CloudAutoFixApprovalBoundary,
   CloudGenerateMode,
+  CloudGenerationMode,
   CloudGenerateRequest,
   CloudGenerateRequestBody,
   CloudNaturalLanguageSpecPayload,
@@ -28,6 +29,7 @@ export type {
 export type {
   CloudAssumption,
   CloudArtifact,
+  CloudArtifactBundle,
   CloudFollowUpAction,
   CloudGenerateResponse,
   CloudRunReceipt,

@@ -10,10 +10,15 @@
  * is the caller's responsibility.
  */
 
-import type { CloudGenerateRequest } from './request-types.js';
+import type {
+  CloudGenerateMode,
+  CloudGenerateRequest,
+  CloudGenerationMode,
+} from './request-types.js';
 import type {
   CloudAssumption,
   CloudArtifact,
+  CloudArtifactBundle,
   CloudFollowUpAction,
   CloudGenerateResponse,
   CloudRunReceipt,
@@ -113,6 +118,12 @@ function generateRequestId(): string {
   return `ricky-cloud-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const VALID_GENERATION_MODES = new Set<CloudGenerationMode>([
+  'generate-only',
+  'generate-and-return-artifacts',
+  'generate-and-run',
+]);
+
 function passedValidation(): CloudValidationStatus {
   return { ok: true, status: 'passed', issues: [] };
 }
@@ -121,11 +132,52 @@ function failedValidation(code: string, message: string, path: string): CloudVal
   return { ok: false, status: 'failed', issues: [{ code, message, path }] };
 }
 
+function skippedValidation(): CloudValidationStatus {
+  // Validation never ran (e.g., executor threw before producing a result).
+  // Reporting `passed` would falsely claim the artifact bundle was checked.
+  return { ok: false, status: 'skipped', issues: [] };
+}
+
 function notRequestedRunReceipt(requestId: string): CloudRunReceipt {
   return {
     executionRequested: false,
     requestId,
     status: 'not_requested',
+  };
+}
+
+function runRequestedReceipt(requestId: string): CloudRunReceipt {
+  return {
+    executionRequested: true,
+    requestId,
+    status: 'skipped',
+  };
+}
+
+function defaultRunReceipt(requestId: string, generationMode: CloudGenerationMode): CloudRunReceipt {
+  return generationMode === 'generate-and-run'
+    ? runRequestedReceipt(requestId)
+    : notRequestedRunReceipt(requestId);
+}
+
+function resolveGenerationMode(
+  generationMode: CloudGenerateRequest['body']['generationMode'],
+): CloudGenerationMode {
+  return generationMode ?? 'generate-and-return-artifacts';
+}
+
+function resolveTargetMode(mode: CloudGenerateRequest['body']['mode']): CloudGenerateMode {
+  return mode ?? 'cloud';
+}
+
+function artifactBundle(
+  artifacts: CloudArtifact[],
+  request: CloudGenerateRequest,
+): CloudArtifactBundle {
+  return {
+    artifacts,
+    generationMode: resolveGenerationMode(request.body.generationMode),
+    targetMode: resolveTargetMode(request.body.mode),
   };
 }
 
@@ -139,6 +191,11 @@ function errorResponse(
     ok: false,
     status,
     artifacts: [],
+    artifactBundle: {
+      artifacts: [],
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    },
     warnings: [{ severity: 'error', message }],
     assumptions: [],
     validation,
@@ -268,6 +325,17 @@ function validateRequest(
     );
   }
 
+  const generationMode = request?.body?.generationMode;
+  if (generationMode !== undefined && !VALID_GENERATION_MODES.has(generationMode)) {
+    return validationFailure(
+      requestId,
+      400,
+      'Invalid generation mode.',
+      'invalid-generation-mode',
+      'body.generationMode',
+    );
+  }
+
   return { ok: true };
 }
 
@@ -313,15 +381,17 @@ export async function handleCloudGenerate(
     const resultValidation = result.validation ?? passedValidation();
     const validationPassed = resultValidation.ok !== false;
     const artifacts = appendGenerationMetadataArtifacts(result.artifacts, result.generationMetadata);
+    const generationMode = resolveGenerationMode(request.body.generationMode);
     return {
       ok: validationPassed,
       status: validationPassed ? 200 : 422,
       artifacts,
+      artifactBundle: artifactBundle(artifacts, request),
       warnings: result.warnings,
       assumptions: result.assumptions ?? [],
       validation: resultValidation,
       runReceipt: {
-        ...notRequestedRunReceipt(requestId),
+        ...defaultRunReceipt(requestId, generationMode),
         ...result.runReceipt,
         requestId,
       },
@@ -334,10 +404,11 @@ export async function handleCloudGenerate(
       ok: false,
       status: 500,
       artifacts: [],
+      artifactBundle: artifactBundle([], request),
       warnings: [{ severity: 'error', message: `Cloud generation failed: ${message}` }],
       assumptions: [],
-      validation: passedValidation(),
-      runReceipt: notRequestedRunReceipt(requestId),
+      validation: skippedValidation(),
+      runReceipt: defaultRunReceipt(requestId, resolveGenerationMode(request.body.generationMode)),
       followUpActions: [
         { action: 'retry', label: 'Retry', description: 'Retry the Cloud generate request.' },
       ],

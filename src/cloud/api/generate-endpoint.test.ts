@@ -82,6 +82,26 @@ describe('CLOUD_GENERATE_ROUTE', () => {
 // ---------------------------------------------------------------------------
 
 describe('handleCloudGenerate — validation', () => {
+  it('rejects requests with missing authentication context', async () => {
+    const executor = mockExecutor();
+    const request = {
+      workspace: { workspaceId: 'ws-001' },
+      body: { spec: 'build a data pipeline' },
+    } as CloudGenerateRequest;
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(401);
+    expect(response.warnings[0].message).toContain('auth token');
+    expect(response.validation.issues[0]).toEqual({
+      code: 'missing-auth-token',
+      message: 'Missing or empty auth token.',
+      path: 'auth.token',
+    });
+    expect(executor.calls).toHaveLength(0);
+  });
+
   it('rejects requests with missing auth token', async () => {
     const request = validRequest({ auth: { token: '' } });
     const response = await handleCloudGenerate(request, testOptions());
@@ -101,6 +121,26 @@ describe('handleCloudGenerate — validation', () => {
       ],
     });
     expect(response.requestId).toBe(TEST_REQUEST_ID);
+  });
+
+  it('rejects requests with missing workspace context', async () => {
+    const executor = mockExecutor();
+    const request = {
+      auth: { token: 'test-token-abc' },
+      body: { spec: 'build a data pipeline' },
+    } as CloudGenerateRequest;
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.warnings[0].message).toContain('workspace ID');
+    expect(response.validation.issues[0]).toEqual({
+      code: 'missing-workspace-id',
+      message: 'Missing or empty workspace ID.',
+      path: 'workspace.workspaceId',
+    });
+    expect(executor.calls).toHaveLength(0);
   });
 
   it('rejects requests with missing workspace ID', async () => {
@@ -164,6 +204,13 @@ describe('handleCloudGenerate — success path', () => {
       requestId: TEST_REQUEST_ID,
       status: 'not_requested',
     });
+    expect(response.artifactBundle).toEqual({
+      artifacts: [
+        { path: 'out/workflow.ts', type: 'text/typescript', content: '// generated' },
+      ],
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    });
     expect(response.followUpActions).toEqual([{ action: 'deploy', label: 'Deploy' }]);
     expect(response.requestId).toBe(TEST_REQUEST_ID);
   });
@@ -192,6 +239,7 @@ describe('handleCloudGenerate — success path', () => {
         spec: 'deploy service',
         specPath: '/specs/deploy.md',
         mode: 'both',
+        generationMode: 'generate-and-return-artifacts',
         metadata: { origin: 'dashboard' },
       },
     });
@@ -201,6 +249,7 @@ describe('handleCloudGenerate — success path', () => {
     expect(executor.calls[0].body.spec).toBe('deploy service');
     expect(executor.calls[0].body.specPath).toBe('/specs/deploy.md');
     expect(executor.calls[0].body.mode).toBe('both');
+    expect(executor.calls[0].body.generationMode).toBe('generate-and-return-artifacts');
     expect(executor.calls[0].body.metadata).toEqual({ origin: 'dashboard' });
   });
 
@@ -245,6 +294,29 @@ describe('handleCloudGenerate — success path', () => {
       status: 'queued',
       receiptUrl: '/runs/run-001',
     });
+  });
+
+  it('marks execution requested for generate-and-run without implementing run behavior', async () => {
+    const executor = mockExecutor();
+    const response = await handleCloudGenerate(
+      validRequest({
+        body: {
+          spec: 'generate and run in Cloud',
+          mode: 'cloud',
+          generationMode: 'generate-and-run',
+        },
+      }),
+      testOptions(executor),
+    );
+
+    expect(response.ok).toBe(true);
+    expect(response.runReceipt).toEqual({
+      executionRequested: true,
+      requestId: TEST_REQUEST_ID,
+      status: 'skipped',
+    });
+    expect(response.artifactBundle?.generationMode).toBe('generate-and-run');
+    expect(response.artifactBundle?.targetMode).toBe('cloud');
   });
 
   it('returns the artifact bundle response contract with warnings, assumptions, and follow-ups', async () => {
@@ -292,6 +364,16 @@ describe('handleCloudGenerate — success path', () => {
     expect(response.followUpActions[0]).toMatchObject({
       action: 'review-artifacts',
       label: 'Review Artifacts',
+    });
+    expect(response.artifactBundle).toEqual({
+      artifacts: response.artifacts,
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    });
+    expect(response.artifactBundle?.artifacts[0]).toMatchObject({
+      path: 'workflows/generated-workflow.ts',
+      type: 'text/typescript',
+      content: expect.stringContaining('workflow'),
     });
   });
 
@@ -402,6 +484,7 @@ describe('handleCloudGenerate — error path', () => {
     expect(response.warnings[0].severity).toBe('error');
     expect(response.warnings[0].message).toContain('connection timeout');
     expect(response.followUpActions[0].action).toBe('retry');
+    expect(response.validation).toEqual({ ok: false, status: 'skipped', issues: [] });
   });
 
   it('handles non-Error throws gracefully', async () => {
@@ -415,6 +498,7 @@ describe('handleCloudGenerate — error path', () => {
     expect(response.ok).toBe(false);
     expect(response.status).toBe(500);
     expect(response.warnings[0].message).toContain('string error');
+    expect(response.validation).toEqual({ ok: false, status: 'skipped', issues: [] });
   });
 });
 
@@ -517,6 +601,24 @@ describe('handleCloudGenerate — runtime-invalid input', () => {
     expect(response.status).toBe(400);
     expect(response.validation.issues[0].code).toBe('invalid-mode');
     expect(response.validation.issues[0].path).toBe('body.mode');
+    expect(executor.calls).toHaveLength(0);
+  });
+
+  it('rejects invalid generationMode values', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      body: {
+        spec: 'build something',
+        generationMode: 'run-only' as unknown as CloudGenerateRequest['body']['generationMode'],
+      },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0].code).toBe('invalid-generation-mode');
+    expect(response.validation.issues[0].path).toBe('body.generationMode');
     expect(executor.calls).toHaveLength(0);
   });
 

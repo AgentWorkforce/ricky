@@ -24,6 +24,11 @@ export type CloudWorkspaceContext = CanonicalCloudWorkspaceContext;
 
 export type CloudGenerateMode = CloudRequestMode;
 
+export type CloudGenerationMode =
+  | 'generate-only'
+  | 'generate-and-return-artifacts'
+  | 'generate-and-run';
+
 export type CloudAutoFixApprovalBoundary =
   | 'code_push'
   | 'pr_create'
@@ -65,8 +70,10 @@ export interface CloudGenerateRequestBody {
   spec: CloudWorkflowSpecPayload;
   /** Optional file path hint for the spec origin. */
   specPath?: string;
-  /** Execution mode — Cloud-only or both (local + Cloud). */
+  /** Target routing mode — Cloud-only or both local/BYOH + Cloud artifact paths. */
   mode?: CloudGenerateMode;
+  /** Generation behavior — generate only, return artifacts, or request Cloud execution. */
+  generationMode?: CloudGenerationMode;
   /** Ricky supervision policy for executing existing workflow artifacts in Cloud. */
   autoFix?: CloudRickyAutoFixPolicy;
   /** Opaque metadata from the originating surface. */
