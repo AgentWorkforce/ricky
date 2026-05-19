@@ -241,6 +241,50 @@ clear_artifact_checkpoint() {
   rm -f "$artifact_dir/checkpoint.env"
 }
 
+restore_quarantined_runtime_state_for_artifact() {
+  local artifact_dir="$1"
+  local quarantine_root="$artifact_dir/runtime-state-quarantine"
+  local entry=""
+  local base=""
+  local candidate=""
+
+  [[ -d "$quarantine_root" ]] || return 0
+
+  shopt -s nullglob
+  for entry in "$quarantine_root"/*; do
+    [[ -e "$entry" ]] || continue
+    base="$(basename "$entry")"
+    candidate=""
+
+    case "$base" in
+      agent-relay-*) candidate=".agent-relay" ;;
+      relay-*) candidate=".relay" ;;
+      trajectories-*) candidate=".trajectories" ;;
+      *)
+        log "leaving unknown quarantined runtime state in place: $entry"
+        continue
+        ;;
+    esac
+
+    if [[ ! -e "$candidate" ]]; then
+      mv "$entry" "$candidate"
+      log "restored quarantined runtime state from stale artifact: $entry -> $candidate"
+      continue
+    fi
+
+    if [[ -d "$candidate" && -d "$entry" ]]; then
+      mkdir -p "$candidate"
+      cp -R "$entry"/. "$candidate"/
+      rm -rf "$entry"
+      log "merged quarantined runtime state from stale artifact: $entry -> $candidate"
+      continue
+    fi
+
+    log "leaving quarantined runtime state in place because restore target already exists: $entry (target: $candidate)"
+  done
+  shopt -u nullglob
+}
+
 mark_artifact_stale_or_complete() {
   local artifact_dir="$1"
   local status_file="$artifact_dir/status.txt"
@@ -320,6 +364,7 @@ reconcile_stale_state_dir() {
   if [[ -f "$status_file" ]] && grep -Eqx 'running|checkpointed' "$status_file"; then
     if ! is_pid_running "$run_pid" && ! is_process_group_running "$run_pgid"; then
       mark_artifact_stale_or_complete "$artifact_dir"
+      restore_quarantined_runtime_state_for_artifact "$artifact_dir"
       reconciled_status="$(cat "$status_file" 2>/dev/null || true)"
       log "reconciled stale overnight state from $checkpoint_file -> $artifact_dir"
 
@@ -416,6 +461,7 @@ reconcile_stale_state_dirs() {
   while IFS= read -r artifact_dir; do
     [[ -d "$artifact_dir" ]] || continue
     mark_artifact_stale_or_complete "$artifact_dir"
+    restore_quarantined_runtime_state_for_artifact "$artifact_dir"
     log "reconciled orphaned overnight artifact without checkpoint -> $artifact_dir"
   done < <(iterate_running_artifact_dirs_without_checkpoints)
 }

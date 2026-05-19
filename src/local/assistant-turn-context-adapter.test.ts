@@ -682,6 +682,9 @@ describe('Ricky turn-context adapter', () => {
       const executionSummary = executionRequest.context?.blocks.find(
         (block) => block.id === 'enrichment-ricky-request-summary',
       )?.text;
+      const executionSummaryMetadata = executionRequest.context?.blocks.find(
+        (block) => block.id === 'enrichment-ricky-request-summary',
+      )?.metadata;
       expect(executionSummary, testCase.name).toContain(`requestId: ${testCase.expected.requestId}`);
       expect(executionSummary, testCase.name).toContain(`mode: ${testCase.expected.mode}`);
       expect(executionSummary, testCase.name).toContain(`stageMode: ${testCase.expected.stageMode}`);
@@ -689,6 +692,14 @@ describe('Ricky turn-context adapter', () => {
       expect(executionSummary, testCase.name).toContain(
         `specPath: ${testCase.expected.specPath ?? '(not supplied)'}`,
       );
+      expect(executionSummaryMetadata, testCase.name).toMatchObject({
+        source: 'ricky-local',
+        requestId: testCase.expected.requestId,
+        mode: testCase.expected.mode,
+        stageMode: testCase.expected.stageMode,
+        invocationRoot: testCase.expected.invocationRoot,
+        specPath: testCase.expected.specPath,
+      });
       expect(executionMetadata?.adapter, testCase.name).toMatchObject({
         name: 'ricky-local-turn-context-adapter',
         package: '@agent-assistant/turn-context',
