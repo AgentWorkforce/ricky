@@ -13,6 +13,17 @@ function artifactReader(content: string) {
   };
 }
 
+function recordingArtifactReader(content: string) {
+  const reads: string[] = [];
+  return {
+    reads,
+    async readArtifact(path: string): Promise<string> {
+      reads.push(path);
+      return content;
+    },
+  };
+}
+
 function contextBlockContent(blocks: Array<{ id: string; content: string }>, id: string): string {
   const block = blocks.find((candidate) => candidate.id === id);
   expect(block, id).toBeDefined();
@@ -264,6 +275,72 @@ describe('Ricky turn-context adapter', () => {
         specFile: 'specs/issue-11.execution-request.json',
       },
     });
+  });
+
+  it('preserves workflow-artifact handoff identity while resolving reads from the invocation root', async () => {
+    const reader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const normalized = await normalizeRequest(
+      {
+        source: 'workflow-artifact',
+        artifactPath: 'workflows/issue-11/from-root.workflow.ts',
+        requestId: 'req-issue-11-artifact-root',
+        invocationRoot: '/workspace/issue-11-root',
+        metadata: { issue: 11, surface: 'workflow-artifact', proof: 'root-preservation' },
+      },
+      reader,
+    );
+    const assembly = await assembleRickyTurnContext(normalized, {
+      assembler: createTurnContextAssembler(),
+    });
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-req-issue-11-artifact-root',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const metadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(reader.reads).toEqual(['/workspace/issue-11-root/workflows/issue-11/from-root.workflow.ts']);
+    expect(normalized).toMatchObject({
+      requestId: 'req-issue-11-artifact-root',
+      source: 'workflow-artifact',
+      invocationRoot: '/workspace/issue-11-root',
+      mode: 'local',
+      stageMode: 'run',
+      specPath: 'workflows/issue-11/from-root.workflow.ts',
+      metadata: { issue: 11, surface: 'workflow-artifact', proof: 'root-preservation' },
+    });
+    expect(metadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expectIssue11RickyMetadata(
+      'workflow-artifact-root.executionRequest.metadata.ricky',
+      metadata?.ricky,
+      {
+        requestId: 'req-issue-11-artifact-root',
+        source: 'workflow-artifact',
+        spec: 'import { workflow } from "@agent-relay/sdk/workflows";',
+        invocationRoot: '/workspace/issue-11-root',
+        mode: 'local',
+        stageMode: 'run',
+        specPath: 'workflows/issue-11/from-root.workflow.ts',
+        metadata: { issue: 11, surface: 'workflow-artifact', proof: 'root-preservation' },
+      },
+    );
+    expect(executionRequest.context?.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'enrichment-ricky-request-summary',
+          text: expect.stringContaining('specPath: workflows/issue-11/from-root.workflow.ts'),
+        }),
+        expect.objectContaining({
+          id: 'enrichment-ricky-spec-text',
+          text: 'import { workflow } from "@agent-relay/sdk/workflows";',
+        }),
+      ]),
+    );
   });
 
   it('round-trips every handoff surface through normalizeRequest and the real turn-context-backed adapter', async () => {
