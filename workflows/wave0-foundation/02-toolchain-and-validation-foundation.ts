@@ -252,8 +252,7 @@ Confirm prior findings are fixed or explicitly non-blocking. Write .workflow-art
       dependsOn: ['final-hard-validation'],
       command: [
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\\n" "$changed" | grep -Eq "^(package.json|package-lock.json|tsconfig.json|vitest.config.ts|test/setup.ts)$"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(package.json|package-lock.json|tsconfig.json|vitest.config.ts|test/setup.ts|\.workflow-artifacts/)"',
+        '{ [ -z "$changed" ] || ! printf "%s\\n" "$changed" | grep -Ev "^(package.json|package-lock.json|tsconfig.json|vitest.config.ts|test/setup.ts|\\.workflow-artifacts/)"; }',
         'echo W0_TOOLCHAIN_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
