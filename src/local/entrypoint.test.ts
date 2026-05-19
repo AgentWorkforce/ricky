@@ -4017,6 +4017,283 @@ describe('runLocal', () => {
       }
     });
 
+    it('feeds every handoff surface through the live normalizeRequest-to-adapter boundary with Ricky metadata intact', async () => {
+      const assembledInputs: Array<Record<string, unknown>> = [];
+      const cases: Array<{
+        name: string;
+        handoff: RawHandoff;
+        artifactContent?: string;
+        expected: {
+          requestId: string;
+          source: LocalInvocationRequest['source'];
+          invocationRoot?: string;
+          mode: LocalInvocationRequest['mode'];
+          stageMode: LocalStageMode;
+          specPath?: string;
+          metadata: Record<string, unknown>;
+          structuredSpec?: Record<string, unknown>;
+          sourceMetadata?: Record<string, unknown>;
+        };
+      }> = [
+        {
+          name: 'cli',
+          handoff: {
+            source: 'cli',
+            spec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+            },
+            specFile: 'specs/issue-11.cli-live.json',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-cli-boundary',
+            invocationRoot: '/workspace/issue-11-cli',
+            metadata: { issue: 11, surface: 'cli' },
+            cliMetadata: { argv: ['ricky', 'generate', '--spec-file', 'specs/issue-11.cli-live.json'] },
+          },
+          expected: {
+            requestId: 'req-issue-11-cli-boundary',
+            source: 'cli',
+            invocationRoot: '/workspace/issue-11-cli',
+            mode: 'local',
+            stageMode: 'generate',
+            specPath: 'specs/issue-11.cli-live.json',
+            metadata: {
+              issue: 11,
+              surface: 'cli',
+              argv: ['ricky', 'generate', '--spec-file', 'specs/issue-11.cli-live.json'],
+            },
+            structuredSpec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+            },
+            sourceMetadata: {
+              cli: {
+                argv: ['ricky', 'generate', '--spec-file', 'specs/issue-11.cli-live.json'],
+                specFile: 'specs/issue-11.cli-live.json',
+              },
+            },
+          },
+        },
+        {
+          name: 'mcp',
+          handoff: {
+            source: 'mcp',
+            toolName: 'ricky.generate',
+            arguments: {
+              prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            requestId: 'req-issue-11-mcp-boundary',
+            invocationRoot: '/workspace/issue-11-mcp',
+            metadata: { issue: 11, surface: 'mcp' },
+            mcpMetadata: { toolCallId: 'tool-issue-11-boundary' },
+          },
+          expected: {
+            requestId: 'req-issue-11-mcp-boundary',
+            source: 'mcp',
+            invocationRoot: '/workspace/issue-11-mcp',
+            mode: 'local',
+            stageMode: 'generate',
+            metadata: {
+              issue: 11,
+              surface: 'mcp',
+              toolCallId: 'tool-issue-11-boundary',
+              toolName: 'ricky.generate',
+            },
+            structuredSpec: {
+              prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            sourceMetadata: {
+              mcp: {
+                toolCallId: 'tool-issue-11-boundary',
+                toolName: 'ricky.generate',
+              },
+            },
+          },
+        },
+        {
+          name: 'claude',
+          handoff: {
+            source: 'claude',
+            spec: {
+              request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stage_mode: 'generate',
+            },
+            requestId: 'req-issue-11-claude-boundary',
+            invocationRoot: '/workspace/issue-11-claude',
+            metadata: { issue: 11, surface: 'claude' },
+            conversationId: 'conv-issue-11-boundary',
+            turnId: 'turn-issue-11-boundary',
+          },
+          expected: {
+            requestId: 'req-issue-11-claude-boundary',
+            source: 'claude',
+            invocationRoot: '/workspace/issue-11-claude',
+            mode: 'local',
+            stageMode: 'generate',
+            metadata: {
+              issue: 11,
+              surface: 'claude',
+              conversationId: 'conv-issue-11-boundary',
+              turnId: 'turn-issue-11-boundary',
+            },
+            structuredSpec: {
+              request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stage_mode: 'generate',
+            },
+            sourceMetadata: {
+              claude: {
+                conversationId: 'conv-issue-11-boundary',
+                turnId: 'turn-issue-11-boundary',
+              },
+            },
+          },
+        },
+        {
+          name: 'structured',
+          handoff: {
+            source: 'structured',
+            spec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            requestId: 'req-issue-11-structured-boundary',
+            invocationRoot: '/workspace/issue-11-structured',
+            metadata: { issue: 11, surface: 'structured' },
+          },
+          expected: {
+            requestId: 'req-issue-11-structured-boundary',
+            source: 'structured',
+            invocationRoot: '/workspace/issue-11-structured',
+            mode: 'local',
+            stageMode: 'generate',
+            metadata: { issue: 11, surface: 'structured' },
+            structuredSpec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+          },
+        },
+        {
+          name: 'free-form',
+          handoff: {
+            source: 'free-form',
+            spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-free-form-boundary',
+            invocationRoot: '/workspace/issue-11-free-form',
+            metadata: { issue: 11, surface: 'free-form' },
+          },
+          expected: {
+            requestId: 'req-issue-11-free-form-boundary',
+            source: 'free-form',
+            invocationRoot: '/workspace/issue-11-free-form',
+            mode: 'local',
+            stageMode: 'generate',
+            metadata: { issue: 11, surface: 'free-form' },
+          },
+        },
+        {
+          name: 'workflow-artifact',
+          handoff: {
+            source: 'workflow-artifact',
+            artifactPath: 'workflows/issue-11/boundary.workflow.ts',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-artifact-boundary',
+            invocationRoot: '/workspace/issue-11-artifact',
+            metadata: { issue: 11, surface: 'workflow-artifact' },
+          },
+          artifactContent: 'import { workflow } from "@agent-relay/sdk/workflows";',
+          expected: {
+            requestId: 'req-issue-11-artifact-boundary',
+            source: 'workflow-artifact',
+            invocationRoot: '/workspace/issue-11-artifact',
+            mode: 'local',
+            stageMode: 'generate',
+            specPath: 'workflows/issue-11/boundary.workflow.ts',
+            metadata: { issue: 11, surface: 'workflow-artifact' },
+          },
+        },
+      ];
+
+      vi.resetModules();
+      vi.doMock('@agent-assistant/turn-context', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@agent-assistant/turn-context')>();
+        return {
+          ...actual,
+          createTurnContextAssembler: () => {
+            const assembler = actual.createTurnContextAssembler();
+            return {
+              assemble(input: Parameters<typeof assembler.assemble>[0]) {
+                assembledInputs.push(input as unknown as Record<string, unknown>);
+                return assembler.assemble(input);
+              },
+            };
+          },
+        };
+      });
+
+      try {
+        const { runLocal: runLocalWithObservedAdapter } = await import('./entrypoint.js');
+
+        for (const testCase of cases) {
+          const result = await runLocalWithObservedAdapter(testCase.handoff, {
+            artifactReader: mockArtifactReader(testCase.artifactContent ?? 'unused artifact'),
+            localExecutor: memoryLocalExecutorOptions({ stdout: [`${testCase.name} runtime should stay idle`] }),
+          });
+
+          expect(result.ok, testCase.name).toBe(true);
+          expectNoTurnContextFallback(result.logs);
+          expect(result.generation?.decisions?.assistant_turn_context, testCase.name).toMatchObject({
+            assistant_id: 'ricky',
+            turn_id: testCase.expected.requestId,
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          });
+          expect(result.execution, testCase.name).toBeUndefined();
+        }
+
+        expect(assembledInputs).toHaveLength(cases.length);
+        for (const [index, testCase] of cases.entries()) {
+          const adapterInput = assembledInputs[index];
+          const metadata = adapterInput.metadata as { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> };
+
+          expect(adapterInput, testCase.name).toMatchObject({
+            assistantId: 'ricky',
+            turnId: testCase.expected.requestId,
+            shaping: {
+              mode: `ricky-local:${testCase.expected.mode}:${testCase.expected.stageMode}`,
+            },
+          });
+          expect(metadata.adapter, testCase.name).toMatchObject({
+            name: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          });
+          expect(metadata.ricky, testCase.name).toMatchObject({
+            requestId: testCase.expected.requestId,
+            source: testCase.expected.source,
+            invocationRoot: testCase.expected.invocationRoot,
+            mode: testCase.expected.mode,
+            stageMode: testCase.expected.stageMode,
+            specPath: testCase.expected.specPath,
+            metadata: testCase.expected.metadata,
+          });
+          expect(metadata.ricky?.structuredSpec, testCase.name).toEqual(testCase.expected.structuredSpec);
+          expect(metadata.ricky?.sourceMetadata, testCase.name).toEqual(testCase.expected.sourceMetadata);
+        }
+      } finally {
+        vi.doUnmock('@agent-assistant/turn-context');
+        vi.resetModules();
+      }
+    });
+
     it('keeps generation-only LocalResponse fields while the real local executor assembles turn context', async () => {
       const localExecutor = memoryLocalExecutorOptions({ stdout: ['runtime should stay idle'] });
       const result = await runLocal(
