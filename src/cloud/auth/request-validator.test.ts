@@ -632,6 +632,18 @@ describe('getProviderConnectGuidance', () => {
     expect(guidance.instructions.join('\n')).toContain('Ricky OAuth Actor app');
   });
 
+  it('optional dashboard providers expose hosted guidance without CLI commands', () => {
+    for (const provider of ['slack', 'notion'] as const) {
+      const guidance = getProviderConnectGuidance(provider);
+
+      expect(guidance.kind).toBe('dashboard');
+      if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+      expect(guidance.dashboardUrl).toBe('/dashboard/integrations');
+      expect(guidance.command).toBeUndefined();
+      expect(guidance.instructions.join('\n')).toContain(`Choose ${provider} from optional integrations.`);
+    }
+  });
+
   it('every provider in PROVIDER_TYPES has discriminator-tagged guidance', () => {
     for (const provider of PROVIDER_TYPES) {
       const guidance = getProviderConnectGuidance(provider);

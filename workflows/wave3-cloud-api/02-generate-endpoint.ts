@@ -10,7 +10,7 @@ async function main() {
     .onError('retry', { maxRetries: 2, retryDelayMs: 10_000 })
 
     .agent('lead-claude', {
-      cli: 'claude',
+      cli: 'codex',
       interactive: false,
       role: 'Cloud endpoint lead who keeps the API route aligned with Ricky spec intake, generation, validation, and artifact-return contracts.',
       retries: 1,
@@ -26,7 +26,7 @@ async function main() {
       retries: 2,
     })
     .agent('reviewer-claude', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'reviewer',
       role: 'Product/API reviewer for endpoint behavior, artifact return, and Cloud auth dependency alignment.',
       retries: 1,
@@ -38,7 +38,7 @@ async function main() {
       retries: 1,
     })
     .agent('validator-claude', {
-      cli: 'claude',
+      cli: 'codex',
       preset: 'worker',
       role: 'Validation owner for final hard gate, regression gate, and endpoint signoff.',
       retries: 2,
