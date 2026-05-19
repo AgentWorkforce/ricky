@@ -50,6 +50,38 @@ interface PreservationCase {
   };
 }
 
+function expectIssue11RickyMetadata(
+  label: string,
+  actual: Record<string, unknown> | undefined,
+  expected: PreservationCase['expected'],
+): void {
+  expect(actual, label).toBeDefined();
+  for (const key of [
+    'requestId',
+    'source',
+    'sourceMetadata',
+    'structuredSpec',
+    'invocationRoot',
+    'mode',
+    'stageMode',
+    'specPath',
+    'metadata',
+  ]) {
+    expect(Object.prototype.hasOwnProperty.call(actual, key), `${label}.${key}`).toBe(true);
+  }
+  expect(actual, label).toMatchObject({
+    requestId: expected.requestId,
+    source: expected.source,
+    invocationRoot: expected.invocationRoot,
+    mode: expected.mode,
+    stageMode: expected.stageMode,
+    specPath: expected.specPath,
+    metadata: expected.metadata,
+  });
+  expect(actual?.structuredSpec, `${label}.structuredSpec`).toEqual(expected.structuredSpec);
+  expect(actual?.sourceMetadata, `${label}.sourceMetadata`).toEqual(expected.sourceMetadata);
+}
+
 describe('Ricky turn-context adapter', () => {
   it('uses the installed turn-context assembler as the production backing adapter', async () => {
     const normalized = await normalizeRequest({
@@ -514,6 +546,11 @@ describe('Ricky turn-context adapter', () => {
       expect((adapterInput.metadata?.ricky as Record<string, unknown>).sourceMetadata, testCase.name).toEqual(
         testCase.expected.sourceMetadata,
       );
+      expectIssue11RickyMetadata(
+        `${testCase.name}.adapterInput.metadata.ricky`,
+        adapterInput.metadata?.ricky as Record<string, unknown> | undefined,
+        testCase.expected,
+      );
 
       expect(assembly.assistantId, testCase.name).toBe('ricky');
       expect(assembly.turnId, testCase.name).toBe(testCase.expected.requestId);
@@ -532,6 +569,11 @@ describe('Ricky turn-context adapter', () => {
       });
       expect(rickyMetadata?.structuredSpec, testCase.name).toEqual(testCase.expected.structuredSpec);
       expect(rickyMetadata?.sourceMetadata, testCase.name).toEqual(testCase.expected.sourceMetadata);
+      expectIssue11RickyMetadata(
+        `${testCase.name}.assembly.metadata.ricky`,
+        rickyMetadata,
+        testCase.expected,
+      );
       expect(assembly.instructions.developerSegments, testCase.name).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -661,6 +703,11 @@ describe('Ricky turn-context adapter', () => {
       );
       expect(executionMetadata?.ricky?.sourceMetadata, testCase.name).toEqual(
         testCase.expected.sourceMetadata,
+      );
+      expectIssue11RickyMetadata(
+        `${testCase.name}.executionRequest.metadata.ricky`,
+        executionMetadata?.ricky,
+        testCase.expected,
       );
 
       if (testCase.expected.structuredSpec) {
