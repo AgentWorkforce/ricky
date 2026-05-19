@@ -2,12 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type {
   CloudExecutor,
+  CloudGenerateEndpointContract,
   CloudGenerateEndpointOptions,
   CloudGenerateRequest,
   CloudGenerateResponse,
   CloudGenerateResult,
 } from './index.js';
-import { CLOUD_GENERATE_METHOD, CLOUD_GENERATE_ROUTE, handleCloudGenerate } from './index.js';
+import {
+  CLOUD_GENERATE_METHOD,
+  CLOUD_GENERATE_ROUTE,
+  cloudGenerateEndpoint,
+  handleCloudGenerate,
+} from './index.js';
 import type { AuthorizedWorkspaceScope } from '../auth/types.js';
 
 // ---------------------------------------------------------------------------
@@ -107,6 +113,21 @@ describe('CLOUD_GENERATE_ROUTE', () => {
       'POST /api/v1/ricky/workflows/generate',
     );
   });
+
+  it('exports a mountable endpoint contract object', async () => {
+    const endpoint: CloudGenerateEndpointContract = cloudGenerateEndpoint;
+
+    expect(endpoint).toMatchObject({
+      method: 'POST',
+      path: '/api/v1/ricky/workflows/generate',
+    });
+    expect(endpoint.handler).toBe(handleCloudGenerate);
+
+    const response = await endpoint.handler(validRequest(), testOptions(mockExecutor()));
+
+    expect(response.ok).toBe(true);
+    expect(response.artifactBundle.targetMode).toBe('cloud');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -151,6 +172,11 @@ describe('handleCloudGenerate — validation', () => {
           path: 'auth.token',
         },
       ],
+    });
+    expect(response.error).toEqual({
+      code: 'MISSING_AUTH_TOKEN',
+      message: 'Missing or empty auth token.',
+      path: 'auth.token',
     });
     expect(response.requestId).toBe(TEST_REQUEST_ID);
   });
@@ -633,7 +659,7 @@ describe('handleCloudGenerate — success path', () => {
     });
   });
 
-  it('returns executor-provided run receipt fields without running locally', async () => {
+  it('ignores executor-provided run receipt fields when execution was not requested', async () => {
     const executor = mockExecutor({
       runReceipt: {
         executionRequested: true,
@@ -643,6 +669,33 @@ describe('handleCloudGenerate — success path', () => {
       },
     });
     const response = await handleCloudGenerate(validRequest(), testOptions(executor));
+
+    expect(response.runReceipt).toEqual({
+      executionRequested: false,
+      requestId: TEST_REQUEST_ID,
+      status: 'not_requested',
+    });
+  });
+
+  it('returns executor-provided run receipt fields for generate-and-run requests', async () => {
+    const executor = mockExecutor({
+      runReceipt: {
+        executionRequested: true,
+        runId: 'run-001',
+        status: 'queued',
+        receiptUrl: '/runs/run-001',
+      },
+    });
+    const response = await handleCloudGenerate(
+      validRequest({
+        body: {
+          spec: 'generate and run in Cloud',
+          mode: 'cloud',
+          generationMode: 'generate-and-run',
+        },
+      }),
+      testOptions(executor),
+    );
 
     expect(response.runReceipt).toEqual({
       executionRequested: true,
@@ -853,6 +906,11 @@ describe('handleCloudGenerate — success path', () => {
     // Top-level response must reflect the validation failure
     expect(response.ok).toBe(false);
     expect(response.status).toBe(422);
+    expect(response.error).toEqual({
+      code: 'INVALID_WORKFLOW',
+      message: 'Generated workflow is missing a deterministic gate.',
+      path: 'steps[3]',
+    });
     expect(response.validation).toEqual({
       ok: false,
       status: 'failed',
@@ -900,6 +958,11 @@ describe('handleCloudGenerate — success path', () => {
     expect(calls).toHaveLength(1);
     expect(response.ok).toBe(false);
     expect(response.status).toBe(500);
+    expect(response.error).toEqual({
+      code: 'MISSING_EXECUTOR_VALIDATION',
+      message: 'Cloud generation returned artifacts without validation evidence.',
+      path: 'validation',
+    });
     expect(response.artifacts).toEqual([
       {
         path: 'out/unvalidated-workflow.ts',
@@ -936,6 +999,11 @@ describe('handleCloudGenerate — success path', () => {
 
     expect(response.ok).toBe(false);
     expect(response.status).toBe(500);
+    expect(response.error).toEqual({
+      code: 'MISSING_GENERATED_ARTIFACTS',
+      message: 'Cloud generation produced no workflow artifacts.',
+      path: 'artifacts',
+    });
     expect(response.artifacts).toEqual([]);
     expect(response.artifactBundle).toEqual({
       artifacts: [],
@@ -984,6 +1052,10 @@ describe('handleCloudGenerate — error path', () => {
 
     expect(response.ok).toBe(false);
     expect(response.status).toBe(500);
+    expect(response.error).toEqual({
+      code: 'CLOUD_GENERATION_FAILED',
+      message: 'Cloud generation failed before validation completed.',
+    });
     expect(response.warnings[0].severity).toBe('error');
     expect(response.warnings[0].message).toContain('Cloud generation failed');
     expect(response.warnings[0].message).toContain(TEST_REQUEST_ID);

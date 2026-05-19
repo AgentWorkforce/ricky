@@ -19,6 +19,7 @@ import type {
   CloudAssumption,
   CloudArtifact,
   CloudArtifactBundle,
+  CloudGenerateError,
   CloudFollowUpAction,
   CloudGenerateResponse,
   CloudRunReceipt,
@@ -59,6 +60,12 @@ export interface CloudGenerateResult {
  */
 export interface CloudExecutor {
   generate(request: CloudGenerateRequest): Promise<CloudGenerateResult>;
+}
+
+export interface CloudGenerateEndpointContract {
+  method: typeof CLOUD_GENERATE_METHOD;
+  path: typeof CLOUD_GENERATE_ROUTE;
+  handler: typeof handleCloudGenerate;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +156,19 @@ function failedValidation(code: string, message: string, path: string): CloudVal
   return { ok: false, status: 'failed', issues: [{ code, message, path }] };
 }
 
+function errorCodeForValidationIssue(code: string): string {
+  return code.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase();
+}
+
+function errorFromValidation(validation: CloudValidationStatus, fallbackMessage: string): CloudGenerateError {
+  const primaryIssue = validation.issues[0];
+  return {
+    code: primaryIssue ? errorCodeForValidationIssue(primaryIssue.code) : 'CLOUD_GENERATION_FAILED',
+    message: primaryIssue?.message ?? fallbackMessage,
+    path: primaryIssue?.path,
+  };
+}
+
 function skippedValidation(): CloudValidationStatus {
   // Validation never ran (e.g., executor threw before producing a result).
   // Reporting `passed` would falsely claim the artifact bundle was checked.
@@ -189,6 +209,23 @@ function defaultRunReceipt(requestId: string, generationMode: CloudGenerationMod
   return generationMode === 'generate-and-run'
     ? runRequestedReceipt(requestId)
     : notRequestedRunReceipt(requestId);
+}
+
+function responseRunReceipt(
+  requestId: string,
+  generationMode: CloudGenerationMode,
+  executorRunReceipt: CloudGenerateResult['runReceipt'],
+): CloudRunReceipt {
+  if (generationMode !== 'generate-and-run') {
+    return notRequestedRunReceipt(requestId);
+  }
+
+  return {
+    ...runRequestedReceipt(requestId),
+    ...executorRunReceipt,
+    executionRequested: true,
+    requestId,
+  };
 }
 
 function resolveGenerationMode(
@@ -240,6 +277,7 @@ function errorResponse(
   return {
     ok: false,
     status,
+    error: errorFromValidation(validation, message),
     artifacts: [],
     artifactBundle: {
       artifacts: [],
@@ -520,17 +558,21 @@ export async function handleCloudGenerate(
       : missingGeneratedArtifactsValidation(result.validation);
     const validationPassed = resultValidation.ok === true && resultValidation.status === 'passed';
     const missingValidationEvidence = producedArtifacts && result.validation === undefined;
+    const status = validationPassed
+      ? 200
+      : result.validation?.ok === false && result.validation.status === 'failed'
+        ? 422
+        : 500;
     const artifacts = producedArtifacts
       ? appendGenerationMetadataArtifacts(result.artifacts, result.generationMetadata)
       : result.artifacts;
     const generationMode = resolveGenerationMode(scopedRequest.body.generationMode);
     return {
       ok: validationPassed,
-      status: validationPassed
-        ? 200
-        : result.validation?.ok === false && result.validation.status === 'failed'
-          ? 422
-          : 500,
+      status,
+      error: validationPassed
+        ? undefined
+        : errorFromValidation(resultValidation, 'Cloud generation failed validation.'),
       artifacts,
       artifactBundle: artifactBundle(artifacts, scopedRequest),
       warnings: producedArtifacts
@@ -540,11 +582,7 @@ export async function handleCloudGenerate(
         : warningsWithMissingArtifactBlocker(result.warnings),
       assumptions: result.assumptions ?? [],
       validation: resultValidation,
-      runReceipt: {
-        ...defaultRunReceipt(requestId, generationMode),
-        ...result.runReceipt,
-        requestId,
-      },
+      runReceipt: responseRunReceipt(requestId, generationMode, result.runReceipt),
       followUpActions: producedArtifacts
         ? missingValidationEvidence
           ? followUpsWithValidationAction(result.followUpActions)
@@ -556,6 +594,10 @@ export async function handleCloudGenerate(
     return {
       ok: false,
       status: 500,
+      error: {
+        code: 'CLOUD_GENERATION_FAILED',
+        message: 'Cloud generation failed before validation completed.',
+      },
       artifacts: [],
       artifactBundle: artifactBundle([], scopedRequest),
       warnings: [executorFailureWarning(requestId)],
@@ -569,6 +611,12 @@ export async function handleCloudGenerate(
     };
   }
 }
+
+export const cloudGenerateEndpoint: CloudGenerateEndpointContract = {
+  method: CLOUD_GENERATE_METHOD,
+  path: CLOUD_GENERATE_ROUTE,
+  handler: handleCloudGenerate,
+};
 
 function appendGenerationMetadataArtifacts(
   artifacts: CloudArtifact[],

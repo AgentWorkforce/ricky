@@ -87,6 +87,19 @@ export interface CloudValidationStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Error response
+// ---------------------------------------------------------------------------
+
+export interface CloudGenerateError {
+  /** Stable machine-readable error code for Cloud API clients. */
+  code: string;
+  /** Human-readable error message safe to show to callers. */
+  message: string;
+  /** Optional field path associated with the error. */
+  path?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Run receipt
 // ---------------------------------------------------------------------------
 
@@ -112,6 +125,8 @@ export interface CloudGenerateResponse {
   ok: boolean;
   /** HTTP-like status code for the response. */
   status: number;
+  /** Stable error payload when ok=false. */
+  error?: CloudGenerateError;
   /** The generated artifacts, kept top-level for existing callers. */
   artifacts: CloudArtifact[];
   /** Explicit artifact bundle response contract for Cloud API callers. */
