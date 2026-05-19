@@ -548,6 +548,14 @@ EOF
   LOCK_ACQUIRED="true"
 }
 
+path_contains_tracked_files() {
+  local candidate="$1"
+
+  [[ -n "$candidate" ]] || return 1
+  [[ -e "$candidate" ]] || return 1
+  [[ -n "$(git ls-files -- "$candidate")" ]]
+}
+
 quarantine_repo_runtime_state() {
   local quarantine_root="$ARTIFACT_DIR/runtime-state-quarantine"
   local candidate=""
@@ -556,6 +564,10 @@ quarantine_repo_runtime_state() {
 
   for candidate in .agent-relay .relay .trajectories; do
     [[ -e "$candidate" ]] || continue
+    if path_contains_tracked_files "$candidate"; then
+      log "leaving repo runtime state in place because git tracks files under it: $candidate"
+      continue
+    fi
     mkdir -p "$quarantine_root"
     destination="$quarantine_root/${candidate#.}-$stamp"
     mv "$candidate" "$destination"
@@ -1450,6 +1462,7 @@ restore_checkpoint() {
   if [[ -n "$previous_status_file" && -f "$previous_status_file" ]] && grep -Eqx 'running|checkpointed' "$previous_status_file"; then
     if ! is_pid_running "$previous_pid" && ! is_process_group_running "$previous_pgid"; then
       mark_artifact_stale_or_complete "$previous_artifact_dir"
+      restore_quarantined_runtime_state_for_artifact "$previous_artifact_dir"
       log "reconciled prior overnight artifact with no live process: $previous_artifact_dir"
     fi
   fi
