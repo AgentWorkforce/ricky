@@ -1849,14 +1849,14 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     if (ts.isTemplateExpression(node)) {
       const parts = [node.head.text];
       for (const span of node.templateSpans) {
-        parts.push(expressionText(span.expression, seen) ?? '${...}');
+        parts.push(expressionText(span.expression, new Set(seen)) ?? '${...}');
         parts.push(span.literal.text);
       }
       return parts.join('');
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-      const left = expressionText(node.left, seen);
-      const right = expressionText(node.right, seen);
+      const left = expressionText(node.left, new Set(seen));
+      const right = expressionText(node.right, new Set(seen));
       return left !== undefined && right !== undefined ? left + right : undefined;
     }
     if (ts.isIdentifier(node)) {
@@ -1873,9 +1873,9 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       node.expression.name.text === 'join' &&
       ts.isArrayLiteralExpression(node.expression.expression)
     ) {
-      const separator = expressionText(node.arguments[0] as ts.Expression | undefined, seen) ?? ',';
+      const separator = expressionText(node.arguments[0] as ts.Expression | undefined, new Set(seen)) ?? ',';
       const elements = node.expression.expression.elements.map((element) =>
-        ts.isSpreadElement(element) ? undefined : expressionText(element, seen),
+        ts.isSpreadElement(element) ? undefined : expressionText(element, new Set(seen)),
       );
       if (elements.some((element) => element === undefined)) return undefined;
       return (elements as string[]).join(separator);
@@ -2256,7 +2256,7 @@ function shellCommandSegments(command: string): string[][] {
   return segments;
 }
 
-function markdownLabelFields(markdown: string): Map<string, string> {
+export function markdownLabelFields(markdown: string): Map<string, string> {
   let tree: Root;
   try {
     tree = fromMarkdown(markdown);

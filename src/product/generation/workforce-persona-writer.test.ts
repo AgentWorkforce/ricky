@@ -2569,6 +2569,38 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     expect(detectSpecIntentMismatch(spec, workflowWithJoinedCommand)).toEqual([]);
   });
 
+  it('resolves repeated variable references independently across joined command siblings', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-repeated-worktree-var',
+        'Target branch: chore/repeated-worktree-var',
+      ].join('\n'),
+    };
+    const workflowWithRepeatedVariable = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'const WORKTREE = "/private/tmp/cloud-repeated-worktree-var";',
+      'const BRANCH = "chore/repeated-worktree-var";',
+      'async function main() {',
+      '  await workflow("with-repeated-variable")',
+      '    .step("setup-worktree", {',
+      '      type: "deterministic",',
+      '      command: [',
+      '        `test -d ${WORKTREE} || true`,',
+      '        `git worktree add ${WORKTREE} ${BRANCH}`,',
+      '      ].join("\\n"),',
+      '    })',
+      '    .step("implement", { type: "deterministic", command: `git -C ${WORKTREE} status --short` })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, workflowWithRepeatedVariable)).toEqual([]);
+  });
+
   it('flags test -f gates over declared worktree directories and glob paths', () => {
     const spec = {
       description: [

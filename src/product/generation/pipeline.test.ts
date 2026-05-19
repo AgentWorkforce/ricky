@@ -510,6 +510,44 @@ describe('workflow generation pipeline', () => {
     expect(artifact(singlePr).content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
   });
 
+  it('ignores inert fenced worktree labels when deciding single-PR master fallback routing', () => {
+    const fencedLabelsOnly = generate({
+      spec: spec({
+        description: [
+          'Implement PR 11 hardening, quotas, audit, docs, demo.',
+          'Outcome: exactly one pull request in cloud opened against origin/main.',
+          'The following historical example is not the requested worktree contract:',
+          '```md',
+          'Worktree: /private/tmp/cloud-mcp-cloud-spawn-hardening',
+          'Target branch: chore/mcp-cloud-spawn-hardening',
+          '```',
+          'The workflow must use createGitHubStep from @agent-relay/github-primitive.',
+        ].join('\n'),
+        targetFiles: [
+          'specs/mcp-cloud-spawn-and-slack-bridge.md',
+          '/private/tmp/cloud-mcp-cloud-spawn-hardening',
+          '/Users/khaliqgant/Projects/AgentWorkforce/cloud',
+          '/api/v1/*',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relaycast',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relay',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relayfile',
+          'packages/web/drizzle/meta/_journal.json',
+          'packages/web/lib/integrations/nango-service.ts',
+          'dev-stack/README.md',
+          '/api/v1/auth/cli-login/*',
+          'packages/web/lib/boot/resource-check.ts',
+          '.relay/conflicts/',
+          '.relay/conflicts/<path>.<ts>',
+          'cloud/dev-stack/',
+        ],
+      }),
+      artifactPath: 'workflows/generated/pr-11-hardening.ts',
+    });
+
+    expect(fencedLabelsOnly.masterExecutionPlan).toBeDefined();
+    expect(artifact(fencedLabelsOnly).content).toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+  });
+
   it('turns a code-writing spec into an implementation team workflow with 80-to-100 validation', () => {
     const result = generate({
       spec: spec({
