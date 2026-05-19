@@ -736,6 +736,21 @@ describe('Cloud auth module contract', () => {
     });
   });
 
+  it('rejects unscoped API-key requests even when provider state is connected', () => {
+    expect(
+      validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, undefined, {
+        requiredProvider: 'github',
+        providerConnection: { provider: 'github', connected: true },
+      }),
+    ).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    });
+  });
+
   it('accepts valid scoped bearer and API-key requests', () => {
     expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-bearer' })).toMatchObject({
       ok: true,
