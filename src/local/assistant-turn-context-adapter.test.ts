@@ -552,6 +552,10 @@ describe('Ricky turn-context adapter', () => {
           expect.objectContaining({
             id: 'enrichment-ricky-request-metadata',
             text: JSON.stringify(testCase.expected.metadata, null, 2),
+            metadata: expect.objectContaining({
+              source: 'ricky-local',
+              importance: 'medium',
+            }),
           }),
         ]),
       );
@@ -567,10 +571,18 @@ describe('Ricky turn-context adapter', () => {
             expect.objectContaining({
               id: 'enrichment-ricky-request-summary',
               text: expect.stringContaining(`source: ${testCase.expected.source}`),
+              metadata: expect.objectContaining({
+                source: 'ricky-local',
+                importance: 'high',
+              }),
             }),
             expect.objectContaining({
               id: 'enrichment-ricky-spec-text',
               text: testCase.expected.spec,
+              metadata: expect.objectContaining({
+                source: 'ricky-local',
+                importance: 'high',
+              }),
             }),
           ]),
         },
@@ -622,6 +634,10 @@ describe('Ricky turn-context adapter', () => {
             expect.objectContaining({
               id: 'enrichment-ricky-structured-spec',
               text: JSON.stringify(testCase.expected.structuredSpec, null, 2),
+              metadata: expect.objectContaining({
+                source: 'ricky-local',
+                importance: 'high',
+              }),
             }),
           ]),
         );
@@ -644,6 +660,10 @@ describe('Ricky turn-context adapter', () => {
             expect.objectContaining({
               id: 'enrichment-ricky-source-metadata',
               text: JSON.stringify(testCase.expected.sourceMetadata, null, 2),
+              metadata: expect.objectContaining({
+                source: 'ricky-local',
+                importance: 'medium',
+              }),
             }),
           ]),
         );
