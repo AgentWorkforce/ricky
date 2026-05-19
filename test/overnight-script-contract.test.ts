@@ -9,6 +9,12 @@ describe('overnight harness queue-exhaustion contract', () => {
       'if artifact_runner_logs_show_success "$ARTIFACT_DIR" && (',
     );
     expect(overnightScript).toContain(
+      'artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR" ||',
+    );
+    expect(overnightScript).toContain(
+      'artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR" &&',
+    );
+    expect(overnightScript).toContain(
       'artifact_active_workflow_runner_log_shows_success "$ARTIFACT_DIR"',
     );
   });
@@ -43,5 +49,10 @@ describe('overnight harness queue-exhaustion contract', () => {
   it('briefly waits for fallback launchers to record the detached child pid before declaring startup failure', () => {
     expect(overnightScript).toContain('while [[ ! -s "$runner_pid_file" && "$pid_wait_attempt" -lt 20 ]]; do');
     expect(overnightScript).toContain('sleep 0.1');
+  });
+
+  it('uses meaningful progress, not mere log growth, for idle timeout enforcement', () => {
+    expect(overnightScript).toContain('if runner_output_idle_for_too_long "$last_progress_epoch" "$(date +%s)"; then');
+    expect(overnightScript).toContain('workflow runner produced no meaningful progress for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path');
   });
 });

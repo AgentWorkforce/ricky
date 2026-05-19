@@ -477,6 +477,64 @@ describe('handleCloudGenerate — success path', () => {
     expect(executor.calls[0].body.mode).toBe('cloud');
   });
 
+  it('accepts natural-language spec payloads and preserves Cloud response evidence', async () => {
+    const artifact = {
+      path: 'workflows/natural-language-workflow.ts',
+      type: 'text/typescript',
+      content: 'export const workflow = "natural-language";',
+    };
+    const executor = mockExecutor({
+      artifacts: [artifact],
+      warnings: [{ severity: 'info', message: 'Assumed default Cloud queue.' }],
+      assumptions: [
+        { key: 'trigger', message: 'Used manual trigger because no schedule was specified.' },
+      ],
+      followUpActions: [
+        {
+          action: 'review-generated-files',
+          label: 'Review Generated Files',
+          description: 'Review the returned workflow artifact before enabling execution.',
+        },
+      ],
+    });
+    const request = validRequest({
+      body: {
+        spec: { kind: 'natural-language', text: 'Generate a workflow from this prompt.' },
+        generationMode: 'generate-and-return-artifacts',
+      },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(`${CLOUD_GENERATE_METHOD} ${CLOUD_GENERATE_ROUTE}`).toBe(
+      'POST /api/v1/ricky/workflows/generate',
+    );
+    expect(executor.calls[0].body.spec).toEqual({
+      kind: 'natural-language',
+      text: 'Generate a workflow from this prompt.',
+    });
+    expect(response.ok).toBe(true);
+    expect(response.artifactBundle).toEqual({
+      artifacts: [artifact],
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    });
+    expect(response.artifactBundle.artifacts[0]).toMatchObject({
+      path: 'workflows/natural-language-workflow.ts',
+      type: 'text/typescript',
+      content: expect.stringContaining('natural-language'),
+    });
+    expect(response.warnings[0].message).toContain('Cloud queue');
+    expect(response.assumptions[0]).toEqual({
+      key: 'trigger',
+      message: 'Used manual trigger because no schedule was specified.',
+    });
+    expect(response.followUpActions[0]).toMatchObject({
+      action: 'review-generated-files',
+      label: 'Review Generated Files',
+    });
+  });
+
   it('returns executor-provided run receipt fields without running locally', async () => {
     const executor = mockExecutor({
       runReceipt: {

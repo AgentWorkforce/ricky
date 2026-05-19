@@ -257,8 +257,11 @@ mark_artifact_stale_or_complete() {
     resolved_status="$(artifact_queue_exhausted_terminal_status "$artifact_dir")"
     resolved_reason="queue exhausted before harness status flush"
   elif artifact_runner_logs_show_success "$artifact_dir" && (
-    ! artifact_checkpoint_has_active_workflow "$artifact_dir" ||
-    artifact_active_workflow_runner_log_shows_success "$artifact_dir"
+    artifact_checkpoint_indicates_queue_exhausted "$artifact_dir" ||
+    (
+      artifact_checkpoint_has_active_workflow "$artifact_dir" &&
+      artifact_active_workflow_runner_log_shows_success "$artifact_dir"
+    )
   ); then
     resolved_status="complete"
     resolved_reason="runner completed before harness status flush"
@@ -559,8 +562,11 @@ on_exit() {
       local recovered_status=""
 
       if artifact_runner_logs_show_success "$ARTIFACT_DIR" && (
-        ! artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR" ||
-        artifact_active_workflow_runner_log_shows_success "$ARTIFACT_DIR"
+        artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR" ||
+        (
+          artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR" &&
+          artifact_active_workflow_runner_log_shows_success "$ARTIFACT_DIR"
+        )
       ); then
         STATUS_REASON="runner completed before harness status flush"
         recovered_status="complete"
@@ -1918,8 +1924,8 @@ run_one() {
     fi
     last_observed_size="$current_output_size"
 
-    if runner_output_idle_for_too_long "$last_output_epoch" "$(date +%s)"; then
-      log "workflow runner produced no output for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
+    if runner_output_idle_for_too_long "$last_progress_epoch" "$(date +%s)"; then
+      log "workflow runner produced no meaningful progress for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
       kill_process_group "$RUN_PGID"
       wait "$runner_pid" 2>/dev/null || true
       echo "$workflow_path" >> "$FAILED_FILE"
