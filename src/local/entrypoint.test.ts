@@ -4696,11 +4696,40 @@ describe('runLocal', () => {
       expect(success.execution).toMatchObject({
         stage: 'execute',
         status: 'success',
+        execution: {
+          workflow_id: success.generation?.artifact?.workflow_id,
+          artifact_path: success.generation?.artifact?.path,
+          workflow_file: success.generation?.artifact?.path,
+          command: `@agent-relay/sdk/workflows runScriptWorkflow ${success.generation?.artifact?.path}`,
+          cwd: '/repo',
+          steps_completed: 1,
+          steps_total: 1,
+        },
         evidence: {
+          outcome_summary: expect.stringContaining('completed successfully'),
+          artifacts_produced: [
+            {
+              path: success.generation?.artifact?.path,
+              kind: 'workflow',
+              bytes: expect.any(Number),
+            },
+          ],
           logs: {
             tail: ['generate-and-run completed'],
             truncated: false,
           },
+          side_effects: {
+            files_written: expect.arrayContaining([success.generation?.artifact?.path]),
+            commands_invoked: [`@agent-relay/sdk/workflows runScriptWorkflow ${success.generation?.artifact?.path}`],
+            network_calls: [],
+          },
+          assertions: [
+            {
+              name: 'runtime_exit_code',
+              status: 'pass',
+              detail: 'Runtime exited with code 0.',
+            },
+          ],
           workflow_steps: [
             {
               id: 'runtime-launch',
@@ -4737,6 +4766,14 @@ describe('runLocal', () => {
           },
         },
       });
+      expect(success.artifacts).toEqual([
+        {
+          path: success.generation?.artifact?.path,
+          type: 'text/typescript',
+          content: expect.stringContaining('workflow('),
+        },
+      ]);
+      expect(success.nextActions).toEqual(['Inspect generated artifacts and local run evidence.']);
 
       const blocked = await runLocal(
         {
