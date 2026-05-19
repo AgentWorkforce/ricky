@@ -207,6 +207,7 @@ Verification:
     .step('review-endpoint-claude', {
       agent: 'reviewer-claude',
       dependsOn: ['initial-soft-validation'],
+      timeoutMs: 420_000,
       task: `Review the Cloud generation endpoint.
 
 Focus:
@@ -215,12 +216,15 @@ Focus:
 - Cloud/local mode distinction is not erased.
 - Response contract is user-visible and useful, not just internal status.
 
+This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
+
 Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md' },
     })
     .step('review-endpoint-codex', {
       agent: 'reviewer-codex',
       dependsOn: ['initial-soft-validation'],
+      timeoutMs: 420_000,
       task: `Review the Cloud generation endpoint code and tests.
 
 Focus:
@@ -228,6 +232,8 @@ Focus:
 - Route and handler contract shape.
 - Practical integration boundary with generation pipeline.
 - Error handling for invalid request and validation failure.
+
+This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
 
 Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/review-codex.md' },
@@ -282,6 +288,7 @@ Rules:
     .step('final-review-endpoint-claude', {
       agent: 'reviewer-claude',
       dependsOn: ['post-fix-validation'],
+      timeoutMs: 420_000,
       task: `Re-review the Cloud generation endpoint after fixes and post-fix validation.
 
 Read src/cloud/api/ source and tests, and post-fix validation output:
@@ -289,18 +296,23 @@ Read src/cloud/api/ source and tests, and post-fix validation output:
 
 Confirm prior review findings are fixed or explicitly non-blocking. Re-check alignment with Ricky product journey, auth/workspace boundary, Cloud/local mode distinction, and response contract.
 
+This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
+
 Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md' },
     })
     .step('final-review-endpoint-codex', {
       agent: 'reviewer-codex',
       dependsOn: ['post-fix-validation'],
+      timeoutMs: 420_000,
       task: `Re-review the Cloud generation endpoint code and tests after fixes.
 
 Read src/cloud/api/ source and tests, and post-fix validation output:
 {{steps.post-fix-validation.output}}
 
 Confirm deterministic gates, route/handler contract, generation pipeline integration, and error handling are ready for final hard gates.
+
+This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
 
 Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md' },
@@ -340,9 +352,11 @@ Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.m
     .step('final-signoff', {
       agent: 'validator-claude',
       dependsOn: ['regression-gate'],
+      timeoutMs: 420_000,
       task: `Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/signoff.md.
 
 Include files changed, validation commands, endpoint contract summary, and any residual integration risks.
+Keep the signoff concise and stop after the file is complete.
 End with GENERATE_ENDPOINT_WORKFLOW_COMPLETE.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/signoff.md' },
     })

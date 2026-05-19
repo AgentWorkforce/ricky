@@ -293,6 +293,11 @@ describe('handleCloudGenerate — success path', () => {
     expect(response.artifacts).toEqual([
       { path: 'out/workflow.ts', type: 'text/typescript', content: '// generated' },
     ]);
+    expect(response.artifacts[0]).toMatchObject({
+      path: expect.stringMatching(/\.ts$/),
+      type: 'text/typescript',
+      content: expect.stringContaining('generated'),
+    });
     expect(response.warnings).toEqual([{ severity: 'info', message: 'Assumed default region.' }]);
     expect(response.assumptions).toEqual([
       { key: 'default-region', message: 'Used the workspace default region.' },
@@ -584,6 +589,14 @@ describe('handleCloudGenerate — success path', () => {
         },
       ],
     });
+    expect(response.artifacts).toEqual([
+      { path: 'out/workflow.ts', type: 'text/typescript', content: '// generated' },
+    ]);
+    expect(response.artifactBundle).toEqual({
+      artifacts: response.artifacts,
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    });
     expect(response.warnings[0].severity).toBe('error');
     expect(response.followUpActions[0]).toEqual({ action: 'revise-spec', label: 'Revise Spec' });
   });
@@ -869,6 +882,11 @@ describe('handleCloudGenerate — runtime-invalid input', () => {
     expect(response.status).toBe(400);
     expect(response.validation.issues[0].code).toBe('missing-spec');
     expect(response.validation.issues[0].path).toBe('body.spec');
+    expect(response.warnings).toEqual([
+      { severity: 'error', message: 'Missing or empty spec in request body.' },
+    ]);
+    expect(response.assumptions).toEqual([]);
+    expect(response.followUpActions).toEqual([]);
     expect(executor.calls).toHaveLength(0);
   });
 
