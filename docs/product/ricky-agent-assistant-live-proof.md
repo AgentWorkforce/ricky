@@ -1,14 +1,14 @@
 # Ricky Agent-Assistant Live Proof Verdict
 
-GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the live local product path. The evidence supports continued adoption while keeping the boundary at request/turn context reuse.
+GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the live local product path. The evidence supports continued adoption while holding the boundary at request/turn context reuse.
 
 ## What was adopted
 
-Ricky adopted `@agent-assistant/turn-context` as a bounded request/turn envelope primitive through the `ricky-local-turn-context-adapter`.
+Ricky adopted `@agent-assistant/turn-context` as a bounded request/turn envelope primitive through `ricky-local-turn-context-adapter`.
 
-The adapter maps Ricky's normalized local request into shared turn context metadata and enrichment blocks. The captured runtime smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter package `@agent-assistant/turn-context`, version `1`, CLI source metadata, structured spec data, invocation root, local mode, run stage mode, and request metadata provenance.
+The captured adapter smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter package `@agent-assistant/turn-context`, adapter version `1`, CLI source metadata, structured spec data, invocation root, local mode, run stage mode, and request metadata provenance.
 
-Captured enrichment blocks:
+Captured turn-context enrichment blocks:
 
 - `enrichment-ricky-request-summary`
 - `enrichment-ricky-spec-text`
@@ -20,9 +20,9 @@ Ricky still owns request normalization, workflow generation, workflow artifacts,
 
 ## Product path exercised
 
-The adapter runtime smoke proof exercised assistant `ricky` with turn id `req-wave10-live-proof`, source `cli`, `mode: local`, `stageMode: run`, invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`, and structured spec description `generate a workflow for package checks`.
+The adapter runtime smoke proof exercised assistant `ricky` with source `cli`, `mode: local`, `stageMode: run`, invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`, and structured spec description `generate a workflow for package checks`.
 
-The external product path invoked Ricky from outside the implementation proof flow with:
+The external product path then invoked the user-facing Ricky CLI:
 
 ```text
 ricky --mode local --spec generate a workflow for package checks with typecheck and tests --no-workforce-persona
@@ -40,9 +40,11 @@ The generated workflow was then executed through the user-facing run command:
 ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
 ```
 
+This proves the adoption was present while moving through generate and run, not only in an isolated unit path.
+
 ## Deterministic test proof
 
-The issue #11 implementation signoff records the deterministic validation suite for the adapter adoption slice:
+The issue #11 implementation signoff records this deterministic validation suite for the adopted adapter slice:
 
 ```text
 npm run typecheck
@@ -52,14 +54,14 @@ npx vitest run src/surfaces/cli
 npm test
 ```
 
-The captured issue #13 proof artifacts add deterministic product-path validation:
+The issue #13 captured artifacts add deterministic product-path proof:
 
 - `adapter-runtime-smoke.json` confirms the real adapter package, assistant id, turn id, request metadata, and enrichment block ids.
 - `external-generate.json` returned `status: ok` and wrote the generated workflow file.
 - `external-generate-and-run.json` returned `status: ok` for generation and `status: success` for execution.
 - `external-generate-and-run.exit` is `0`.
 
-The adoption proof also confirms the shared adapter is called by the real local executor before product intake, workflow generation, artifact selection, runtime prechecks, or coordinator launch. This is runtime-path adoption, not copied types or documentation-only alignment.
+The adoption proof document also confirms the shared adapter is called by the real local executor before product intake, workflow generation, artifact selection, runtime prechecks, or coordinator launch. This is runtime-path adoption, not copied types or documentation-only alignment.
 
 ## Live/user-facing validation proof
 
@@ -70,7 +72,7 @@ Run: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-
 Background: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts --background
 ```
 
-The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, run id `6502d139276e382a1ff571a6`, stdout and stderr log paths under Ricky local state, and the assertion `external_cli_execution: pass`.
+The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `932626ac9037e47c553dce39`, stdout and stderr log paths under Ricky local state, and the assertion `external_cli_execution: pass`.
 
 The execution also recorded `Auto-fix: repaired after 1/7 attempt(s)`, proving the user-facing run path completed through Ricky's existing repair loop.
 
@@ -78,7 +80,7 @@ The execution also recorded `Auto-fix: repaired after 1/7 attempt(s)`, proving t
 
 No regression was observed in the captured proof artifacts. Generation succeeded, the generated workflow executed, the external run completed successfully, and the captured process exit was `0`.
 
-The observed product cost is that live execution may still require a repair pass. That cost belongs to Ricky's workflow generation and repair loop, not to the shared turn-context adapter boundary.
+The observed product cost is that live execution may still require a repair pass. That cost belongs to Ricky's workflow generation and repair loop, not to the shared turn-context adapter.
 
 ## Verdict: keep adopting, hold boundary, or redesign
 
