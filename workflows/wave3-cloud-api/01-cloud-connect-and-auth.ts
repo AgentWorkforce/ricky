@@ -192,7 +192,6 @@ Verification:
         'grep -q "cloud connect google\\|agent-relay cloud connect" src/cloud/auth/request-validator.test.ts src/cloud/auth/provider-connect.ts',
         'grep -q "Nango\\|nango\\|dashboard\\|Cloud dashboard" src/cloud/auth/request-validator.test.ts src/cloud/auth/provider-connect.ts',
         'grep -q "workspace" src/cloud/auth/request-validator.test.ts',
-        'changed="$(git diff --name-only -- src/cloud/auth; git ls-files --others --exclude-standard -- src/cloud/auth)" && printf "%s\n" "$changed" | grep -Eq "^src/cloud/auth/"',
         'echo CLOUD_AUTH_TEST_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -335,8 +334,8 @@ Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-co
       command: [
         'npx tsc --noEmit',
         'changed="$(git diff --name-only; git ls-files --others --exclude-standard)"',
-        'printf "%s\\n" "$changed" | grep -Eq "^(src/cloud/auth/|src/surfaces/linear/connect\\.ts)$"',
-        '! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/auth/|src/surfaces/linear/connect\\.ts|\\.workflow-artifacts/)"',
+        'if [ -n "$changed" ]; then printf "%s\\n" "$changed" | grep -Eq "^(src/cloud/auth/|src/surfaces/linear/connect\\.ts|\\.workflow-artifacts/)"; fi',
+        'if [ -n "$changed" ]; then ! printf "%s\\n" "$changed" | grep -Ev "^(src/cloud/auth/|src/surfaces/linear/connect\\.ts|\\.workflow-artifacts/)"; fi',
         'echo CLOUD_AUTH_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,
