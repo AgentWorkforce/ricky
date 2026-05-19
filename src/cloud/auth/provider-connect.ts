@@ -7,6 +7,10 @@ function createConnectInstructions(...instructions: string[]): string[] {
   return Object.freeze(instructions) as string[];
 }
 
+function freezeGuidance<T extends ProviderConnectGuidance>(guidance: T): T {
+  return Object.freeze(guidance);
+}
+
 export const GITHUB_CONNECT_INSTRUCTIONS = createConnectInstructions(
   'Open the Cloud dashboard integrations page.',
   'Click "Connect GitHub" to start the Nango-backed GitHub App installation.',
@@ -25,7 +29,7 @@ export const LINEAR_CONNECT_INSTRUCTIONS = createConnectInstructions(
 
 export function getProviderConnectGuidance(provider: ProviderType): ProviderConnectGuidance {
   if (provider === 'google') {
-    return {
+    return freezeGuidance({
       kind: 'cli',
       provider: 'google',
       command: GOOGLE_CONNECT_COMMAND,
@@ -34,28 +38,28 @@ export function getProviderConnectGuidance(provider: ProviderType): ProviderConn
         'Follow the OAuth consent flow in your browser.',
         'Once connected, Cloud workflows can access Google-integrated services.',
       ),
-    };
+    });
   }
 
   if (provider === 'github') {
-    return {
+    return freezeGuidance({
       kind: 'dashboard',
       provider: 'github',
       dashboardUrl: CLOUD_INTEGRATIONS_DASHBOARD_URL,
       instructions: GITHUB_CONNECT_INSTRUCTIONS,
-    };
+    });
   }
 
   if (provider === 'linear') {
-    return {
+    return freezeGuidance({
       kind: 'dashboard',
       provider: 'linear',
       dashboardUrl: LINEAR_CONNECT_DASHBOARD_URL,
       instructions: LINEAR_CONNECT_INSTRUCTIONS,
-    };
+    });
   }
 
-  return {
+  return freezeGuidance({
     kind: 'dashboard',
     provider,
     dashboardUrl: CLOUD_INTEGRATIONS_DASHBOARD_URL,
@@ -65,5 +69,5 @@ export function getProviderConnectGuidance(provider: ProviderType): ProviderConn
       'Complete the hosted connection flow.',
       `${provider} connection is managed through the Cloud dashboard, not the CLI.`,
     ),
-  };
+  });
 }

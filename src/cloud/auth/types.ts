@@ -34,6 +34,7 @@ export type CloudRequestMode = 'cloud' | 'both';
  */
 export type CloudValidationErrorCode =
   | 'missing-auth-token'
+  | 'invalid-auth-token'
   | 'invalid-auth-token-type'
   | 'missing-workspace-id'
   | 'invalid-project-id'

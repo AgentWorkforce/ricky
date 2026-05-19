@@ -44,6 +44,16 @@ describe('validateAuthContext', () => {
     expect(validateAuthContext({ token: '   ' })).toEqual(missingTokenFailure);
   });
 
+  it('rejects malformed token strings containing whitespace', () => {
+    expect(validateAuthContext({ token: 'bearer token' })).toEqual({
+      ok: false,
+      error: 'Invalid auth token.',
+      status: 401,
+      code: 'invalid-auth-token',
+      path: 'auth.token',
+    });
+  });
+
   it('accepts valid bearer token', () => {
     expect(validateAuthContext({ token: 'bearer-token', tokenType: 'bearer' })).toEqual({
       ok: true,
@@ -704,6 +714,7 @@ describe('getProviderConnectGuidance', () => {
       const guidance = getProviderConnectGuidance(provider);
       expect(guidance.provider).toBe(provider);
       expect(guidance.kind === 'cli' || guidance.kind === 'dashboard').toBe(true);
+      expect(Object.isFrozen(guidance)).toBe(true);
       expect(Object.isFrozen(guidance.instructions)).toBe(true);
       if (guidance.kind === 'cli') {
         expect(typeof guidance.command).toBe('string');
@@ -729,8 +740,36 @@ describe('Cloud auth module contract', () => {
     });
   });
 
+  it('rejects runtime API-key auth objects that omit the token field', () => {
+    const auth = { tokenType: 'api-key' } as unknown as CloudAuthContext;
+
+    expect(validateCloudRequest(auth, { workspaceId: 'ws-001' })).toEqual({
+      ok: false,
+      error: 'Missing or empty auth token.',
+      status: 401,
+      code: 'missing-auth-token',
+      path: 'auth.token',
+    });
+  });
+
   it('rejects otherwise valid auth when workspace context is missing', () => {
     expect(validateCloudRequest({ token: 'cloud-token', tokenType: 'bearer' }, undefined)).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    });
+  });
+
+  it('does not accept a request whose only successful check is provider connection state', () => {
+    const result = validateCloudRequest({ token: 'cloud-token', tokenType: 'bearer' }, undefined, {
+      requiredProvider: 'google',
+      providerConnection: { provider: 'google', connected: true },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result).toEqual({
       ok: false,
       error: 'Missing or empty workspace ID.',
       status: 400,

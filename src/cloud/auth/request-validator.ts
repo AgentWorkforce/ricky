@@ -16,6 +16,7 @@ import type {
 const VALID_TOKEN_TYPES = new Set<string>(['bearer', 'api-key']);
 const VALID_REQUEST_MODES = new Set<string>(['cloud', 'both']);
 const VALID_PROVIDER_TYPES = new Set<string>(PROVIDER_TYPES);
+const TOKEN_WHITESPACE_PATTERN = /\s/;
 
 export function validateAuthContext(auth: CloudAuthContext | undefined): AuthValidationResult {
   if (!auth || typeof auth.token !== 'string' || !auth.token.trim()) {
@@ -24,6 +25,16 @@ export function validateAuthContext(auth: CloudAuthContext | undefined): AuthVal
       error: 'Missing or empty auth token.',
       status: 401,
       code: 'missing-auth-token',
+      path: 'auth.token',
+    };
+  }
+
+  if (TOKEN_WHITESPACE_PATTERN.test(auth.token)) {
+    return {
+      ok: false,
+      error: 'Invalid auth token.',
+      status: 401,
+      code: 'invalid-auth-token',
       path: 'auth.token',
     };
   }
