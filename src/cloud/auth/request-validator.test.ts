@@ -381,6 +381,22 @@ describe('validateCloudRequest', () => {
     });
   });
 
+  it('rejects invalid required provider values at runtime', () => {
+    expect(
+      validateCloudRequest(
+        { token: 'token' },
+        { workspaceId: 'ws-001' },
+        { requiredProvider: 'dropbox' as never },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
   it('accepts fully valid auth, workspace, request mode, and provider state', () => {
     expect(
       validateCloudRequest(
@@ -502,6 +518,22 @@ describe('resolveAuthorizedWorkspaceScope', () => {
     });
   });
 
+  it('lets requested project refine when authorized project is unset', () => {
+    expect(
+      resolveAuthorizedWorkspaceScope(
+        { workspaceId: 'ws-001' },
+        { workspaceId: 'ws-001', projectId: 'proj-001' },
+      ),
+    ).toEqual({
+      ok: true,
+      scope: {
+        workspaceId: 'ws-001',
+        projectId: 'proj-001',
+        environment: undefined,
+      },
+    });
+  });
+
   it('rejects cross-workspace mismatch', () => {
     expect(
       resolveAuthorizedWorkspaceScope({ workspaceId: 'ws-001' }, { workspaceId: 'ws-002' }),
@@ -556,6 +588,7 @@ describe('getProviderConnectGuidance', () => {
     if (guidance.kind !== 'cli') throw new Error('expected CLI guidance');
     expect(guidance.command).toBe('npx agent-relay cloud connect google');
     expect(guidance.dashboardUrl).toBeUndefined();
+    expect(guidance.instructions[0]).toBe('Run: npx agent-relay cloud connect google');
     expect(guidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
   });
 
@@ -630,6 +663,21 @@ describe('Cloud auth module contract', () => {
 
   it('rejects otherwise valid auth when workspace context is missing', () => {
     expect(validateCloudRequest({ token: 'cloud-token', tokenType: 'bearer' }, undefined)).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    });
+  });
+
+  it('rejects unscoped provider-backed requests before provider state can authorize them', () => {
+    expect(
+      validateCloudRequest({ token: 'cloud-token', tokenType: 'bearer' }, undefined, {
+        requiredProvider: 'google',
+        providerConnection: { provider: 'google', connected: true },
+      }),
+    ).toEqual({
       ok: false,
       error: 'Missing or empty workspace ID.',
       status: 400,
