@@ -18,6 +18,15 @@ function contextBlockContent(blocks: Array<{ id: string; content: string }>, id:
   return block!.content;
 }
 
+function contextBlock(
+  blocks: Array<{ id: string; content: string; source?: string; importance?: string; metadata?: unknown }>,
+  id: string,
+): { id: string; content: string; source?: string; importance?: string; metadata?: unknown } {
+  const block = blocks.find((candidate) => candidate.id === id);
+  expect(block, id).toBeDefined();
+  return block!;
+}
+
 function parseJsonBlock(blocks: Array<{ id: string; content: string }>, id: string): unknown {
   return JSON.parse(contextBlockContent(blocks, id));
 }
@@ -539,7 +548,12 @@ describe('Ricky turn-context adapter', () => {
           'ricky-request-metadata',
         ]),
       );
-      const requestSummary = contextBlockContent(assembly.context.blocks, 'enrichment-ricky-request-summary');
+      const requestSummaryBlock = contextBlock(assembly.context.blocks, 'enrichment-ricky-request-summary');
+      expect(requestSummaryBlock, testCase.name).toMatchObject({
+        source: 'ricky-local',
+        importance: 'high',
+      });
+      const requestSummary = requestSummaryBlock.content;
       expect(requestSummary, testCase.name).toContain(`source: ${testCase.expected.source}`);
       expect(requestSummary, testCase.name).toContain(`requestId: ${testCase.expected.requestId}`);
       expect(requestSummary, testCase.name).toContain(`mode: ${testCase.expected.mode}`);
@@ -548,9 +562,11 @@ describe('Ricky turn-context adapter', () => {
       expect(requestSummary, testCase.name).toContain(
         `specPath: ${testCase.expected.specPath ?? '(not supplied)'}`,
       );
-      expect(contextBlockContent(assembly.context.blocks, 'enrichment-ricky-spec-text'), testCase.name).toBe(
-        testCase.expected.spec,
-      );
+      expect(contextBlock(assembly.context.blocks, 'enrichment-ricky-spec-text'), testCase.name).toMatchObject({
+        content: testCase.expected.spec,
+        source: 'ricky-local',
+        importance: 'high',
+      });
       expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-request-metadata'), testCase.name).toEqual(
         testCase.expected.metadata,
       );
@@ -633,9 +649,13 @@ describe('Ricky turn-context adapter', () => {
             }),
           ]),
         );
-        expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-structured-spec'), testCase.name).toEqual(
-          testCase.expected.structuredSpec,
-        );
+        const structuredSpecBlock = contextBlock(assembly.context.blocks, 'enrichment-ricky-structured-spec');
+        expect(structuredSpecBlock, testCase.name).toMatchObject({
+          content: JSON.stringify(testCase.expected.structuredSpec, null, 2),
+          source: 'ricky-local',
+          importance: 'high',
+        });
+        expect(JSON.parse(structuredSpecBlock.content), testCase.name).toEqual(testCase.expected.structuredSpec);
         expect(executionRequest.context?.blocks, testCase.name).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
@@ -672,9 +692,13 @@ describe('Ricky turn-context adapter', () => {
             }),
           ]),
         );
-        expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-source-metadata'), testCase.name).toEqual(
-          testCase.expected.sourceMetadata,
-        );
+        const sourceMetadataBlock = contextBlock(assembly.context.blocks, 'enrichment-ricky-source-metadata');
+        expect(sourceMetadataBlock, testCase.name).toMatchObject({
+          content: JSON.stringify(testCase.expected.sourceMetadata, null, 2),
+          source: 'ricky-local',
+          importance: 'medium',
+        });
+        expect(JSON.parse(sourceMetadataBlock.content), testCase.name).toEqual(testCase.expected.sourceMetadata);
         expect(executionRequest.context?.blocks, testCase.name).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
