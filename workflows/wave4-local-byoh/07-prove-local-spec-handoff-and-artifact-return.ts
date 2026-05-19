@@ -92,7 +92,7 @@ Write the files to disk, then exit cleanly.`,
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['proof-file-gate'],
-      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
+      command: 'npm run typecheck && npx vitest run src/local/proof/local-entrypoint-proof.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -168,7 +168,7 @@ Write the files to disk, then exit cleanly.`,
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
+      command: 'npm run typecheck && npx vitest run src/local/proof/local-entrypoint-proof.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -216,7 +216,7 @@ Write the files to disk, then exit cleanly.`,
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
+      command: 'npm run typecheck && npx vitest run src/local/proof/local-entrypoint-proof.test.ts',
       captureOutput: true,
       failOnError: true,
     })

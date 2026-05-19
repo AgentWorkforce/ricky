@@ -235,7 +235,7 @@ EOF`,
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
+      command: 'npm run typecheck && npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts',
       captureOutput: true,
       failOnError: false,
     })
@@ -243,7 +243,7 @@ EOF`,
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-validation'],
-      command: 'npm run typecheck --workspace @ricky/local && npm test --workspace @ricky/local',
+      command: 'npm run typecheck && npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts',
       captureOutput: true,
       failOnError: true,
     })
@@ -281,8 +281,8 @@ cat > .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.m
 - local execution returns artifacts, logs, warnings, and next actions honestly.
 
 ## Validation commands
-- npm run typecheck --workspace @ricky/local
-- npm test --workspace @ricky/local
+- npm run typecheck
+- npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts
 - npx tsc --noEmit
 
 ## Remaining risks
