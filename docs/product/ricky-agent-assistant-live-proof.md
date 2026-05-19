@@ -72,7 +72,7 @@ Run: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-
 Background: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts --background
 ```
 
-The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `e997f855f0c5a6bcf7e774fa`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/943d651b1c00/12d17b94-3bf0-45bb-b832-c50b0405e913/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/943d651b1c00/12d17b94-3bf0-45bb-b832-c50b0405e913/stderr.log`, and the assertion `external_cli_execution: pass`.
+The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `a99bb7118307f0c39c5a168e`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/d23c02dc5c54/340dd96b-b5af-474d-986d-0774ae04c352/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/d23c02dc5c54/340dd96b-b5af-474d-986d-0774ae04c352/stderr.log`, and the assertion `external_cli_execution: pass`.
 
 The execution also recorded `Auto-fix: repaired after 1/7 attempt(s)`, proving the user-facing run path completed through Ricky's existing repair loop.
 
