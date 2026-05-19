@@ -1635,6 +1635,10 @@ repo_has_meaningful_delta() {
 
 commit_if_clean_delta() {
   local workflow_path="$1"
+  local push_output_file="$ARTIFACT_DIR/git-push.txt"
+  local ahead="0"
+  local behind="0"
+
   if ! repo_has_meaningful_delta; then
     log "no tracked/untracked repo delta after $workflow_path"
     return 0
@@ -1656,7 +1660,20 @@ commit_if_clean_delta() {
     log "repo HEAD already advanced during $workflow_path; capturing committed state"
   fi
 
-  git push origin main || true
+  : > "$push_output_file"
+  if ! git push origin main >"$push_output_file" 2>&1; then
+    cat "$push_output_file" >&2 || true
+    git fetch origin main:refs/remotes/origin/main >/dev/null 2>&1 || true
+    if git show-ref --verify --quiet refs/remotes/origin/main; then
+      read -r ahead behind < <(git rev-list --left-right --count HEAD...refs/remotes/origin/main)
+      log "push rejected after $workflow_path; local main diverged from origin/main (ahead=${ahead}, behind=${behind})"
+    else
+      log "push rejected after $workflow_path; unable to read refs/remotes/origin/main for divergence details"
+    fi
+    inspect_repo_changes
+    return 1
+  fi
+
   git rev-parse HEAD > "$LAST_COMMIT_FILE"
   inspect_repo_changes
 }
@@ -2008,7 +2025,12 @@ run_one() {
 
       if repo_has_meaningful_delta; then
         log "idle workflow produced repo changes; validating before capture"
-        commit_if_clean_delta "$workflow_path"
+        if ! commit_if_clean_delta "$workflow_path"; then
+          mark_status "blocked" "push rejected after idle workflow delta capture: $workflow_path"
+          CURRENT_WORKFLOW=""
+          persist_checkpoint
+          return 1
+        fi
         remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
         CURRENT_WORKFLOW=""
         persist_checkpoint
@@ -2068,7 +2090,12 @@ run_one() {
     fi
 
     log "failure produced repo changes; validating before capture"
-    commit_if_clean_delta "$workflow_path"
+    if ! commit_if_clean_delta "$workflow_path"; then
+      mark_status "blocked" "push rejected after failed workflow delta capture: $workflow_path"
+      CURRENT_WORKFLOW=""
+      persist_checkpoint
+      return 1
+    fi
     remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
     CURRENT_WORKFLOW=""
     persist_checkpoint
@@ -2076,7 +2103,12 @@ run_one() {
   fi
 
   log "workflow completed: $workflow_path"
-  commit_if_clean_delta "$workflow_path"
+  if ! commit_if_clean_delta "$workflow_path"; then
+    mark_status "blocked" "push rejected after workflow delta capture: $workflow_path"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
+    return 1
+  fi
   remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
   CURRENT_WORKFLOW=""
   persist_checkpoint

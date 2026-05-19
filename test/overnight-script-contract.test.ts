@@ -56,6 +56,15 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain('workflow runner produced no meaningful progress for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path');
   });
 
+  it('treats push rejection during delta capture as a blocking divergence instead of silently continuing', () => {
+    expect(overnightScript).not.toContain('git push origin main || true');
+    expect(overnightScript).toContain('if ! git push origin main >"$push_output_file" 2>&1; then');
+    expect(overnightScript).toContain('push rejected after $workflow_path; local main diverged from origin/main (ahead=${ahead}, behind=${behind})');
+    expect(overnightScript).toContain('mark_status "blocked" "push rejected after workflow delta capture: $workflow_path"');
+    expect(overnightScript).toContain('mark_status "blocked" "push rejected after failed workflow delta capture: $workflow_path"');
+    expect(overnightScript).toContain('mark_status "blocked" "push rejected after idle workflow delta capture: $workflow_path"');
+  });
+
   it('does not quarantine runtime directories that still contain tracked repo files', () => {
     expect(overnightScript).toContain('path_contains_tracked_files()');
     expect(overnightScript).toContain('git ls-files -- "$candidate"');

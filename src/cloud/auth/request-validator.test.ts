@@ -368,6 +368,15 @@ describe('validateCloudRequest', () => {
     expect(validateCloudRequest(undefined, undefined)).toEqual(missingAuthFailure);
   });
 
+  it('rejects missing auth before provider state can authorize a request', () => {
+    expect(
+      validateCloudRequest(undefined, { workspaceId: 'ws-001' }, {
+        requiredProvider: 'google',
+        providerConnection: { provider: 'google', connected: true },
+      }),
+    ).toEqual(missingAuthFailure);
+  });
+
   it('rejects missing workspace when auth is valid', () => {
     expect(validateCloudRequest({ token: 'token' }, undefined)).toEqual(missingWorkspaceFailure);
   });
