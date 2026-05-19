@@ -1826,7 +1826,12 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     const [rawStepName, rawConfig] = node.arguments;
     const config = resolveIdentifierInitializer(rawConfig);
     if (!config || !ts.isObjectLiteralExpression(config)) return null;
-    const command = propertyLiteralText(config, 'command');
+    const commandProperty = config.properties.find((property) =>
+      ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'command',
+    );
+    const command = commandProperty && ts.isPropertyAssignment(commandProperty)
+      ? expressionText(commandProperty.initializer)
+      : undefined;
     if (command === undefined) return null;
     return {
       stepName: rawStepName && ts.isStringLiteralLike(rawStepName) ? rawStepName.text : '(unknown-step)',
@@ -1835,6 +1840,47 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
         ? node.expression.name.getStart(workflowSourceFile)
         : node.getStart(workflowSourceFile),
     };
+  }
+
+  function expressionText(node: ts.Expression | undefined, seen = new Set<string>()): string | undefined {
+    if (!node) return undefined;
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isTemplateExpression(node)) {
+      const parts = [node.head.text];
+      for (const span of node.templateSpans) {
+        parts.push(expressionText(span.expression, seen) ?? '${...}');
+        parts.push(span.literal.text);
+      }
+      return parts.join('');
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = expressionText(node.left, seen);
+      const right = expressionText(node.right, seen);
+      return left !== undefined && right !== undefined ? left + right : undefined;
+    }
+    if (ts.isIdentifier(node)) {
+      const binding = findVisibleBinding(variableInitializers.get(node.text) ?? [], node);
+      if (!binding) return undefined;
+      const seenKey = `${binding.name}:${binding.declarationStart}`;
+      if (seen.has(seenKey)) return undefined;
+      seen.add(seenKey);
+      return expressionText(binding.initializer, seen);
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'join' &&
+      ts.isArrayLiteralExpression(node.expression.expression)
+    ) {
+      const separator = expressionText(node.arguments[0] as ts.Expression | undefined, seen) ?? ',';
+      const elements = node.expression.expression.elements.map((element) =>
+        ts.isSpreadElement(element) ? undefined : expressionText(element, seen),
+      );
+      if (elements.some((element) => element === undefined)) return undefined;
+      return (elements as string[]).join(separator);
+    }
+    return undefined;
   }
 }
 
@@ -2268,26 +2314,6 @@ function stripMarkdownListMarker(line: string): string {
 function propertyNameText(name: ts.PropertyName): string | undefined {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
-  }
-  return undefined;
-}
-
-function propertyLiteralText(object: ts.ObjectLiteralExpression, propertyName: string): string | undefined {
-  for (const property of object.properties) {
-    if (!ts.isPropertyAssignment(property) || propertyNameText(property.name) !== propertyName) continue;
-    return literalText(property.initializer);
-  }
-  return undefined;
-}
-
-function literalText(node: ts.Expression): string | undefined {
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
-  if (ts.isTemplateExpression(node)) {
-    return [
-      node.head.text,
-      ...node.templateSpans.map((span) => `\${...}${span.literal.text}`),
-    ].join('');
   }
   return undefined;
 }

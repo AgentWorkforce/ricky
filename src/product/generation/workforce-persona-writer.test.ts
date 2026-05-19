@@ -2535,6 +2535,40 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     expect(detectSpecIntentMismatch(spec, workflowWithWorktreeSetup)).toEqual([]);
   });
 
+  it('accepts worktree setup commands assembled with array join and constants', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-mcp-cloud-spawn-hardening',
+        'Target branch: chore/mcp-cloud-spawn-hardening',
+      ].join('\n'),
+    };
+    const workflowWithJoinedCommand = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'const REPO_ROOT = "/Users/khaliqgant/Projects/AgentWorkforce/cloud";',
+      'const WORKTREE = "/private/tmp/cloud-mcp-cloud-spawn-hardening";',
+      'const BRANCH = "chore/mcp-cloud-spawn-hardening";',
+      'async function main() {',
+      '  await workflow("with-joined-command")',
+      '    .step("setup-worktree", {',
+      '      type: "deterministic",',
+      '      command: [',
+      '        "set -e",',
+      '        `git -C ${REPO_ROOT} fetch origin main --quiet`,',
+      '        `git -C ${REPO_ROOT} worktree add ${WORKTREE} -b ${BRANCH} origin/main`,',
+      '      ].join("\\n"),',
+      '    })',
+      '    .step("implement", { type: "deterministic", command: `git -C ${WORKTREE} status --short` })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, workflowWithJoinedCommand)).toEqual([]);
+  });
+
   it('flags test -f gates over declared worktree directories and glob paths', () => {
     const spec = {
       description: [
