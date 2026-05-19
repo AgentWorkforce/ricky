@@ -7,6 +7,7 @@ import {
 import { planMasterExecution, type ChildWorkflowPlan, type MasterExecutionPlan } from '../orchestration/index.js';
 import { deriveTestCommand } from './template-renderer.js';
 import { buildFinalReviewPassGateCommand } from './final-review-gate.js';
+import { markdownLabelFields } from './workforce-persona-writer.js';
 import type {
   DeterministicGate,
   PatternDecision,
@@ -81,11 +82,11 @@ export function shouldUseMasterExecutionWorkflow(spec: NormalizedWorkflowSpec): 
 }
 
 function hasSinglePrWorktreeContract(text: string): boolean {
-  return (
-    /\b(?:Outcome\s*:\s*)?(?:exactly\s+)?one\s+pull\s+request\b/i.test(text) &&
-    /^\s*(?:[-*]\s*)?(?:Worktree|Target worktree)\s*:/im.test(text) &&
-    /^\s*(?:[-*]\s*)?(?:Target branch|Branch)\s*:/im.test(text)
-  );
+  if (!/\b(?:Outcome\s*:\s*)?(?:exactly\s+)?one\s+pull\s+request\b/i.test(text)) return false;
+  const fields = markdownLabelFields(text);
+  const worktree = fields.get('worktree') ?? fields.get('target worktree');
+  const branch = fields.get('target branch') ?? fields.get('branch');
+  return Boolean(worktree && branch);
 }
 
 export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput): RenderedMasterWorkflow {
