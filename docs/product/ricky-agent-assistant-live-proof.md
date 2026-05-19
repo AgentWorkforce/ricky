@@ -4,11 +4,11 @@ GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the liv
 
 ## What was adopted
 
-Ricky adopted `@agent-assistant/turn-context` as a bounded request/turn envelope primitive through the `ricky-local-turn-context-adapter`.
+Ricky adopted the real `@agent-assistant/turn-context` package as a bounded request/turn envelope primitive through the `ricky-local-turn-context-adapter`.
 
-The captured adapter runtime smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter package `@agent-assistant/turn-context`, adapter version `1`, CLI source metadata, structured spec data, invocation root, local mode, run stage mode, and request metadata provenance.
+The runtime smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter package `@agent-assistant/turn-context`, adapter version `1`, CLI source metadata, structured spec data, local mode, run stage mode, and request metadata provenance.
 
-Captured turn-context enrichment blocks:
+Captured enrichment blocks:
 
 - `enrichment-ricky-request-summary`
 - `enrichment-ricky-spec-text`
@@ -20,7 +20,7 @@ Ricky still owns request normalization, workflow generation, workflow artifacts,
 
 ## Product path exercised
 
-The adapter runtime smoke proof exercised assistant `ricky` with source `cli`, `mode: local`, `stageMode: run`, invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`, and structured spec description `generate a workflow for package checks`.
+The adapter runtime smoke proof exercised assistant `ricky` from the CLI with `mode: local`, `stageMode: run`, invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`, and structured spec description `generate a workflow for package checks`.
 
 The external product path invoked the user-facing Ricky CLI:
 
@@ -40,7 +40,7 @@ The generated workflow was then executed through the user-facing run command:
 ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
 ```
 
-This proves the adoption was present while moving through generate and run, not only in an isolated adapter path.
+This proves the adopted turn-context adapter was present while Ricky moved through generate and run, not only in an isolated adapter check.
 
 ## Deterministic test proof
 
@@ -61,7 +61,7 @@ The issue #13 captured artifacts add deterministic product-path proof:
 - `external-generate-and-run.json` returned `status: ok` for generation and `status: success` for execution.
 - `external-generate-and-run.exit` is `0`.
 
-The adoption proof document also confirms the shared adapter is called by the real local executor before product intake, workflow generation, artifact selection, runtime prechecks, or coordinator launch. This is runtime-path adoption, not copied types or documentation-only alignment.
+The adoption proof document confirms the shared adapter is called by the real local executor before product intake, workflow generation, artifact selection, runtime prechecks, or coordinator launch. This is runtime-path adoption, not copied types or documentation-only alignment.
 
 ## Live/user-facing validation proof
 
@@ -72,7 +72,7 @@ Run: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-
 Background: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts --background
 ```
 
-The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `a99bb7118307f0c39c5a168e`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/d23c02dc5c54/340dd96b-b5af-474d-986d-0774ae04c352/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/d23c02dc5c54/340dd96b-b5af-474d-986d-0774ae04c352/stderr.log`, and the assertion `external_cli_execution: pass`.
+The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `2346199fa6afadc8ee88ec98`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/f45bf144beab/eb28d915-4f04-4616-83a9-9a01cd319ef3/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/f45bf144beab/eb28d915-4f04-4616-83a9-9a01cd319ef3/stderr.log`, and assertion `external_cli_execution: pass`.
 
 The execution also recorded `Auto-fix: repaired after 1/7 attempt(s)`, proving the user-facing run path completed through Ricky's existing repair loop.
 
