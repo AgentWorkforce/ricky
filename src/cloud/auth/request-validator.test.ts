@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   WorkspaceScopingError,
+  CLOUD_INTEGRATIONS_DASHBOARD_URL,
+  GITHUB_CONNECT_INSTRUCTIONS,
+  GOOGLE_CONNECT_COMMAND,
+  PROVIDER_TYPES,
   assertWorkspaceMatch,
   createWorkspaceScopedQuery,
   getProviderConnectGuidance,
@@ -13,7 +17,6 @@ import {
   validateRequestMode,
   validateWorkspaceContext,
 } from './index.js';
-import { PROVIDER_TYPES } from './types.js';
 import type { CloudAuthContext, CloudWorkspaceContext, ProviderConnectionState } from './types.js';
 
 describe('validateAuthContext', () => {
@@ -621,13 +624,15 @@ describe('resolveAuthorizedWorkspaceScope', () => {
 describe('getProviderConnectGuidance', () => {
   it('Google guidance is a CLI variant with the exact command', () => {
     const guidance = getProviderConnectGuidance('google');
+    const expectedCommand = 'npx agent-relay cloud connect google';
 
     expect(guidance.kind).toBe('cli');
     if (guidance.kind !== 'cli') throw new Error('expected CLI guidance');
-    expect(guidance.command).toBe('npx agent-relay cloud connect google');
+    expect(GOOGLE_CONNECT_COMMAND).toBe(expectedCommand);
+    expect(guidance.command).toBe(expectedCommand);
     expect(guidance.dashboardUrl).toBeUndefined();
-    expect(guidance.instructions[0]).toBe('Run: npx agent-relay cloud connect google');
-    expect(guidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
+    expect(guidance.instructions[0]).toBe(`Run: ${expectedCommand}`);
+    expect(guidance.instructions.join('\n')).toContain(expectedCommand);
   });
 
   it('Google guidance instructions mention OAuth', () => {
@@ -639,13 +644,15 @@ describe('getProviderConnectGuidance', () => {
 
     expect(guidance.kind).toBe('dashboard');
     if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
-    expect(guidance.dashboardUrl).toBe('/dashboard/integrations');
+    expect(guidance.dashboardUrl).toBe(CLOUD_INTEGRATIONS_DASHBOARD_URL);
     expect(guidance.command).toBeUndefined();
   });
 
   it('GitHub guidance mentions Nango and Cloud dashboard', () => {
     const instructions = getProviderConnectGuidance('github').instructions.join('\n');
 
+    expect(getProviderConnectGuidance('github').instructions).toBe(GITHUB_CONNECT_INSTRUCTIONS);
+    expect(Object.isFrozen(GITHUB_CONNECT_INSTRUCTIONS)).toBe(true);
     expect(instructions).toContain('Nango');
     expect(instructions).toContain('Cloud dashboard');
     expect(instructions).toContain('GitHub App installation');
@@ -676,7 +683,7 @@ describe('getProviderConnectGuidance', () => {
 
       expect(guidance.kind).toBe('dashboard');
       if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
-      expect(guidance.dashboardUrl).toBe('/dashboard/integrations');
+      expect(guidance.dashboardUrl).toBe(CLOUD_INTEGRATIONS_DASHBOARD_URL);
       expect(guidance.command).toBeUndefined();
       expect(guidance.instructions.join('\n')).toContain(`Choose ${provider} from optional integrations.`);
     }
@@ -687,6 +694,7 @@ describe('getProviderConnectGuidance', () => {
       const guidance = getProviderConnectGuidance(provider);
       expect(guidance.provider).toBe(provider);
       expect(guidance.kind === 'cli' || guidance.kind === 'dashboard').toBe(true);
+      expect(Object.isFrozen(guidance.instructions)).toBe(true);
       if (guidance.kind === 'cli') {
         expect(typeof guidance.command).toBe('string');
         expect(guidance.command.length).toBeGreaterThan(0);
