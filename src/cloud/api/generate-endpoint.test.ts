@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   CloudExecutor,
@@ -277,6 +277,72 @@ describe('handleCloudGenerate — validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('handleCloudGenerate — success path', () => {
+  it('satisfies the Cloud route contract without network or live runtime access', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network disabled'));
+    const executor = mockExecutor({
+      artifacts: [
+        {
+          path: 'workflows/cloud-contract-workflow.ts',
+          type: 'text/typescript',
+          content: 'export const workflow = "cloud-contract";',
+        },
+      ],
+      warnings: [{ severity: 'warning', message: 'Assumed default validation policy.' }],
+      assumptions: [{ key: 'trigger', message: 'Used manual trigger by default.' }],
+      followUpActions: [
+        {
+          action: 'review-generated-files',
+          label: 'Review Generated Files',
+          description: 'Review the returned artifact bundle before deployment.',
+        },
+      ],
+    });
+
+    try {
+      const response = await handleCloudGenerate(
+        validRequest({
+          body: {
+            spec: 'generate a workflow from the Cloud API',
+            generationMode: 'generate-and-return-artifacts',
+          },
+        }),
+        testOptions(executor),
+      );
+
+      expect(`${CLOUD_GENERATE_METHOD} ${CLOUD_GENERATE_ROUTE}`).toBe(
+        'POST /api/v1/ricky/workflows/generate',
+      );
+      expect(response.ok).toBe(true);
+      expect(response.status).toBe(200);
+      expect(response.artifactBundle).toEqual({
+        artifacts: response.artifacts,
+        generationMode: 'generate-and-return-artifacts',
+        targetMode: 'cloud',
+      });
+      expect(response.artifactBundle.artifacts[0]).toMatchObject({
+        path: 'workflows/cloud-contract-workflow.ts',
+        type: 'text/typescript',
+        content: expect.stringContaining('cloud-contract'),
+      });
+      expect(response.warnings[0]).toEqual({
+        severity: 'warning',
+        message: 'Assumed default validation policy.',
+      });
+      expect(response.assumptions[0]).toEqual({
+        key: 'trigger',
+        message: 'Used manual trigger by default.',
+      });
+      expect(response.followUpActions[0]).toMatchObject({
+        action: 'review-generated-files',
+        label: 'Review Generated Files',
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(executor.calls).toHaveLength(1);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('returns the POST route response contract for Cloud generation callers', async () => {
     const artifact = {
       path: 'workflows/route-contract.ts',
