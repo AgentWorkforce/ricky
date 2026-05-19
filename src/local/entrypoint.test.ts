@@ -4142,6 +4142,135 @@ describe('runLocal', () => {
       expect(localExecutor.runner.invocations).toHaveLength(0);
     });
 
+    it('surfaces real adapter decisions for generator handoff surfaces without changing generation-only behavior', async () => {
+      const handoffs: Array<{
+        name: string;
+        handoff: RawHandoff;
+        expectedSource: LocalInvocationRequest['source'];
+        expectedTurnId: string;
+      }> = [
+        {
+          name: 'cli',
+          handoff: {
+            source: 'cli',
+            spec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+            },
+            stageMode: 'generate',
+            requestId: 'req-issue-11-cli-live',
+            cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+          },
+          expectedSource: 'cli',
+          expectedTurnId: 'req-issue-11-cli-live',
+        },
+        {
+          name: 'mcp',
+          handoff: {
+            source: 'mcp',
+            toolName: 'ricky.generate',
+            arguments: {
+              prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            requestId: 'req-issue-11-mcp-live',
+            mcpMetadata: { toolCallId: 'tool-issue-11-live' },
+          },
+          expectedSource: 'mcp',
+          expectedTurnId: 'req-issue-11-mcp-live',
+        },
+        {
+          name: 'claude',
+          handoff: {
+            source: 'claude',
+            spec: {
+              request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stage_mode: 'generate',
+            },
+            requestId: 'req-issue-11-claude-live',
+            conversationId: 'conv-issue-11-live',
+            turnId: 'turn-issue-11-live',
+          },
+          expectedSource: 'claude',
+          expectedTurnId: 'req-issue-11-claude-live',
+        },
+        {
+          name: 'structured',
+          handoff: {
+            source: 'structured',
+            spec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            requestId: 'req-issue-11-structured-live',
+            metadata: { issue: 11, surface: 'structured' },
+          },
+          expectedSource: 'structured',
+          expectedTurnId: 'req-issue-11-structured-live',
+        },
+        {
+          name: 'free-form',
+          handoff: {
+            source: 'free-form',
+            spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-free-form-live',
+            metadata: { issue: 11, surface: 'free-form' },
+          },
+          expectedSource: 'free-form',
+          expectedTurnId: 'req-issue-11-free-form-live',
+        },
+      ];
+
+      for (const testCase of handoffs) {
+        const localExecutor = memoryLocalExecutorOptions({ stdout: [`${testCase.name} runtime should stay idle`] });
+        const result = await runLocal(testCase.handoff, { localExecutor });
+
+        expect(result.ok, testCase.name).toBe(true);
+        expectNoTurnContextFallback(result.logs);
+        expect(result.exitCode, testCase.name).toBe(0);
+        expect(result.logs, testCase.name).toEqual(
+          expect.arrayContaining([
+            `[local] received spec from ${testCase.expectedSource}`,
+            '[local] stage mode: generate',
+            '[local] spec intake route: generate',
+            '[local] runtime launch skipped: returning generated artifact only',
+          ]),
+        );
+        expect(result.generation, testCase.name).toMatchObject({
+          stage: 'generate',
+          status: 'ok',
+          decisions: {
+            assistant_turn_context: {
+              assistant_id: 'ricky',
+              turn_id: testCase.expectedTurnId,
+              adapter: 'ricky-local-turn-context-adapter',
+              package: '@agent-assistant/turn-context',
+              context_blocks: expect.arrayContaining([
+                'enrichment-ricky-request-summary',
+                'enrichment-ricky-spec-text',
+                'enrichment-ricky-request-metadata',
+              ]),
+              enrichment_ids: expect.arrayContaining([
+                'ricky-request-summary',
+                'ricky-spec-text',
+                'ricky-request-metadata',
+              ]),
+            },
+          },
+        });
+        expect(result.execution, testCase.name).toBeUndefined();
+        expect(workflowArtifactWrites(localExecutor.writes), testCase.name).toHaveLength(1);
+        expect(localExecutor.runner.invocations, testCase.name).toHaveLength(0);
+        expect(result.nextActions[0], testCase.name).toBe(
+          `Run the generated workflow locally: ricky run ${result.generation?.artifact?.path}`,
+        );
+      }
+    });
+
     it('preserves artifact-run stage semantics through the adapter-backed live local path', async () => {
       const artifactPath = 'workflows/issue-11/ready.workflow.ts';
       const launches: RunRequest[] = [];
