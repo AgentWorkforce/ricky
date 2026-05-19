@@ -540,6 +540,8 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-environment access denied.',
       status: 403,
+      code: 'cross-environment-access',
+      path: 'workspace.environment',
     });
   });
 
@@ -582,6 +584,8 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-workspace access denied.',
       status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
     });
   });
 
@@ -593,6 +597,8 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-workspace access denied.',
       status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
     });
   });
 
@@ -604,6 +610,8 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-workspace access denied.',
       status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
     });
   });
 
@@ -617,6 +625,8 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-project access denied.',
       status: 403,
+      code: 'cross-project-access',
+      path: 'workspace.projectId',
     });
   });
 });
@@ -782,6 +792,8 @@ describe('Cloud auth module contract', () => {
       ok: false,
       error: 'Cross-workspace access denied.',
       status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
     });
   });
 

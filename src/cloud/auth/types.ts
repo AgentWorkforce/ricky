@@ -77,7 +77,13 @@ export interface AuthorizedWorkspaceScope {
 
 export type AuthorizedWorkspaceScopeResult =
   | { ok: true; scope: AuthorizedWorkspaceScope }
-  | { ok: false; error: string; status: number };
+  | {
+      ok: false;
+      error: string;
+      status: number;
+      code: 'cross-workspace-access' | 'cross-project-access' | 'cross-environment-access';
+      path: 'workspace.workspaceId' | 'workspace.projectId' | 'workspace.environment';
+    };
 
 export type RequestModeValidationResult =
   | { ok: true; mode: CloudRequestMode }
