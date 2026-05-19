@@ -457,6 +457,7 @@ describe('normalizeRequest', () => {
     const result = await normalizeRequest(raw);
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('both');
   });
 
   it('maps top-level auto execution preference to local-first both mode', async () => {
@@ -464,6 +465,7 @@ describe('normalizeRequest', () => {
     const result = await normalizeRequest(raw);
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('auto');
   });
 
   it('reads execution preference from structured spec payloads when top-level mode is absent', async () => {
@@ -476,6 +478,7 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('both');
   });
 
   it('lets top-level mode override nested structured execution preference', async () => {
@@ -489,6 +492,7 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('local');
+    expect(result.executionPreference).toBe('local');
   });
 
   it('maps MCP auto execution preference to both for the local contract', async () => {
@@ -501,6 +505,7 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('auto');
   });
 
   it('accepts generate-and-run as a stageMode alias for run behavior', async () => {
@@ -646,6 +651,7 @@ describe('runLocal', () => {
       source: 'cli',
       spec: 'generate a local workflow',
       mode: 'local',
+      executionPreference: 'local',
       stageMode,
       metadata: {},
     };
@@ -671,6 +677,7 @@ describe('runLocal', () => {
     };
 
     expect(input.stageMode).toBe('generate-and-run');
+    expect(input.executionPreference).toBe('local');
     expect(generation.status).toBe('ok');
     expect(execution.status).toBe('success');
   });
@@ -1210,7 +1217,10 @@ describe('runLocal', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
+    const generatedArtifacts = workflowArtifactWrites(localExecutor.writes);
+    expect(generatedArtifacts).toHaveLength(1);
+    expect(generatedArtifacts[0].content).toContain('\\"executionPreference\\": \\"local\\"');
+    expect(generatedArtifacts[0].content).not.toContain('\\"executionPreference\\": \\"cloud\\"');
     expect(localExecutor.runner.invocations).toHaveLength(1);
     expect(localExecutor.runner.invocations[0]).toMatchObject({
       command: DEFAULT_LOCAL_ROUTE.command,

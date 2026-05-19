@@ -1126,7 +1126,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       let generationResult: GenerationResult | null = null;
 
       if (intakeResult.routing.target === 'generate' || !workflowFile) {
-        const executionPreference: ExecutionPreference = activeRequest.mode === 'both' ? 'auto' : 'local';
+        const executionPreference = generationExecutionPreference(activeRequest);
         const normalizedSpec = {
           ...intakeResult.routing.normalizedSpec,
           executionPreference,
@@ -1588,6 +1588,7 @@ function toRawSpecPayload(
     metadata: {
       ...request.metadata,
       mode: request.mode,
+      executionPreference: request.executionPreference,
       specPath: request.specPath,
       refine: request.refine,
       sourceMetadata: request.sourceMetadata,
@@ -1685,6 +1686,11 @@ function stableRunIdFor(request: LocalInvocationRequest): Pick<RunRequest, 'runI
   const fromMetadata = request.metadata.rickyRunId ?? request.metadata.runId;
   if (typeof fromMetadata === 'string' && fromMetadata.trim()) return { runId: fromMetadata };
   return request.requestId ? { runId: request.requestId } : {};
+}
+
+function generationExecutionPreference(request: LocalInvocationRequest): ExecutionPreference {
+  if (request.mode === 'both') return 'auto';
+  return request.mode === 'cloud' ? 'cloud' : 'local';
 }
 
 function resolveWorkforcePersonaWriterOptions(
