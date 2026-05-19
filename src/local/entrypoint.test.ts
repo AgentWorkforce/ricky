@@ -4706,6 +4706,18 @@ describe('runLocal', () => {
         turn_id: 'req-issue-11-generate-and-run',
         adapter: 'ricky-local-turn-context-adapter',
         package: '@agent-assistant/turn-context',
+        context_blocks: expect.arrayContaining([
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-request-metadata',
+        ]),
+        enrichment_ids: expect.arrayContaining([
+          'ricky-request-summary',
+          'ricky-spec-text',
+          'ricky-structured-spec',
+          'ricky-request-metadata',
+        ]),
       });
       expect(success.execution).toMatchObject({
         stage: 'execute',
@@ -4777,6 +4789,18 @@ describe('runLocal', () => {
             turn_id: 'req-issue-11-generate-and-run',
             adapter: 'ricky-local-turn-context-adapter',
             package: '@agent-assistant/turn-context',
+            context_blocks: expect.arrayContaining([
+              'enrichment-ricky-request-summary',
+              'enrichment-ricky-spec-text',
+              'enrichment-ricky-structured-spec',
+              'enrichment-ricky-request-metadata',
+            ]),
+            enrichment_ids: expect.arrayContaining([
+              'ricky-request-summary',
+              'ricky-spec-text',
+              'ricky-structured-spec',
+              'ricky-request-metadata',
+            ]),
           },
         },
       });
@@ -4822,6 +4846,16 @@ describe('runLocal', () => {
             turn_id: 'req-issue-11-blocker',
             adapter: 'ricky-local-turn-context-adapter',
             package: '@agent-assistant/turn-context',
+            context_blocks: expect.arrayContaining([
+              'enrichment-ricky-request-summary',
+              'enrichment-ricky-spec-text',
+              'enrichment-ricky-request-metadata',
+            ]),
+            enrichment_ids: expect.arrayContaining([
+              'ricky-request-summary',
+              'ricky-spec-text',
+              'ricky-request-metadata',
+            ]),
           },
         },
       });
