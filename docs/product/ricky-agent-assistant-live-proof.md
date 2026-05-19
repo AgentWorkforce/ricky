@@ -1,12 +1,12 @@
 # Ricky Agent-Assistant Live Proof Verdict
 
-GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the live local product path. The evidence supports continued adoption while holding the boundary at request/turn context reuse.
+GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the live local product path. The evidence supports continued adoption while holding the boundary at neutral request/turn context reuse.
 
 ## What was adopted
 
-Ricky adopted the real `@agent-assistant/turn-context` package as a bounded request/turn envelope primitive through the `ricky-local-turn-context-adapter`.
+Ricky adopted the real `@agent-assistant/turn-context` package through the `ricky-local-turn-context-adapter`.
 
-The runtime smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter package `@agent-assistant/turn-context`, adapter version `1`, CLI source metadata, structured spec data, local mode, run stage mode, and request metadata provenance.
+The runtime smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter version `1`, CLI source metadata, structured spec data, `mode: local`, `stageMode: run`, and request metadata provenance.
 
 Captured enrichment blocks:
 
@@ -16,13 +16,13 @@ Captured enrichment blocks:
 - `enrichment-ricky-source-metadata`
 - `enrichment-ricky-request-metadata`
 
-Ricky still owns request normalization, workflow generation, workflow artifacts, run-stage behavior, runtime prechecks, blocker classification, recovery wording, and local execution semantics.
+The adopted slice is the request/turn envelope. Ricky still owns request normalization, workflow generation, artifact selection, runtime prechecks, blocker classification, recovery wording, and execution semantics.
 
 ## Product path exercised
 
-The adapter runtime smoke proof exercised assistant `ricky` from the CLI with `mode: local`, `stageMode: run`, invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`, and structured spec description `generate a workflow for package checks`.
+The adapter runtime smoke proof exercised assistant `ricky` from the CLI with invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky` and structured spec description `generate a workflow for package checks`.
 
-The external product path invoked the user-facing Ricky CLI:
+The external user-facing CLI path invoked:
 
 ```text
 ricky --mode local --spec generate a workflow for package checks with typecheck and tests --no-workforce-persona
@@ -34,7 +34,7 @@ Ricky generated:
 workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
 ```
 
-The generated workflow was then executed through the user-facing run command:
+The generated workflow was then executed through:
 
 ```text
 ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
@@ -44,7 +44,7 @@ This proves the adopted turn-context adapter was present while Ricky moved throu
 
 ## Deterministic test proof
 
-The issue #11 implementation signoff records this deterministic validation suite for the adopted adapter slice:
+The issue #11 implementation signoff records this validation suite for the adopted adapter slice:
 
 ```text
 npm run typecheck
@@ -54,7 +54,7 @@ npx vitest run src/surfaces/cli
 npm test
 ```
 
-The issue #13 captured artifacts add deterministic product-path proof:
+The issue #13 captured artifacts add product-path proof:
 
 - `adapter-runtime-smoke.json` confirms the real adapter package, assistant id, turn id, request metadata, and enrichment block ids.
 - `external-generate.json` returned `status: ok` and wrote the generated workflow file.
@@ -65,14 +65,14 @@ The adoption proof document confirms the shared adapter is called by the real lo
 
 ## Live/user-facing validation proof
 
-The external generate artifact printed the user-facing next commands for foreground and background execution:
+The external generate artifact printed user-facing next commands for foreground and background execution:
 
 ```text
 Run: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
 Background: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts --background
 ```
 
-The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `2346199fa6afadc8ee88ec98`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/f45bf144beab/eb28d915-4f04-4616-83a9-9a01cd319ef3/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/f45bf144beab/eb28d915-4f04-4616-83a9-9a01cd319ef3/stderr.log`, and assertion `external_cli_execution: pass`.
+The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `efac585f5020b038edf76de0`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/15496f9b3181/32e85e10-916b-4c5f-a651-818abf0c22b7/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/15496f9b3181/32e85e10-916b-4c5f-a651-818abf0c22b7/stderr.log`, and assertion `external_cli_execution: pass`.
 
 The execution also recorded `Auto-fix: repaired after 1/7 attempt(s)`, proving the user-facing run path completed through Ricky's existing repair loop.
 
@@ -86,6 +86,6 @@ The observed product cost is that live execution may still require a repair pass
 
 Verdict: keep adopting, hold boundary.
 
-The proof supports continued adoption because a real `agent-assistant` runtime primitive is exercised in Ricky's live local product path. The boundary should remain narrow: shared neutral request/turn context is appropriate, while Ricky keeps ownership of workflow-specific product behavior, execution UX, evidence, recovery, and reliability semantics.
+The proof supports continued adoption because a real agent-assistant runtime primitive is exercised in Ricky's live local product path. The boundary should remain narrow: shared neutral request/turn context is appropriate, while Ricky keeps ownership of workflow-specific product behavior, execution UX, evidence, recovery, and reliability semantics.
 
 RICKY_AGENT_ASSISTANT_LIVE_PROOF_COMPLETE
