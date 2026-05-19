@@ -1,25 +1,14 @@
 # Ricky Agent-Assistant Live Proof Verdict
 
-GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the live local product path. The evidence supports continued adoption while holding the adoption boundary to neutral request/turn context reuse.
+GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the live local product path. The evidence supports continued adoption while holding the boundary to neutral request/turn context reuse.
 
 ## What was adopted
 
 Ricky adopted the real `@agent-assistant/turn-context` package through the `ricky-local-turn-context-adapter`.
 
-The captured adapter runtime smoke proof records:
+The adapter runtime smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter package `@agent-assistant/turn-context`, adapter version `1`, source `cli`, invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`, `mode: local`, and `stageMode: run`.
 
-- assistant id `ricky`
-- turn id `req-wave10-live-proof`
-- adapter package `@agent-assistant/turn-context`
-- adapter name `ricky-local-turn-context-adapter`
-- adapter version `1`
-- source `cli`
-- invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`
-- `mode: local`
-- `stageMode: run`
-- structured spec description `generate a workflow for package checks`
-
-Captured enrichment blocks:
+It also records the bounded enrichment blocks Ricky contributes to the shared turn context:
 
 - `enrichment-ricky-request-summary`
 - `enrichment-ricky-spec-text`
@@ -31,7 +20,7 @@ The adopted slice is the request/turn envelope. Ricky still owns request normali
 
 ## Product path exercised
 
-The live proof exercised Ricky from the user-facing local CLI path, not only from an isolated adapter check.
+The proof exercised Ricky from the user-facing local CLI path, not only from an isolated adapter check.
 
 Generation invoked:
 
@@ -51,7 +40,7 @@ The generated workflow was then executed through the printed foreground command:
 ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
 ```
 
-This proves the adopted turn-context adapter was present while Ricky moved through generate and run.
+This covers the local generate-and-run product path with the adopted turn-context adapter present in Ricky's runtime.
 
 ## Deterministic test proof
 
@@ -65,10 +54,10 @@ npx vitest run src/surfaces/cli
 npm test
 ```
 
-The issue #13 proof artifacts add live product-path evidence:
+The issue #13 artifacts add deterministic live-path evidence:
 
 - `adapter-runtime-smoke.json` confirms the real adapter package, assistant id, turn id, CLI source, request metadata, and enrichment block ids.
-- `external-generate.json` records generation `status: ok`, the generated workflow path, the CLI command invoked, and the foreground/background run commands shown to the user.
+- `external-generate.json` records generation `status: ok`, the generated workflow path, the CLI command invoked, and the run commands shown to the user.
 - `external-generate-and-run.json` records generation `status: ok`, execution `status: success`, command `ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts`, and assertion `external_cli_execution: pass`.
 - `external-generate-and-run.exit` is `0`.
 
@@ -83,7 +72,7 @@ Run: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-
 Background: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts --background
 ```
 
-The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `c81e941e0150e0509686bc37`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/b129c4ac7653/ff7b788c-e60d-461d-add6-00b094ac4eac/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/b129c4ac7653/ff7b788c-e60d-461d-add6-00b094ac4eac/stderr.log`, and assertion `external_cli_execution: pass`.
+The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `9dc3bec086dbc660e42b15a4`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/f5536fe45932/a269f8c2-33f5-4849-9eba-e4a8d8968a01/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/f5536fe45932/a269f8c2-33f5-4849-9eba-e4a8d8968a01/stderr.log`, and assertion `external_cli_execution: pass`.
 
 The run also recorded:
 
