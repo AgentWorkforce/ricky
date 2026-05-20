@@ -130,6 +130,7 @@ describe('CLOUD_GENERATE_ROUTE', () => {
 
     expect(response.ok).toBe(true);
     expect(response.artifactBundle.targetMode).toBe('cloud');
+    expect(response.artifactBundle.artifacts).toBe(response.artifacts);
   });
 });
 
