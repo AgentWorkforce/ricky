@@ -4809,6 +4809,175 @@ describe('runLocal', () => {
       }
     });
 
+    it('preserves artifact-run and generate-and-run stage semantics at the live adapter boundary', async () => {
+      const assembledInputs: Array<Record<string, unknown>> = [];
+      const artifactPath = 'workflows/issue-11/live-artifact.workflow.ts';
+      const artifactLaunches: RunRequest[] = [];
+
+      vi.resetModules();
+      vi.doMock('@agent-assistant/turn-context', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@agent-assistant/turn-context')>();
+        return {
+          ...actual,
+          createTurnContextAssembler: () => {
+            const assembler = actual.createTurnContextAssembler();
+            return {
+              assemble(input: Parameters<typeof assembler.assemble>[0]) {
+                assembledInputs.push(input as unknown as Record<string, unknown>);
+                return assembler.assemble(input);
+              },
+            };
+          },
+        };
+      });
+
+      try {
+        const { runLocal: runLocalWithObservedAdapter } = await import('./entrypoint.js');
+        const artifactResult = await runLocalWithObservedAdapter(
+          {
+            source: 'workflow-artifact',
+            artifactPath,
+            requestId: 'req-issue-11-live-artifact-run',
+            invocationRoot: '/workspace/issue-11-live-artifact',
+            metadata: { issue: 11, stage: 'artifact-run' },
+          },
+          {
+            artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+            localExecutor: {
+              cwd: '/fallback-cwd',
+              artifactWriter: {
+                async writeArtifact(): Promise<void> {
+                  throw new Error('artifact-run should not generate a replacement workflow');
+                },
+              },
+              coordinator: {
+                async launch(request: RunRequest): Promise<CoordinatorResult> {
+                  artifactLaunches.push(request);
+                  return coordinatorResult(request, { stdout: ['artifact runtime ok'] });
+                },
+              },
+            },
+          },
+        );
+        const generateAndRunExecutor = memoryLocalExecutorOptions({
+          cwd: '/fallback-generate-and-run',
+          stdout: ['generate-and-run runtime ok'],
+        });
+        const generateAndRunResult = await runLocalWithObservedAdapter(
+          {
+            source: 'mcp',
+            toolName: 'ricky.generate',
+            requestId: 'req-issue-11-live-generate-and-run',
+            invocationRoot: '/workspace/issue-11-live-generate-and-run',
+            executionPreference: 'auto',
+            arguments: {
+              prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              stageMode: 'generate-and-run',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+            },
+            metadata: { issue: 11, stage: 'generate-and-run' },
+            mcpMetadata: { toolCallId: 'tool-issue-11-live-generate-and-run' },
+          },
+          { localExecutor: generateAndRunExecutor },
+        );
+
+        expect(artifactResult.ok).toBe(true);
+        expect(generateAndRunResult.ok).toBe(true);
+        expectNoTurnContextFallback(artifactResult.logs);
+        expectNoTurnContextFallback(generateAndRunResult.logs);
+        expect(artifactResult.logs).toEqual(
+          expect.arrayContaining([
+            '[local] stage mode: run',
+            '[local] spec intake route: execute',
+            '[local] runtime status: passed',
+          ]),
+        );
+        expect(generateAndRunResult.logs).toEqual(
+          expect.arrayContaining([
+            '[local] mode: both',
+            '[local] stage mode: run',
+            '[local] spec intake route: generate',
+            '[local] runtime status: passed',
+          ]),
+        );
+        expect(artifactResult.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+        expect(artifactLaunches).toHaveLength(1);
+        expect(generateAndRunExecutor.runner.invocations).toHaveLength(1);
+        expect(assembledInputs).toHaveLength(2);
+
+        const artifactInput = assembledInputs[0];
+        const artifactMetadata = artifactInput.metadata as {
+          adapter?: Record<string, unknown>;
+          ricky?: Record<string, unknown>;
+        };
+        expect(artifactInput).toMatchObject({
+          assistantId: 'ricky',
+          turnId: 'req-issue-11-live-artifact-run',
+          shaping: { mode: 'ricky-local:local:run' },
+        });
+        expect(artifactMetadata.adapter).toMatchObject({
+          name: 'ricky-local-turn-context-adapter',
+          package: '@agent-assistant/turn-context',
+        });
+        expectIssue11RickyMetadataKeys(artifactMetadata.ricky, 'live-artifact-run.metadata.ricky');
+        expect(artifactMetadata.ricky).toMatchObject({
+          requestId: 'req-issue-11-live-artifact-run',
+          source: 'workflow-artifact',
+          invocationRoot: '/workspace/issue-11-live-artifact',
+          mode: 'local',
+          stageMode: 'run',
+          specPath: artifactPath,
+          metadata: { issue: 11, stage: 'artifact-run' },
+        });
+
+        const generateAndRunInput = assembledInputs[1];
+        const generateAndRunMetadata = generateAndRunInput.metadata as {
+          adapter?: Record<string, unknown>;
+          ricky?: Record<string, unknown>;
+        };
+        expect(generateAndRunInput).toMatchObject({
+          assistantId: 'ricky',
+          turnId: 'req-issue-11-live-generate-and-run',
+          shaping: { mode: 'ricky-local:both:generate-and-run' },
+        });
+        expect(generateAndRunMetadata.adapter).toMatchObject({
+          name: 'ricky-local-turn-context-adapter',
+          package: '@agent-assistant/turn-context',
+        });
+        expectIssue11RickyMetadataKeys(
+          generateAndRunMetadata.ricky,
+          'live-generate-and-run.metadata.ricky',
+        );
+        expect(generateAndRunMetadata.ricky).toMatchObject({
+          requestId: 'req-issue-11-live-generate-and-run',
+          source: 'mcp',
+          invocationRoot: '/workspace/issue-11-live-generate-and-run',
+          mode: 'both',
+          stageMode: 'generate-and-run',
+          metadata: {
+            issue: 11,
+            stage: 'generate-and-run',
+            toolCallId: 'tool-issue-11-live-generate-and-run',
+            toolName: 'ricky.generate',
+          },
+        });
+        expect(generateAndRunMetadata.ricky?.structuredSpec).toEqual({
+          prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'generate-and-run',
+          targetFiles: ['packages/local/src/entrypoint.ts'],
+        });
+        expect(generateAndRunMetadata.ricky?.sourceMetadata).toEqual({
+          mcp: {
+            toolCallId: 'tool-issue-11-live-generate-and-run',
+            toolName: 'ricky.generate',
+          },
+        });
+      } finally {
+        vi.doUnmock('@agent-assistant/turn-context');
+        vi.resetModules();
+      }
+    });
+
     it('keeps generation-only LocalResponse fields while the real local executor assembles turn context', async () => {
       const localExecutor = memoryLocalExecutorOptions({ stdout: ['runtime should stay idle'] });
       const result = await runLocal(
