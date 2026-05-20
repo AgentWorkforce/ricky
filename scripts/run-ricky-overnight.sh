@@ -1896,7 +1896,9 @@ runner_output_declares_expected_workflow() {
 
   [[ -n "$expected_workflow_name" && -f "$runner_output" ]] || return 1
 
-  grep -Fq "Workflow \"$expected_workflow_name-workflow\"" "$runner_output" || \
+  grep -Fq "Starting workflow \"$expected_workflow_name-workflow\"" "$runner_output" || \
+    grep -Fq "Starting workflow \"$expected_workflow_name\"" "$runner_output" || \
+    grep -Fq "Workflow \"$expected_workflow_name-workflow\"" "$runner_output" || \
     grep -Fq "Workflow \"$expected_workflow_name\"" "$runner_output"
 }
 

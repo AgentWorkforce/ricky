@@ -78,6 +78,7 @@ describe('overnight harness queue-exhaustion contract', () => {
 
   it('trusts the active runner log when it clearly declares the expected workflow identity', () => {
     expect(overnightScript).toContain('runner_output_declares_expected_workflow()');
+    expect(overnightScript).toContain('grep -Fq "Starting workflow');
     expect(overnightScript).toContain('grep -Fq "Workflow');
     expect(overnightScript).toContain('$expected_workflow_name-workflow');
     expect(overnightScript).toContain('"$runner_output"');
