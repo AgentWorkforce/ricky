@@ -3437,6 +3437,90 @@ describe('runLocal', () => {
     expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
   });
 
+  it('keeps workflow artifact handoffs on the local/BYOH path with response and environment-warning contracts', async () => {
+    const artifactPath = 'workflows/wave4-local-byoh/byoh-entrypoint.workflow.ts';
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'workflow-artifact',
+        artifactPath,
+        invocationRoot: '/workspace/project',
+        requestId: 'req-byoh-artifact-contract',
+      },
+      {
+        artifactReader,
+        localExecutor: {
+          cwd: '/workspace/project',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                status: 'failed',
+                exitCode: 1,
+                stdout: ['local runtime accepted artifact handoff'],
+                stderr: ['MISSING_ENV_VAR: RELAYCAST_API_KEY'],
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(artifactReader.reads).toEqual([`/workspace/project/${artifactPath}`]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile: artifactPath,
+      cwd: '/workspace/project',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        requestId: 'req-byoh-artifact-contract',
+        source: 'workflow-artifact',
+        route: 'execute',
+      },
+    });
+    expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from workflow-artifact',
+        '[local] mode: local',
+        `[local] spec path: ${artifactPath}`,
+        '[local] spec intake route: execute',
+        '[local] runtime status: failed',
+        `[local] runtime command: @agent-relay/sdk/workflows runScriptWorkflow ${artifactPath}`,
+        '[stdout] local runtime accepted artifact handoff',
+        '[stderr] MISSING_ENV_VAR: RELAYCAST_API_KEY',
+      ]),
+    );
+    expect(result.execution).toMatchObject({
+      stage: 'execute',
+      status: 'blocker',
+      blocker: {
+        code: 'MISSING_ENV_VAR',
+        category: 'environment',
+        context: {
+          missing: ['RELAYCAST_API_KEY'],
+        },
+      },
+      evidence: {
+        logs: {
+          tail: ['local runtime accepted artifact handoff', 'MISSING_ENV_VAR: RELAYCAST_API_KEY'],
+          truncated: false,
+        },
+      },
+    });
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        'Required runtime environment is missing: MISSING_ENV_VAR: RELAYCAST_API_KEY.',
+      ]),
+    );
+    expect(result.nextActions).toEqual(expect.arrayContaining(['export RELAYCAST_API_KEY=...']));
+    expect(result.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+    expect(result.nextActions.some((action) => action.includes('promote to Cloud'))).toBe(false);
+  });
+
   it('returns local artifact, logs, and environment recovery warnings without Cloud fallback', async () => {
     const workflowFile = 'workflows/wave4-local-byoh/env-warning.workflow.ts';
     const launches: RunRequest[] = [];
