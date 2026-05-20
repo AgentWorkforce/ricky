@@ -121,6 +121,7 @@ describe('CLOUD_GENERATE_ROUTE', () => {
       method: 'POST',
       path: '/api/v1/ricky/workflows/generate',
     });
+    expect(endpoint.path).toBe(CLOUD_GENERATE_ROUTE);
     expect(`${endpoint.method} ${endpoint.path}`).toBe(
       'POST /api/v1/ricky/workflows/generate',
     );
