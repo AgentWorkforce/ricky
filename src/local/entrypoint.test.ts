@@ -987,6 +987,79 @@ describe('runLocal', () => {
     expect(result.logs.some((l) => l.includes('[local] spec intake route: execute'))).toBe(true);
   });
 
+  it('runs normalized structured artifact path requests through the local runtime contract', async () => {
+    const cases = [
+      {
+        key: 'artifactPath',
+        workflowFile: 'workflows/generated/normalized-artifact.ts',
+      },
+      {
+        key: 'workflowArtifactPath',
+        workflowFile: 'workflows/generated/normalized-workflow-artifact.ts',
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const launches: RunRequest[] = [];
+      const result = await runLocal(
+        {
+          _normalized: true,
+          source: 'mcp',
+          spec: 'run local workflow artifact',
+          structuredSpec: {
+            intent: 'execute',
+            description: 'run local workflow artifact',
+            [testCase.key]: testCase.workflowFile,
+          },
+          mode: 'local',
+          executionPreference: 'local',
+          stageMode: 'run',
+          metadata: { toolName: 'ricky.runLocal' },
+          sourceMetadata: {
+            mcp: { toolName: 'ricky.runLocal', toolCallId: 'tool-normalized-artifact' },
+          },
+        },
+        {
+          localExecutor: {
+            cwd: '/workspace/ricky',
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                launches.push(request);
+                return coordinatorResult(request, { stdout: [`${testCase.key} executed`] });
+              },
+            },
+            artifactWriter: {
+              async writeArtifact(): Promise<void> {
+                throw new Error(`${testCase.key} execute request should not generate`);
+              },
+            },
+          },
+        },
+      );
+
+      expect(result.ok, testCase.key).toBe(true);
+      expect(launches, testCase.key).toHaveLength(1);
+      expect(launches[0], testCase.key).toMatchObject({
+        workflowFile: testCase.workflowFile,
+        cwd: '/workspace/ricky',
+        metadata: {
+          source: 'mcp',
+          route: 'execute',
+        },
+      });
+      expect(result.artifacts, testCase.key).toEqual([
+        { path: testCase.workflowFile, type: 'text/typescript' },
+      ]);
+      expect(result.logs, testCase.key).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from mcp',
+          '[local] spec intake route: execute',
+          `[stdout] ${testCase.key} executed`,
+        ]),
+      );
+    }
+  });
+
   it('does not skip normalization for raw cli handoffs that include mode and metadata', async () => {
     const executor = mockExecutor();
     const result = await runLocal(

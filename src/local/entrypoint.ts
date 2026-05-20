@@ -1726,8 +1726,15 @@ function workflowFileForRoute(
   if (request.specPath && isExecutableWorkflowPath(request.specPath)) return request.specPath;
   if (route !== 'execute') return null;
 
-  const candidate = request.structuredSpec?.workflowFile ?? request.structuredSpec?.workflowPath;
-  if (typeof candidate === 'string' && isExecutableWorkflowPath(candidate)) return candidate;
+  const candidates = [
+    request.structuredSpec?.workflowFile,
+    request.structuredSpec?.workflowPath,
+    request.structuredSpec?.artifactPath,
+    request.structuredSpec?.workflowArtifactPath,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && isExecutableWorkflowPath(candidate)) return candidate;
+  }
   return workflowFileHint && isExecutableWorkflowPath(workflowFileHint) ? workflowFileHint : null;
 }
 
