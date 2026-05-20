@@ -1016,15 +1016,30 @@ workflow_is_already_satisfied() {
         'RICKY_FAILURE_UNBLOCKER_PROOF_COMPLETE'
       ;;
     workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts)
-      git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.test.ts 2>/dev/null
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return/signoff.md \
+        'LOCAL_BYOH_PROOF_COMPLETE' \
+        && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.test.ts 2>/dev/null \
+        && npx vitest run src/local/proof/local-entrypoint-proof.test.ts >/dev/null
       ;;
     workflows/wave5-scale-and-ops/01-workflow-health-analytics.ts)
-      git cat-file -e HEAD:packages/product/src/analytics/health-analyzer.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/product/src/analytics/digest-generator.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/product/src/analytics/types.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/product/src/analytics/health-analyzer.test.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/product/src/analytics/index.ts 2>/dev/null
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/signoff.md \
+        'HEALTH_ANALYTICS_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && git cat-file -e HEAD:src/product/analytics/health-analyzer.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/analytics/digest-generator.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/analytics/types.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/analytics/health-analyzer.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/analytics/index.ts 2>/dev/null \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/product/analytics/health-analyzer.test.ts >/dev/null
       ;;
     workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts)
       git cat-file -e HEAD:docs/product/ricky-cli-onboarding-ux-spec.md 2>/dev/null \
@@ -1143,6 +1158,28 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave10-agent-assistant-adoption/verify-and-close-wave9-docs/signoff.md \
         'WAVE9_AGENT_ASSISTANT_DOC_ISSUES_COMPLETE'
       ;;
+    workflows/wave10-agent-assistant-adoption/02-adopt-request-turn-context-adapter.ts)
+      git cat-file -e HEAD:src/local/assistant-turn-context-adapter.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/assistant-turn-context-adapter.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/entrypoint-turn-context-resilience.test.ts 2>/dev/null \
+        && grep -q '@agent-assistant/turn-context' src/local/assistant-turn-context-adapter.ts \
+        && grep -q 'assembleRickyTurnContext' src/local/entrypoint.ts \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/local/assistant-turn-context-adapter.test.ts src/local/entrypoint-turn-context-resilience.test.ts >/dev/null
+      ;;
+    workflows/wave10-agent-assistant-adoption/03-prove-live-product-path.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/signoff.md \
+        'RICKY_AGENT_ASSISTANT_ADOPTION_LIVE_PROOF_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/final-review.md \
+        'FINAL_REVIEW_PASS' \
+        && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/adapter-runtime-smoke.json \
+        && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/external-generate.json \
+        && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/external-generate-and-run.json \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/local src/surfaces/cli >/dev/null
+      ;;
     workflows/wave10-agent-assistant-adoption/04-close-agent-assistant-handoff-issue.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave10-agent-assistant-adoption/close-agent-assistant-handoff-issue/signoff.md \
@@ -1232,6 +1269,22 @@ workflow_is_already_satisfied() {
         && grep -q 'vitest' package.json \
         && npm run typecheck >/dev/null \
         && npm test >/dev/null
+      ;;
+    workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md \
+        'LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && git cat-file -e HEAD:src/local/entrypoint.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/entrypoint.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.test.ts 2>/dev/null \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts >/dev/null
       ;;
     workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts)
       artifact_signoff_has_marker \

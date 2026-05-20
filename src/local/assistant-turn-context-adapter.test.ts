@@ -391,6 +391,58 @@ describe('Ricky turn-context adapter', () => {
     });
   });
 
+  it('keeps Ricky metadata identical from adapter input through assembly and execution projection', async () => {
+    const normalized = await normalizeRequest({
+      source: 'mcp',
+      toolName: 'ricky.generate',
+      arguments: {
+        prompt: 'generate an adapter identity preservation workflow',
+        targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+        stageMode: 'generate-and-run',
+      },
+      requestId: 'req-issue-11-identical-metadata',
+      invocationRoot: '/repo/identical-metadata',
+      executionPreference: 'auto',
+      metadata: { issue: 11, proof: 'identical-metadata' },
+      mcpMetadata: { toolCallId: 'tool-identical-metadata' },
+    });
+    const adapterInput = toRickyTurnContextInput(normalized);
+    const assembly = await createTurnContextAssembler().assemble(adapterInput);
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-issue-11-identical-metadata',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    expect(assembly.metadata).toEqual(adapterInput.metadata);
+    expect(executionRequest.metadata).toEqual(adapterInput.metadata);
+    expect(adapterInput.metadata?.ricky).toEqual({
+      requestId: 'req-issue-11-identical-metadata',
+      source: 'mcp',
+      sourceMetadata: {
+        mcp: {
+          toolCallId: 'tool-identical-metadata',
+          toolName: 'ricky.generate',
+        },
+      },
+      structuredSpec: {
+        prompt: 'generate an adapter identity preservation workflow',
+        targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+        stageMode: 'generate-and-run',
+      },
+      invocationRoot: '/repo/identical-metadata',
+      mode: 'both',
+      stageMode: 'generate-and-run',
+      specPath: undefined,
+      metadata: {
+        issue: 11,
+        proof: 'identical-metadata',
+        toolCallId: 'tool-identical-metadata',
+        toolName: 'ricky.generate',
+      },
+    });
+  });
+
   it('preserves workflow-artifact handoff identity while resolving reads from the invocation root', async () => {
     const reader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
     const normalized = await normalizeRequest(
