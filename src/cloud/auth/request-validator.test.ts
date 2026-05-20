@@ -837,6 +837,48 @@ describe('getProviderConnectGuidance', () => {
 });
 
 describe('Cloud auth module contract', () => {
+  it('covers required Cloud auth request outcomes explicitly', () => {
+    expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toEqual({
+      ok: false,
+      error: 'Missing or empty auth token.',
+      status: 401,
+      code: 'missing-auth-token',
+      path: 'auth.token',
+    });
+
+    expect(validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, undefined)).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    });
+
+    expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-001' })).toEqual({
+      ok: true,
+      auth: { token: 'bearer-token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-001', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
+    });
+
+    expect(resolveAuthorizedWorkspaceScope({ workspaceId: 'ws-001' }, { workspaceId: 'ws-002' })).toEqual({
+      ok: false,
+      error: 'Cross-workspace access denied.',
+      status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
+    });
+  });
+
+  it('locks provider connect guidance to user-visible Cloud flows', () => {
+    const googleGuidanceText = getProviderConnectGuidance('google').instructions.join('\n');
+    const githubGuidanceText = getProviderConnectGuidance('github').instructions.join('\n');
+
+    expect(googleGuidanceText).toContain('npx agent-relay cloud connect google');
+    expect(githubGuidanceText).toMatch(/Cloud dashboard|Nango/);
+  });
+
   it('enforces the broker-facing Cloud auth request and guidance contract', () => {
     expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toMatchObject({
       ok: false,
