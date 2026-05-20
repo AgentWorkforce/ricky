@@ -1093,4 +1093,212 @@ describe('Ricky turn-context adapter', () => {
       }
     }
   });
+
+  it('uses the default real backing adapter for every handoff surface without injected assemblers', async () => {
+    const cases: Array<{
+      name: string;
+      raw: RawHandoff;
+      artifactContent?: string;
+      expected: {
+        requestId: string;
+        source: LocalInvocationRequest['source'];
+        mode: LocalInvocationRequest['mode'];
+        stageMode?: LocalInvocationRequest['stageMode'];
+        specPath?: string;
+        metadata: Record<string, unknown>;
+        structuredSpec?: Record<string, unknown>;
+        sourceMetadata?: Record<string, unknown>;
+      };
+    }> = [
+      {
+        name: 'cli',
+        raw: {
+          source: 'cli',
+          requestId: 'req-real-cli-11',
+          spec: { description: 'generate from CLI through the real adapter', stageMode: 'generate' },
+          specFile: 'specs/real-cli.json',
+          cliMetadata: { argv: ['ricky', 'generate', '--spec-file', 'specs/real-cli.json'] },
+          metadata: { surface: 'cli' },
+        },
+        expected: {
+          requestId: 'req-real-cli-11',
+          source: 'cli',
+          mode: 'local',
+          stageMode: 'generate',
+          specPath: 'specs/real-cli.json',
+          metadata: {
+            surface: 'cli',
+            argv: ['ricky', 'generate', '--spec-file', 'specs/real-cli.json'],
+          },
+          structuredSpec: { description: 'generate from CLI through the real adapter', stageMode: 'generate' },
+          sourceMetadata: {
+            cli: {
+              argv: ['ricky', 'generate', '--spec-file', 'specs/real-cli.json'],
+              specFile: 'specs/real-cli.json',
+            },
+          },
+        },
+      },
+      {
+        name: 'mcp',
+        raw: {
+          source: 'mcp',
+          requestId: 'req-real-mcp-11',
+          toolName: 'ricky.generate',
+          arguments: { prompt: 'generate from MCP through the real adapter', stageMode: 'generate-and-run' },
+          mcpMetadata: { toolCallId: 'tool-real-mcp-11' },
+          executionPreference: 'auto',
+          metadata: { surface: 'mcp' },
+        },
+        expected: {
+          requestId: 'req-real-mcp-11',
+          source: 'mcp',
+          mode: 'both',
+          stageMode: 'generate-and-run',
+          metadata: {
+            surface: 'mcp',
+            toolCallId: 'tool-real-mcp-11',
+            toolName: 'ricky.generate',
+          },
+          structuredSpec: { prompt: 'generate from MCP through the real adapter', stageMode: 'generate-and-run' },
+          sourceMetadata: {
+            mcp: {
+              toolCallId: 'tool-real-mcp-11',
+              toolName: 'ricky.generate',
+            },
+          },
+        },
+      },
+      {
+        name: 'claude',
+        raw: {
+          source: 'claude',
+          requestId: 'req-real-claude-11',
+          spec: { request: 'generate from Claude through the real adapter', stage_mode: 'run' },
+          conversationId: 'conv-real-11',
+          turnId: 'turn-real-11',
+          metadata: { surface: 'claude' },
+        },
+        expected: {
+          requestId: 'req-real-claude-11',
+          source: 'claude',
+          mode: 'local',
+          stageMode: 'run',
+          metadata: {
+            surface: 'claude',
+            conversationId: 'conv-real-11',
+            turnId: 'turn-real-11',
+          },
+          structuredSpec: { request: 'generate from Claude through the real adapter', stage_mode: 'run' },
+          sourceMetadata: {
+            claude: {
+              conversationId: 'conv-real-11',
+              turnId: 'turn-real-11',
+            },
+          },
+        },
+      },
+      {
+        name: 'structured',
+        raw: {
+          source: 'structured',
+          requestId: 'req-real-structured-11',
+          spec: { description: 'generate structured through the real adapter', stageMode: 'generate' },
+          metadata: { surface: 'structured' },
+        },
+        expected: {
+          requestId: 'req-real-structured-11',
+          source: 'structured',
+          mode: 'local',
+          stageMode: 'generate',
+          metadata: { surface: 'structured' },
+          structuredSpec: { description: 'generate structured through the real adapter', stageMode: 'generate' },
+        },
+      },
+      {
+        name: 'free-form',
+        raw: {
+          source: 'free-form',
+          requestId: 'req-real-free-form-11',
+          spec: 'generate free-form through the real adapter',
+          stageMode: 'generate',
+          metadata: { surface: 'free-form' },
+        },
+        expected: {
+          requestId: 'req-real-free-form-11',
+          source: 'free-form',
+          mode: 'local',
+          stageMode: 'generate',
+          metadata: { surface: 'free-form' },
+        },
+      },
+      {
+        name: 'workflow-artifact',
+        raw: {
+          source: 'workflow-artifact',
+          requestId: 'req-real-artifact-11',
+          artifactPath: 'workflows/real-artifact.workflow.ts',
+          metadata: { surface: 'workflow-artifact' },
+        },
+        artifactContent: 'import { workflow } from "@agent-relay/sdk/workflows";',
+        expected: {
+          requestId: 'req-real-artifact-11',
+          source: 'workflow-artifact',
+          mode: 'local',
+          stageMode: 'run',
+          specPath: 'workflows/real-artifact.workflow.ts',
+          metadata: { surface: 'workflow-artifact' },
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const normalized = await normalizeRequest(
+        testCase.raw,
+        artifactReader(testCase.artifactContent ?? 'unused artifact content'),
+      );
+      const assembly = await assembleRickyTurnContext(normalized);
+      const executionRequest = turnContextPackage.toExecutionRequest(assembly, {
+        id: `msg-${testCase.expected.requestId}`,
+        text: normalized.spec,
+        receivedAt: '2026-01-01T00:00:00.000Z',
+      });
+      const metadata = executionRequest.metadata as
+        | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+        | undefined;
+
+      expect(metadata?.adapter, testCase.name).toMatchObject({
+        name: 'ricky-local-turn-context-adapter',
+        package: '@agent-assistant/turn-context',
+      });
+      expectIssue11RickyMetadata(
+        `${testCase.name}.default-real-adapter.metadata.ricky`,
+        metadata?.ricky,
+        {
+          ...testCase.expected,
+          spec: normalized.spec,
+        },
+      );
+      expect(metadata?.ricky?.structuredSpec, testCase.name).toEqual(testCase.expected.structuredSpec);
+      expect(metadata?.ricky?.sourceMetadata, testCase.name).toEqual(testCase.expected.sourceMetadata);
+      expect(executionRequest, testCase.name).toMatchObject({
+        assistantId: 'ricky',
+        turnId: testCase.expected.requestId,
+        message: {
+          id: `msg-${testCase.expected.requestId}`,
+          text: normalized.spec,
+        },
+        context: {
+          blocks: expect.arrayContaining([
+            expect.objectContaining({ id: 'enrichment-ricky-request-summary' }),
+            expect.objectContaining({ id: 'enrichment-ricky-spec-text', text: normalized.spec }),
+            expect.objectContaining({
+              id: 'enrichment-ricky-request-metadata',
+              text: JSON.stringify(testCase.expected.metadata, null, 2),
+            }),
+          ]),
+        },
+      });
+    }
+  });
 });
