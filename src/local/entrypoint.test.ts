@@ -3279,6 +3279,104 @@ describe('runLocal', () => {
     }
   });
 
+  it('proves raw handoff normalization reaches injected adapters in explicit local mode', async () => {
+    const handoffs: Array<{
+      name: string;
+      handoff: RawHandoff;
+      expected: Partial<LocalInvocationRequest>;
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            description: 'generate a local workflow from CLI',
+            workflowFile: 'workflows/local-cli.workflow.ts',
+          },
+          cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+          requestId: 'req-local-cli-adapter',
+        },
+        expected: {
+          source: 'cli',
+          spec: 'generate a local workflow from CLI',
+          structuredSpec: {
+            description: 'generate a local workflow from CLI',
+            workflowFile: 'workflows/local-cli.workflow.ts',
+          },
+          metadata: { argv: ['ricky', 'generate', '--local'] },
+          sourceMetadata: {
+            cli: { argv: ['ricky', 'generate', '--local'] },
+          },
+          requestId: 'req-local-cli-adapter',
+        },
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            prompt: 'generate a local workflow from MCP',
+            workflowFile: 'workflows/local-mcp.workflow.ts',
+          },
+          mcpMetadata: { toolCallId: 'tool-local-adapter' },
+        },
+        expected: {
+          source: 'mcp',
+          spec: 'generate a local workflow from MCP',
+          structuredSpec: {
+            prompt: 'generate a local workflow from MCP',
+            workflowFile: 'workflows/local-mcp.workflow.ts',
+          },
+          metadata: { toolCallId: 'tool-local-adapter', toolName: 'ricky.generate' },
+          sourceMetadata: {
+            mcp: { toolCallId: 'tool-local-adapter', toolName: 'ricky.generate' },
+          },
+        },
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            request: 'generate a local workflow from Claude',
+            workflowFile: 'workflows/local-claude.workflow.ts',
+          },
+          conversationId: 'conv-local-adapter',
+          turnId: 'turn-local-adapter',
+        },
+        expected: {
+          source: 'claude',
+          spec: 'generate a local workflow from Claude',
+          structuredSpec: {
+            request: 'generate a local workflow from Claude',
+            workflowFile: 'workflows/local-claude.workflow.ts',
+          },
+          metadata: { conversationId: 'conv-local-adapter', turnId: 'turn-local-adapter' },
+          sourceMetadata: {
+            claude: { conversationId: 'conv-local-adapter', turnId: 'turn-local-adapter' },
+          },
+        },
+      },
+    ];
+
+    for (const { name, handoff, expected } of handoffs) {
+      const executor = mockExecutor({ logs: [`[adapter] ${name} ran locally`] });
+      const result = await runLocal(handoff, { executor });
+
+      expect(result.ok, name).toBe(true);
+      expect(executor.calls, name).toHaveLength(1);
+      expect(executor.calls[0], name).toMatchObject({
+        _normalized: true,
+        mode: 'local',
+        executionPreference: 'local',
+        ...expected,
+      });
+      expect(result.logs, name).toEqual([`[adapter] ${name} ran locally`]);
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), name).toBe(false);
+    }
+  });
+
   it('reads workflow artifact inputs from invocationRoot and routes the relative artifact path locally', async () => {
     const artifactPath = 'workflows/wave4-local-byoh/relative-entrypoint.workflow.ts';
     const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
