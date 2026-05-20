@@ -538,6 +538,75 @@ describe('handleCloudGenerate — success path', () => {
     expect(response.requestId).toBe(TEST_REQUEST_ID);
   });
 
+  it('returns a complete artifact bundle contract without Cloud runtime access', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network disabled'));
+    const artifact = {
+      path: 'workflows/api-generated.ts',
+      type: 'text/typescript',
+      content: 'export const workflow = "api-generated";',
+    };
+    const executor = mockExecutor({
+      artifacts: [artifact],
+      warnings: [{ severity: 'warning', message: 'Spec did not name an owner.' }],
+      assumptions: [{ key: 'owner', message: 'Used the authenticated workspace owner.' }],
+      followUpActions: [
+        {
+          action: 'review-artifact-bundle',
+          label: 'Review Artifact Bundle',
+          description: 'Inspect returned file fields before enabling execution.',
+        },
+      ],
+    });
+
+    try {
+      const response = await cloudGenerateEndpoint.handler(
+        validRequest({ body: { spec: 'generate a Cloud API workflow', mode: 'both' } }),
+        testOptions(executor),
+      );
+
+      expect(`${cloudGenerateEndpoint.method} ${cloudGenerateEndpoint.path}`).toBe(
+        'POST /api/v1/ricky/workflows/generate',
+      );
+      expect(response).toMatchObject({
+        ok: true,
+        status: 200,
+        requestId: TEST_REQUEST_ID,
+      });
+      expect(response.artifacts).toEqual([artifact]);
+      expect(response.artifactBundle).toEqual({
+        artifacts: response.artifacts,
+        generationMode: 'generate-and-return-artifacts',
+        targetMode: 'both',
+      });
+      expect(response.artifactBundle.artifacts[0]).toEqual({
+        path: 'workflows/api-generated.ts',
+        type: 'text/typescript',
+        content: expect.stringContaining('api-generated'),
+      });
+      expect(response.warnings).toEqual([
+        { severity: 'warning', message: 'Spec did not name an owner.' },
+      ]);
+      expect(response.assumptions).toEqual([
+        { key: 'owner', message: 'Used the authenticated workspace owner.' },
+      ]);
+      expect(response.followUpActions).toEqual([
+        {
+          action: 'review-artifact-bundle',
+          label: 'Review Artifact Bundle',
+          description: 'Inspect returned file fields before enabling execution.',
+        },
+      ]);
+      expect(response.runReceipt).toEqual({
+        executionRequested: false,
+        requestId: TEST_REQUEST_ID,
+        status: 'not_requested',
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('delegates to the injected executor and returns 200', async () => {
     const executor = mockExecutor({
       artifacts: [{ path: 'out/workflow.ts', type: 'text/typescript', content: '// generated' }],
