@@ -94,6 +94,68 @@ function expectIssue11RickyMetadata(
 }
 
 describe('Ricky turn-context adapter', () => {
+  it('imports and exercises the installed turn-context backing package directly', async () => {
+    const normalized = await normalizeRequest({
+      source: 'free-form',
+      spec: 'generate a direct backing-package proof workflow',
+      requestId: 'req-issue-11-direct-backing-package',
+      invocationRoot: '/repo/direct-backing-package',
+      mode: 'both',
+      stageMode: 'generate-and-run',
+      metadata: { issue: 11, proof: 'direct-backing-package' },
+    });
+
+    const backingAssembler = turnContextPackage.createTurnContextAssembler();
+    const assembly = await backingAssembler.assemble(toRickyTurnContextInput(normalized));
+    const executionRequest = turnContextPackage.toExecutionRequest(assembly, {
+      id: 'msg-issue-11-direct-backing-package',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const metadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(turnContextPackage.createTurnContextAssembler).toBe(createTurnContextAssembler);
+    expect(executionRequest).toMatchObject({
+      assistantId: 'ricky',
+      turnId: 'req-issue-11-direct-backing-package',
+      message: {
+        id: 'msg-issue-11-direct-backing-package',
+        text: 'generate a direct backing-package proof workflow',
+      },
+      context: {
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-summary',
+            text: expect.stringContaining('source: free-form'),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-spec-text',
+            text: 'generate a direct backing-package proof workflow',
+          }),
+        ]),
+      },
+    });
+    expect(metadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expectIssue11RickyMetadata(
+      'direct-backing-package.executionRequest.metadata.ricky',
+      metadata?.ricky,
+      {
+        requestId: 'req-issue-11-direct-backing-package',
+        source: 'free-form',
+        spec: 'generate a direct backing-package proof workflow',
+        invocationRoot: '/repo/direct-backing-package',
+        mode: 'both',
+        stageMode: 'generate-and-run',
+        metadata: { issue: 11, proof: 'direct-backing-package' },
+      },
+    );
+  });
+
   it('uses the installed turn-context assembler as the production backing adapter', async () => {
     const normalized = await normalizeRequest({
       source: 'cli',
