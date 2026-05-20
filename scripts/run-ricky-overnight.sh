@@ -1148,6 +1148,58 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave10-agent-assistant-adoption/close-agent-assistant-handoff-issue/signoff.md \
         'RICKY_AGENT_ASSISTANT_HANDOFF_COMPLETE'
       ;;
+    workflows/wave3-cloud-api/01-cloud-connect-and-auth.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/signoff.md \
+        'CLOUD_AUTH_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/cloud/auth/ >/dev/null
+      ;;
+    workflows/wave3-cloud-api/02-generate-endpoint.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/generate-endpoint/signoff.md \
+        'GENERATE_ENDPOINT_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
+      ;;
+    workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/signoff.md \
+        'RICKY_CLOUD_GENERATE_SLICE_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
+      ;;
+    workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/signoff.md \
+        'RICKY_CLOUD_PROOF_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/cloud/auth/ src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
+      ;;
     workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave4-local-byoh/cli-onboarding-and-welcome/signoff.md \
