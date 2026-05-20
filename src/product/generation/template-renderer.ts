@@ -275,16 +275,13 @@ function buildGates(
 ): DeterministicGate[] {
   const outputManifest = `${artifactsDir}/output-manifest.txt`;
   const usingManifest = spec.targetFiles.length === 0;
-  const targetFiles = usingManifest ? [outputManifest] : spec.targetFiles;
-  const fileExistsCommand = targetFiles.map((file) => `test -f ${shellQuote(file)}`).join(' && ');
-  const grepPattern = isCodeWorkflow ? 'export|function|class|workflow\\(' : '#|##|TODO|Acceptance|Deliverables';
-  const grepCommand = usingManifest
-    ? buildManifestFileGateCommand(outputManifest)
-    : `grep -Eq ${shellQuote(grepPattern)} ${targetFiles.map(shellQuote).join(' ')}`;
   const gitDiffPath = `${artifactsDir}/git-diff.txt`;
+  const fileGateCommand = usingManifest
+    ? buildManifestFileGateCommand(outputManifest)
+    : buildTargetImplementationGateCommand(spec.targetFiles, `${artifactsDir}/implementation-file-gate.txt`);
   const gitDiffCommand = usingManifest
     ? buildManifestGitDiffCommand(outputManifest, gitDiffPath)
-    : `{ git diff --name-only -- ${targetFiles.map(shellQuote).join(' ')}; git ls-files --others --exclude-standard -- ${targetFiles.map(shellQuote).join(' ')}; } > ${shellQuote(gitDiffPath)} && sort -u ${shellQuote(gitDiffPath)} -o ${shellQuote(gitDiffPath)} && test -s ${shellQuote(gitDiffPath)}`;
+    : buildTargetGitDiffCommand(gitDiffPath);
   const activeReferenceCommand = usingManifest
     ? buildActiveReferenceGateCommand(outputManifest, `${artifactsDir}/active-reference-check.txt`)
     : `printf '%s\\n' 'No manifest-driven deleted paths to check.' > ${shellQuote(`${artifactsDir}/active-reference-check.txt`)}`;
@@ -304,7 +301,7 @@ function buildGates(
       'pre_review',
     ),
     gate('lead-plan-gate', buildLeadPlanGateCommand(`${artifactsDir}/lead-plan.md`), 'output_contains', true, ['lead-plan'], 'pre_review'),
-    gate('post-implementation-file-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['implement-artifact'], 'pre_review'),
+    gate('post-implementation-file-gate', fileGateCommand, 'file_exists', true, ['implement-artifact'], 'pre_review'),
     gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
     gate(
       'fix-loop-report-gate',
@@ -317,7 +314,7 @@ function buildGates(
       ['fix-loop'],
       'post_fix',
     ),
-    gate('post-fix-verification-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['fix-loop-report-gate'], 'post_fix'),
+    gate('post-fix-verification-gate', fileGateCommand, 'file_exists', true, ['fix-loop-report-gate'], 'post_fix'),
     gate('active-reference-gate', activeReferenceCommand, 'deterministic_gate', true, ['post-fix-verification-gate'], 'post_fix'),
     gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['active-reference-gate'], 'post_fix'),
     gate(
@@ -390,6 +387,34 @@ function buildManifestFileGateCommand(outputManifest: string): string {
   ].join('\n');
 }
 
+function buildTargetImplementationGateCommand(targetFiles: readonly string[], evidencePath: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    "const { execFileSync } = require('node:child_process');",
+    `const evidencePath = ${literal(evidencePath)};`,
+    `const declaredTargets = ${literal(JSON.stringify(targetFiles, null, 2))};`,
+    'const changed = collectChangedPaths();',
+    'fs.mkdirSync(require(\'node:path\').dirname(evidencePath), { recursive: true });',
+    'fs.writeFileSync(evidencePath, [`Declared targets:`, declaredTargets, `Changed paths:`, ...changed].flat().join(\'\\n\') + \'\\n\');',
+    'if (changed.length === 0) throw new Error(\'implementation produced no repository diff outside workflow artifacts\');',
+    'const materialized = changed.filter((path) => fs.existsSync(path) && fs.statSync(path).isFile());',
+    'if (materialized.length === 0) throw new Error(\'implementation diff has no materialized file paths to review\');',
+    'console.log(\'IMPLEMENTATION_FILE_GATE_OK\');',
+    '',
+    'function collectChangedPaths() {',
+    '  const tracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'diff\', \'--name-only\', \'--diff-filter=ACMRT\'], { encoding: \'utf8\' });',
+    '  const untracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'ls-files\', \'--others\', \'--exclude-standard\'], { encoding: \'utf8\' });',
+    '  return [...tracked.split(/\\r?\\n/), ...untracked.split(/\\r?\\n/)]',
+    '    .map((line) => line.trim())',
+    '    .filter(Boolean)',
+    '    .filter((path) => !path.startsWith(\'.workflow-artifacts/\'))',
+    '    .sort();',
+    '}',
+    'NODE',
+  ].join('\n');
+}
+
 function buildLeadPlanGateCommand(leadPlanPath: string): string {
   return [
     'node <<\'NODE\'',
@@ -403,6 +428,33 @@ function buildLeadPlanGateCommand(leadPlanPath: string): string {
     "const hasImplementationContract = /Implementation contract/i.test(body) || /This is an implementation spec/i.test(body);",
     "if (!hasImplementationContract) throw new Error('lead plan missing required marker: Implementation contract');",
     "console.log('LEAD_PLAN_GATE_OK');",
+    'NODE',
+  ].join('\n');
+}
+
+function buildTargetGitDiffCommand(gitDiffPath: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const { execFileSync } = require('node:child_process');",
+    `const gitDiffPath = ${literal(gitDiffPath)};`,
+    'const tracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'diff\', \'--name-status\', \'--diff-filter=ACMRTD\'], { encoding: \'utf8\' })',
+    '  .split(/\\r?\\n/)',
+    '  .map((line) => line.trim())',
+    '  .filter(Boolean);',
+    'const untracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'ls-files\', \'--others\', \'--exclude-standard\'], { encoding: \'utf8\' })',
+    '  .split(/\\r?\\n/)',
+    '  .map((line) => line.trim())',
+    '  .filter(Boolean)',
+    '  .map((file) => `A\\t${file}`);',
+    'const actual = [...tracked, ...untracked]',
+    '  .filter((line) => !line.replace(/^[A-Z]+\\s+/, \'\').startsWith(\'.workflow-artifacts/\'))',
+    '  .sort();',
+    'fs.mkdirSync(path.dirname(gitDiffPath), { recursive: true });',
+    'fs.writeFileSync(gitDiffPath, `${actual.join(\'\\n\')}\\n`);',
+    'if (actual.length === 0) throw new Error(\'git diff evidence is empty\');',
+    'console.log(\'GIT_DIFF_GATE_OK\');',
     'NODE',
   ].join('\n');
 }

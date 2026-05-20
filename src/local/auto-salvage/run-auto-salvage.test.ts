@@ -143,6 +143,18 @@ describe('runAutoSalvage', () => {
     expect(result.reason).toBe('worktree-path-missing');
   });
 
+  it('reports already-shipped when the worktree path is missing but a PR exists for the branch', async () => {
+    const runtime = createStubRuntime({
+      worktreeExists: false,
+      existingPrs: [{ url: 'https://github.com/AgentWorkforce/cloud/pull/724' }],
+    });
+    const result = await runAutoSalvage(FULL_SPEC, { exitCode: 1 }, runtime);
+    expect(result.outcome).toBe('skipped');
+    expect(result.reason).toBe('already-shipped');
+    expect(result.prUrl).toBe('https://github.com/AgentWorkforce/cloud/pull/724');
+    expect(runtime.git.status).not.toHaveBeenCalled();
+  });
+
   it('skips when the worktree is not a git directory', async () => {
     const runtime = createStubRuntime({ isGitWorkTree: false });
     const result = await runAutoSalvage(FULL_SPEC, { exitCode: 1 }, runtime);

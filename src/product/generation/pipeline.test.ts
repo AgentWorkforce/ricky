@@ -656,7 +656,7 @@ describe('workflow generation pipeline', () => {
       expect.arrayContaining([
         expect.stringContaining('npx tsc --noEmit'),
         expect.stringContaining('npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts'),
-        expect.stringContaining('git diff --name-only'),
+        expect.stringContaining("'diff', '--name-status'"),
       ]),
     );
     expect(result.validation.issues).toEqual([]);
@@ -1007,12 +1007,12 @@ describe('workflow generation pipeline', () => {
       dependsOn: ['final-review-pass-gate'],
     });
     expect(gate(artifact, 'git-diff-gate')).toMatchObject({
-      command: expect.stringContaining('git diff --name-only'),
+      command: expect.stringContaining("'diff', '--name-status'"),
       failOnError: true,
       stage: 'final',
       dependsOn: ['final-hard-validation'],
     });
-    expect(gate(artifact, 'git-diff-gate').command).toContain('git ls-files --others --exclude-standard');
+    expect(gate(artifact, 'git-diff-gate').command).toContain("'ls-files', '--others', '--exclude-standard'");
     expect(result.validation.issues).toEqual([]);
   });
 
@@ -1516,12 +1516,12 @@ describe('workflow generation pipeline', () => {
       expect.arrayContaining([
         expect.stringContaining('npx tsc --noEmit'),
         expect.stringContaining('npx vitest run'),
-        expect.stringContaining('git diff --name-only'),
+        expect.stringContaining("'diff', '--name-status'"),
       ]),
     );
     expect(result.deterministicValidationCommands).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('git ls-files --others --exclude-standard'),
+        expect.stringContaining("'ls-files', '--others', '--exclude-standard'"),
       ]),
     );
     expect(result.plannedChecks.map((check) => check.command)).toContain(result.dryRunCommand);
@@ -1620,6 +1620,36 @@ describe('workflow generation pipeline', () => {
     expect(fileGate.command).toContain('deleted manifest path still exists');
     expect(fileGate.command).toContain('manifest path does not exist');
     expect(fileGate.command).toContain('MANIFEST_FILE_GATE_OK');
+  });
+
+  it('targeted code workflow file gate uses repository diff evidence instead of test-f on every declared target', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement Slack relay bridge with mixed context targets.',
+        targetFiles: [
+          'specs/mcp-cloud-spawn-and-slack-bridge.md',
+          '/private/tmp/cloud-slack-relay-bridge-inbound',
+          '/Users/khaliqgant/Projects/AgentWorkforce/cloud',
+          '/api/v1/*',
+          'packages/web/lib/integrations/slack-relay-bridge/',
+          'packages/web/drizzle/meta/_journal.json',
+        ],
+      }),
+      artifactPath: 'workflows/generated/mixed-targets.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const fileGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
+    const gitDiffGate = artifact.gates.find((g) => g.name === 'git-diff-gate')!;
+
+    expect(fileGate.command).toContain('IMPLEMENTATION_FILE_GATE_OK');
+    expect(fileGate.command).toContain("'diff', '--name-only', '--diff-filter=ACMRT'");
+    expect(fileGate.command).not.toContain('test -f');
+    expect(fileGate.command).not.toContain("test -f '/private/tmp/cloud-slack-relay-bridge-inbound'");
+    expect(fileGate.command).not.toContain("test -f '/api/v1/*'");
+    expect(gitDiffGate.command).toContain('GIT_DIFF_GATE_OK');
+    expect(gitDiffGate.command).not.toContain('/api/v1/*');
   });
 
   it('renders deterministic artifact content for the same spec with controlled registry', () => {
@@ -1754,10 +1784,9 @@ describe('workflow generation pipeline', () => {
     const artifact = result.artifact!;
     const gitDiffGate = artifact.gates.find((g) => g.name === 'git-diff-gate')!;
 
-    expect(gitDiffGate.command).toContain('git diff --name-only');
-    expect(gitDiffGate.command).toContain('git ls-files --others --exclude-standard');
-    expect(gitDiffGate.command).toContain('src/product/generation/new-file.ts');
-    expect(gitDiffGate.command).toContain('sort -u');
+    expect(gitDiffGate.command).toContain("'diff', '--name-status'");
+    expect(gitDiffGate.command).toContain("'ls-files', '--others', '--exclude-standard'");
+    expect(gitDiffGate.command).toContain('GIT_DIFF_GATE_OK');
   });
 
   it('maps prose acceptance gates with inline shell commands without emitting prose as shell', () => {

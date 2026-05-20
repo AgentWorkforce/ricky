@@ -162,8 +162,24 @@ async function tryRunAutoSalvage(
   }
 
   const { repo, branch, worktree } = metadata;
+  const owner = runtime.owner ?? DEFAULT_PR_OWNER;
 
   if (!(await runtime.fs.exists(worktree))) {
+    try {
+      const existing = await runtime.gh.listPrs(repo, branch, owner);
+      if (existing.length > 0) {
+        return {
+          outcome: 'skipped',
+          reason: 'already-shipped',
+          worktree,
+          branch,
+          ...(existing[0]?.url ? { prUrl: existing[0].url } : {}),
+        };
+      }
+    } catch {
+      // A missing worktree is already non-salvageable locally. If the PR
+      // probe also fails, keep the primary reason actionable and quiet.
+    }
     return { outcome: 'skipped', reason: 'worktree-path-missing', worktree, branch };
   }
   if (!(await runtime.git.isGitWorkTree(worktree))) {
@@ -180,7 +196,6 @@ async function tryRunAutoSalvage(
   if (status.trim().length === 0) {
     // Clean worktree. Skip — but if a PR is already open for this branch,
     // note that for observability.
-    const owner = runtime.owner ?? DEFAULT_PR_OWNER;
     try {
       const existing = await runtime.gh.listPrs(repo, branch, owner);
       if (existing.length > 0) {
@@ -199,7 +214,6 @@ async function tryRunAutoSalvage(
   }
 
   // Worktree dirty. Confirm we aren't double-shipping.
-  const owner = runtime.owner ?? DEFAULT_PR_OWNER;
   let probeError: string | undefined;
   try {
     const existing = await runtime.gh.listPrs(repo, branch, owner);
