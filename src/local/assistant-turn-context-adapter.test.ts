@@ -343,6 +343,96 @@ describe('Ricky turn-context adapter', () => {
     );
   });
 
+  it('keeps source metadata nested when caller metadata has overlapping keys', async () => {
+    const normalized = await normalizeRequest({
+      source: 'mcp',
+      toolName: 'ricky.generate',
+      arguments: {
+        prompt: 'generate a local workflow while preserving source metadata boundaries',
+        stageMode: 'generate-and-run',
+        targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+      },
+      requestId: 'req-issue-11-source-boundary',
+      invocationRoot: '/repo/source-boundary',
+      executionPreference: 'auto',
+      metadata: {
+        toolName: 'caller-owned-tool-name',
+        toolCallId: 'caller-owned-tool-call',
+        nested: { owner: 'caller' },
+      },
+      mcpMetadata: {
+        toolCallId: 'mcp-owned-tool-call',
+        nested: { owner: 'mcp' },
+      },
+    });
+
+    const assembly = await assembleRickyTurnContext(normalized, {
+      assembler: createTurnContextAssembler(),
+    });
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-issue-11-source-boundary',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const executionMetadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(normalized.metadata).toEqual({
+      toolName: 'ricky.generate',
+      toolCallId: 'mcp-owned-tool-call',
+      nested: { owner: 'mcp' },
+    });
+    expect(normalized.sourceMetadata).toEqual({
+      mcp: {
+        toolName: 'ricky.generate',
+        toolCallId: 'mcp-owned-tool-call',
+        nested: { owner: 'mcp' },
+      },
+    });
+    expectIssue11RickyMetadata(
+      'source-boundary.executionRequest.metadata.ricky',
+      executionMetadata?.ricky,
+      {
+        requestId: 'req-issue-11-source-boundary',
+        source: 'mcp',
+        spec: 'generate a local workflow while preserving source metadata boundaries',
+        structuredSpec: {
+          prompt: 'generate a local workflow while preserving source metadata boundaries',
+          stageMode: 'generate-and-run',
+          targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+        },
+        sourceMetadata: {
+          mcp: {
+            toolName: 'ricky.generate',
+            toolCallId: 'mcp-owned-tool-call',
+            nested: { owner: 'mcp' },
+          },
+        },
+        invocationRoot: '/repo/source-boundary',
+        mode: 'both',
+        stageMode: 'generate-and-run',
+        metadata: {
+          toolName: 'ricky.generate',
+          toolCallId: 'mcp-owned-tool-call',
+          nested: { owner: 'mcp' },
+        },
+      },
+    );
+    expect(executionRequest.context?.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'enrichment-ricky-source-metadata',
+          text: JSON.stringify(normalized.sourceMetadata, null, 2),
+        }),
+        expect.objectContaining({
+          id: 'enrichment-ricky-request-metadata',
+          text: JSON.stringify(normalized.metadata, null, 2),
+        }),
+      ]),
+    );
+  });
+
   it('round-trips every handoff surface through normalizeRequest and the real turn-context-backed adapter', async () => {
     const cases: PreservationCase[] = [
       {
