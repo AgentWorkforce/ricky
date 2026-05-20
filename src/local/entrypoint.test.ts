@@ -1892,6 +1892,95 @@ describe('runLocal', () => {
       );
     });
 
+    it('passes the real adapter summary into generated local runtime metadata', async () => {
+      const writes: RecordedWrite[] = [];
+      const launches: RunRequest[] = [];
+      const result = await runLocal(
+        {
+          source: 'structured',
+          requestId: 'req-issue-11-generated-runtime-metadata',
+          invocationRoot: '/repo/issue-11-generated-runtime-metadata',
+          executionPreference: 'both',
+          spec: {
+            description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            targetFiles: ['src/local/entrypoint.ts'],
+            stageMode: 'generate-and-run',
+          },
+          metadata: { issue: 11, proof: 'generated-runtime-metadata' },
+        },
+        {
+          localExecutor: {
+            cwd: '/ignored/generated-runtime-metadata-cwd',
+            artifactWriter: {
+              async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+                writes.push({ path, content, cwd });
+              },
+            },
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                launches.push(request);
+                return coordinatorResult(request, { stdout: ['generated runtime metadata completed'] });
+              },
+            },
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(workflowArtifactWrites(writes)).toHaveLength(1);
+      expect(launches).toHaveLength(1);
+      expect(launches[0]).toMatchObject({
+        workflowFile: result.generation?.artifact?.path,
+        cwd: '/repo/issue-11-generated-runtime-metadata',
+        metadata: {
+          requestId: 'req-issue-11-generated-runtime-metadata',
+          source: 'structured',
+          route: 'generate',
+          generatedWorkflowId: result.generation?.artifact?.workflow_id,
+          assistantTurnContext: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-generated-runtime-metadata',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+            context_blocks: expect.arrayContaining([
+              'enrichment-ricky-request-summary',
+              'enrichment-ricky-spec-text',
+              'enrichment-ricky-structured-spec',
+              'enrichment-ricky-request-metadata',
+            ]),
+            enrichment_ids: expect.arrayContaining([
+              'ricky-request-summary',
+              'ricky-spec-text',
+              'ricky-structured-spec',
+              'ricky-request-metadata',
+            ]),
+          },
+        },
+      });
+      expect(result.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from structured',
+          '[local] mode: both',
+          '[local] stage mode: run',
+          '[local] spec intake route: generate',
+          '[local] runtime status: passed',
+          '[stdout] generated runtime metadata completed',
+        ]),
+      );
+      expectNoTurnContextFallback(result.logs);
+      expectIssue11AssistantTurnContext(
+        result.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-generated-runtime-metadata',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+    });
+
     it('keeps Ricky blocker and evidence fields when adapter-observed local execution fails', async () => {
       const localExecutor = memoryLocalExecutorOptions({
         exitCode: 127,
