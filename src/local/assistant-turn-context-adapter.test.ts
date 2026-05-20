@@ -117,6 +117,7 @@ describe('Ricky turn-context adapter', () => {
       | undefined;
 
     expect(turnContextPackage.createTurnContextAssembler).toBe(createTurnContextAssembler);
+    expect(turnContextPackage.toExecutionRequest).toBe(toExecutionRequest);
     expect(executionRequest).toMatchObject({
       assistantId: 'ricky',
       turnId: 'req-issue-11-direct-backing-package',
