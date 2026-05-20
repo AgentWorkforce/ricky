@@ -257,6 +257,23 @@ function expectIssue11AssistantTurnContext(
   });
 }
 
+function expectIssue11RickyMetadataKeys(actual: Record<string, unknown> | undefined, label: string): void {
+  expect(actual, label).toBeDefined();
+  for (const key of [
+    'requestId',
+    'source',
+    'sourceMetadata',
+    'structuredSpec',
+    'invocationRoot',
+    'mode',
+    'stageMode',
+    'specPath',
+    'metadata',
+  ]) {
+    expect(Object.prototype.hasOwnProperty.call(actual, key), `${label}.${key}`).toBe(true);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // normalizeRequest
 // ---------------------------------------------------------------------------
@@ -4473,6 +4490,7 @@ describe('runLocal', () => {
           name: 'ricky-local-turn-context-adapter',
           package: '@agent-assistant/turn-context',
         });
+        expectIssue11RickyMetadataKeys(metadata.ricky, 'live-adapter.metadata.ricky');
         expect(metadata.ricky).toMatchObject({
           requestId: 'req-issue-11-live-adapter',
           source: 'cli',
@@ -4772,6 +4790,7 @@ describe('runLocal', () => {
             name: 'ricky-local-turn-context-adapter',
             package: '@agent-assistant/turn-context',
           });
+          expectIssue11RickyMetadataKeys(metadata.ricky, `${testCase.name}.metadata.ricky`);
           expect(metadata.ricky, testCase.name).toMatchObject({
             requestId: testCase.expected.requestId,
             source: testCase.expected.source,
