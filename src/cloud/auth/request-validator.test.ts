@@ -344,6 +344,18 @@ describe('validateProviderConnectionState', () => {
     });
   });
 
+  it('rejects invalid required provider values at runtime', () => {
+    const requiredProvider = 'dropbox' as unknown as 'github';
+
+    expect(validateProviderConnectionState({ provider: 'github', connected: true }, requiredProvider)).toEqual({
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
   it('runtime provider validation accepts every PROVIDER_TYPES entry', () => {
     for (const provider of PROVIDER_TYPES) {
       expect(validateProviderConnectionState({ provider, connected: true }, provider)).toEqual({
