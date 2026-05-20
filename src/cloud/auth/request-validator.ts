@@ -155,7 +155,7 @@ export function validateRequestMode(mode: CloudRequestMode | string | undefined)
 
 export function validateProviderConnectionState(
   connection: unknown,
-  requiredProvider: ProviderType,
+  requiredProvider: unknown,
 ): ProviderConnectionValidationResult {
   const providerResult = validateRequiredProvider(requiredProvider);
   if (!providerResult.ok) {

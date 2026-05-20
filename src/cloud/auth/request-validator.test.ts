@@ -347,9 +347,7 @@ describe('validateProviderConnectionState', () => {
   });
 
   it('rejects invalid required provider values at runtime', () => {
-    const requiredProvider = 'dropbox' as unknown as 'github';
-
-    expect(validateProviderConnectionState({ provider: 'github', connected: true }, requiredProvider)).toEqual({
+    expect(validateProviderConnectionState({ provider: 'github', connected: true }, 'dropbox')).toEqual({
       ok: false,
       error: 'Invalid required provider.',
       status: 400,
@@ -461,13 +459,11 @@ describe('validateCloudRequest', () => {
   });
 
   it('rejects invalid required provider values at runtime', () => {
-    const options = { requiredProvider: 'dropbox' } as unknown as CloudRequestValidationOptions;
-
     expect(
       validateCloudRequest(
         { token: 'token' },
         { workspaceId: 'ws-001' },
-        options,
+        { requiredProvider: 'dropbox' },
       ),
     ).toEqual({
       ok: false,
@@ -475,6 +471,22 @@ describe('validateCloudRequest', () => {
       status: 400,
       code: 'invalid-required-provider',
       path: 'providerConnection',
+    });
+  });
+
+  it('does not validate provider state when no provider is required', () => {
+    expect(
+      validateCloudRequest(
+        { token: 'token' },
+        { workspaceId: 'ws-001' },
+        { providerConnection: { provider: 'dropbox', connected: false } },
+      ),
+    ).toEqual({
+      ok: true,
+      auth: { token: 'token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-001', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
     });
   });
 

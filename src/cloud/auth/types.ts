@@ -118,8 +118,8 @@ export interface CloudRequestValidationOptions {
   mode?: CloudRequestMode | string;
   /** Require a non-empty projectId in the workspace context. */
   requireProject?: boolean;
-  /** Require a connected provider before accepting the request. */
-  requiredProvider?: ProviderType;
+  /** Require a connected provider before accepting the request. Runtime input may be malformed. */
+  requiredProvider?: ProviderType | string;
   /** Current provider connection state for provider-backed request input. */
   providerConnection?: unknown;
 }
