@@ -73,6 +73,34 @@ describe('parseSpecMetadata', () => {
     });
   });
 
+  it('normalizes annotated target repo values to the first repo token', () => {
+    const spec = [
+      '# Spec: hardening',
+      'Target repo: `cloud` (mainly) + `relaycast` docs',
+      'Target branch: `chore/mcp-cloud-spawn-hardening`',
+      'Worktree: `/private/tmp/cloud-mcp-cloud-spawn-hardening`',
+    ].join('\n');
+
+    expect(parseSpecMetadata(spec)).toMatchObject({
+      repo: 'cloud',
+      branch: 'chore/mcp-cloud-spawn-hardening',
+      worktree: '/private/tmp/cloud-mcp-cloud-spawn-hardening',
+    });
+  });
+
+  it('normalizes owner/repo target repo values to the repository slug', () => {
+    const spec = [
+      '# Spec: full repo',
+      'Target repo: `AgentWorkforce/cloud`',
+      'Target branch: `feat/full-repo`',
+      'Worktree: `/private/tmp/cloud-full-repo`',
+    ].join('\n');
+
+    expect(parseSpecMetadata(spec)).toMatchObject({
+      repo: 'cloud',
+    });
+  });
+
   it('handles list-marker prefixed header lines', () => {
     const spec = [
       '# Spec: bulleted',

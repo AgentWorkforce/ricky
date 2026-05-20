@@ -37,9 +37,10 @@ export interface SpecMetadata {
  */
 export function parseSpecMetadata(markdown: string): SpecMetadata {
   const tree = parseMarkdown(markdown);
+  const repo = extractHeaderValue(markdown, tree, 'Target repo');
   return {
     title: extractTitle(tree),
-    repo: extractHeaderValue(markdown, tree, 'Target repo'),
+    repo: repo ? normalizeRepoValue(repo) : null,
     branch: extractHeaderValue(markdown, tree, 'Target branch'),
     worktree: extractHeaderValue(markdown, tree, 'Worktree'),
   };
@@ -155,6 +156,21 @@ function unwrapValue(raw: string): string | null {
     }
   }
   return value.length > 0 ? value : null;
+}
+
+function normalizeRepoValue(raw: string): string | null {
+  const inlineCodeRepo = [...raw.matchAll(/`([^`]+)`/g)]
+    .map((match) => match[1]?.trim() ?? '')
+    .find(isRepoToken);
+  const repo = inlineCodeRepo ?? raw.split(/\s+/).find(isRepoToken) ?? null;
+  if (!repo) return null;
+  const cleaned = repo.replace(/^[`"'([{<]+|[`"',.;:)\]}>]+$/g, '');
+  if (!isRepoToken(cleaned)) return null;
+  return cleaned.includes('/') ? cleaned.split('/').at(-1) ?? null : cleaned;
+}
+
+function isRepoToken(value: string): boolean {
+  return /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)?$/.test(value);
 }
 
 function escapeRegex(input: string): string {
