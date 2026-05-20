@@ -48,6 +48,11 @@ export interface CloudGenerateResult {
   warnings: CloudWarning[];
   assumptions?: CloudAssumption[];
   validation?: CloudValidationStatus;
+  /**
+   * Reserved for future queue-backed adapters. This bounded generate endpoint
+   * does not surface executor-provided run metadata; it derives an honest
+   * skipped/not_requested receipt from the caller's generation mode.
+   */
   runReceipt?: Omit<CloudRunReceipt, 'requestId'>;
   generationMetadata?: {
     workforcePersona?: WorkforcePersonaGenerationMetadata;
@@ -220,18 +225,12 @@ function defaultRunReceipt(requestId: string, generationMode: CloudGenerationMod
 function responseRunReceipt(
   requestId: string,
   generationMode: CloudGenerationMode,
-  executorRunReceipt: CloudGenerateResult['runReceipt'],
 ): CloudRunReceipt {
   if (generationMode !== 'generate-and-run') {
     return notRequestedRunReceipt(requestId);
   }
 
-  return {
-    ...runRequestedReceipt(requestId),
-    ...executorRunReceipt,
-    executionRequested: true,
-    requestId,
-  };
+  return runRequestedReceipt(requestId);
 }
 
 function resolveGenerationMode(
@@ -616,7 +615,7 @@ export async function handleCloudGenerate(
         : warningsWithMissingArtifactBlocker(result.warnings),
       assumptions: result.assumptions ?? [],
       validation: resultValidation,
-      runReceipt: responseRunReceipt(requestId, generationMode, result.runReceipt),
+      runReceipt: responseRunReceipt(requestId, generationMode),
       followUpActions: producedArtifacts
         ? missingValidationEvidence
           ? followUpsWithValidationAction(result.followUpActions)

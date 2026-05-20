@@ -841,7 +841,7 @@ describe('handleCloudGenerate — success path', () => {
     });
   });
 
-  it('returns executor-provided run receipt fields for generate-and-run requests', async () => {
+  it('skips execution for generate-and-run requests instead of honoring executor run receipts', async () => {
     const executor = mockExecutor({
       runReceipt: {
         executionRequested: true,
@@ -864,9 +864,7 @@ describe('handleCloudGenerate — success path', () => {
     expect(response.runReceipt).toEqual({
       executionRequested: true,
       requestId: TEST_REQUEST_ID,
-      runId: 'run-001',
-      status: 'queued',
-      receiptUrl: '/runs/run-001',
+      status: 'skipped',
     });
   });
 
@@ -1051,6 +1049,12 @@ describe('handleCloudGenerate — success path', () => {
   it('represents executor validation failures as top-level failure with 422 status', async () => {
     const executor = mockExecutor({
       warnings: [{ severity: 'error', message: 'Generated workflow did not pass validation.' }],
+      assumptions: [
+        {
+          key: 'validation-policy',
+          message: 'Applied the default Cloud workflow validation policy.',
+        },
+      ],
       validation: {
         ok: false,
         status: 'failed',
@@ -1067,6 +1071,9 @@ describe('handleCloudGenerate — success path', () => {
 
     const response = await handleCloudGenerate(validRequest(), testOptions(executor));
 
+    expect(`${CLOUD_GENERATE_METHOD} ${CLOUD_GENERATE_ROUTE}`).toBe(
+      'POST /api/v1/ricky/workflows/generate',
+    );
     // Top-level response must reflect the validation failure
     expect(response.ok).toBe(false);
     expect(response.status).toBe(422);
@@ -1094,7 +1101,18 @@ describe('handleCloudGenerate — success path', () => {
       generationMode: 'generate-and-return-artifacts',
       targetMode: 'cloud',
     });
+    expect(response.artifactBundle.artifacts[0]).toMatchObject({
+      path: 'out/workflow.ts',
+      type: 'text/typescript',
+      content: expect.stringContaining('generated'),
+    });
     expect(response.warnings[0].severity).toBe('error');
+    expect(response.assumptions).toEqual([
+      {
+        key: 'validation-policy',
+        message: 'Applied the default Cloud workflow validation policy.',
+      },
+    ]);
     expect(response.followUpActions[0]).toEqual({ action: 'revise-spec', label: 'Revise Spec' });
   });
 
