@@ -2270,6 +2270,8 @@ if (( QUEUE_TOTAL == 0 )); then
   exit 0
 fi
 
+SHOULD_FINALIZE_AND_EXIT="false"
+
 for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
   local_start_index="$CURRENT_INDEX"
   if (( pass > CURRENT_PASS )); then
@@ -2284,7 +2286,8 @@ for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
     persist_checkpoint
 
     if should_stop_before_next_workflow; then
-      exit 0
+      SHOULD_FINALIZE_AND_EXIT="true"
+      break 2
     fi
 
     workflow_path="${QUEUE_ITEMS[$idx]}"
@@ -2308,6 +2311,14 @@ for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
   persist_checkpoint
 
 done
+
+if [[ "$SHOULD_FINALIZE_AND_EXIT" == "true" ]]; then
+  clear_all_state_checkpoints
+  finalize_current_artifact_checkpoint
+  write_summary "$(cat "$STATUS_FILE")"
+  log "overnight queue finalized after stop condition"
+  exit 0
+fi
 
 CURRENT_PASS="$PASSES"
 CURRENT_INDEX="$QUEUE_TOTAL"

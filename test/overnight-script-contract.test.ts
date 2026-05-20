@@ -51,6 +51,16 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain('sleep 0.1');
   });
 
+  it('finalizes checkpoint and summary when a stop condition is hit before the next workflow', () => {
+    expect(overnightScript).toContain('SHOULD_FINALIZE_AND_EXIT="false"');
+    expect(overnightScript).toContain('if should_stop_before_next_workflow; then');
+    expect(overnightScript).toContain('SHOULD_FINALIZE_AND_EXIT="true"');
+    expect(overnightScript).toContain('break 2');
+    expect(overnightScript).toContain('if [[ "$SHOULD_FINALIZE_AND_EXIT" == "true" ]]; then');
+    expect(overnightScript).toContain('finalize_current_artifact_checkpoint');
+    expect(overnightScript).toContain('write_summary "$(cat "$STATUS_FILE")"');
+  });
+
   it('uses meaningful progress, not mere log growth, for idle timeout enforcement', () => {
     expect(overnightScript).toContain('if runner_output_idle_for_too_long "$last_progress_epoch" "$(date +%s)"; then');
     expect(overnightScript).toContain('workflow runner produced no meaningful progress for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path');
