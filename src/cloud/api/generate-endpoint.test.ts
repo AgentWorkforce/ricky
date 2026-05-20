@@ -1278,6 +1278,35 @@ describe('handleCloudGenerate — runtime-invalid input', () => {
     expect(executor.calls).toHaveLength(0);
   });
 
+  it('rejects structured specs with invalid format values', async () => {
+    const executor = mockExecutor();
+    const request = validRequest({
+      body: {
+        spec: {
+          kind: 'structured',
+          document: { name: 'demo' },
+          format: 'toml' as unknown as 'json',
+        },
+      },
+    });
+
+    const response = await handleCloudGenerate(request, testOptions(executor));
+
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.validation.issues[0]).toEqual({
+      code: 'invalid-structured-spec-format',
+      message: 'Invalid structured spec format.',
+      path: 'body.spec.format',
+    });
+    expect(response.error).toEqual({
+      code: 'INVALID_STRUCTURED_SPEC_FORMAT',
+      message: 'Invalid structured spec format.',
+      path: 'body.spec.format',
+    });
+    expect(executor.calls).toHaveLength(0);
+  });
+
   it('rejects malformed natural-language spec with non-string text', async () => {
     const executor = mockExecutor();
     const request = validRequest({

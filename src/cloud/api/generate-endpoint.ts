@@ -14,6 +14,7 @@ import type {
   CloudGenerateMode,
   CloudGenerateRequest,
   CloudGenerationMode,
+  CloudStructuredSpecFormat,
 } from './request-types.js';
 import type {
   CloudAssumption,
@@ -132,6 +133,11 @@ const VALID_GENERATION_MODES = new Set<CloudGenerationMode>([
   'generate-only',
   'generate-and-return-artifacts',
   'generate-and-run',
+]);
+const VALID_STRUCTURED_SPEC_FORMATS = new Set<CloudStructuredSpecFormat>([
+  'json',
+  'yaml',
+  'ricky-workflow',
 ]);
 
 function missingGeneratedArtifactsValidation(
@@ -399,6 +405,23 @@ function hasSpecPayload(spec: unknown): boolean {
   return false;
 }
 
+function hasValidStructuredSpecFormat(spec: unknown): boolean {
+  if (!spec || typeof spec !== 'object') {
+    return true;
+  }
+
+  if ((spec as { kind?: unknown }).kind !== 'structured') {
+    return true;
+  }
+
+  const format = (spec as { format?: unknown }).format;
+  return (
+    format === undefined ||
+    (typeof format === 'string' &&
+      VALID_STRUCTURED_SPEC_FORMATS.has(format as CloudStructuredSpecFormat))
+  );
+}
+
 function validationFailure(
   requestId: string,
   status: number,
@@ -475,6 +498,17 @@ function validateRequest(
       'Missing or empty spec in request body.',
       'missing-spec',
       'body.spec',
+      request,
+    );
+  }
+
+  if (!hasValidStructuredSpecFormat(request?.body?.spec)) {
+    return validationFailure(
+      requestId,
+      400,
+      'Invalid structured spec format.',
+      'invalid-structured-spec-format',
+      'body.spec.format',
       request,
     );
   }

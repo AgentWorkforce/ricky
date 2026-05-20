@@ -23,6 +23,7 @@ export type {
   CloudGenerateRequestBody,
   CloudNaturalLanguageSpecPayload,
   CloudRickyAutoFixPolicy,
+  CloudStructuredSpecFormat,
   CloudStructuredSpecPayload,
   CloudWorkflowSpecPayload,
   CloudWorkspaceContext,

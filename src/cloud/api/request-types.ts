@@ -44,13 +44,15 @@ export interface CloudNaturalLanguageSpecPayload {
 export interface CloudStructuredSpecPayload {
   kind: 'structured';
   document: Record<string, unknown>;
-  format?: 'json' | 'yaml' | 'ricky-workflow';
+  format?: CloudStructuredSpecFormat;
 }
 
 export type CloudWorkflowSpecPayload =
   | string
   | CloudNaturalLanguageSpecPayload
   | CloudStructuredSpecPayload;
+
+export type CloudStructuredSpecFormat = 'json' | 'yaml' | 'ricky-workflow';
 
 export interface CloudRickyAutoFixPolicy {
   /** Whether Ricky should diagnose and repair failed Cloud workflow runs. */
