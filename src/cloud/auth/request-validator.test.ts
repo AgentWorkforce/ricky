@@ -11,7 +11,9 @@ import {
   LINEAR_CONNECT_GUIDANCE,
   LINEAR_CONNECT_DASHBOARD_URL,
   LINEAR_CONNECT_INSTRUCTIONS,
+  NOTION_CONNECT_GUIDANCE,
   PROVIDER_TYPES,
+  SLACK_CONNECT_GUIDANCE,
   assertWorkspaceMatch,
   createWorkspaceScopedQuery,
   getProviderConnectGuidance,
@@ -804,11 +806,17 @@ describe('getProviderConnectGuidance', () => {
   });
 
   it('optional dashboard providers expose hosted guidance without CLI commands', () => {
+    const optionalProviderConstants = {
+      slack: SLACK_CONNECT_GUIDANCE,
+      notion: NOTION_CONNECT_GUIDANCE,
+    } as const;
+
     for (const provider of ['slack', 'notion'] as const) {
       const guidance = getProviderConnectGuidance(provider);
 
       expect(guidance.kind).toBe('dashboard');
       if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+      expect(guidance).toBe(optionalProviderConstants[provider]);
       expect(guidance.dashboardUrl).toBe(CLOUD_INTEGRATIONS_DASHBOARD_URL);
       expect(guidance.command).toBeUndefined();
       expect(guidance.instructions.join('\n')).toContain(`Choose ${provider} from optional integrations.`);
@@ -837,6 +845,87 @@ describe('getProviderConnectGuidance', () => {
 });
 
 describe('Cloud auth module contract', () => {
+  it('proves the broker-facing auth and workspace contract', () => {
+    expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toEqual({
+      ok: false,
+      error: 'Missing or empty auth token.',
+      status: 401,
+      code: 'missing-auth-token',
+      path: 'auth.token',
+    });
+
+    expect(validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, undefined)).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    });
+
+    expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-broker' })).toEqual({
+      ok: true,
+      auth: { token: 'bearer-token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-broker', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
+    });
+
+    expect(
+      validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, { workspaceId: 'ws-api' }),
+    ).toEqual({
+      ok: true,
+      auth: { token: 'api-key-token', tokenType: 'api-key' },
+      workspace: { workspaceId: 'ws-api', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
+    });
+  });
+
+  it('fails if auth accepts an unscoped provider-backed request', () => {
+    expect(
+      validateCloudRequest({ token: 'bearer-token' }, undefined, {
+        requiredProvider: 'google',
+        providerConnection: { provider: 'google', connected: true },
+      }),
+    ).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    });
+  });
+
+  it('proves authorized workspace mismatch rejection', () => {
+    expect(
+      resolveAuthorizedWorkspaceScope(
+        { workspaceId: 'authorized-workspace' },
+        { workspaceId: 'requested-workspace' },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Cross-workspace access denied.',
+      status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
+    });
+  });
+
+  it('proves provider connect guidance remains user-visible', () => {
+    const googleGuidance = getProviderConnectGuidance('google');
+    expect(googleGuidance.kind).toBe('cli');
+    if (googleGuidance.kind !== 'cli') throw new Error('expected Google CLI guidance');
+    expect(googleGuidance.command).toBe('npx agent-relay cloud connect google');
+    expect(googleGuidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
+
+    const githubGuidance = getProviderConnectGuidance('github');
+    expect(githubGuidance.kind).toBe('dashboard');
+    if (githubGuidance.kind !== 'dashboard') throw new Error('expected GitHub dashboard guidance');
+    expect(githubGuidance.command).toBeUndefined();
+    expect(githubGuidance.instructions.join('\n')).toContain('Cloud dashboard');
+    expect(githubGuidance.instructions.join('\n')).toContain('Nango');
+  });
+
   it('covers required Cloud auth request outcomes explicitly', () => {
     expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toEqual({
       ok: false,

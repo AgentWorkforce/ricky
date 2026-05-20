@@ -54,7 +54,7 @@ export const LINEAR_CONNECT_GUIDANCE = freezeGuidance({
   instructions: LINEAR_CONNECT_INSTRUCTIONS,
 });
 
-const SLACK_CONNECT_GUIDANCE = freezeGuidance({
+export const SLACK_CONNECT_GUIDANCE = freezeGuidance({
   kind: 'dashboard',
   provider: 'slack',
   dashboardUrl: CLOUD_INTEGRATIONS_DASHBOARD_URL,
@@ -66,7 +66,7 @@ const SLACK_CONNECT_GUIDANCE = freezeGuidance({
   ),
 });
 
-const NOTION_CONNECT_GUIDANCE = freezeGuidance({
+export const NOTION_CONNECT_GUIDANCE = freezeGuidance({
   kind: 'dashboard',
   provider: 'notion',
   dashboardUrl: CLOUD_INTEGRATIONS_DASHBOARD_URL,

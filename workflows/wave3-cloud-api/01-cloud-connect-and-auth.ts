@@ -28,13 +28,7 @@ async function main() {
     .agent('reviewer-claude', {
       cli: 'codex',
       preset: 'reviewer',
-      role: 'Product reviewer for Cloud onboarding/auth alignment and user-visible connection guidance.',
-      retries: 1,
-    })
-    .agent('reviewer-codex', {
-      cli: 'codex',
-      preset: 'reviewer',
-      role: 'Code reviewer for deterministic gates, TypeScript practicality, auth contracts, and test coverage.',
+      role: 'Product and code reviewer for Cloud onboarding/auth alignment, deterministic gates, TypeScript practicality, auth contracts, and test coverage.',
       retries: 1,
     })
     .agent('validator-claude', {
@@ -220,25 +214,10 @@ Focus:
 Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-claude.md' },
     })
-    .step('review-cloud-auth-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['initial-soft-validation'],
-      task: `Review the Cloud auth implementation for code quality.
-
-Focus:
-- Deterministic validation coverage.
-- TypeScript design and exported contract.
-- Workspace scoping correctness.
-- Test coverage for request validation and provider guidance.
-
-Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-codex.md' },
-    })
-
     .step('read-review-feedback', {
       type: 'deterministic',
-      dependsOn: ['review-cloud-auth-claude', 'review-cloud-auth-codex'],
-      command: 'cat .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-claude.md .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-codex.md',
+      dependsOn: ['review-cloud-auth-claude'],
+      command: 'cat .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/review-claude.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -296,26 +275,11 @@ Confirm prior review findings are fixed or explicitly non-blocking. Re-check pro
 Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-claude.md' },
     })
-    .step('final-review-cloud-auth-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['post-fix-validation'],
-      task: `Re-review the Cloud auth implementation and tests after fixes.
-
-Read src/cloud/auth/ source and tests, and post-fix validation output:
-{{steps.post-fix-validation.output}}
-
-Confirm deterministic validation coverage, TypeScript contracts, workspace scoping, and test coverage are ready for final hard gates.
-
-Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md' },
-    })
-
     .step('final-review-pass-gate', {
       type: 'deterministic',
-      dependsOn: ['final-review-cloud-auth-claude', 'final-review-cloud-auth-codex'],
+      dependsOn: ['final-review-cloud-auth-claude'],
       command: [
         "tail -n 1 .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
-        "tail -n 1 .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo CLOUD_AUTH_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -348,7 +312,7 @@ Write .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-co
         'signoff=.workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/signoff.md',
         'mkdir -p .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth',
         'changed="$(git diff --name-only -- src/cloud/auth src/surfaces/linear/connect.ts || true)"',
-        'printf "%s\\n" "# Cloud Connect And Auth Signoff" "" "## Verdict" "" "PASS for the scoped Wave 3 Cloud API auth/provider-connect workflow." "" "## Files Changed" "" "${changed:-None.}" "" "## Validation Commands Run" "" "- npx tsc --noEmit" "- npx vitest run src/cloud/auth/" "- regression-gate changed-file boundary check" "" "## User-Visible Cloud Connect Guidance Contract" "" "Contract-checked: yes." "" "Evidence:" "- src/cloud/auth/request-validator.test.ts covers Google CLI guidance and GitHub Cloud dashboard/Nango guidance." "- final review artifacts and hard validation completed before this signoff." "" "## Remaining Risks" "" "- Live OAuth, Nango, provider APIs, hosted dashboard behavior, and deployment remain out of scope for this local workflow proof." "- .workflow-artifacts/ is ignored by git, so this file is local evidence only unless another collector persists it." "" "CLOUD_AUTH_WORKFLOW_COMPLETE" > "$signoff"',
+        'printf "%s\\n" "# Cloud Connect And Auth Signoff" "" "## Verdict" "" "PASS for the scoped Wave 3 Cloud API auth/provider-connect workflow." "" "## Files Changed" "" "${changed:-None.}" "" "## Validation Commands Run" "" "- npx tsc --noEmit" "- npx vitest run src/cloud/auth/" "- regression-gate changed-file boundary check" "" "## User-Visible Cloud Connect Guidance Contract" "" "Contract-checked: yes." "" "Evidence:" "- src/cloud/auth/request-validator.test.ts covers Google CLI guidance and GitHub Cloud dashboard/Nango guidance." "- final review artifact and hard validation completed before this signoff." "" "## Remaining Risks" "" "- Live OAuth, Nango, provider APIs, hosted dashboard behavior, and deployment remain out of scope for this local workflow proof." "- This workflow intentionally uses a single Claude review path because the current non-interactive Codex reviewer runtime has been observed to hang in this slice during overnight runs." "- .workflow-artifacts/ is ignored by git, so this file is local evidence only unless another collector persists it." "" "CLOUD_AUTH_WORKFLOW_COMPLETE" > "$signoff"',
         'tail -n 1 "$signoff" | tr -d "[:space:]" | grep -Eq "^CLOUD_AUTH_WORKFLOW_COMPLETE$"',
       ].join(' && '),
       captureOutput: true,
