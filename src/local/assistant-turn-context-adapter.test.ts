@@ -53,9 +53,9 @@ interface PreservationCase {
     spec: string;
     structuredSpec?: Record<string, unknown>;
     sourceMetadata?: Record<string, unknown>;
-    invocationRoot: string;
+    invocationRoot?: string;
     mode: LocalInvocationRequest['mode'];
-    stageMode: NonNullable<LocalInvocationRequest['stageMode']>;
+    stageMode?: LocalInvocationRequest['stageMode'];
     specPath?: string;
     metadata: Record<string, unknown>;
   };
@@ -243,6 +243,57 @@ describe('Ricky turn-context adapter', () => {
     expect(assembly.harnessProjection.instructions.developerPrompt).toContain(
       'Current mode: ricky-local:local:generate',
     );
+  });
+
+  it('keeps optional Ricky metadata fields present when the real execution adapter projects a minimal handoff', async () => {
+    const normalized = await normalizeRequest({
+      source: 'free-form',
+      spec: 'generate a minimal adapter metadata proof workflow',
+      requestId: 'req-issue-11-minimal-metadata',
+      metadata: { issue: 11, proof: 'minimal-metadata' },
+    });
+
+    const assembly = await assembleRickyTurnContext(normalized);
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-issue-11-minimal-metadata',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const metadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(metadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expectIssue11RickyMetadata(
+      'minimal-metadata.executionRequest.metadata.ricky',
+      metadata?.ricky,
+      {
+        requestId: 'req-issue-11-minimal-metadata',
+        source: 'free-form',
+        spec: 'generate a minimal adapter metadata proof workflow',
+        mode: 'local',
+        metadata: { issue: 11, proof: 'minimal-metadata' },
+      },
+    );
+    expect(executionRequest).toMatchObject({
+      assistantId: 'ricky',
+      turnId: 'req-issue-11-minimal-metadata',
+      context: {
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-summary',
+            text: expect.stringContaining('stageMode: (default)'),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-metadata',
+            text: JSON.stringify({ issue: 11, proof: 'minimal-metadata' }, null, 2),
+          }),
+        ]),
+      },
+    });
   });
 
   it('projects preserved Ricky request metadata through the real turn-context execution request adapter', async () => {

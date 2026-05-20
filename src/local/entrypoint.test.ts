@@ -4744,13 +4744,36 @@ describe('runLocal', () => {
         const { runLocal: runLocalWithObservedAdapter } = await import('./entrypoint.js');
 
         for (const testCase of cases) {
+          const localExecutor = memoryLocalExecutorOptions({ stdout: [`${testCase.name} runtime should stay idle`] });
           const result = await runLocalWithObservedAdapter(testCase.handoff, {
             artifactReader: mockArtifactReader(testCase.artifactContent ?? 'unused artifact'),
-            localExecutor: memoryLocalExecutorOptions({ stdout: [`${testCase.name} runtime should stay idle`] }),
+            localExecutor,
           });
 
           expect(result.ok, testCase.name).toBe(true);
           expectNoTurnContextFallback(result.logs);
+          expect(result.exitCode, testCase.name).toBe(0);
+          expect(result.artifacts, testCase.name).toEqual([
+            {
+              path: result.generation?.artifact?.path,
+              type: 'text/typescript',
+              ...(testCase.name === 'workflow-artifact'
+                ? {}
+                : { content: expect.stringContaining('workflow(') }),
+            },
+          ]);
+          expect(result.logs, testCase.name).toEqual(
+            expect.arrayContaining([
+              `[local] received spec from ${testCase.expected.source}`,
+              '[local] stage mode: generate',
+              '[local] runtime launch skipped: returning generated artifact only',
+            ]),
+          );
+          expect(result.nextActions, testCase.name).toEqual([
+            `Run the generated workflow locally: ricky run ${result.generation?.artifact?.path}`,
+            'Inspect the generated workflow artifact and choose whether to run it locally.',
+          ]);
+          expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), testCase.name).toBe(false);
           expect(result.generation?.decisions?.assistant_turn_context, testCase.name).toMatchObject({
             assistant_id: 'ricky',
             turn_id: testCase.expected.requestId,
@@ -4772,6 +4795,7 @@ describe('runLocal', () => {
             ]),
           });
           expect(result.execution, testCase.name).toBeUndefined();
+          expect(localExecutor.runner.invocations, testCase.name).toHaveLength(0);
         }
 
         expect(assembledInputs).toHaveLength(cases.length);
@@ -4902,6 +4926,31 @@ describe('runLocal', () => {
         );
         expect(artifactResult.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
         expect(artifactLaunches).toHaveLength(1);
+        expect(artifactLaunches[0]).toMatchObject({
+          workflowFile: artifactPath,
+          cwd: '/workspace/issue-11-live-artifact',
+          metadata: {
+            requestId: 'req-issue-11-live-artifact-run',
+            source: 'workflow-artifact',
+            route: 'execute',
+            assistantTurnContext: {
+              assistant_id: 'ricky',
+              turn_id: 'req-issue-11-live-artifact-run',
+              adapter: 'ricky-local-turn-context-adapter',
+              package: '@agent-assistant/turn-context',
+              context_blocks: expect.arrayContaining([
+                'enrichment-ricky-request-summary',
+                'enrichment-ricky-spec-text',
+                'enrichment-ricky-request-metadata',
+              ]),
+              enrichment_ids: expect.arrayContaining([
+                'ricky-request-summary',
+                'ricky-spec-text',
+                'ricky-request-metadata',
+              ]),
+            },
+          },
+        });
         expect(generateAndRunExecutor.runner.invocations).toHaveLength(1);
         expect(assembledInputs).toHaveLength(2);
 
