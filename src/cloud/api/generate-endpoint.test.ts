@@ -221,6 +221,43 @@ describe('handleCloudGenerate — validation', () => {
     expect(response.validation.issues[0].code).toBe('missing-spec');
   });
 
+  it('returns the Cloud generate failure contract when the request body omits the spec', async () => {
+    const executor = mockExecutor();
+    const response = await handleCloudGenerate(
+      validRequest({ body: { spec: '   ' } }),
+      testOptions(executor),
+    );
+
+    expect(`${CLOUD_GENERATE_METHOD} ${CLOUD_GENERATE_ROUTE}`).toBe(
+      'POST /api/v1/ricky/workflows/generate',
+    );
+    expect(response.ok).toBe(false);
+    expect(response.status).toBe(400);
+    expect(response.artifacts).toEqual([]);
+    expect(response.artifactBundle).toEqual({
+      artifacts: [],
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    });
+    expect(response.warnings).toEqual([
+      { severity: 'error', message: 'Missing or empty spec in request body.' },
+    ]);
+    expect(response.assumptions).toEqual([]);
+    expect(response.followUpActions).toEqual([]);
+    expect(response.validation).toEqual({
+      ok: false,
+      status: 'failed',
+      issues: [
+        {
+          code: 'missing-spec',
+          message: 'Missing or empty spec in request body.',
+          path: 'body.spec',
+        },
+      ],
+    });
+    expect(executor.calls).toHaveLength(0);
+  });
+
   it('rejects requests with empty structured spec payloads', async () => {
     const request = validRequest({ body: { spec: { kind: 'structured', document: {} } } });
     const response = await handleCloudGenerate(request, testOptions());
