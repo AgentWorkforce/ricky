@@ -133,6 +133,59 @@ describe('CLOUD_GENERATE_ROUTE', () => {
     expect(response.artifactBundle.targetMode).toBe('cloud');
     expect(response.artifactBundle.artifacts).toBe(response.artifacts);
   });
+
+  it('serves successful Cloud generation responses through the exported endpoint contract', async () => {
+    const endpoint: CloudGenerateEndpointContract = cloudGenerateEndpoint;
+    const artifact = {
+      path: 'workflows/mounted-cloud-generate.ts',
+      type: 'text/typescript',
+      content: 'export const workflow = "mounted-cloud-generate";',
+    };
+    const executor = mockExecutor({
+      artifacts: [artifact],
+      warnings: [{ severity: 'warning', message: 'Assumed the default Cloud queue.' }],
+      assumptions: [{ key: 'queue', message: 'Used the workspace default queue.' }],
+      followUpActions: [
+        {
+          action: 'review-generated-files',
+          label: 'Review Generated Files',
+          description: 'Inspect returned workflow artifacts before deployment.',
+        },
+      ],
+    });
+
+    const response = await endpoint.handler(validRequest(), testOptions(executor));
+
+    expect(`${endpoint.method} ${endpoint.path}`).toBe(
+      'POST /api/v1/ricky/workflows/generate',
+    );
+    expect(response.ok).toBe(true);
+    expect(response.status).toBe(200);
+    expect(response.artifacts).toEqual([artifact]);
+    expect(response.artifactBundle).toEqual({
+      artifacts: response.artifacts,
+      generationMode: 'generate-and-return-artifacts',
+      targetMode: 'cloud',
+    });
+    expect(response.artifactBundle.artifacts[0]).toMatchObject({
+      path: 'workflows/mounted-cloud-generate.ts',
+      type: 'text/typescript',
+      content: expect.stringContaining('mounted-cloud-generate'),
+    });
+    expect(response.warnings).toEqual([
+      { severity: 'warning', message: 'Assumed the default Cloud queue.' },
+    ]);
+    expect(response.assumptions).toEqual([
+      { key: 'queue', message: 'Used the workspace default queue.' },
+    ]);
+    expect(response.followUpActions).toEqual([
+      {
+        action: 'review-generated-files',
+        label: 'Review Generated Files',
+        description: 'Inspect returned workflow artifacts before deployment.',
+      },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
