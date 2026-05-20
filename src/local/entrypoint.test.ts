@@ -1075,6 +1075,97 @@ describe('runLocal', () => {
     expect(executor.calls[0].mode).toBe('local');
   });
 
+  it('hands CLI, MCP, and Claude structured specs to the injected local executor without Cloud defaults', async () => {
+    const cases: Array<{
+      name: string;
+      handoff: CliHandoff | McpHandoff | ClaudeHandoff;
+      expectedSpec: string;
+      expectedMetadata: Record<string, unknown>;
+      expectedSourceMetadata: NonNullable<LocalInvocationRequest['sourceMetadata']>;
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            description: 'generate a local workflow from CLI',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+        },
+        expectedSpec: 'generate a local workflow from CLI',
+        expectedMetadata: { argv: ['ricky', 'generate', '--local'] },
+        expectedSourceMetadata: {
+          cli: { argv: ['ricky', 'generate', '--local'] },
+        },
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            prompt: 'generate a local workflow from MCP',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          mcpMetadata: { toolCallId: 'tool-local-entrypoint' },
+        },
+        expectedSpec: 'generate a local workflow from MCP',
+        expectedMetadata: {
+          toolCallId: 'tool-local-entrypoint',
+          toolName: 'ricky.generate',
+        },
+        expectedSourceMetadata: {
+          mcp: {
+            toolCallId: 'tool-local-entrypoint',
+            toolName: 'ricky.generate',
+          },
+        },
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            request: 'generate a local workflow from Claude',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          conversationId: 'conv-local-entrypoint',
+          turnId: 'turn-local-entrypoint',
+        },
+        expectedSpec: 'generate a local workflow from Claude',
+        expectedMetadata: {
+          conversationId: 'conv-local-entrypoint',
+          turnId: 'turn-local-entrypoint',
+        },
+        expectedSourceMetadata: {
+          claude: {
+            conversationId: 'conv-local-entrypoint',
+            turnId: 'turn-local-entrypoint',
+          },
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const executor = mockExecutor();
+      const result = await runLocal(testCase.handoff, { executor });
+
+      expect(result.ok, testCase.name).toBe(true);
+      expect(executor.calls, testCase.name).toHaveLength(1);
+      expect(executor.calls[0], testCase.name).toMatchObject({
+        source: testCase.handoff.source,
+        spec: testCase.expectedSpec,
+        structuredSpec: expect.any(Object),
+        mode: 'local',
+        executionPreference: 'local',
+        metadata: testCase.expectedMetadata,
+        sourceMetadata: testCase.expectedSourceMetadata,
+      });
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), testCase.name).toBe(false);
+    }
+  });
+
   it('keeps CLI, MCP, and Claude handoffs BYOH-first without Cloud credentials', async () => {
     const handoffs: RawHandoff[] = [
       {
