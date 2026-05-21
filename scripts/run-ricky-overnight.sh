@@ -1673,6 +1673,14 @@ $(sed 's/^/  - /' "$SKIPPED_FILE" 2>/dev/null || true)
 EOF
 }
 
+prune_empty_artifact_marker_files() {
+  local marker_file=""
+
+  for marker_file in "$FAILED_FILE" "$SKIPPED_FILE" "$STALE_FILE"; do
+    [[ -f "$marker_file" && ! -s "$marker_file" ]] && rm -f "$marker_file"
+  done
+}
+
 mark_status() {
   local status="$1"
   STATUS_REASON="${2:-}"
@@ -1680,6 +1688,7 @@ mark_status() {
   STATUS_MARKED="true"
   persist_checkpoint
   write_summary "$status"
+  prune_empty_artifact_marker_files
 }
 
 validate_repo() {

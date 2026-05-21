@@ -39,6 +39,14 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain("$(sort -u \"$STALE_FILE\" 2>/dev/null | sed 's/^/  - /' || true)");
   });
 
+  it('prunes empty marker files after writing the artifact summary', () => {
+    expect(overnightScript).toContain('prune_empty_artifact_marker_files()');
+    expect(overnightScript).toContain('for marker_file in "$FAILED_FILE" "$SKIPPED_FILE" "$STALE_FILE"; do');
+    expect(overnightScript).toContain('[[ -f "$marker_file" && ! -s "$marker_file" ]] && rm -f "$marker_file"');
+    expect(overnightScript).toContain('write_summary "$status"');
+    expect(overnightScript).toContain('prune_empty_artifact_marker_files');
+  });
+
   it('waits on the detached launcher wrapper instead of the detached runner pid', () => {
     expect(overnightScript).toContain('RUNNER_WAIT_PID=""');
     expect(overnightScript).toContain('raise SystemExit(proc.wait())');
