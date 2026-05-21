@@ -285,10 +285,17 @@ function buildGates(
   const activeReferenceCommand = usingManifest
     ? buildActiveReferenceGateCommand(outputManifest, `${artifactsDir}/active-reference-check.txt`)
     : `printf '%s\\n' 'No manifest-driven deleted paths to check.' > ${shellQuote(`${artifactsDir}/active-reference-check.txt`)}`;
+  const listedValidationOnly = usesOnlyListedValidationCommands(spec);
   const testCommand = deriveTestCommand(spec);
   const typecheckCommand = 'npx tsc --noEmit';
   const acceptanceCommands = spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate));
-  const executableAcceptanceCommands = acceptanceCommands.filter((cmd) => !cmd.startsWith("printf '%s\\n'"));
+  const executableAcceptanceCommands = acceptanceCommands.filter(isExecutableAcceptanceCommand);
+  const initialValidationCommand = listedValidationOnly
+    ? buildValidationCommand(executableAcceptanceCommands)
+    : [typecheckCommand, testCommand, ...acceptanceCommands].join(' && ');
+  const hardValidationCommand = buildValidationCommand(
+    listedValidationOnly ? executableAcceptanceCommands : [typecheckCommand, testCommand, ...executableAcceptanceCommands],
+  );
   const skillBoundaryPath = `${artifactsDir}/skill-application-boundary.json`;
 
   return [
@@ -302,7 +309,7 @@ function buildGates(
     ),
     gate('lead-plan-gate', buildLeadPlanGateCommand(`${artifactsDir}/lead-plan.md`), 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('post-implementation-file-gate', fileGateCommand, 'file_exists', true, ['implement-artifact'], 'pre_review'),
-    gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
+    gate('initial-soft-validation', initialValidationCommand, 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
     gate(
       'fix-loop-report-gate',
       [
@@ -316,7 +323,7 @@ function buildGates(
     ),
     gate('post-fix-verification-gate', fileGateCommand, 'file_exists', true, ['fix-loop-report-gate'], 'post_fix'),
     gate('active-reference-gate', activeReferenceCommand, 'deterministic_gate', true, ['post-fix-verification-gate'], 'post_fix'),
-    gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['active-reference-gate'], 'post_fix'),
+    gate('post-fix-validation', hardValidationCommand, 'exit_code', false, ['active-reference-gate'], 'post_fix'),
     gate(
       'codex-fix-loop-report-gate',
       [
@@ -328,7 +335,7 @@ function buildGates(
       ['fix-loop-codex'],
       'post_fix',
     ),
-    gate('post-codex-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
+    gate('post-codex-fix-validation', hardValidationCommand, 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
     gate(
       'final-review-pass-gate',
       [
@@ -341,9 +348,9 @@ function buildGates(
       ['final-fix-codex'],
       'final',
     ),
-    gate('final-hard-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
+    gate('final-hard-validation', hardValidationCommand, 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', gitDiffCommand, 'artifact_exists', true, ['final-hard-validation'], 'final'),
-    gate('regression-gate', isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
+    gate('regression-gate', listedValidationOnly ? hardValidationCommand : isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
     ...(usingManifest
       ? [
           gate(
@@ -1341,6 +1348,38 @@ export function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
   return 'npx vitest run';
 }
 
+export function executableAcceptanceCommandsForSpec(spec: NormalizedWorkflowSpec): string[] {
+  return spec.acceptanceGates
+    .map((gate) => mapAcceptanceGateToCommand(gate.gate))
+    .filter(isExecutableAcceptanceCommand);
+}
+
+export function usesOnlyListedValidationCommands(spec: NormalizedWorkflowSpec): boolean {
+  const text = [
+    spec.description,
+    spec.targetContext,
+    spec.desiredAction.summary,
+    ...spec.constraints.map((constraint) => constraint.constraint),
+    ...spec.evidenceRequirements.map((requirement) => requirement.requirement),
+    ...spec.acceptanceGates.map((gate) => gate.gate),
+  ].filter(Boolean).join('\n');
+  return [
+    /\b(?:use|run)\s+only\s+(?:the\s+)?(?:listed|declared|specified)\s+validation\s+commands?\b/i,
+    /\bonly\s+(?:the\s+)?(?:listed|declared|specified)\s+validation\s+commands?\b/i,
+    /\bno\s+(?:generic|root)\s+(?:validation\s+)?(?:gates?|commands?|typechecks?|tests?)\b/i,
+    /\b(?:do\s+not|don't|must\s+not)\s+(?:add|inject|emit|run)\s+(?:generic|root).{0,60}\b(?:validation|gate|typecheck|test)\b/i,
+  ].some((pattern) => pattern.test(text));
+}
+
+function buildValidationCommand(commands: string[]): string {
+  const executableCommands = commands.filter(isExecutableAcceptanceCommand);
+  return executableCommands.join(' && ') || "printf '%s\\n' 'No executable validation commands listed by spec.'";
+}
+
+function isExecutableAcceptanceCommand(command: string): boolean {
+  return !command.startsWith("printf '%s\\n'");
+}
+
 const IN_REPO_SOURCE_ROOTS = new Set([
   'packages',
   'apps',
@@ -1404,13 +1443,13 @@ function mapAcceptanceGateToCommand(gateText: string): string {
   if (/\bvitest\b/i.test(gateText)) return gateText.trim();
   if (/\bnpm test\b/i.test(gateText)) return 'npm test';
   if (/\bfile exists|file_exists\b/i.test(gateText)) return `test -f ${shellQuote(gateText.replace(/.*(?:file exists|file_exists)\s*:?\s*/i, '').trim() || '.')}`;
-  if (/^\s*(?:grep|node|npx|npm|test)\b/i.test(gateText)) return gateText.trim();
+  if (/^\s*(?:grep|node|npx|npm|test|git|bash|sh|actionlint|ruby)\b/i.test(gateText)) return gateText.trim();
   return `printf '%s\\n' ${shellQuote(`Manual acceptance gate: ${gateText}`)}`;
 }
 
 function extractInlineShellCommand(text: string): string | null {
   const candidates = [...text.matchAll(/`([^`\n]+)`/g)].map((match) => match[1].trim());
-  return candidates.find((candidate) => /^(?:node|npx|npm|grep|test)\b/i.test(candidate)) ?? null;
+  return candidates.find((candidate) => /^(?:node|npx|npm|grep|test|git|bash|sh|actionlint|ruby)\b/i.test(candidate)) ?? null;
 }
 
 function isCodeWritingWorkflow(spec: NormalizedWorkflowSpec): boolean {

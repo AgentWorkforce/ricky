@@ -510,6 +510,57 @@ describe('workflow generation pipeline', () => {
     expect(artifact(singlePr).content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
   });
 
+  it('honors explicit single-workflow constraints before file-count master fallback', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement per-service deploy workflows with a single local workflow and static validation only.',
+        constraints: [
+          'Do not generate child workflows.',
+          'Use only listed validation commands and no generic root gates.',
+        ],
+        targetFiles: [
+          '.github/workflows/deploy-sage.yml',
+          '.github/workflows/deploy-relayauth.yml',
+          '.github/workflows/deploy-relayfile.yml',
+          '.github/workflows/_deploy-cloud-stage.yml',
+          '.github/actions/run-cloudflare-d1-migrations/action.yml',
+          'scripts/run-cloudflare-d1-migrations.sh',
+          '.github/workflows/bump-sage-worker.yml',
+          'infra/sage.ts',
+          'infra/relayauth.ts',
+          'infra/relayfile.ts',
+          'package.json',
+          'README.md',
+          'docs/deploy.md',
+        ],
+        acceptanceGates: [
+          'git diff --check',
+          'bash -n scripts/run-cloudflare-d1-migrations.sh',
+          'actionlint .github/workflows/deploy-sage.yml .github/workflows/deploy-relayauth.yml .github/workflows/deploy-relayfile.yml',
+          "ruby -e \"require 'yaml'; YAML.load_file('.github/workflows/deploy-sage.yml')\"",
+        ],
+      }),
+      artifactPath: 'workflows/generated/cloud-issue-311.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.masterExecutionPlan).toBeUndefined();
+    const rendered = artifact(result);
+    expect(rendered.content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+    expect(rendered.content).not.toContain('Master plan:');
+    expect(rendered.content).not.toContain('ricky run');
+
+    for (const gateName of ['initial-soft-validation', 'post-fix-validation', 'final-hard-validation', 'regression-gate']) {
+      const command = gate(rendered, gateName).command;
+      expect(command).toContain('git diff --check');
+      expect(command).toContain('bash -n scripts/run-cloudflare-d1-migrations.sh');
+      expect(command).toContain('actionlint .github/workflows/deploy-sage.yml');
+      expect(command).toContain("ruby -e \"require 'yaml'; YAML.load_file('.github/workflows/deploy-sage.yml')\"");
+      expect(command).not.toContain('npx tsc --noEmit');
+      expect(command).not.toContain('npx vitest run');
+    }
+  });
+
   it('ignores inert fenced worktree labels when deciding single-PR master fallback routing', () => {
     const fencedLabelsOnly = generate({
       spec: spec({
@@ -1805,6 +1856,32 @@ describe('workflow generation pipeline', () => {
     const initialValidation = result.artifact!.gates.find((gate) => gate.name === 'initial-soft-validation')!;
     expect(initialValidation.command).toContain("node dist/bin/ricky.js --version | grep -Eq '^ricky [0-9]+\\.[0-9]+\\.[0-9]+$'");
     expect(initialValidation.command).not.toContain('test for this layer');
+  });
+
+  it('treats static shell tools in acceptance gates as executable validation commands', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow static validation gates.',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+        constraints: ['Use only listed validation commands.'],
+        acceptanceGates: [
+          'git diff --check',
+          'bash -n scripts/check.sh',
+          'actionlint .github/workflows/deploy.yml',
+          "ruby -e \"require 'yaml'\"",
+        ],
+      }),
+      artifactPath: 'workflows/generated/static-tool-gates.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const command = gate(artifact(result), 'final-hard-validation').command;
+    expect(command).toContain('git diff --check');
+    expect(command).toContain('bash -n scripts/check.sh');
+    expect(command).toContain('actionlint .github/workflows/deploy.yml');
+    expect(command).toContain("ruby -e \"require 'yaml'\"");
+    expect(command).not.toContain('npx tsc --noEmit');
+    expect(command).not.toContain('npx vitest run');
   });
 
   it('enforces executable acceptance gates in post-fix and final-hard validation stages', () => {

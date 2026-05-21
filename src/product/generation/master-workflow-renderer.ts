@@ -5,7 +5,11 @@ import {
   DEFAULT_RETRY_MAX_ATTEMPTS,
 } from '../../shared/constants.js';
 import { planMasterExecution, type ChildWorkflowPlan, type MasterExecutionPlan } from '../orchestration/index.js';
-import { deriveTestCommand } from './template-renderer.js';
+import {
+  deriveTestCommand,
+  executableAcceptanceCommandsForSpec,
+  usesOnlyListedValidationCommands,
+} from './template-renderer.js';
 import { buildFinalReviewPassGateCommand } from './final-review-gate.js';
 import { markdownLabelFields } from './workforce-persona-writer.js';
 import type {
@@ -75,10 +79,20 @@ const MASTER_FILE_COUNT_THRESHOLD = 12;
 export function shouldUseMasterExecutionWorkflow(spec: NormalizedWorkflowSpec): boolean {
   const text = workflowText(spec);
   if (!IMPLEMENTATION_PATTERN.test(text)) return false;
+  if (hasSingleWorkflowVeto(text)) return false;
   if (MASTER_EXPLICIT_PATTERN.test(text)) return true;
   if (hasSinglePrWorktreeContract(text)) return false;
   if (spec.targetFiles.length >= MASTER_FILE_COUNT_THRESHOLD) return true;
   return false;
+}
+
+function hasSingleWorkflowVeto(text: string): boolean {
+  return [
+    /\b(?:single|one)\s+(?:local\s+)?workflow\b/i,
+    /\bno\s+child\s+workflows?\b/i,
+    /\b(?:do\s+not|don't|must\s+not|without)\s+(?:generate|emit|create|use|run)?\s*(?:any\s+)?child\s+workflows?\b/i,
+    /\b(?:static|deterministic)\s+validation\s+only\b/i,
+  ].some((pattern) => pattern.test(text));
 }
 
 function hasSinglePrWorktreeContract(text: string): boolean {
@@ -248,6 +262,17 @@ function renderMasterSource(input: {
     'EOF',
     'echo MASTER_EXECUTOR_RESULT_READY',
   ].join('\n');
+  const listedValidationOnly = usesOnlyListedValidationCommands(input.spec);
+  const listedValidationCommands = executableAcceptanceCommandsForSpec(input.spec);
+  const finalHardValidationCommands = [
+    'set -e',
+    ...(listedValidationOnly
+      ? listedValidationCommands
+      : [TYPECHECK_COMMAND, deriveTestCommand(input.spec)]),
+    'git diff --name-only',
+    `grep -F RICKY_MASTER_REVIEW_READY ${shellQuote(`${input.artifactsDir}/review-codex.md`)}`,
+    'echo RICKY_MASTER_FINAL_VALIDATION_READY',
+  ];
 
   return `${[
     "import { workflow } from '@agent-relay/sdk/workflows';",
@@ -341,14 +366,7 @@ function renderMasterSource(input: {
     '    .step("final-hard-validation", {',
     '      type: "deterministic",',
     '      dependsOn: ["review-child-evidence"],',
-    `      command: ${literal([
-      'set -e',
-      TYPECHECK_COMMAND,
-      deriveTestCommand(input.spec),
-      'git diff --name-only',
-      `grep -F RICKY_MASTER_REVIEW_READY ${shellQuote(`${input.artifactsDir}/review-codex.md`)}`,
-      'echo RICKY_MASTER_FINAL_VALIDATION_READY',
-    ].join('\n'))},`,
+    `      command: ${literal(finalHardValidationCommands.join('\n'))},`,
     '      captureOutput: true,',
     '      failOnError: true,',
     '    })',
@@ -691,14 +709,19 @@ function buildMasterTasks(plan: MasterExecutionPlan): WorkflowTask[] {
 
 function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan, spec: NormalizedWorkflowSpec): DeterministicGate[] {
   const testCommand = deriveTestCommand(spec);
+  const listedValidationOnly = usesOnlyListedValidationCommands(spec);
+  const finalValidationCommand = listedValidationOnly
+    ? executableAcceptanceCommandsForSpec(spec).join(' && ')
+    : `{ ${TYPECHECK_COMMAND}; } && ${testCommand}`;
+  const safeFinalValidationCommand = finalValidationCommand || "printf '%s\\n' 'No executable validation commands listed by spec.'";
   return [
     gate('skill-boundary-metadata-gate', `test -f ${artifactsDir}/skill-application-boundary.json`, 'file_exists', true, ['prepare-context'], 'pre_review'),
     gate('child-workflow-file-gate', plan.children.map((child) => `test -f ${child.workflowFilePath}`).join(' && '), 'file_exists', true, ['materialize-child-workflows'], 'pre_review'),
-    gate('initial-soft-validation', `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
+    gate('initial-soft-validation', listedValidationOnly ? safeFinalValidationCommand : `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
     gate('final-review-pass-gate', `grep -F RICKY_MASTER_REVIEW_READY ${artifactsDir}/review-codex.md`, 'output_contains', true, ['review-child-evidence'], 'final'),
-    gate('final-hard-validation', `{ ${TYPECHECK_COMMAND}; } && ${testCommand}`, 'exit_code', true, ['final-review-pass-gate'], 'final'),
+    gate('final-hard-validation', safeFinalValidationCommand, 'exit_code', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', 'git diff --name-only', 'output_contains', true, ['final-hard-validation'], 'final'),
-    gate('regression-gate', testCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
+    gate('regression-gate', listedValidationOnly ? safeFinalValidationCommand : testCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
   ];
 }
 
