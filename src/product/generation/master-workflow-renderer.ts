@@ -5,7 +5,7 @@ import {
   DEFAULT_RETRY_MAX_ATTEMPTS,
 } from '../../shared/constants.js';
 import { planMasterExecution, type ChildWorkflowPlan, type MasterExecutionPlan } from '../orchestration/index.js';
-import { deriveTestCommand } from './template-renderer.js';
+import { deriveTestCommand, shouldDisableMasterDecomposition } from './template-renderer.js';
 import { buildFinalReviewPassGateCommand } from './final-review-gate.js';
 import { markdownLabelFields } from './workforce-persona-writer.js';
 import type {
@@ -75,6 +75,7 @@ const MASTER_FILE_COUNT_THRESHOLD = 12;
 export function shouldUseMasterExecutionWorkflow(spec: NormalizedWorkflowSpec): boolean {
   const text = workflowText(spec);
   if (!IMPLEMENTATION_PATTERN.test(text)) return false;
+  if (shouldDisableMasterDecomposition(spec)) return false;
   if (MASTER_EXPLICIT_PATTERN.test(text)) return true;
   if (hasSinglePrWorktreeContract(text)) return false;
   if (spec.targetFiles.length >= MASTER_FILE_COUNT_THRESHOLD) return true;

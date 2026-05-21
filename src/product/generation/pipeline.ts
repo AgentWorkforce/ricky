@@ -16,7 +16,7 @@ import { selectPattern } from './pattern-selector.js';
 import { refineWithLlm } from './refine-with-llm.js';
 import { loadSkills } from './skill-loader.js';
 import { renderMasterExecutionWorkflow, shouldUseMasterExecutionWorkflow } from './master-workflow-renderer.js';
-import { renderWorkflow } from './template-renderer.js';
+import { renderWorkflow, shouldHonorStaticValidationOnly } from './template-renderer.js';
 import {
   applyPersonaArtifactToRenderedArtifact,
   detectSpecIntentMismatch,
@@ -533,10 +533,11 @@ export function validateGeneratedArtifact(
       `Rendered workflow uses rg without a grep fallback in: ${unguardedRipgrepGates.map((gate) => gate.name).join(', ')}.`,
     ));
   }
-  if (!/npx tsc --noEmit/.test(content)) {
+  const staticValidationOnly = spec ? shouldHonorStaticValidationOnly(spec) : false;
+  if (!staticValidationOnly && !/npx tsc --noEmit/.test(content)) {
     issues.push(blockingIssue('validation', 'TYPECHECK_GATE_MISSING', 'Rendered workflow has no typecheck gate.'));
   }
-  if (!/vitest|npm test/.test(content)) {
+  if (!staticValidationOnly && !/vitest|npm test/.test(content)) {
     issues.push(blockingIssue('validation', 'TEST_GATE_MISSING', 'Rendered workflow has no test gate.'));
   }
   if (!/git diff --(?:name-only|name-status)/.test(content) && !/['"]diff['"],\s*['"]--name-status['"]/.test(content)) {

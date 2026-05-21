@@ -289,6 +289,13 @@ function buildGates(
   const typecheckCommand = 'npx tsc --noEmit';
   const acceptanceCommands = spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate));
   const executableAcceptanceCommands = acceptanceCommands.filter((cmd) => !cmd.startsWith("printf '%s\\n'"));
+  const validationCommands = validationCommandsForSpec(spec, typecheckCommand, testCommand, acceptanceCommands);
+  const executableValidationCommands = validationCommandsForSpec(
+    spec,
+    typecheckCommand,
+    testCommand,
+    executableAcceptanceCommands,
+  );
   const skillBoundaryPath = `${artifactsDir}/skill-application-boundary.json`;
 
   return [
@@ -302,7 +309,7 @@ function buildGates(
     ),
     gate('lead-plan-gate', buildLeadPlanGateCommand(`${artifactsDir}/lead-plan.md`), 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('post-implementation-file-gate', fileGateCommand, 'file_exists', true, ['implement-artifact'], 'pre_review'),
-    gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
+    gate('initial-soft-validation', validationCommands.join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
     gate(
       'fix-loop-report-gate',
       [
@@ -316,7 +323,7 @@ function buildGates(
     ),
     gate('post-fix-verification-gate', fileGateCommand, 'file_exists', true, ['fix-loop-report-gate'], 'post_fix'),
     gate('active-reference-gate', activeReferenceCommand, 'deterministic_gate', true, ['post-fix-verification-gate'], 'post_fix'),
-    gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['active-reference-gate'], 'post_fix'),
+    gate('post-fix-validation', executableValidationCommands.join(' && '), 'exit_code', false, ['active-reference-gate'], 'post_fix'),
     gate(
       'codex-fix-loop-report-gate',
       [
@@ -328,7 +335,7 @@ function buildGates(
       ['fix-loop-codex'],
       'post_fix',
     ),
-    gate('post-codex-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
+    gate('post-codex-fix-validation', executableValidationCommands.join(' && '), 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
     gate(
       'final-review-pass-gate',
       [
@@ -341,9 +348,16 @@ function buildGates(
       ['final-fix-codex'],
       'final',
     ),
-    gate('final-hard-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
+    gate('final-hard-validation', executableValidationCommands.join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', gitDiffCommand, 'artifact_exists', true, ['final-hard-validation'], 'final'),
-    gate('regression-gate', isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
+    gate(
+      'regression-gate',
+      shouldHonorStaticValidationOnly(spec) ? executableValidationCommands.join(' && ') : (isCodeWorkflow ? 'npx vitest run' : 'git diff --check'),
+      'exit_code',
+      true,
+      ['git-diff-gate'],
+      'regression',
+    ),
     ...(usingManifest
       ? [
           gate(
@@ -706,15 +720,28 @@ function buildGeneratedContextPackage(
   const deliverables = spec.targetFiles.length > 0
     ? spec.targetFiles
     : ['A generated workflow artifact and any requested output files'];
-  const verificationCommands = [
-    'file_exists gate for declared targets',
-    'deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion',
-    'active-reference gate for deleted manifest paths',
-    'npx tsc --noEmit',
-    deriveTestCommand(spec),
-    'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff',
-    'PR URL or explicit result summary',
-  ];
+  const verificationCommands = shouldHonorStaticValidationOnly(spec)
+    ? [
+        'file_exists gate for declared targets',
+        'deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion',
+        ...validationCommandsForSpec(
+          spec,
+          'npx tsc --noEmit',
+          deriveTestCommand(spec),
+          spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate)),
+        ),
+        'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff',
+        'PR URL or explicit result summary',
+      ]
+    : [
+        'file_exists gate for declared targets',
+        'deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion',
+        'active-reference gate for deleted manifest paths',
+        'npx tsc --noEmit',
+        deriveTestCommand(spec),
+        'git diff gate comparing git diff --name-status against the declared change inventory and requiring a non-empty diff',
+        'PR URL or explicit result summary',
+      ];
   const acceptanceContract = {
     description: spec.description,
     desiredAction: spec.desiredAction,
@@ -1341,6 +1368,54 @@ export function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
   return 'npx vitest run';
 }
 
+export function shouldHonorStaticValidationOnly(spec: NormalizedWorkflowSpec): boolean {
+  return /\b(?:static[- ]only|static validation only|static validation|workflow\/action validation only|yaml parsing|shell syntax)\b/i.test(specContractText(spec))
+    || /\b(?:do not|don't|must not)\s+(?:add|include|emit|run)[^.:\n]*(?:root|monorepo|typecheck|tsc|vitest|workspace test|npm test)/i.test(specContractText(spec))
+    || /\b(?:only|required)\s+(?:local\s+)?(?:static\s+)?validation commands?\b/i.test(specContractText(spec))
+    || /\b(?:forbidden|do not include)[^.:\n]*(?:npm run typecheck|npx tsc|npx vitest|npm test --workspace)\b/i.test(specContractText(spec));
+}
+
+export function shouldDisableMasterDecomposition(spec: NormalizedWorkflowSpec): boolean {
+  const text = specContractText(spec);
+  return shouldHonorStaticValidationOnly(spec)
+    || /\b(?:one|single)\s+(?:bounded\s+)?workflow artifact\b/i.test(text)
+    || /\b(?:do not|don't|must not)\s+(?:generate|include|use|emit)[^.:\n]*(?:child workflows?|nested child|ricky run|multi[- ]child|master executor)/i.test(text)
+    || /\b(?:no|without)\s+(?:child workflows?|nested child|ricky run|multi[- ]child fanout)\b/i.test(text);
+}
+
+function specContractText(spec: NormalizedWorkflowSpec): string {
+  return [
+    spec.description,
+    spec.targetContext,
+    spec.desiredAction.summary,
+    ...spec.constraints.map((constraint) => constraint.constraint),
+    ...spec.evidenceRequirements.map((requirement) => requirement.requirement),
+    ...spec.acceptanceGates.map((gate) => gate.gate),
+  ].filter(Boolean).join('\n');
+}
+
+function validationCommandsForSpec(
+  spec: NormalizedWorkflowSpec,
+  typecheckCommand: string,
+  testCommand: string,
+  acceptanceCommands: readonly string[],
+): string[] {
+  if (!shouldHonorStaticValidationOnly(spec)) {
+    return [typecheckCommand, testCommand, ...acceptanceCommands].filter((command) => command.trim().length > 0);
+  }
+
+  const executableAcceptanceCommands = acceptanceCommands.filter((cmd) => !cmd.startsWith("printf '%s\\n'"));
+  const commands = executableAcceptanceCommands.length > 0
+    ? executableAcceptanceCommands
+    : spec.acceptanceGates
+        .map((gate) => mapAcceptanceGateToCommand(gate.gate))
+        .filter((cmd) => !cmd.startsWith("printf '%s\\n'"));
+  const unique = [...new Set(commands.map((command) => command.trim()).filter(Boolean))];
+  return unique.length > 0
+    ? unique
+    : [`printf '%s\\n' 'No executable static validation command was declared by the spec.'`];
+}
+
 const IN_REPO_SOURCE_ROOTS = new Set([
   'packages',
   'apps',
@@ -1404,13 +1479,13 @@ function mapAcceptanceGateToCommand(gateText: string): string {
   if (/\bvitest\b/i.test(gateText)) return gateText.trim();
   if (/\bnpm test\b/i.test(gateText)) return 'npm test';
   if (/\bfile exists|file_exists\b/i.test(gateText)) return `test -f ${shellQuote(gateText.replace(/.*(?:file exists|file_exists)\s*:?\s*/i, '').trim() || '.')}`;
-  if (/^\s*(?:grep|node|npx|npm|test)\b/i.test(gateText)) return gateText.trim();
+  if (/^\s*(?:bash|command|git|grep|if|node|npx|npm|ruby|test|actionlint)\b/i.test(gateText)) return gateText.trim();
   return `printf '%s\\n' ${shellQuote(`Manual acceptance gate: ${gateText}`)}`;
 }
 
 function extractInlineShellCommand(text: string): string | null {
   const candidates = [...text.matchAll(/`([^`\n]+)`/g)].map((match) => match[1].trim());
-  return candidates.find((candidate) => /^(?:node|npx|npm|grep|test)\b/i.test(candidate)) ?? null;
+  return candidates.find((candidate) => /^(?:bash|command|git|grep|if|node|npx|npm|ruby|test|actionlint)\b/i.test(candidate)) ?? null;
 }
 
 function isCodeWritingWorkflow(spec: NormalizedWorkflowSpec): boolean {

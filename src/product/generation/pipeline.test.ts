@@ -510,6 +510,66 @@ describe('workflow generation pipeline', () => {
     expect(artifact(singlePr).content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
   });
 
+  it('honors static-only single-workflow specs instead of emitting child ricky runs or root gates', () => {
+    const result = generate({
+      spec: spec({
+        description: [
+          'Implement issue 311 per-service deploy workflows.',
+          'Generated workflow constraints:',
+          '- Generate one bounded workflow artifact for this issue.',
+          '- Do not generate nested child workflow files and do not include any `ricky run ...` commands inside the generated artifact.',
+          '- Do not include these commands anywhere in the generated artifact: `npm run typecheck`, `npx tsc`, `npx vitest`, `npm test --workspace`.',
+          '- The only required validation commands are the acceptance commands listed below, plus optional `actionlint` if it is already installed.',
+        ].join('\n'),
+        constraints: [
+          'Do not add generic root or monorepo validation gates.',
+          'Use only local static validation commands.',
+        ],
+        targetFiles: [
+          '.github/workflows/deploy-relayauth.yml',
+          '.github/workflows/deploy-relayfile.yml',
+          '.github/workflows/deploy-sage.yml',
+          '.github/workflows/deploy-sage-production-worker.yml',
+          '.github/workflows/bump-sage-worker.yml',
+          '.github/workflows/_deploy-cloud-stage.yml',
+          '.github/actions/run-cloudflare-d1-migrations/action.yml',
+          '.github/actions/run-cloudflare-d1-migrations/run.sh',
+          'specs/311-per-service-deploy-workflows.md',
+          'workflows/generated/issue-311-static-validation.ts',
+          '.workflow-artifacts/issue-311/ricky-static-validation.md',
+          'README.md',
+          'docs/deploy.md',
+        ],
+        acceptanceGates: [
+          'ruby -e \'require "yaml"; ARGV.each { |f| YAML.load_file(f); puts f }\' .github/workflows/deploy-relayauth.yml .github/workflows/deploy-relayfile.yml .github/workflows/deploy-sage.yml .github/workflows/deploy-sage-production-worker.yml .github/workflows/bump-sage-worker.yml .github/workflows/_deploy-cloud-stage.yml .github/actions/run-cloudflare-d1-migrations/action.yml',
+          'bash -n .github/actions/run-cloudflare-d1-migrations/run.sh',
+          'git diff --check origin/main...HEAD',
+          'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/deploy-relayauth.yml .github/workflows/deploy-relayfile.yml .github/workflows/deploy-sage.yml .github/workflows/deploy-sage-production-worker.yml .github/workflows/bump-sage-worker.yml .github/workflows/_deploy-cloud-stage.yml; else echo actionlint-not-installed; fi',
+        ],
+      }),
+      artifactPath: 'workflows/generated/issue-311-static-validation.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.masterExecutionPlan).toBeUndefined();
+    const rendered = artifact(result);
+    expect(rendered.content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+
+    const commands = renderedStepCommands(rendered.content).join('\n---\n');
+    expect(commands).not.toContain('ricky run');
+    expect(commands).not.toContain('npm run typecheck');
+    expect(commands).not.toContain('npx tsc');
+    expect(commands).not.toContain('npx vitest');
+    expect(commands).not.toContain('npm test --workspace');
+    expect(commands).toContain('ruby -e');
+    expect(commands).toContain('bash -n .github/actions/run-cloudflare-d1-migrations/run.sh');
+    expect(commands).toContain('git diff --check origin/main...HEAD');
+    expect(commands).toContain('actionlint .github/workflows/deploy-relayauth.yml');
+    expect(gate(rendered, 'final-hard-validation').command).toContain('ruby -e');
+    expect(gate(rendered, 'final-hard-validation').command).not.toContain('npx tsc');
+    expect(gate(rendered, 'regression-gate').command).not.toContain('npx vitest');
+  });
+
   it('ignores inert fenced worktree labels when deciding single-PR master fallback routing', () => {
     const fencedLabelsOnly = generate({
       spec: spec({
