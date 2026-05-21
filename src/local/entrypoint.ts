@@ -2372,6 +2372,22 @@ function classifyCoordinatorBlocker(
   const combined = [result.error, ...result.stderr, ...result.stdout].filter(Boolean).join('\n');
   const runtimePackage = npxNoInstallPackage(result.invocation.args);
 
+  if (matchesRuntimeHandoffStall(combined)) {
+    return blocker({
+      code: 'RUNTIME_HANDOFF_STALLED',
+      category: 'resource',
+      detectedDuring: 'launch',
+      message: `Runtime handoff stalled before workflow execution: ${signal}.`,
+      missing: ['local Agent Relay broker startup acknowledgement'],
+      found: [`cwd=${result.cwd}`, `status=${result.status}`, `exitCode=${result.exitCode ?? 'unknown'}`],
+      steps: [
+        'Stop stale agent-relay or Ricky child processes, then retry the same workflow artifact.',
+        'Inspect the local Ricky run logs for a broker startup timeout or missing runtime acknowledgement.',
+        command,
+      ],
+    });
+  }
+
   if (/Workflow runtime reported failure despite a zero process exit|\[workflow\]\s+FAILED:/i.test(combined)) {
     return blocker({
       code: 'INVALID_ARTIFACT',
@@ -2463,22 +2479,6 @@ function classifyCoordinatorBlocker(
     });
   }
 
-  if (matchesRuntimeHandoffStall(combined)) {
-    return blocker({
-      code: 'RUNTIME_HANDOFF_STALLED',
-      category: 'resource',
-      detectedDuring: 'launch',
-      message: `Runtime handoff stalled before workflow execution: ${signal}.`,
-      missing: ['local Agent Relay broker startup acknowledgement'],
-      found: [`cwd=${result.cwd}`, `status=${result.status}`, `exitCode=${result.exitCode ?? 'unknown'}`],
-      steps: [
-        'Stop stale agent-relay or Ricky child processes, then retry the same workflow artifact.',
-        'Inspect the local Ricky run logs for a broker startup timeout or missing runtime acknowledgement.',
-        command,
-      ],
-    });
-  }
-
   if (/(?:econnrefused|enotfound|network|timeout|timed out|dns)/i.test(combined)) {
     return blocker({
       code: 'NETWORK_UNREACHABLE',
@@ -2514,6 +2514,11 @@ function npxNoInstallPackage(args: string[]): string | undefined {
 
 function matchesRuntimeHandoffStall(text: string): boolean {
   const patterns = [
+    /\bBroker did not report API port within \d+ms\b/i,
+    /\bBroker process exited with code \d+ before becoming ready\b/i,
+    /\bBroker process exited with code \d+ during initial handshake\b/i,
+    /\bFailed to start broker:/i,
+    /\bBroker stdout not available\b/i,
     /\b(?:local|runtime|agent[-\s]?relay)\s+(?:broker\s+)?(?:handoff|startup).{0,80}\b(?:stall(?:ed)?|hung|timeout|timed\s+out)\b/i,
     /\b(?:broker|agent[-\s]?relay\s+broker).{0,80}\b(?:startup|start|ack|acknowledg(?:e|ement)).{0,80}\b(?:timeout|timed\s+out|stall(?:ed)?|hung)\b/i,
     /\b(?:timeout|timed\s+out).{0,80}\b(?:broker|agent[-\s]?relay\s+broker).{0,80}\b(?:startup|ack|acknowledg(?:e|ement))\b/i,

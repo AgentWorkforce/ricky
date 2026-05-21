@@ -513,7 +513,14 @@ describe('workflow generation pipeline', () => {
   it('honors explicit single-workflow constraints before file-count master fallback', () => {
     const result = generate({
       spec: spec({
-        description: 'Implement per-service deploy workflows with a single local workflow and static validation only.',
+        description: [
+          'Implement cloud issue 311 per-service deploy workflows with a single local workflow and static validation only.',
+          'Generate a single local implementation workflow.',
+          'Do not decompose this into child workflows.',
+          'Do not materialize child workflow files.',
+          'Do not invoke ricky run recursively.',
+          'Do not require an Agent Relay broker for implementation.',
+        ].join('\n'),
         constraints: [
           'Do not generate child workflows.',
           'Use only listed validation commands and no generic root gates.',
@@ -522,20 +529,20 @@ describe('workflow generation pipeline', () => {
           '.github/workflows/deploy-sage.yml',
           '.github/workflows/deploy-relayauth.yml',
           '.github/workflows/deploy-relayfile.yml',
+          '.github/workflows/deploy-sage-production-worker.yml',
           '.github/workflows/_deploy-cloud-stage.yml',
           '.github/actions/run-cloudflare-d1-migrations/action.yml',
-          'scripts/run-cloudflare-d1-migrations.sh',
+          '.github/actions/run-cloudflare-d1-migrations/run.sh',
           '.github/workflows/bump-sage-worker.yml',
           'infra/sage.ts',
           'infra/relayauth.ts',
           'infra/relayfile.ts',
-          'package.json',
           'README.md',
           'docs/deploy.md',
         ],
         acceptanceGates: [
           'git diff --check',
-          'bash -n scripts/run-cloudflare-d1-migrations.sh',
+          'bash -n .github/actions/run-cloudflare-d1-migrations/run.sh',
           'actionlint .github/workflows/deploy-sage.yml .github/workflows/deploy-relayauth.yml .github/workflows/deploy-relayfile.yml',
           "ruby -e \"require 'yaml'; YAML.load_file('.github/workflows/deploy-sage.yml')\"",
         ],
@@ -548,17 +555,19 @@ describe('workflow generation pipeline', () => {
     const rendered = artifact(result);
     expect(rendered.content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
     expect(rendered.content).not.toContain('Master plan:');
-    expect(rendered.content).not.toContain('ricky run');
+    expect(rendered.content).not.toContain("ricky run 'workflows/generated");
 
-    for (const gateName of ['initial-soft-validation', 'post-fix-validation', 'final-hard-validation', 'regression-gate']) {
+    for (const gateName of ['initial-soft-validation', 'post-fix-validation', 'post-codex-fix-validation', 'final-hard-validation']) {
       const command = gate(rendered, gateName).command;
       expect(command).toContain('git diff --check');
-      expect(command).toContain('bash -n scripts/run-cloudflare-d1-migrations.sh');
+      expect(command).toContain('bash -n .github/actions/run-cloudflare-d1-migrations/run.sh');
       expect(command).toContain('actionlint .github/workflows/deploy-sage.yml');
       expect(command).toContain("ruby -e \"require 'yaml'; YAML.load_file('.github/workflows/deploy-sage.yml')\"");
       expect(command).not.toContain('npx tsc --noEmit');
       expect(command).not.toContain('npx vitest run');
     }
+
+    expect(gate(rendered, 'regression-gate').command).toBe('git diff --check');
   });
 
   it('ignores inert fenced worktree labels when deciding single-PR master fallback routing', () => {
@@ -1911,6 +1920,45 @@ describe('workflow generation pipeline', () => {
     expect(initialValidation.failOnError).toBe(false);
     expect(postFixValidation.failOnError).toBe(false);
     expect(finalHardValidation.failOnError).toBe(true);
+  });
+
+  it('uses only listed validation commands when the spec forbids generic root gates', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow-only deploy plumbing.',
+        targetFiles: [
+          '.github/workflows/deploy-sage.yml',
+          '.github/actions/run-cloudflare-d1-migrations/run.sh',
+        ],
+        constraints: [
+          'Use only the validation commands listed in this spec.',
+          'Do not add generic root gates such as npm run typecheck, npx tsc, or npx vitest.',
+        ],
+        acceptanceGates: [
+          'git diff --check',
+          'bash -n .github/actions/run-cloudflare-d1-migrations/run.sh',
+          'actionlint .github/workflows/deploy-sage.yml',
+        ],
+      }),
+      artifactPath: 'workflows/generated/static-validation-only.ts',
+    });
+
+    const artifactResult = artifact(result);
+    const initialValidation = gate(artifactResult, 'initial-soft-validation');
+    const postFixValidation = gate(artifactResult, 'post-fix-validation');
+    const finalHardValidation = gate(artifactResult, 'final-hard-validation');
+    const regressionGate = gate(artifactResult, 'regression-gate');
+
+    for (const validationGate of [initialValidation, postFixValidation, finalHardValidation]) {
+      expect(validationGate.command).toContain('git diff --check');
+      expect(validationGate.command).toContain('bash -n .github/actions/run-cloudflare-d1-migrations/run.sh');
+      expect(validationGate.command).toContain('actionlint .github/workflows/deploy-sage.yml');
+      expect(validationGate.command).not.toContain('npx tsc --noEmit');
+      expect(validationGate.command).not.toContain('npx vitest run');
+    }
+    expect(regressionGate.command).toBe('git diff --check');
+    expect(artifactResult.gates.map((gate) => gate.command).join('\n')).not.toContain('npx tsc --noEmit');
+    expect(artifactResult.gates.map((gate) => gate.command).join('\n')).not.toContain('npx vitest run');
   });
 
   it('excludes prose-only acceptance gates from post-fix and final-hard validation', () => {
