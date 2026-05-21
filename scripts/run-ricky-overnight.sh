@@ -925,6 +925,16 @@ artifact_signoff_has_marker() {
   [[ -f "$signoff_path" ]] && grep -q "$marker" "$signoff_path"
 }
 
+artifact_review_declares_pass() {
+  local review_path="$1"
+  local ready_marker="$2"
+
+  [[ -f "$review_path" ]] \
+    && grep -q "$ready_marker" "$review_path" \
+    && grep -Eq '^(PASS|\*\*PASS\*\*)$' "$review_path" \
+    && ! grep -Eq '^(FAIL|\*\*FAIL\*\*)$' "$review_path"
+}
+
 append_unique_lines_from_file() {
   local source_file="$1"
   local destination_file="$2"
@@ -1393,10 +1403,10 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave13-master-executor/implement-master-executor/signoff.md \
         'RICKY_MASTER_EXECUTOR_IMPLEMENTED' \
-        && artifact_signoff_has_marker \
+        && artifact_review_declares_pass \
         .workflow-artifacts/wave13-master-executor/implement-master-executor/review-claude.md \
         'RICKY_MASTER_EXECUTOR_CLAUDE_REVIEW_READY' \
-        && artifact_signoff_has_marker \
+        && artifact_review_declares_pass \
         .workflow-artifacts/wave13-master-executor/implement-master-executor/review-codex.md \
         'RICKY_MASTER_EXECUTOR_CODEX_REVIEW_READY' \
         && test -f src/product/orchestration/types.ts \

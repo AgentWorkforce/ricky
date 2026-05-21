@@ -107,4 +107,12 @@ describe('overnight harness queue-exhaustion contract', () => {
       'runner_executed_unexpected_workflow "$workflow_path" "$workflow_runs_start_line" "$runner_output"',
     );
   });
+
+  it('does not treat wave13 as satisfied when a stored review is only ready but still explicitly FAIL', () => {
+    expect(overnightScript).toContain('artifact_review_declares_pass()');
+    expect(overnightScript).toContain("grep -Eq '^(PASS|\\*\\*PASS\\*\\*)$'");
+    expect(overnightScript).toContain("! grep -Eq '^(FAIL|\\*\\*FAIL\\*\\*)$'");
+    expect(overnightScript).toContain('.workflow-artifacts/wave13-master-executor/implement-master-executor/review-codex.md');
+    expect(overnightScript).toContain('.workflow-artifacts/wave13-master-executor/implement-master-executor/review-claude.md');
+  });
 });
