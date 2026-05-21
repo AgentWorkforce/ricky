@@ -111,6 +111,7 @@ export type LocalBlockerCode =
   | 'MISSING_BINARY'
   | 'INVALID_ARTIFACT'
   | 'UNSUPPORTED_RUNTIME'
+  | 'RUNTIME_HANDOFF_STALLED'
   | 'CREDENTIALS_REJECTED'
   | 'STEP_TIMEOUT'
   | 'WORKDIR_DIRTY'
@@ -2462,6 +2463,22 @@ function classifyCoordinatorBlocker(
     });
   }
 
+  if (matchesRuntimeHandoffStall(combined)) {
+    return blocker({
+      code: 'RUNTIME_HANDOFF_STALLED',
+      category: 'resource',
+      detectedDuring: 'launch',
+      message: `Runtime handoff stalled before workflow execution: ${signal}.`,
+      missing: ['local Agent Relay broker startup acknowledgement'],
+      found: [`cwd=${result.cwd}`, `status=${result.status}`, `exitCode=${result.exitCode ?? 'unknown'}`],
+      steps: [
+        'Stop stale agent-relay or Ricky child processes, then retry the same workflow artifact.',
+        'Inspect the local Ricky run logs for a broker startup timeout or missing runtime acknowledgement.',
+        command,
+      ],
+    });
+  }
+
   if (/(?:econnrefused|enotfound|network|timeout|timed out|dns)/i.test(combined)) {
     return blocker({
       code: 'NETWORK_UNREACHABLE',
@@ -2493,6 +2510,20 @@ function npxNoInstallPackage(args: string[]): string | undefined {
   const noInstallIndex = args.indexOf('--no-install');
   if (noInstallIndex === -1) return undefined;
   return args[noInstallIndex + 1];
+}
+
+function matchesRuntimeHandoffStall(text: string): boolean {
+  const patterns = [
+    /\b(?:local|runtime|agent[-\s]?relay)\s+(?:broker\s+)?(?:handoff|startup).{0,80}\b(?:stall(?:ed)?|hung|timeout|timed\s+out)\b/i,
+    /\b(?:broker|agent[-\s]?relay\s+broker).{0,80}\b(?:startup|start|ack|acknowledg(?:e|ement)).{0,80}\b(?:timeout|timed\s+out|stall(?:ed)?|hung)\b/i,
+    /\b(?:timeout|timed\s+out).{0,80}\b(?:broker|agent[-\s]?relay\s+broker).{0,80}\b(?:startup|ack|acknowledg(?:e|ement))\b/i,
+    /\bUNSUPPORTED_RUNTIME\b.{0,120}\b(?:broker|handoff|runtime\s+startup)\b/i,
+  ];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine);
+    if (patterns.some((pattern) => pattern.test(line))) return true;
+  }
+  return false;
 }
 
 // Match credential failures by requiring an explicit rejection signal — bare

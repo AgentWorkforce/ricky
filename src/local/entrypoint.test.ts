@@ -2411,6 +2411,48 @@ describe('runLocal', () => {
       expect(result.nextActions.join('\n')).not.toMatch(/rerun.*later|vague/i);
     });
 
+    it('classifies local broker startup timeout as a runtime handoff stall', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stdout: [],
+        stderr: ['local broker startup timeout after 30000ms waiting for Agent Relay broker acknowledgement'],
+      });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).toBe(2);
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'blocker',
+        blocker: {
+          code: 'RUNTIME_HANDOFF_STALLED',
+          category: 'resource',
+          detected_during: 'launch',
+          message: expect.stringContaining('Runtime handoff stalled before workflow execution'),
+          context: {
+            missing: ['local Agent Relay broker startup acknowledgement'],
+          },
+        },
+        evidence: {
+          failed_step: { id: 'runtime-launch', name: 'Local runtime execution' },
+          exit_code: 1,
+          logs: {
+            tail: ['local broker startup timeout after 30000ms waiting for Agent Relay broker acknowledgement'],
+            truncated: false,
+          },
+        },
+      });
+      expect(result.execution?.blocker?.code).not.toBe('UNSUPPORTED_RUNTIME');
+      expect(result.execution?.blocker?.recovery.steps.join('\n')).toContain('retry the same workflow artifact');
+    });
+
     it('extracts env recovery steps only from explicit missing-env messages', async () => {
       const localExecutor = memoryLocalExecutorOptions({
         exitCode: 1,

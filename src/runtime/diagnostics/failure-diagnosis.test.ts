@@ -38,6 +38,13 @@ describe('failure-diagnosis: blocker differentiation', () => {
     );
   });
 
+  it('classifies broker startup timeout as a handoff stall', () => {
+    expectDiagnosis(
+      { source: 'runtime', message: 'local broker startup timeout waiting for Agent Relay broker acknowledgement' },
+      BlockerClass.RuntimeHandoffStall,
+    );
+  });
+
   it('classifies handoff stall by source', () => {
     expectDiagnosis(
       { source: 'handoff', message: 'unspecified error' },

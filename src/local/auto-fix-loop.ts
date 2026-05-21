@@ -864,7 +864,10 @@ function isV1DirectBlocker(code: string | undefined): boolean {
 }
 
 function isExternalSetupBlocker(code: string | undefined): boolean {
-  return code === 'CREDENTIALS_REJECTED' || code === 'WORKDIR_DIRTY' || code === 'UNSUPPORTED_RUNTIME';
+  return code === 'CREDENTIALS_REJECTED'
+    || code === 'WORKDIR_DIRTY'
+    || code === 'UNSUPPORTED_RUNTIME'
+    || code === 'RUNTIME_HANDOFF_STALLED';
 }
 
 async function defaultWorkflowRepairer(input: WorkflowRepairInput): Promise<WorkflowRepairResult> {
