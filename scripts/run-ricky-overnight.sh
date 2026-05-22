@@ -1765,48 +1765,15 @@ repo_has_meaningful_delta() {
 }
 
 commit_if_clean_delta() {
+  # Auto-commit and auto-push directly to origin/main were disabled
+  # intentionally: this loop was shipping unreviewed changes straight to a
+  # shared branch (commits authored as "Miya"). Future progress capture
+  # belongs in a per-run branch + PR. Keep the function as a no-op so the
+  # callers don't need to change.
   local workflow_path="$1"
-  local push_output_file="$ARTIFACT_DIR/git-push.txt"
-  local ahead="0"
-  local behind="0"
-
-  if ! repo_has_meaningful_delta; then
-    log "no tracked/untracked repo delta after $workflow_path"
-    return 0
-  fi
-
-  validate_repo
-
-  local short
-  local head_advanced="false"
-  short="$(basename "$workflow_path" .ts)"
-  if repo_has_captured_head_delta; then
-    head_advanced="true"
-  fi
-
-  if meaningful_tracked_delta_exists || meaningful_untracked_delta_exists; then
-    git add -A ':!tmp/' ':!.workflow-artifacts/' ':!.trajectories/'
-    git commit -m "chore(overnight): capture $short progress" || true
-  elif [[ "$head_advanced" == "true" ]]; then
-    log "repo HEAD already advanced during $workflow_path; capturing committed state"
-  fi
-
-  : > "$push_output_file"
-  if ! git push origin main >"$push_output_file" 2>&1; then
-    cat "$push_output_file" >&2 || true
-    git fetch origin main:refs/remotes/origin/main >/dev/null 2>&1 || true
-    if git show-ref --verify --quiet refs/remotes/origin/main; then
-      read -r ahead behind < <(git rev-list --left-right --count HEAD...refs/remotes/origin/main)
-      log "push rejected after $workflow_path; local main diverged from origin/main (ahead=${ahead}, behind=${behind})"
-    else
-      log "push rejected after $workflow_path; unable to read refs/remotes/origin/main for divergence details"
-    fi
-    inspect_repo_changes
-    return 1
-  fi
-
-  git rev-parse HEAD > "$LAST_COMMIT_FILE"
+  log "auto-commit/auto-push disabled; skipping post-workflow capture for $workflow_path"
   inspect_repo_changes
+  return 0
 }
 
 workflow_hit_claude_rate_limit() {
