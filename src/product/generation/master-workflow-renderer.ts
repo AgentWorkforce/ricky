@@ -1,4 +1,6 @@
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
+import type { Nodes } from 'mdast';
+import { fromMarkdown } from 'mdast-util-from-markdown';
 import {
   DEFAULT_REPAIR_RETRY_ATTEMPTS,
   DEFAULT_RETRY_BACKOFF_MS,
@@ -87,10 +89,64 @@ export function shouldUseMasterExecutionWorkflow(spec: NormalizedWorkflowSpec): 
 }
 
 function hasSingleWorkflowVeto(text: string): boolean {
+  const parsedSignals = parseConstraintTextCandidates(text);
+  if (parsedSignals.length > 0 && parsedSignals.some(hasSingleWorkflowSignal)) return true;
+  return hasSingleWorkflowSignal(text);
+}
+
+function parseConstraintTextCandidates(text: string): string[] {
+  const jsonSignals = parseJsonTextCandidates(text);
+  if (jsonSignals.length > 0) return jsonSignals;
+
+  try {
+    const root = fromMarkdown(text);
+    return collectMarkdownText(root);
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonTextCandidates(text: string): string[] {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const values: string[] = [];
+    collectJsonStrings(parsed, values);
+    return values;
+  } catch {
+    return [];
+  }
+}
+
+function collectJsonStrings(value: unknown, values: string[]): void {
+  if (typeof value === 'string') {
+    values.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectJsonStrings(item, values);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) collectJsonStrings(item, values);
+  }
+}
+
+function collectMarkdownText(node: Nodes): string[] {
+  const ownText = 'value' in node && typeof node.value === 'string' ? [node.value] : [];
+  if (!('children' in node)) return ownText;
+  const childText = node.children.flatMap((child) => collectMarkdownText(child));
+  const combined = childText.join(' ').replace(/\s+/g, ' ').trim();
+  return combined ? [...ownText, combined] : ownText;
+}
+
+function hasSingleWorkflowSignal(text: string): boolean {
   return [
     /\b(?:single|one)\s+(?:local\s+)?workflow\b/i,
+    /\b(?:single|one)\s+(?:local\s+)?implementation\s+workflow\b/i,
     /\bno\s+child\s+workflows?\b/i,
+    /\bno\s+(?:nested|multi-child|multi child)\s+workflows?\b/i,
     /\b(?:do\s+not|don't|must\s+not|without)\s+(?:generate|emit|create|use|run)?\s*(?:any\s+)?child\s+workflows?\b/i,
+    /\b(?:do\s+not|don't|must\s+not)\s+(?:decompose|materialize\s+child\s+workflows?|invoke\s+`?ricky run`?\s+recursively|require\s+an?\s+Agent Relay broker)\b/i,
     /\b(?:static|deterministic)\s+validation\s+only\b/i,
   ].some((pattern) => pattern.test(text));
 }

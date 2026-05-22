@@ -296,6 +296,7 @@ function buildGates(
   const hardValidationCommand = buildValidationCommand(
     listedValidationOnly ? executableAcceptanceCommands : [typecheckCommand, testCommand, ...executableAcceptanceCommands],
   );
+  const regressionCommand = listedValidationOnly ? 'git diff --check' : isCodeWorkflow ? 'npx vitest run' : 'git diff --check';
   const skillBoundaryPath = `${artifactsDir}/skill-application-boundary.json`;
 
   return [
@@ -350,7 +351,7 @@ function buildGates(
     ),
     gate('final-hard-validation', hardValidationCommand, 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', gitDiffCommand, 'artifact_exists', true, ['final-hard-validation'], 'final'),
-    gate('regression-gate', listedValidationOnly ? hardValidationCommand : isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
+    gate('regression-gate', regressionCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
     ...(usingManifest
       ? [
           gate(
@@ -1371,9 +1372,9 @@ export function usesOnlyListedValidationCommands(spec: NormalizedWorkflowSpec): 
   ].some((pattern) => pattern.test(text));
 }
 
-function buildValidationCommand(commands: string[]): string {
+function buildValidationCommand(commands: string[], fallback = 'git diff --check'): string {
   const executableCommands = commands.filter(isExecutableAcceptanceCommand);
-  return executableCommands.join(' && ') || "printf '%s\\n' 'No executable validation commands listed by spec.'";
+  return executableCommands.join(' && ') || fallback;
 }
 
 function isExecutableAcceptanceCommand(command: string): boolean {

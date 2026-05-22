@@ -2453,6 +2453,40 @@ describe('runLocal', () => {
       expect(result.execution?.blocker?.recovery.steps.join('\n')).toContain('retry the same workflow artifact');
     });
 
+    it('classifies SDK broker readiness failures inside workflow failure output as runtime handoff stalls', async () => {
+      const brokerFailure = [
+        '[workflow] FAILED: Step "implement-slice" failed after 2 retries: Broker did not report API port within 45000ms',
+        '(pid=41079; cwd=/private/tmp/cloud-ricky-309; command=/bin/agent-relay-broker init --name cloud-ricky-309 --channels wf-ricky-child-update-providers;',
+        'stdout_tail=<empty>; stderr_tail=relaycast ws event ignored by inbound mapper)',
+      ].join(' ');
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stdout: [brokerFailure],
+        stderr: ['Workflow runtime reported failure despite a zero process exit: ' + brokerFailure],
+      });
+
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.blocker).toMatchObject({
+        code: 'RUNTIME_HANDOFF_STALLED',
+        category: 'resource',
+        context: {
+          missing: ['local Agent Relay broker startup acknowledgement'],
+          found: expect.arrayContaining(['cwd=/repo', 'status=failed', 'exitCode=1']),
+        },
+      });
+      expect(result.execution?.blocker?.code).not.toBe('INVALID_ARTIFACT');
+      expect(result.execution?.blocker?.code).not.toBe('UNSUPPORTED_RUNTIME');
+    });
+
     it('extracts env recovery steps only from explicit missing-env messages', async () => {
       const localExecutor = memoryLocalExecutorOptions({
         exitCode: 1,
