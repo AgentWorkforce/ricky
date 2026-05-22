@@ -111,18 +111,11 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).not.toMatch(/^\s*command: "set -e\\nricky run .*--no-auto-fix/m);
     expect(rendered.content).toContain('MASTER_EXECUTOR_RESULT_READY');
     expect(rendered.content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
-    // Child workflow sources live in the .children.json sidecar so the
-    // master content stays under ARG_MAX. Assert child-only strings are in
-    // the sidecar payload rather than inlined into the master TS.
-    const childrenSidecarPath = 'workflows/generated/runtime-master.children.json';
-    expect(rendered.sidecarFiles?.[childrenSidecarPath], 'children sidecar attached').toBeDefined();
-    const childrenSidecar = rendered.sidecarFiles![childrenSidecarPath];
-    expect(childrenSidecar).toContain('review-claude');
-    expect(childrenSidecar).toContain('final-fix-codex');
-    expect(childrenSidecar).toContain('RICKY_CHILD_FRESH_EYES_LOOP_READY');
+    expect(rendered.content).toContain('review-claude');
+    expect(rendered.content).toContain('final-fix-codex');
+    expect(rendered.content).toContain('RICKY_CHILD_FRESH_EYES_LOOP_READY');
     expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"master-lead\", repairRetries: 2 })");
-    // validator-claude is a child-side agent; assert against the sidecar.
-    expect(childrenSidecar.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(rendered.content.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(rendered.content.replace(/\\+"/g, '"')).toMatch(
       /\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/,
     );

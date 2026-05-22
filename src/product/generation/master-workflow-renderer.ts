@@ -182,16 +182,6 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
   const gates = buildMasterGates(artifactsDir, plan, input.spec);
   const skillApplicationEvidence = buildMasterSkillEvidence(input.skills);
   const toolSelections = buildMasterToolSelections(plan);
-  // Sidecars travel with the generated workflow on disk. Embedding the spec
-  // and the child-source map inline ballooned the master workflow past
-  // ARG_MAX (spawn E2BIG) every time `materialize-child-workflows` ran; the
-  // sidecars push that payload off of argv entirely.
-  const artifactPathNoExt = artifactPath.replace(/\.ts$/, '');
-  const specSidecarPath = `${artifactPathNoExt}.spec.md`;
-  const childrenSidecarPath = `${artifactPathNoExt}.children.json`;
-  const childSources = Object.fromEntries(
-    plan.children.map((child) => [child.workflowFilePath, childWorkflowSource(child, input.spec, specSidecarPath)]),
-  );
   const content = renderMasterSource({
     spec: input.spec,
     pattern: input.pattern,
@@ -201,9 +191,6 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
     plan,
     skills: input.skills,
     skillApplicationEvidence,
-    childSources,
-    specSidecarPath,
-    childrenSidecarPath,
   });
 
   return {
@@ -223,10 +210,6 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
       skillMatches: input.skills.matches,
       toolSelections,
       artifactsDir,
-      sidecarFiles: {
-        [specSidecarPath]: input.spec.description,
-        [childrenSidecarPath]: `${JSON.stringify(childSources, null, 2)}\n`,
-      },
     },
   };
 }
@@ -257,10 +240,10 @@ function renderMasterSource(input: {
   plan: MasterExecutionPlan;
   skills: SkillContext;
   skillApplicationEvidence: SkillApplicationEvidence[];
-  childSources: Record<string, string>;
-  specSidecarPath: string;
-  childrenSidecarPath: string;
 }): string {
+  const childSources = Object.fromEntries(
+    input.plan.children.map((child) => [child.workflowFilePath, childWorkflowSource(child, input.spec)]),
+  );
   const planJson = JSON.stringify(input.plan, null, 2);
   const skillMatchesJson = JSON.stringify(input.skills.matches, null, 2);
   const skillBoundaryJson = JSON.stringify({
@@ -270,14 +253,11 @@ function renderMasterSource(input: {
     loadedSkills: input.skills.applicableSkillNames,
     applicationEvidence: input.skillApplicationEvidence,
   }, null, 2);
-  // Read the child source map from disk at runtime instead of inlining the
-  // JSON into this shell command. Inlining once N children deep produced a
-  // multi-megabyte argv element and triggered `spawn E2BIG`.
   const materializeCommand = [
     'node --input-type=module <<\'NODE\'',
-    'import { mkdirSync, writeFileSync, readFileSync } from \'node:fs\';',
+    'import { mkdirSync, writeFileSync } from \'node:fs\';',
     'import { dirname } from \'node:path\';',
-    `const childSources = JSON.parse(readFileSync(${literal(input.childrenSidecarPath)}, 'utf8'));`,
+    `const childSources = ${JSON.stringify(childSources, null, 2)};`,
     'for (const [filePath, source] of Object.entries(childSources)) {',
     '  mkdirSync(dirname(filePath), { recursive: true });',
     '  writeFileSync(filePath, source, \'utf8\');',
@@ -350,12 +330,6 @@ function renderMasterSource(input: {
     'echo RICKY_MASTER_FINAL_VALIDATION_READY',
   ];
 
-  // The master workflow's `.description()` is sent to runtime agents as
-  // context. Inlining the full spec text here meant every agent invocation
-  // carried ~100KB+ of markdown that the agents did not need (the spec lives
-  // on disk at specSidecarPath and child slices `cp` it locally). The short
-  // ref keeps the description small without losing the pointer.
-  const masterDescription = `${firstHeadingOrSummary(input.spec.description)} (full spec on disk at ${input.specSidecarPath}; child workflows read it from there).`;
   return `${[
     "import { workflow } from '@agent-relay/sdk/workflows';",
     '',
@@ -365,7 +339,7 @@ function renderMasterSource(input: {
     '',
     'async function main() {',
     `  const result = await workflow(${literal(input.workflowId)})`,
-    `    .description(${literal(masterDescription)})`,
+    `    .description(${literal(input.spec.description)})`,
     `    .pattern(${literal(input.pattern.pattern)})`,
     `    .channel(${literal(input.channel)})`,
     '    .maxConcurrency(4)',
@@ -497,7 +471,7 @@ function renderChildRunStep(child: ChildWorkflowPlan): string[] {
   ];
 }
 
-export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowSpec, specSidecarPath?: string): string {
+export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowSpec): string {
   const artifactsDir = child.signoffArtifactPath.replace(/\/signoff\.md$/, '');
   const validationCommand = child.validationCommands[0] ?? 'npm run typecheck';
   const targetScope = child.targetFiles.length > 0 ? child.targetFiles.join(' ') : 'NO_TARGET_FILES_DECLARED';
@@ -541,14 +515,7 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
     `      command: ${literal([
       'set -e',
       `mkdir -p ${shellQuote(artifactsDir)}`,
-      // Copy the spec from its sidecar file rather than embedding it via
-      // `printf '%s\\n' '<huge spec text>'`. The embedded form pushed every
-      // child's prepare-context heredoc to ~100KB and made the materialize
-      // step's argv multi-megabyte. When the sidecar path isn't known
-      // (legacy call sites), fall back to a no-op so this child still runs.
-      specSidecarPath
-        ? `cp ${shellQuote(specSidecarPath)} ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`
-        : `: > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
+      `printf '%s\\n' ${shellQuote(spec.description)} > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
       `printf '%s\\n' ${shellQuote(targetScope)} > ${shellQuote(`${artifactsDir}/target-files.txt`)}`,
       // Snapshot the worktree's dirty set BEFORE this child touches anything.
       // The master executor runs every child in the SAME checkout, so by the
@@ -930,18 +897,6 @@ function titleCase(value: string): string {
 
 function literal(value: string | string[]): string {
   return JSON.stringify(value);
-}
-
-function firstHeadingOrSummary(specText: string): string {
-  // Pull the first H1 / H2 line from the spec to use as a short description.
-  // Falls back to the first non-empty line, then to a generic label. Output
-  // is capped so the master `.description()` never approaches argv limits.
-  const lines = specText.split('\n');
-  const heading = lines.find((line) => /^#{1,2}\s+\S/.test(line));
-  const candidate = heading?.replace(/^#{1,2}\s+/, '').trim()
-    ?? lines.find((line) => line.trim().length > 0)?.trim()
-    ?? 'Ricky master workflow';
-  return candidate.length > 200 ? `${candidate.slice(0, 197)}...` : candidate;
 }
 
 function templateLiteral(value: string): string {

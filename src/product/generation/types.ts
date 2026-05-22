@@ -195,14 +195,6 @@ export interface RenderedArtifact {
   skillMatches: SkillMatch[];
   toolSelections: ToolSelection[];
   artifactsDir: string;
-  /**
-   * Files that must be written alongside `artifactPath` at generation time.
-   * Keys are repo-relative paths. The master executor uses this to ship the
-   * spec text and the child-workflow source map as on-disk sidecars instead
-   * of inlining them into the generated TS — inlining ballooned the master
-   * workflow's argv past ARG_MAX and tripped `spawn E2BIG`.
-   */
-  sidecarFiles?: Record<string, string>;
 }
 
 export interface RefinementMetadata {

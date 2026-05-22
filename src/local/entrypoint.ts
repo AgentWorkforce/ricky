@@ -1199,15 +1199,6 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
         onProgress?.(`Writing workflow artifact to ${artifact.artifactPath}...`);
         await artifactWriter.writeArtifact(artifact.artifactPath, artifact.content, cwd);
-        // Sidecar files travel with the master workflow on disk so the
-        // generated TS can stay small (master-renderer pushes the spec text
-        // and child source map here to avoid argv-blow-out from spawn E2BIG).
-        if (artifact.sidecarFiles) {
-          for (const [sidecarPath, sidecarContent] of Object.entries(artifact.sidecarFiles)) {
-            await artifactWriter.writeArtifact(sidecarPath, sidecarContent, cwd);
-            logs.push(`[local] wrote workflow sidecar: ${sidecarPath}`);
-          }
-        }
         if (options.persistGenerationMetadataArtifacts === true) {
           await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
         }
