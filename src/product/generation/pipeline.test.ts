@@ -1073,6 +1073,7 @@ describe('workflow generation pipeline', () => {
       dependsOn: ['final-hard-validation'],
     });
     expect(gate(artifact, 'git-diff-gate').command).toContain("'ls-files', '--others', '--exclude-standard'");
+    expect(gate(artifact, 'git-diff-gate').command).toContain('git ls-files --others --exclude-standard');
     expect(result.validation.issues).toEqual([]);
   });
 
