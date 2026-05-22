@@ -31,12 +31,6 @@ async function main() {
       role: 'Product/API reviewer for endpoint behavior, artifact return, and Cloud auth dependency alignment.',
       retries: 1,
     })
-    .agent('reviewer-codex', {
-      cli: 'codex',
-      preset: 'reviewer',
-      role: 'Code reviewer for route contracts, deterministic gates, TypeScript quality, and tests.',
-      retries: 1,
-    })
     .agent('validator-claude', {
       cli: 'codex',
       preset: 'worker',
@@ -221,28 +215,10 @@ This is a bounded review, not a rewrite. Keep the review concise, write the file
 Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md ending with REVIEW_CLAUDE_PASS or REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md' },
     })
-    .step('review-endpoint-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['initial-soft-validation'],
-      timeoutMs: 420_000,
-      task: `Review the Cloud generation endpoint code and tests.
-
-Focus:
-- Deterministic gates and test completeness.
-- Route and handler contract shape.
-- Practical integration boundary with generation pipeline.
-- Error handling for invalid request and validation failure.
-
-This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
-
-Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-codex.md ending with REVIEW_CODEX_PASS or REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/review-codex.md' },
-    })
-
     .step('read-review-feedback', {
       type: 'deterministic',
-      dependsOn: ['review-endpoint-claude', 'review-endpoint-codex'],
-      command: 'cat .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-codex.md',
+      dependsOn: ['review-endpoint-claude'],
+      command: 'cat .workflow-artifacts/wave3-cloud-api/generate-endpoint/review-claude.md',
       captureOutput: true,
       failOnError: true,
     })
@@ -301,29 +277,11 @@ This is a bounded review, not a rewrite. Keep the review concise, write the file
 Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md ending with FINAL_REVIEW_CLAUDE_PASS or FINAL_REVIEW_CLAUDE_FAIL.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md' },
     })
-    .step('final-review-endpoint-codex', {
-      agent: 'reviewer-codex',
-      dependsOn: ['post-fix-validation'],
-      timeoutMs: 420_000,
-      task: `Re-review the Cloud generation endpoint code and tests after fixes.
-
-Read src/cloud/api/ source and tests, and post-fix validation output:
-{{steps.post-fix-validation.output}}
-
-Confirm deterministic gates, route/handler contract, generation pipeline integration, and error handling are ready for final hard gates.
-
-This is a bounded review, not a rewrite. Keep the review concise, write the file directly, and stop after the file is complete.
-
-Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md ending with FINAL_REVIEW_CODEX_PASS or FINAL_REVIEW_CODEX_FAIL.`,
-      verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md' },
-    })
-
     .step('final-review-pass-gate', {
       type: 'deterministic',
-      dependsOn: ['final-review-endpoint-claude', 'final-review-endpoint-codex'],
+      dependsOn: ['final-review-endpoint-claude'],
       command: [
         "tail -n 1 .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CLAUDE_PASS$\"",
-        "tail -n 1 .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md | tr -d '[:space:]*' | grep -Eq \"^FINAL_REVIEW_CODEX_PASS$\"",
         'echo GENERATE_ENDPOINT_FINAL_REVIEW_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -355,6 +313,7 @@ Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.m
       task: `Write .workflow-artifacts/wave3-cloud-api/generate-endpoint/signoff.md.
 
 Include files changed, validation commands, endpoint contract summary, and any residual integration risks.
+Call out that this workflow intentionally uses a single Claude review path because the current non-interactive Codex reviewer runtime has been observed to stall in overnight runs after producing review artifacts.
 Keep the signoff concise and stop after the file is complete.
 End with GENERATE_ENDPOINT_WORKFLOW_COMPLETE.`,
       verification: { type: 'file_exists', value: '.workflow-artifacts/wave3-cloud-api/generate-endpoint/signoff.md' },
