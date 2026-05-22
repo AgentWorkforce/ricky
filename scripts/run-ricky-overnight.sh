@@ -241,6 +241,13 @@ clear_artifact_checkpoint() {
   rm -f "$artifact_dir/checkpoint.env"
 }
 
+clear_artifact_runner_pid() {
+  local artifact_dir="$1"
+
+  [[ -n "$artifact_dir" ]] || return 0
+  rm -f "$artifact_dir/runner.pid"
+}
+
 restore_quarantined_runtime_state_for_artifact() {
   local artifact_dir="$1"
   local quarantine_root="$artifact_dir/runtime-state-quarantine"
@@ -2175,6 +2182,7 @@ run_one() {
   if ! wait "${RUNNER_WAIT_PID:-$runner_pid}"; then
     runner_exit=$?
   fi
+  clear_artifact_runner_pid "$ARTIFACT_DIR"
   RUN_PID="$$"
   RUN_PGID=""
   persist_checkpoint
