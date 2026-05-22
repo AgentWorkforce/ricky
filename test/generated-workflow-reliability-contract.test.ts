@@ -84,19 +84,15 @@ describe('generated workflow reliability contract', () => {
     expect(result.success, result.validation.errors.join('\n')).toBe(true);
     const content = result.artifact!.content;
     const unescaped = content.replace(/\\+"/g, '"');
-    const childrenSidecarPath = 'workflows/generated/reliability-master.children.json';
-    const childrenSidecar = result.artifact!.sidecarFiles?.[childrenSidecarPath];
-    const childrenSidecarUnescaped = childrenSidecar?.replace(/\\+"/g, '"');
 
     expect(content).toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
     expect(content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"master-lead\", repairRetries: 2 })");
     expect(content).toContain('ricky run');
     expect(content).not.toContain('--no-auto-fix');
-    expect(childrenSidecar, 'children sidecar attached').toBeDefined();
-    expect(childrenSidecarUnescaped).toMatch(/\.onError\('retry', \{ maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 \}\)/);
-    expect(childrenSidecar).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
-    expect(childrenSidecarUnescaped).toMatch(/\.step\("final-hard-validation"[\s\S]*?failOnError: false,[\s\S]*?\.step\("final-signoff"/);
+    expect(unescaped).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(unescaped).toMatch(/\.step\("final-hard-validation"[\s\S]*?failOnError: false,[\s\S]*?\.step\("final-signoff"/);
     expect(content).toMatch(/\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/);
+    expect(content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
     expect(content).toContain('RICKY_MASTER_FINAL_VALIDATION_READY');
   });
 
