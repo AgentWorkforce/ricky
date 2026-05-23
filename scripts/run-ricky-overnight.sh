@@ -563,6 +563,64 @@ path_contains_tracked_files() {
   [[ -n "$(git ls-files -- "$candidate")" ]]
 }
 
+prune_stale_trajectory_index_entries() {
+  local index_path=".trajectories/index.json"
+  local prune_report=""
+
+  [[ -f "$index_path" ]] || return 0
+
+  prune_report="$(python3 - <<'PY'
+import json
+from pathlib import Path
+
+index_path = Path('.trajectories/index.json')
+try:
+    data = json.loads(index_path.read_text())
+except Exception:
+    print('invalid')
+    raise SystemExit(0)
+
+trajectories = data.get('trajectories')
+if not isinstance(trajectories, dict):
+    print('invalid')
+    raise SystemExit(0)
+
+removed = []
+for key, entry in list(trajectories.items()):
+    if not isinstance(entry, dict):
+        continue
+    if entry.get('status') != 'active':
+        continue
+    entry_path = entry.get('path')
+    if not isinstance(entry_path, str) or not entry_path:
+        continue
+    if Path(entry_path).exists():
+        continue
+    removed.append(key)
+    del trajectories[key]
+
+if not removed:
+    print('0')
+    raise SystemExit(0)
+
+data['lastUpdated'] = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+index_path.write_text(json.dumps(data, indent=2) + '\n')
+print(str(len(removed)))
+PY
+)"
+
+  case "$prune_report" in
+    ''|0)
+      ;;
+    invalid)
+      log "warning: failed to prune stale trajectory index entries because $index_path is invalid json"
+      ;;
+    *)
+      log "pruned ${prune_report} stale active trajectory entr$( [[ "$prune_report" == "1" ]] && printf 'y' || printf 'ies' ) from .trajectories/index.json"
+      ;;
+  esac
+}
+
 quarantine_repo_runtime_state() {
   local quarantine_root="$ARTIFACT_DIR/runtime-state-quarantine"
   local candidate=""
@@ -588,8 +646,10 @@ quarantine_repo_runtime_state() {
     mv .trajectories/active "$destination"
     QUARANTINED_RUNTIME_PATHS+=(".trajectories/active:$destination")
     log "quarantined repo runtime state: .trajectories/active -> $destination"
+    prune_stale_trajectory_index_entries
   elif [[ -e .trajectories ]] && path_contains_tracked_files .trajectories; then
     log "leaving repo runtime state in place because git tracks files under it: .trajectories"
+    prune_stale_trajectory_index_entries
   elif [[ -e .trajectories ]]; then
     mkdir -p "$quarantine_root"
     destination="$quarantine_root/trajectories-$stamp"

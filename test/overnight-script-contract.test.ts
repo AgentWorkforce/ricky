@@ -99,6 +99,15 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain('log "leaving quarantined stale trajectory active state in artifact: $destination"');
   });
 
+  it('prunes stale active trajectory index entries when active runtime files are gone', () => {
+    expect(overnightScript).toContain('prune_stale_trajectory_index_entries()');
+    expect(overnightScript).toContain("if entry.get('status') != 'active':");
+    expect(overnightScript).toContain('if Path(entry_path).exists():');
+    expect(overnightScript).toContain('del trajectories[key]');
+    expect(overnightScript).toContain('prune_stale_trajectory_index_entries');
+    expect(overnightScript).toContain('pruned ${prune_report} stale active trajectory');
+  });
+
   it('restores quarantined runtime state when resume reconciles a dead prior artifact', () => {
     expect(overnightScript).toContain('restore_quarantined_runtime_state_for_artifact "$previous_artifact_dir"');
     expect(overnightScript).toContain('reconciled prior overnight artifact with no live process: $previous_artifact_dir');
