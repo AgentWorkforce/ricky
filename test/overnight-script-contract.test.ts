@@ -95,6 +95,8 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain('if [[ -d .trajectories/active ]]; then');
     expect(overnightScript).toContain('QUARANTINED_RUNTIME_PATHS+=(".trajectories/active:$destination")');
     expect(overnightScript).toContain('log "quarantined repo runtime state: .trajectories/active -> $destination"');
+    expect(overnightScript).toContain('if [[ "$candidate" == ".trajectories/active" ]]; then');
+    expect(overnightScript).toContain('log "leaving quarantined stale trajectory active state in artifact: $destination"');
   });
 
   it('restores quarantined runtime state when resume reconciles a dead prior artifact', () => {

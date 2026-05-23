@@ -611,6 +611,11 @@ restore_repo_runtime_state() {
     destination="${entry#*:}"
     [[ -e "$destination" ]] || continue
 
+    if [[ "$candidate" == ".trajectories/active" ]]; then
+      log "leaving quarantined stale trajectory active state in artifact: $destination"
+      continue
+    fi
+
     if [[ ! -e "$candidate" ]]; then
       mv "$destination" "$candidate"
       log "restored quarantined repo runtime state: $destination -> $candidate"
