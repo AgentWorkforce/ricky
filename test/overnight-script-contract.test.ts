@@ -88,10 +88,13 @@ describe('overnight harness queue-exhaustion contract', () => {
     expect(overnightScript).toContain('auto-commit/auto-push disabled; skipping post-workflow capture for $workflow_path');
   });
 
-  it('does not quarantine runtime directories that still contain tracked repo files', () => {
+  it('does not quarantine runtime directories that still contain tracked repo files, except stale trajectory active state', () => {
     expect(overnightScript).toContain('path_contains_tracked_files()');
     expect(overnightScript).toContain('git ls-files -- "$candidate"');
     expect(overnightScript).toContain('leaving repo runtime state in place because git tracks files under it: $candidate');
+    expect(overnightScript).toContain('if [[ -d .trajectories/active ]]; then');
+    expect(overnightScript).toContain('QUARANTINED_RUNTIME_PATHS+=(".trajectories/active:$destination")');
+    expect(overnightScript).toContain('log "quarantined repo runtime state: .trajectories/active -> $destination"');
   });
 
   it('restores quarantined runtime state when resume reconciles a dead prior artifact', () => {

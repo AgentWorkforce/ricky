@@ -569,7 +569,7 @@ quarantine_repo_runtime_state() {
   local stamp="$(date +%Y%m%d-%H%M%S)"
   local destination=""
 
-  for candidate in .agent-relay .relay .trajectories; do
+  for candidate in .agent-relay .relay; do
     [[ -e "$candidate" ]] || continue
     if path_contains_tracked_files "$candidate"; then
       log "leaving repo runtime state in place because git tracks files under it: $candidate"
@@ -581,6 +581,22 @@ quarantine_repo_runtime_state() {
     QUARANTINED_RUNTIME_PATHS+=("$candidate:$destination")
     log "quarantined repo runtime state: $candidate -> $destination"
   done
+
+  if [[ -d .trajectories/active ]]; then
+    mkdir -p "$quarantine_root/.trajectories"
+    destination="$quarantine_root/.trajectories/active-$stamp"
+    mv .trajectories/active "$destination"
+    QUARANTINED_RUNTIME_PATHS+=(".trajectories/active:$destination")
+    log "quarantined repo runtime state: .trajectories/active -> $destination"
+  elif [[ -e .trajectories ]] && path_contains_tracked_files .trajectories; then
+    log "leaving repo runtime state in place because git tracks files under it: .trajectories"
+  elif [[ -e .trajectories ]]; then
+    mkdir -p "$quarantine_root"
+    destination="$quarantine_root/trajectories-$stamp"
+    mv .trajectories "$destination"
+    QUARANTINED_RUNTIME_PATHS+=(".trajectories:$destination")
+    log "quarantined repo runtime state: .trajectories -> $destination"
+  fi
 }
 
 restore_repo_runtime_state() {
