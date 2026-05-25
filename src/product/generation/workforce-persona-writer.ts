@@ -1060,6 +1060,23 @@ export function parsePersonaWorkflowResponse(
     return tryFencedResponseOrDiskRecovery(tsFence, metadata, expectedPath, options);
   }
 
+  // Tolerant fallback: Claude Sonnet has been observed (2026-05-23 driving
+  // sage proactive-unification workforce slice) to emit a bare ```ts opening
+  // fence as its first line — with the workflow source inside — but skip
+  // the structured-JSON metadata wrapper and the matching ```metadata fence
+  // the prompt asks for. The output is otherwise valid TypeScript that
+  // contains a `workflow(` call; the lack of metadata makes us fall through
+  // here. Trying disk recovery with empty metadata is a strict superset of
+  // the strict path: validateArtifactContent inside
+  // tryFencedResponseOrDiskRecovery still rejects content without a
+  // `workflow(` call, so we can't silently accept a stub. Captured fix for
+  // the workforce#1 first-attempt parse-error case where the writer dumped
+  // ~12 KB of valid ```ts source and ricky lost it to the harder
+  // "must have metadata too" rule.
+  if (tsFence) {
+    return tryFencedResponseOrDiskRecovery(tsFence, metadata ?? {}, expectedPath, options);
+  }
+
   // Tolerant fallback: Claude Sonnet has been observed to emit a prose
   // preamble plus a ```json opening fence without a matching closing fence,
   // which defeats both the direct-JSON and fenced-block matchers above. As
