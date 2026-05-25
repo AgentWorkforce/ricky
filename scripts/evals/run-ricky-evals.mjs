@@ -338,24 +338,35 @@ function readGeneratedArtifactContent(stdout, workingDir) {
   const realWorkingDir = safeRealpath(workingDir);
   if (!realWorkingDir) return '';
   for (const artifactPath of artifactPaths) {
-    const fullPath = path.resolve(workingDir, artifactPath);
-    if (!existsSync(fullPath)) continue;
-    const realFullPath = safeRealpath(fullPath);
-    if (!realFullPath) continue;
-    if (realFullPath !== realWorkingDir && !realFullPath.startsWith(`${realWorkingDir}${path.sep}`)) {
-      continue;
+    for (const generatedPath of generatedArtifactAndSidecarPaths(artifactPath)) {
+      const fullPath = path.resolve(workingDir, generatedPath);
+      if (!existsSync(fullPath)) continue;
+      const realFullPath = safeRealpath(fullPath);
+      if (!realFullPath) continue;
+      if (realFullPath !== realWorkingDir && !realFullPath.startsWith(`${realWorkingDir}${path.sep}`)) {
+        continue;
+      }
+      try {
+        if (!statSync(realFullPath).isFile()) continue;
+      } catch {
+        continue;
+      }
+      sections.push([
+        `\n--- GENERATED ARTIFACT: ${generatedPath} ---`,
+        readFileSync(realFullPath, 'utf8'),
+      ].join('\n'));
     }
-    try {
-      if (!statSync(realFullPath).isFile()) continue;
-    } catch {
-      continue;
-    }
-    sections.push([
-      `\n--- GENERATED ARTIFACT: ${artifactPath} ---`,
-      readFileSync(realFullPath, 'utf8'),
-    ].join('\n'));
   }
   return sections.join('\n');
+}
+
+function generatedArtifactAndSidecarPaths(artifactPath) {
+  const paths = [artifactPath];
+  if (artifactPath.startsWith('workflows/generated/') && artifactPath.endsWith('.ts')) {
+    const stem = artifactPath.slice(0, -'.ts'.length);
+    paths.push(`${stem}.spec.md`, `${stem}.children.json`);
+  }
+  return paths;
 }
 
 function safeRealpath(value) {

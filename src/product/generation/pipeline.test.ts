@@ -12,6 +12,15 @@ interface StepConfig {
   agent?: string;
   type?: string;
   dependsOn?: string[];
+  position: number;
+}
+
+interface OnErrorConfig {
+  strategy?: string;
+  maxRetries?: number;
+  retryDelayMs?: number;
+  repairAgent?: string;
+  repairRetries?: number;
 }
 
 /**
@@ -43,7 +52,7 @@ function extractStepConfigs(source: string): Map<string, StepConfig> {
       && ts.isObjectLiteralExpression(node.arguments[1])
     ) {
       const id = node.arguments[0].text;
-      const cfg: StepConfig = {};
+      const cfg: StepConfig = { position: node.getStart(sourceFile) };
       for (const prop of node.arguments[1].properties) {
         if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
         const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
@@ -63,6 +72,53 @@ function extractStepConfigs(source: string): Map<string, StepConfig> {
   };
   visit(sourceFile);
   return steps;
+}
+
+function extractOnErrorConfigs(source: string): OnErrorConfig[] {
+  const sourceFile = ts.createSourceFile('workflow.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const configs: OnErrorConfig[] = [];
+
+  const literalText = (node: ts.Expression): string | undefined => {
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    return undefined;
+  };
+  const literalNumber = (node: ts.Expression): number | undefined => {
+    if (ts.isNumericLiteral(node)) return Number(node.text);
+    if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(node.operand)) {
+      return -Number(node.operand.text);
+    }
+    return undefined;
+  };
+  const objectValue = (node: ts.Expression): Partial<OnErrorConfig> => {
+    if (!ts.isObjectLiteralExpression(node)) return {};
+    const cfg: Partial<OnErrorConfig> = {};
+    for (const prop of node.properties) {
+      if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
+      const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
+      if (key === 'repairAgent') cfg.repairAgent = literalText(prop.initializer);
+      if (key === 'maxRetries') cfg.maxRetries = literalNumber(prop.initializer);
+      if (key === 'retryDelayMs') cfg.retryDelayMs = literalNumber(prop.initializer);
+      if (key === 'repairRetries') cfg.repairRetries = literalNumber(prop.initializer);
+    }
+    return cfg;
+  };
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'onError'
+    ) {
+      configs.push({
+        strategy: node.arguments[0] && ts.isExpression(node.arguments[0]) ? literalText(node.arguments[0]) : undefined,
+        ...(node.arguments[1] && ts.isExpression(node.arguments[1]) ? objectValue(node.arguments[1]) : {}),
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return configs;
 }
 
 const RECEIVED_AT = '2026-04-26T00:00:00.000Z';
@@ -117,12 +173,42 @@ describe('workflow generation pipeline', () => {
     const childrenSidecarPath = 'workflows/generated/runtime-master.children.json';
     expect(rendered.sidecarFiles?.[childrenSidecarPath], 'children sidecar attached').toBeDefined();
     const childrenSidecar = rendered.sidecarFiles![childrenSidecarPath];
-    expect(childrenSidecar).toContain('review-claude');
-    expect(childrenSidecar).toContain('final-fix-codex');
-    expect(childrenSidecar).toContain('RICKY_CHILD_FRESH_EYES_LOOP_READY');
-    expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"master-lead\", repairRetries: 2 })");
-    // validator-claude is a child-side agent; assert against the sidecar.
-    expect(childrenSidecar.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    const childSources = JSON.parse(childrenSidecar) as Record<string, string>;
+    expect(Object.keys(childSources), 'child sidecar contains child workflow sources').not.toHaveLength(0);
+    const expectedChildStepOrder = [
+      'review-claude',
+      'fix-loop',
+      'final-review-claude',
+      'final-fix-claude',
+      'review-codex',
+      'fix-loop-codex',
+      'final-review-codex',
+      'final-fix-codex',
+      'final-review-pass-gate',
+      'final-hard-validation',
+    ];
+    for (const [childPath, childSource] of Object.entries(childSources)) {
+      const childStepConfigs = extractStepConfigs(childSource);
+      expect(extractOnErrorConfigs(childSource), `${childPath} child workflow retry policy`).toContainEqual({
+        strategy: 'retry',
+        maxRetries: 2,
+        retryDelayMs: 10000,
+        repairAgent: 'validator-claude',
+        repairRetries: 2,
+      });
+      const childStepPositions = expectedChildStepOrder.map((step) => childStepConfigs.get(step)?.position);
+      expect(childStepPositions, `${childPath} declares every fresh-eyes step`).not.toContain(undefined);
+      expect(childStepPositions, `${childPath} fresh-eyes step order`)
+        .toEqual([...childStepPositions].sort((a, b) => a! - b!));
+      expect(childStepConfigs.get('final-review-pass-gate')?.command, `${childPath} child fresh-eyes marker`).toContain('RICKY_CHILD_FRESH_EYES_LOOP_READY');
+    }
+    expect(extractOnErrorConfigs(rendered.content), 'master workflow retry policy').toContainEqual({
+      strategy: 'retry',
+      maxRetries: 2,
+      retryDelayMs: 10000,
+      repairAgent: 'master-lead',
+      repairRetries: 2,
+    });
     expect(rendered.content.replace(/\\+"/g, '"')).toMatch(
       /\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/,
     );
