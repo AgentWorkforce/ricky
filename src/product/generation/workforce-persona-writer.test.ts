@@ -220,6 +220,18 @@ describe('workforce persona workflow writer', () => {
     expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
   });
 
+  it('parses a bare fenced TypeScript artifact without metadata', () => {
+    const parsed = parsePersonaWorkflowResponse([
+      '```ts',
+      workflowSource(),
+      '```',
+    ].join('\n'), 'workflows/generated/persona.ts');
+
+    expect(parsed.responseFormat).toBe('fenced-artifact');
+    expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
+    expect(parsed.metadata).toEqual({});
+  });
+
   it('accepts multiline run options when cwd is explicit', () => {
     const parsed = parsePersonaWorkflowResponse(JSON.stringify({
       artifact: {
