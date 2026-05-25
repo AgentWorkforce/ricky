@@ -1074,7 +1074,7 @@ export function parsePersonaWorkflowResponse(
   // ~12 KB of valid ```ts source and ricky lost it to the harder
   // "must have metadata too" rule.
   if (tsFence) {
-    return tryFencedResponseOrDiskRecovery(tsFence, metadata ?? {}, expectedPath, options);
+    return tryFencedResponseOrDiskRecovery(tsFence, metadata ?? undefined, expectedPath, options);
   }
 
   // Tolerant fallback: Claude Sonnet has been observed to emit a prose
@@ -1323,12 +1323,12 @@ function recoverExpectedArtifactContent(
 
 function validateFencedResponse(
   artifactContent: string,
-  metadata: Record<string, unknown>,
+  metadata: Record<string, unknown> | undefined,
   expectedPath: string,
 ): ParsedPersonaResponse {
   validateArtifactContent(artifactContent);
-  validateMetadata(metadata);
-  const artifactPath = metadata.path ?? metadata.outputPath ?? metadata.artifactPath;
+  if (metadata) validateMetadata(metadata);
+  const artifactPath = metadata?.path ?? metadata?.outputPath ?? metadata?.artifactPath;
   if (typeof artifactPath === 'string' && artifactPath !== expectedPath) {
     throw new WorkforcePersonaWriterError(
       `Workforce persona fenced metadata path ${artifactPath} did not match expected output path ${expectedPath}.`,
@@ -1336,7 +1336,7 @@ function validateFencedResponse(
   }
   return {
     content: artifactContent.trimEnd() + '\n',
-    metadata,
+    metadata: metadata ?? {},
     responseFormat: 'fenced-artifact',
   };
 }
@@ -1366,7 +1366,7 @@ function validateFencedResponse(
  */
 function tryFencedResponseOrDiskRecovery(
   tsFence: string,
-  metadata: Record<string, unknown>,
+  metadata: Record<string, unknown> | undefined,
   expectedPath: string,
   options: PersonaResponseParseOptions,
 ): ParsedPersonaResponse {
