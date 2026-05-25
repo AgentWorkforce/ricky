@@ -14,7 +14,7 @@ import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
@@ -924,6 +924,16 @@ function isNoSuchProcessError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'ESRCH';
 }
 
+function resolveRepoContainedOutputPath(cwd: string, outputPath: string): string | undefined {
+  if (isAbsolute(outputPath)) return undefined;
+
+  const root = resolve(cwd);
+  const resolved = resolve(root, outputPath);
+  if (resolved === root) return undefined;
+  if (!resolved.startsWith(`${root}${sep}`)) return undefined;
+  return resolved;
+}
+
 async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefined> {
   const runtime = await resolveWorkflowSdkRuntime(cwd);
   if (!runtime) return undefined;
@@ -1204,7 +1214,13 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         // and child source map here to avoid argv-blow-out from spawn E2BIG).
         if (artifact.sidecarFiles) {
           for (const [sidecarPath, sidecarContent] of Object.entries(artifact.sidecarFiles)) {
-            await artifactWriter.writeArtifact(sidecarPath, sidecarContent, cwd);
+            const resolvedSidecarPath = resolveRepoContainedOutputPath(cwd, sidecarPath);
+            if (!resolvedSidecarPath) {
+              warnings.push(`Skipped unsafe workflow sidecar path outside invocation root: ${sidecarPath}`);
+              logs.push(`[local] skipped unsafe workflow sidecar: ${sidecarPath}`);
+              continue;
+            }
+            await artifactWriter.writeArtifact(resolvedSidecarPath, sidecarContent, cwd);
             logs.push(`[local] wrote workflow sidecar: ${sidecarPath}`);
           }
         }

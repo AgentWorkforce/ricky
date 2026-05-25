@@ -933,15 +933,55 @@ function literal(value: string | string[]): string {
 }
 
 function firstHeadingOrSummary(specText: string): string {
-  // Pull the first H1 / H2 line from the spec to use as a short description.
-  // Falls back to the first non-empty line, then to a generic label. Output
-  // is capped so the master `.description()` never approaches argv limits.
-  const lines = specText.split('\n');
-  const heading = lines.find((line) => /^#{1,2}\s+\S/.test(line));
-  const candidate = heading?.replace(/^#{1,2}\s+/, '').trim()
-    ?? lines.find((line) => line.trim().length > 0)?.trim()
+  const candidate = firstMarkdownHeadingOrParagraph(specText)
+    ?? specText.split('\n').find((line) => line.trim().length > 0)?.trim()
     ?? 'Ricky master workflow';
   return candidate.length > 200 ? `${candidate.slice(0, 197)}...` : candidate;
+}
+
+function firstMarkdownHeadingOrParagraph(specText: string): string | undefined {
+  let root: Nodes;
+  try {
+    root = fromMarkdown(specText);
+  } catch {
+    return undefined;
+  }
+
+  let fallback: string | undefined;
+  const visit = (node: Nodes): string | undefined => {
+    if (node.type === 'heading' && 'depth' in node && (node.depth === 1 || node.depth === 2)) {
+      const text = markdownNodeText(node);
+      if (text) return text;
+    }
+
+    if (!fallback && (node.type === 'paragraph' || node.type === 'text')) {
+      fallback = markdownNodeText(node);
+    }
+
+    if ('children' in node) {
+      for (const child of node.children) {
+        const found = visit(child);
+        if (found) return found;
+      }
+    }
+
+    return undefined;
+  };
+
+  return visit(root) ?? fallback;
+}
+
+function markdownNodeText(node: Nodes): string | undefined {
+  if ('value' in node && typeof node.value === 'string') {
+    return node.value.replace(/\s+/g, ' ').trim() || undefined;
+  }
+  if (!('children' in node)) return undefined;
+  const text = node.children
+    .map((child) => markdownNodeText(child) ?? '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text || undefined;
 }
 
 function templateLiteral(value: string): string {
