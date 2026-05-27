@@ -673,7 +673,7 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.clarificationQuestions).toEqual([]);
   });
 
-  it('asks for a side-effect boundary before generating risky workflows', () => {
+  it('asks for a side-effect boundary before generating destructive workflows', () => {
     const result = intake(
       natural('Generate a workflow that deletes obsolete files, commits the cleanup, and pushes the branch.'),
     );
@@ -687,6 +687,18 @@ describe('spec intake parser, normalizer, and router', () => {
         blocking: true,
       }),
     ]);
+  });
+
+  it('does not ask for approval when the only side effects are commit/push/open-PR', () => {
+    // Opening a PR is Ricky's normal intended outcome — committing, pushing,
+    // and creating the pull request must not trip the risky-side-effect gate.
+    const result = intake(
+      natural(
+        'Generate a workflow that implements the fix, commits the change, pushes the branch, and opens exactly one pull request.',
+      ),
+    );
+
+    expect(result.clarificationQuestions.find((q) => q.id === 'side-effect-approval')).toBeUndefined();
   });
 
   describe('targetFiles extraction (AST-driven)', () => {
