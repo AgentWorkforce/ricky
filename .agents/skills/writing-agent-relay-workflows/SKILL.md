@@ -747,11 +747,11 @@ relay.onChannelUnmuted = (agent, channel) => { /* ... */ };
 #### Model Constants
 
 ```typescript
-import { ClaudeModels, CodexModels, GeminiModels } from '@agent-relay/config';
+import { ClaudeModels } from '@agent-relay/config';
 
 .agent('planner', { cli: 'claude', model: ClaudeModels.OPUS })    // not 'opus'
 .agent('worker',  { cli: 'claude', model: ClaudeModels.SONNET })  // not 'sonnet'
-.agent('coder',   { cli: 'codex',  model: CodexModels.GPT_5_4 })  // not 'gpt-5.4'
+.agent('coder',   { cli: 'claude', model: ClaudeModels.SONNET })  // default to claude; other CLIs (codex, gemini) are supported but not the default
 ```
 
 

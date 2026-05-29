@@ -175,17 +175,17 @@ function renderSource(input: {
     '',
     renderFixLoopStep('final-fix-claude', 'validator-claude', ['final-review-claude'], `${input.artifactsDir}/final-review-claude.md`, `${input.artifactsDir}/claude-final-fix.md`, 'CLAUDE_FINAL_FIX_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-claude'), true),
     '',
-    renderReviewStep('review-codex', 'reviewer-codex', ['final-fix-claude'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-codex')),
+    renderReviewStep('review-claude-2', 'reviewer-claude-2', ['final-fix-claude'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-claude-2')),
     '',
-    renderFixLoopStep('fix-loop-codex', 'validator-codex', ['review-codex'], `${input.artifactsDir}/review-codex.md`, `${input.artifactsDir}/codex-fix-loop-report.md`, 'CODEX_FIX_LOOP_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop-codex')),
+    renderFixLoopStep('fix-loop-claude-2', 'validator-claude', ['review-claude-2'], `${input.artifactsDir}/review-claude-2.md`, `${input.artifactsDir}/claude-2-fix-loop-report.md`, 'CLAUDE_2_FIX_LOOP_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop-claude-2')),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'codex-fix-loop-report-gate')!),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-codex-fix-validation')!),
     '',
-    renderReviewStep('final-review-codex', 'reviewer-codex', ['post-codex-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-codex'), true),
+    renderReviewStep('final-review-claude-2', 'reviewer-claude-2', ['post-codex-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude-2'), true),
     '',
-    renderFixLoopStep('final-fix-codex', 'validator-codex', ['final-review-codex'], `${input.artifactsDir}/final-review-codex.md`, `${input.artifactsDir}/codex-final-fix.md`, 'CODEX_FINAL_FIX_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-codex'), true),
+    renderFixLoopStep('final-fix-claude-2', 'validator-claude', ['final-review-claude-2'], `${input.artifactsDir}/final-review-claude-2.md`, `${input.artifactsDir}/claude-2-final-fix.md`, 'CLAUDE_2_FINAL_FIX_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-claude-2'), true),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'final-review-pass-gate')!),
     '',
@@ -216,19 +216,18 @@ function renderRepairAwareOnError(repairAgent: string): string {
   return `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS}, repairAgent: ${literal(repairAgent)}, repairRetries: ${DEFAULT_REPAIR_RETRY_ATTEMPTS} }`;
 }
 
-function repairAgentFor(isCodeWorkflow: boolean): string {
-  return isCodeWorkflow ? 'validator-claude' : 'validator-codex';
+function repairAgentFor(_isCodeWorkflow: boolean): string {
+  return 'validator-claude';
 }
 
 function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSpec[] {
   if (!isCodeWorkflow) {
     return [
-      { name: 'lead-codex', cli: 'codex', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
-      { name: 'author-codex', cli: 'codex', role: 'Writes the requested bounded artifact and keeps scope to declared files.', retries: 2 },
+      { name: 'lead-claude', cli: 'claude', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
+      { name: 'author-claude', cli: 'claude', role: 'Writes the requested bounded artifact and keeps scope to declared files.', retries: 2 },
       { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'First-pass fresh-eyes reviewer for scope, evidence, and product fit.', retries: 1 },
-      { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Second-pass fresh-eyes reviewer for TypeScript/workflow correctness, deterministic gates, and test coverage.', retries: 1 },
-      { name: 'validator-claude', cli: 'claude', preset: 'worker', role: 'Applies Claude review findings and proves the fixed state.', retries: 2 },
-      { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
+      { name: 'reviewer-claude-2', cli: 'claude', preset: 'reviewer', role: 'Second-pass fresh-eyes reviewer for TypeScript/workflow correctness, deterministic gates, and test coverage.', retries: 1 },
+      { name: 'validator-claude', cli: 'claude', preset: 'worker', role: 'Applies review findings and proves the fixed state.', retries: 2 },
     ];
   }
 
@@ -239,30 +238,29 @@ function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSp
 
   return [
     { name: 'lead-claude', cli: 'claude', interactive: false, role: 'Plans task shape, ownership, non-goals, and verification gates.', retries: 1 },
-    { name: 'impl-primary-codex', cli: 'codex', role: implementationRole, retries: 2 },
-    { name: 'impl-tests-codex', cli: 'codex', role: 'Adds or updates tests and validation coverage for the changed surface.', retries: 2 },
+    { name: 'impl-primary-claude', cli: 'claude', role: implementationRole, retries: 2 },
+    { name: 'impl-tests-claude', cli: 'claude', role: 'Adds or updates tests and validation coverage for the changed surface.', retries: 2 },
     { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'Reviews product fit, scope control, and workflow evidence quality.', retries: 1 },
-    { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews TypeScript correctness, deterministic gates, and test coverage.', retries: 1 },
+    { name: 'reviewer-claude-2', cli: 'claude', preset: 'reviewer', role: 'Reviews TypeScript correctness, deterministic gates, and test coverage.', retries: 1 },
     { name: 'validator-claude', cli: 'claude', preset: 'worker', role: 'Runs the 80-to-100 fix loop and verifies final readiness.', retries: 2 },
-    { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Runs the final Codex review-fix loop and verifies final readiness.', retries: 2 },
   ];
 }
 
 function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean): WorkflowTask[] {
-  const implementer = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
+  const implementer = isCodeWorkflow ? 'impl-primary-claude' : 'author-claude';
   return [
     task('prepare-context', 'Prepare context', 'deterministic', 'Read or materialize the normalized spec and target context.', []),
-    task('lead-plan', 'Lead plan', isCodeWorkflow ? 'lead-claude' : 'lead-codex', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
+    task('lead-plan', 'Lead plan', 'lead-claude', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
     task('implement-artifact', 'Implement artifact', implementer, describeImplementation(spec), ['lead-plan']),
     task('review-claude', 'Fresh-eyes review with Claude', 'reviewer-claude', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
     task('fix-loop', 'Claude review-fix loop', 'validator-claude', 'Apply bounded fixes from Claude review and validation feedback.', ['review-claude', 'initial-soft-validation']),
     task('final-review-claude', 'Final review with Claude', 'reviewer-claude', 'Re-review the fixed state only.', ['post-fix-validation']),
     task('final-fix-claude', 'Final Claude review-fix loop', 'validator-claude', 'Apply final Claude findings or record no further fixes.', ['final-review-claude']),
-    task('review-codex', 'Fresh-eyes review with Codex', 'reviewer-codex', 'Second-pass fresh-eyes review after the Claude loop.', ['final-fix-claude']),
-    task('fix-loop-codex', 'Codex review-fix loop', 'validator-codex', 'Apply bounded fixes from Codex review feedback.', ['review-codex']),
-    task('final-review-codex', 'Final review with Codex', 'reviewer-codex', 'Re-review implementation and validation after Codex fixes.', ['post-codex-fix-validation']),
-    task('final-fix-codex', 'Final Codex review-fix loop', 'validator-codex', 'Apply final Codex findings or record no further fixes.', ['final-review-codex']),
-    task('final-signoff', 'Final signoff', isCodeWorkflow ? 'validator-claude' : 'validator-codex', 'Write final evidence summary after hard deterministic gates.', ['regression-gate']),
+    task('review-claude-2', 'Second fresh-eyes review with Claude', 'reviewer-claude-2', 'Second-pass fresh-eyes review after the first fix loop.', ['final-fix-claude']),
+    task('fix-loop-claude-2', 'Second Claude review-fix loop', 'validator-claude', 'Apply bounded fixes from second review feedback.', ['review-claude-2']),
+    task('final-review-claude-2', 'Final second review with Claude', 'reviewer-claude-2', 'Re-review implementation and validation after second fix loop.', ['post-codex-fix-validation']),
+    task('final-fix-claude-2', 'Final second Claude review-fix loop', 'validator-claude', 'Apply final second-pass findings or record no further fixes.', ['final-review-claude-2']),
+    task('final-signoff', 'Final signoff', 'validator-claude', 'Write final evidence summary after hard deterministic gates.', ['regression-gate']),
   ];
 }
 
@@ -876,7 +874,7 @@ function buildGeneratedContextPackage(
 }
 
 function renderLeadPlanStep(artifactsDir: string, hasTargetContext: boolean, isCodeWorkflow: boolean): string {
-  const agent = isCodeWorkflow ? 'lead-claude' : 'lead-codex';
+  const agent = 'lead-claude';
   return `    .step('lead-plan', {
       agent: ${literal(agent)},
       dependsOn: ['skill-boundary-metadata-gate'],
@@ -906,7 +904,7 @@ function renderImplementationStep(
   artifactsDir: string,
   selection?: ToolSelection,
 ): string {
-  const agent = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
+  const agent = isCodeWorkflow ? 'impl-primary-claude' : 'author-claude';
   const selectionLines = renderSelectionFields(selection);
   const noTargetInstructions = `No explicit file targets were supplied. Write every changed path to ${artifactsDir}/output-manifest.txt using status-prefixed entries such as "A path", "M path", or "D path". Include deleted files and supporting edits. Keep changes bounded.`;
   return `    .step('implement-artifact', {
@@ -1026,7 +1024,7 @@ Re-run ${isCodeWorkflow ? 'typecheck and tests' : 'document sanity checks'} befo
 function renderFinalSignoffStep(artifactsDir: string, isCodeWorkflow: boolean, selection?: ToolSelection): string {
   const selectionLines = renderSelectionFields(selection);
   return `    .step('final-signoff', {
-      agent: ${literal(isCodeWorkflow ? 'validator-claude' : 'validator-codex')},
+      agent: ${literal('validator-claude')},
       dependsOn: ['regression-gate'],
 ${selectionLines}
       timeoutMs: ${DEFAULT_REVIEW_TIMEOUT_MS},
