@@ -608,7 +608,7 @@ export function applyCloudRepoSetup<T>(wf: T, opts: CloudRepoSetupOptions): T {
 - **Record residual risks**
 - Call out what was not covered
 - **Ship the result as a PR**
-- Open the pull request from the workflow itself with `createGitHubStep`
+- Open the pull request from the workflow itself with `createGitHubStep` from `@agent-relay/sdk` — **never** `gh pr create`, never `id:` inside the config, never `action: 'createPullRequest'`, never separate `owner`/`repo` fields
 - See [Shipping the Result — Open a PR via `createGitHubStep`](#shipping-the-result--open-a-pr-via-creategithubstep) below
 - A workflow that fixes a bug and stops short of the PR has only done half the loop
 - disposable sandbox / cloud workspace
@@ -681,23 +681,6 @@ runWorkflow().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-```
-
-#### Common authoring mistakes that cause startup parse errors
-
-```typescript
-.step('ship-pr', {
-      type: 'deterministic',
-      dependsOn: ['push-branch'],
-      command: [
-        'BRANCH=$(git rev-parse --abbrev-ref HEAD)',
-        'EXISTING=$(gh pr list --head "$BRANCH" --json number --jq ".[0].number" 2>/dev/null || echo "")',
-        'if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then echo "PR_ALREADY_EXISTS: #$EXISTING"',
-        'else gh pr create --base main --head "$BRANCH" --draft --title "feat: ..." --body "..." 2>&1 && echo "PR_CREATED"; fi',
-      ].join('\n'),
-      captureOutput: true,
-      failOnError: true,
-    })
 ```
 
 
