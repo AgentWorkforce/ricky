@@ -1473,9 +1473,13 @@ export function detectSpecIntentMismatch(
     const referencesPrShippingSymbol =
       facts.referencesIdentifier('GitHubStepExecutor') ||
       facts.referencesIdentifier('createGitHubStep');
-    if (!importsGithubPrimitive && !referencesPrShippingSymbol) {
+    // gh pr create / gh pr list in a deterministic step is also a valid
+    // PR-shipping mechanism (documented as the preferred fallback in SKILL.md
+    // for SDK < 6.0.9 where createGitHubStep is not yet supported).
+    const usesGhCli = /\bgh\s+pr\s+(create|list)\b/.test(workflowContent);
+    if (!importsGithubPrimitive && !referencesPrShippingSymbol && !usesGhCli) {
       mismatches.push(
-        `spec declares a PR-shipping outcome but the workflow neither imports @agent-relay/github-primitive (or @agent-relay/sdk/github) nor references GitHubStepExecutor / createGitHubStep`,
+        `spec declares a PR-shipping outcome but the workflow neither imports @agent-relay/github-primitive (or @agent-relay/sdk/github) nor references GitHubStepExecutor / createGitHubStep / gh pr create`,
       );
     }
   }

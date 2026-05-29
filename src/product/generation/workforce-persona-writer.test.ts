@@ -2097,6 +2097,25 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     expect(detectSpecIntentMismatch(spec, realWorkflow)).toEqual([]);
   });
 
+  it('does NOT flag a workflow that uses `gh pr create` in a deterministic step', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const ghCliWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'async function main() {',
+      '  await workflow("real")',
+      '    .step("ship-pr", {',
+      '      type: "deterministic",',
+      '      command: "gh pr create --base main --head feat/foo --title \\"feat: x\\"",',
+      '    })',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+    expect(detectSpecIntentMismatch(spec, ghCliWorkflow)).toEqual([]);
+  });
+
   it('also accepts the `@agent-relay/sdk/github` import path (used by some persona variants)', () => {
     const spec = {
       description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',

@@ -681,11 +681,14 @@ function validateWorkforcePersonaArtifact(
   spec: NormalizedWorkflowSpec,
 ): GenerationValidationResult {
   const validation = validateGeneratedArtifact(artifact, patternDecision, skillContext, spec);
+  // Spec-intent mismatches are warnings, not blockers. A workflow that ships
+  // a PR via `gh pr create` instead of `createGitHubStep` still ships the PR.
+  // Blocking on this caused workflows to stall silently rather than run.
   const specIntentIssues = detectSpecIntentMismatch(spec, artifact.content).map((mismatch) =>
-    blockingIssue(
+    warningIssue(
       'validation',
       'WORKFORCE_PERSONA_SPEC_INTENT_MISMATCH',
-      `Workforce persona writer output does not satisfy spec-declared intent: ${mismatch}.`,
+      `Workforce persona writer output does not fully satisfy spec-declared intent: ${mismatch}.`,
     ),
   );
 
