@@ -619,68 +619,79 @@ export function applyCloudRepoSetup<T>(wf: T, opts: CloudRepoSetupOptions): T {
 - chooses the best swarm pattern
 - then authors the final fix/validation workflow
 
-### Shipping the Result — Open a PR via `createGitHubStep`
+### Shipping the Result — Open a PR
 
-#### The minimal "open a PR" recipe
+#### Canonical pattern: `gh pr create` in a deterministic step
+
+This is the preferred approach. It works on all SDK versions and avoids the
+`createGitHubStep` API pitfalls documented below.
+
+```typescript
+    // Commit all staged changes.
+    .step('commit', {
+      type: 'deterministic',
+      command: 'git add -A && git commit -m "feat(program): implement spec XYZ" 2>&1 || echo "NOTHING_TO_COMMIT"',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    // Push branch to remote.
+    .step('push-branch', {
+      type: 'deterministic',
+      dependsOn: ['commit'],
+      command: 'BRANCH=$(git rev-parse --abbrev-ref HEAD) && git push -u origin "$BRANCH" 2>&1 && echo "PUSH_OK: $BRANCH"',
+      captureOutput: true,
+      failOnError: false,
+    })
+
+    // Open a draft PR (idempotent — skips if PR already exists).
+    .step('ship-pr', {
+      type: 'deterministic',
+      dependsOn: ['push-branch'],
+      command: [
+        'BRANCH=$(git rev-parse --abbrev-ref HEAD)',
+        'EXISTING=$(gh pr list --head "$BRANCH" --json number --jq ".[0].number" 2>/dev/null || echo "")',
+        'if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then',
+        '  echo "PR_ALREADY_EXISTS: #$EXISTING"',
+        'else',
+        '  gh pr create --base main --head "$BRANCH" --draft --title "feat: ship X" --body "## Summary\\n\\n- ..." 2>&1',
+        '  echo "PR_CREATED"',
+        'fi',
+      ].join('\n'),
+      captureOutput: true,
+      failOnError: false,
+    })
+```
+
+#### Alternative: `createGitHubStep` (requires SDK ≥ 6.0.9)
+
+**Critical field names** — getting any of these wrong causes a startup parse error:
+- **`name`** is NOT a field inside `createGitHubStep({...})`; the step name comes from the first arg of `.step('step-name', createGitHubStep({...}))`
+- **`action: 'createPR'`** — NOT `createPullRequest`. Valid values: `createPR`, `createBranch`, `createFile`, `updateFile`, `getPR`, `listPRs`, `mergePR`, etc.
+- **`repo`** MUST be `'owner/repo'` format (e.g. `'AgentWorkforce/nightcto'`) — NOT separate `owner`/`repo` fields
+- **NO `id` field** — `createGitHubStep` has no `id` parameter
 
 ```typescript
 import { workflow } from '@agent-relay/sdk/workflows';
-import { createGitHubStep } from '@agent-relay/sdk';
+import { createGitHubStep } from '@agent-relay/sdk';   // NOT from '@agent-relay/github-primitive'
 
-const REPO = 'AgentWorkforce/cloud';
-const BRANCH = `agent-relay/run-${Date.now()}`;
+const REPO = 'AgentWorkforce/cloud';            // 'owner/repo' format — required
+const BRANCH = 'results/my-feature';
 
-async function runWorkflow() {
-  await workflow('feature-x')
-    // ... your real implementation, repair, review loops, and final acceptance ...
-    .step('write-marker', {
-      type: 'deterministic',
-      command: `echo "fix landed at $(date -u)" >> CHANGELOG.md`,
-    })
-
-    // Branch off main on the remote.
-    .step('create-branch', createGitHubStep({
-      dependsOn: ['write-marker'],
-      action: 'createBranch',
-      repo: REPO,
-      params: { branch: BRANCH, source: 'main' },
-    }))
-
-    // Commit the change to the branch via Contents API.
-    .step('commit-change', createGitHubStep({
-      dependsOn: ['create-branch'],
-      action: 'createFile',
-      repo: REPO,
-      params: {
-        path: 'CHANGELOG.md',
-        branch: BRANCH,
-        content: '<file body here>',
-        message: 'chore: changelog entry',
-      },
-    }))
-
-    // Open the PR. This is the load-bearing step.
+    // Open the PR. name comes from .step('open-pr', ...) NOT from createGitHubStep.
     .step('open-pr', createGitHubStep({
-      dependsOn: ['commit-change'],
-      action: 'createPR',
-      repo: REPO,
+      action: 'createPR',                        // NOT 'createPullRequest'
+      repo: REPO,                                // 'owner/repo' string — NOT separate owner/repo
       params: {
         title: 'feat: ship feature X',
         head: BRANCH,
         base: 'main',
-        body: '## Summary\n\n- ...\n\n## Test plan\n\n- [x] ...',
-        draft: false,
+        body: '## Summary\n\n- ...',
+        draft: true,
       },
       output: { mode: 'data', format: 'json', path: 'html_url' },
+      dependsOn: ['push-branch'],
     }))
-
-    .run({ cwd: process.cwd() });
-}
-
-runWorkflow().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
 ```
 
 
