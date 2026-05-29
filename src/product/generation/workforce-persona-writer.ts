@@ -258,10 +258,10 @@ export async function writeWorkflowWithWorkforcePersona(
   // which a stale leftover could falsely satisfy the freshness check.
   const writerInvokedAtMs = Date.now();
   // Normalize the timeout once before threading it into both
-  // `sendMessage` (harness-kit subprocess timeout) and the outer watchdog
+  // `sendMessage` (persona-kit subprocess timeout) and the outer watchdog
   // so they're guaranteed to run on the same schedule. If the configured
-  // value is missing, zero, or negative, harness-kit otherwise disables
-  // its internal timeout entirely (see harness-kit/dist/runner.js:
+  // value is missing, zero, or negative, persona-kit otherwise disables
+  // its internal timeout entirely (see persona-kit/dist/runner.js:
   // `options.timeoutSeconds && options.timeoutSeconds > 0 ? setTimeout(...) : undefined`)
   // — and a watchdog firing on a fallback window while the subprocess has
   // no inner timeout at all is exactly the divergence coderabbit flagged.
@@ -288,11 +288,11 @@ export async function writeWorkflowWithWorkforcePersona(
     },
   });
 
-  // Defense-in-depth watchdog around the harness-kit await. Observed in
+  // Defense-in-depth watchdog around the persona-kit await. Observed in
   // production (2026-05-15): claude subprocess exited cleanly after the
-  // harness-kit timeoutSeconds expired and SIGTERM/SIGKILL fired, but the
+  // persona-kit timeoutSeconds expired and SIGTERM/SIGKILL fired, but the
   // subprocess's stdio pipe stayed half-open with buffered bytes, and the
-  // harness-kit `finish()` resolution never landed on its `exit` handler.
+  // persona-kit `finish()` resolution never landed on its `exit` handler.
   // Ricky's `await Promise.all([run, run.runId])` then hung indefinitely
   // (60+ minutes with 0% CPU, FD 4/5 = PIPE waiting on a dead writer).
   // The watchdog forces a settle at `timeoutSeconds + grace`, calling
@@ -444,7 +444,7 @@ export async function defaultWorkforcePersonaResolver(
       source: 'package',
       warnings: [
         ...(writerError?.warnings ?? []),
-        `Workforce harness-kit unavailable; trying usePersona(...).sendMessage() seam: ${errorMessage(error)}`,
+        `Workforce persona-kit unavailable; trying usePersona(...).sendMessage() seam: ${errorMessage(error)}`,
       ],
     };
   }
@@ -585,27 +585,26 @@ export async function resolveWorkforcePersonaContextWithModules(
   );
 }
 
-export async function loadWorkforcePersonaModule(importPackage: WorkforcePackageImporter = importWorkforcePackage): Promise<{
+export async function loadWorkforcePersonaModule(_importPackage?: WorkforcePackageImporter): Promise<{
   module: WorkforcePersonaModule;
   source: 'package';
   warnings: string[];
 }> {
-  const warnings: string[] = [];
-  let importFailure: string | undefined;
+  // Use the local persona-kit-runner adapter instead of @agentworkforce/persona-kit.
+  // persona-kit's buildNonInteractiveSpec uses the correct codex flags (no --ask-for-approval).
   try {
-    const packageName = '@agentworkforce/harness-kit';
-    const module = await importPackage(packageName) as WorkforcePersonaModule;
-    if (isRunnablePersonaModule(module)) return { module, source: 'package', warnings };
-    warnings.push(`@agentworkforce/harness-kit did not export useRunnablePersona() or useRunnableSelection(); exports: ${moduleExports(module)}.`);
+    const { useRunnablePersona, useRunnableSelection } = await import('./persona-kit-runner.js');
+    // Cast: persona-kit-runner returns structurally-compatible types but
+    // uses workload-router's PersonaSelection instead of WorkforcePersonaSelection.
+    // The two are structurally equivalent — PersonaTier ⊆ string, PersonaRuntime ≅ WorkforcePersonaRuntime.
+    const module = { useRunnablePersona, useRunnableSelection } as unknown as WorkforcePersonaModule;
+    return { module, source: 'package', warnings: [] };
   } catch (error) {
-    importFailure = errorMessage(error);
-    warnings.push(`Package Workforce harness-kit unavailable: ${importFailure}`);
+    throw new WorkforcePersonaWriterError(
+      workforcePersonaModuleLoadError(errorMessage(error)),
+      [`persona-kit runner unavailable: ${errorMessage(error)}`],
+    );
   }
-
-  throw new WorkforcePersonaWriterError(
-    workforcePersonaModuleLoadError(importFailure),
-    warnings,
-  );
 }
 
 export async function loadWorkforceSelectionModule(importPackage: WorkforcePackageImporter = importWorkforcePackage): Promise<{
@@ -2479,13 +2478,13 @@ function isRunnablePersonaModule(value: WorkforcePersonaModule): boolean {
 function workforcePersonaModuleLoadError(importFailure: string | undefined): string {
   if (importFailure) {
     return [
-      '@agentworkforce/harness-kit could not be loaded from the installed npm dependencies.',
+      '@agentworkforce/persona-kit could not be loaded from the installed npm dependencies.',
       'Try reinstalling @agentworkforce/ricky (`npm install` in this project).',
       'Ricky only resolves npm packages for Workforce persona execution; local ../workforce checkouts are intentionally ignored.',
     ].join(' ');
   }
   return [
-    '@agentworkforce/harness-kit is installed but does not expose the runnable persona API Ricky needs.',
+    '@agentworkforce/persona-kit is installed but does not expose the runnable persona API Ricky needs.',
     'Install a published npm version that exports useRunnablePersona() or useRunnableSelection().',
     'Ricky only resolves npm packages for Workforce persona execution; local ../workforce checkouts are intentionally ignored.',
   ].join(' ');
@@ -2652,11 +2651,11 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Default grace window (seconds) added on top of the harness-kit
+ * Default grace window (seconds) added on top of the persona-kit
  * subprocess timeout before ricky's outer watchdog fires. Has to absorb
- * harness-kit's SIGTERM → SIGKILL window plus the final pipe-drain — but
+ * persona-kit's SIGTERM → SIGKILL window plus the final pipe-drain — but
  * not so much that an actually-hung writer holds up a multi-spec run for
- * an hour. 90s has handled every observed harness-kit-timely settle case
+ * an hour. 90s has handled every observed persona-kit-timely settle case
  * in testing while still releasing within ~1.5 min of a true pipe-hang.
  */
 const WRITER_WATCHDOG_GRACE_SECONDS = 90;
@@ -2674,7 +2673,7 @@ const WRITER_WATCHDOG_GRACE_SECONDS = 90;
 const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
 
 /**
- * Awaits the harness-kit writer execution with a watchdog so a stuck
+ * Awaits the persona-kit writer execution with a watchdog so a stuck
  * subprocess settle path can't hang the caller indefinitely.
  *
  * ⚠️  Known limitation: the watchdog uses `setTimeout`, which only fires
@@ -2689,10 +2688,10 @@ const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
  * for the common half-open-pipe case.
  *
  * Background — production hang on 2026-05-15:
- * - claude writer subprocess ran to its harness-kit-declared timeout
+ * - claude writer subprocess ran to its persona-kit-declared timeout
  *   (3600s), got SIGTERM, then SIGKILL.
  * - The subprocess exited (gone from `ps`) but its stdio pipe stayed
- *   half-open with ~16 KB of buffered bytes. harness-kit's `finish()`
+ *   half-open with ~16 KB of buffered bytes. persona-kit's `finish()`
  *   resolution never fired because its `exit` handler was waiting on a
  *   `stdout` close that never came.
  * - Ricky's `await Promise.all([run, run.runId])` then hung at 0% CPU
@@ -2706,7 +2705,7 @@ const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
  *
  * The watchdog is opt-out by design: every caller already passes
  * `timeoutSeconds` via the persona's `harnessSettings`, so the watchdog
- * fires at most `grace` seconds after the harness-kit-internal timeout
+ * fires at most `grace` seconds after the persona-kit-internal timeout
  * was supposed to land. The happy path (writer settles before its own
  * timeout) clears the watchdog timer in the `finally` block and never
  * pays any wall-clock cost.
@@ -2735,7 +2734,7 @@ export async function waitForWriterWithWatchdog<R extends Promise<unknown> & { r
       }
       reject(
         new WorkforcePersonaWriterError(
-          `Workforce persona writer did not settle within ${effectiveTimeoutSeconds + WRITER_WATCHDOG_GRACE_SECONDS}s (declared timeout ${effectiveTimeoutSeconds}s + watchdog grace ${WRITER_WATCHDOG_GRACE_SECONDS}s). The harness-kit subprocess likely exited but left its stdio pipe half-open; aborting to avoid an indefinite wait.`,
+          `Workforce persona writer did not settle within ${effectiveTimeoutSeconds + WRITER_WATCHDOG_GRACE_SECONDS}s (declared timeout ${effectiveTimeoutSeconds}s + watchdog grace ${WRITER_WATCHDOG_GRACE_SECONDS}s). The persona-kit subprocess likely exited but left its stdio pipe half-open; aborting to avoid an indefinite wait.`,
           resolverWarnings,
         ),
       );
@@ -2800,7 +2799,7 @@ export interface PersonaDebugDumpInput {
  *   is set, so green production runs do not litter the artifact tree.
  *
  * Dump layout (one directory per `(kind, promptDigest)` pair):
- * - `output.raw.txt`   — the persona's stdout as captured by harness-kit
+ * - `output.raw.txt`   — the persona's stdout as captured by persona-kit
  * - `task.prompt.txt`  — the task body that was sent to the persona
  * - `meta.json`        — selection, status, exit code, stderr, durationMs
  *

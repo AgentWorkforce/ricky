@@ -40,7 +40,7 @@ export interface RickyLocalPersonaSpec {
    * when both are unset, the resolver picks a harness-appropriate default
    * (`bypassPermissions` for claude, undefined for codex/opencode — see
    * {@link DEFAULT_RICKY_LOCAL_CLAUDE_PERMISSIONS}). Mirrors the shape
-   * `@agentworkforce/harness-kit` reads off the selection in its
+   * `@agentworkforce/persona-kit` reads off the selection in its
    * `useRunnableSelection` entrypoint.
    */
   permissions?: RickyLocalPersonaPermissions;
@@ -64,7 +64,7 @@ export interface RickyLocalPersonaRuntime {
  * Shape consumed by harness-kit when it builds the spawn args:
  * - `mode` translates to `--permission-mode <mode>` for the claude harness.
  * - `allow` / `deny` translate to `--allowedTools` / `--disallowedTools`.
- * See `@agentworkforce/harness-kit`'s `harness.ts` for the canonical map.
+ * See `@agentworkforce/persona-kit`'s `harness.ts` for the canonical map.
  */
 export interface RickyLocalPersonaPermissions {
   mode?: 'acceptEdits' | 'auto' | 'bypassPermissions' | 'default' | 'dontAsk' | 'plan';
@@ -289,14 +289,16 @@ function resolvePermissionsForSelection(
   return undefined;
 }
 
-interface HarnessKitRunnableSelectionModule {
+interface PersonaKitRunnableSelectionModule {
   useRunnableSelection?: WorkforcePersonaModule['useRunnableSelection'];
 }
 
-type RunnableSelectionLoader = () => Promise<HarnessKitRunnableSelectionModule>;
+type RunnableSelectionLoader = () => Promise<PersonaKitRunnableSelectionModule>;
 
-async function defaultLoadRunnableSelectionModule(): Promise<HarnessKitRunnableSelectionModule> {
-  return (await import('@agentworkforce/harness-kit')) as HarnessKitRunnableSelectionModule;
+async function defaultLoadRunnableSelectionModule(): Promise<PersonaKitRunnableSelectionModule> {
+  // Use the local persona-kit-runner adapter so useRunnableSelection builds
+  // CLI args via persona-kit's fixed buildNonInteractiveSpec.
+  return import('./persona-kit-runner.js') as Promise<PersonaKitRunnableSelectionModule>;
 }
 
 /**
@@ -307,7 +309,7 @@ async function defaultLoadRunnableSelectionModule(): Promise<HarnessKitRunnableS
  * preserving the prior workforce-package behavior end-to-end.
  *
  * The Ricky-local path constructs a `PersonaSelection` by hand and hands
- * it to `@agentworkforce/harness-kit`'s `useRunnableSelection` to obtain a
+ * it to `@agentworkforce/persona-kit`'s `useRunnableSelection` to obtain a
  * runnable `WorkforcePersonaContext`. This avoids depending on the v3
  * persona-kit shape (which dropped tiers) and stays compatible with the
  * 0.19 router/harness-kit pair pinned by Ricky today.
@@ -331,18 +333,18 @@ export function createRickyLocalPersonaResolver(
       const tier = resolveRickyLocalPersonaTier(spec, resolverOptions);
       const selection = buildPersonaSelectionFromRickyLocalSpec(spec, tier);
 
-      let runnableModule: HarnessKitRunnableSelectionModule;
+      let runnableModule: PersonaKitRunnableSelectionModule;
       try {
         runnableModule = await load();
       } catch (error) {
         localWarnings.push(
-          `Ricky-local persona override for "${intent}" could not load @agentworkforce/harness-kit: ${errorMessage(error)}.`,
+          `Ricky-local persona override for "${intent}" could not load @agentworkforce/persona-kit: ${errorMessage(error)}.`,
         );
         break;
       }
       if (typeof runnableModule.useRunnableSelection !== 'function') {
         localWarnings.push(
-          `Ricky-local persona override for "${intent}" skipped: @agentworkforce/harness-kit did not export useRunnableSelection().`,
+          `Ricky-local persona override for "${intent}" skipped: @agentworkforce/persona-kit did not export useRunnableSelection().`,
         );
         break;
       }

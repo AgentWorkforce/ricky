@@ -1259,30 +1259,14 @@ describe('workforce persona workflow writer', () => {
     );
   });
 
-  it('preserves npm load failure wording when harness-kit cannot be imported', async () => {
-    const failImport = async () => {
-      throw new Error('simulated package load failure');
-    };
-
-    await expect(loadWorkforcePersonaModule(failImport)).rejects.toMatchObject({
-      name: 'WorkforcePersonaWriterError',
-      message: expect.stringContaining('@agentworkforce/harness-kit could not be loaded'),
-      warnings: [expect.stringContaining('simulated package load failure')],
-    });
-  });
-
-  it('preserves missing-export wording when harness-kit imports but lacks runnable APIs', async () => {
-    const importWrongShape = async () => ({
-      buildInteractiveSpec() {
-        return {};
-      },
-    });
-
-    await expect(loadWorkforcePersonaModule(importWrongShape)).rejects.toMatchObject({
-      name: 'WorkforcePersonaWriterError',
-      message: expect.stringContaining('does not expose the runnable persona API'),
-      warnings: [expect.stringContaining('exports: buildInteractiveSpec')],
-    });
+  it('loadWorkforcePersonaModule resolves to a module with useRunnablePersona and useRunnableSelection', async () => {
+    // loadWorkforcePersonaModule now always loads the local persona-kit-runner adapter;
+    // the importPackage parameter is ignored.
+    const result = await loadWorkforcePersonaModule();
+    expect(typeof result.module.useRunnablePersona).toBe('function');
+    expect(typeof result.module.useRunnableSelection).toBe('function');
+    expect(result.source).toBe('package');
+    expect(result.warnings).toHaveLength(0);
   });
 
   it('preserves npm load failure wording when workload-router cannot be imported', async () => {
