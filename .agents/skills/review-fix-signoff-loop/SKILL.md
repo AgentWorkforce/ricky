@@ -13,6 +13,7 @@ Pair this with `writing-agent-relay-workflows` for SDK syntax and `relay-80-100-
 
 - Run deterministic preflight before agents start.
 - Confirm repository root, required specs, declared write scope, credentials needed for PR comments, and whether commit/push/PR creation is in scope.
+- For cross-repo or package-release work, write a scope matrix before implementation: repositories, branches, PRs, packages, providers/features touched, published versions, consuming package manifests, lockfiles, and expected downstream bumps.
 - Probe the CLIs used by later agent steps. For Codex, `codex login status` is not enough; run a tiny `codex exec --ephemeral --json --sandbox read-only -m <supported-model>` prompt and fail early with a clear re-login instruction if it cannot return the expected token.
 - Write preflight evidence to `.workflow-artifacts/<workflow>/iteration-N/preflight.md`.
 - Implement with scoped owners.
@@ -21,9 +22,13 @@ Pair this with `writing-agent-relay-workflows` for SDK syntax and `relay-80-100-
 - Each worker writes a durable summary artifact with changed files and commands run.
 - Reconcile before validation.
 - Add a deterministic `implementation-reconcile` gate that checks required files, expected API/UI/runtime surfaces, migrations, generated artifacts, and untracked files with `git status --short -- <paths>`.
+- For multi-provider changes, reconcile against the scope matrix: every touched provider/package must be classified as `implemented`, `dependency-only`, `intentionally-deferred`, or `not-applicable`, with proof. Do not let "we only bumped the package I remembered" pass this gate.
+- For package-release flows, reconcile producer and consumer state: `npm view <pkg> version`, package manifests, lockfile resolved tarballs/integrities, and `npm ls <pkg>` from every consuming workspace.
+- For CI failures, map each failing job to its exact local command or documented non-local equivalent. Distinguish similarly named gates (for example handler coverage vs acceptance route coverage) and replay the one that actually failed.
 - Use `failOnError: false`, then route the captured output to a repair owner.
 - Run repairable validation.
 - Use capture -> fix -> rerun for typecheck, targeted tests, integration or E2E tests, and regression checks.
+- Include exact failing CI commands when available before broader "nearby" checks. A nearby green gate is supporting evidence, not proof that the reported CI failure is fixed.
 - Red validation output is input for a repair agent, not an immediate workflow failure.
 - Write `BLOCKED_NO_COMMIT.md` only for true external blockers.
 - Run fresh-context signoff reviews.
@@ -36,6 +41,7 @@ Pair this with `writing-agent-relay-workflows` for SDK syntax and `relay-80-100-
 - Make the Codex fix pass a non-interactive one-shot worker (`preset: 'worker'`) with a `file_exists` verification for its durable report. Do not rely on interactive PTY idle detection or `/exit` for loop progress.
 - Report final signoff.
 - Write a final `SIGNOFF.md` that includes iteration count, validation evidence, Claude rationale, Codex rationale, remaining risks, and artifact paths.
+- Include the final scope matrix with every repository/package/provider row signed off, deferred with owner/date, or marked not applicable. For release flows, include published and consumed versions.
 - Post the same report to the PR. Resolve the PR from an explicit env var first, then from `gh pr view`.
 
 ### Verdict Contract
@@ -47,6 +53,7 @@ VERDICT: COMPREHENSIVELY_SATISFIED | FINDINGS | BLOCKED
 why_passed: required when VERDICT is COMPREHENSIVELY_SATISFIED
 end_to_end_wiring_verified: required when VERDICT is COMPREHENSIVELY_SATISFIED
 deterministic_evidence: required when VERDICT is COMPREHENSIVELY_SATISFIED
+scope_matrix_verified: required when VERDICT is COMPREHENSIVELY_SATISFIED for cross-repo/provider/package work
 remaining_risks: required when VERDICT is COMPREHENSIVELY_SATISFIED
 finding_id: stable-id when VERDICT is FINDINGS
 severity: blocker | high | medium | low
@@ -55,6 +62,15 @@ issue: concrete gap
 fix_required: exact change needed
 test_required: deterministic proof needed
 evidence: commands, files, or spec clause
+```
+
+
+### Scope Matrix
+
+#### Create a machine-readable and human-readable matrix before the first fix pass for work that spans repositories, packages, providers, or CI gates. Keep it updated every iteration.
+
+```text
+repo | branch | PR | package/provider/surface | expected change | producer version | consumer version | files expected | gates required | status | evidence | owner
 ```
 
 
