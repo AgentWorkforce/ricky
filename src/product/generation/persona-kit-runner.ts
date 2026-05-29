@@ -105,12 +105,8 @@ function anySignal(signals: (AbortSignal | undefined)[]): AbortSignal | undefine
   const active = signals.filter((s): s is AbortSignal => s !== undefined);
   if (active.length === 0) return undefined;
   if (active.length === 1) return active[0];
-  const controller = new AbortController();
-  for (const signal of active) {
-    if (signal.aborted) { controller.abort(signal.reason); break; }
-    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
-  }
-  return controller.signal;
+  // AbortSignal.any() (Node.js ≥ 20.3) handles listener cleanup automatically.
+  return AbortSignal.any(active);
 }
 
 async function spawnCapture(
@@ -174,7 +170,9 @@ async function spawnCapture(
       stderr += text;
       options.onProgress?.({ stream: 'stderr', text });
     });
-    child.on('exit', (code) => finish(code));
+    // Use 'close' (not 'exit') to ensure stdio streams are fully drained
+    // before resolving — 'exit' fires while pipes may still have buffered data.
+    child.on('close', (code) => finish(code));
     child.on('error', (err: NodeJS.ErrnoException) => {
       stderr += err.message;
       finish(err.code === 'ENOENT' ? 127 : 1, 'failed');
@@ -248,8 +246,11 @@ export function makeRunnablePersonaContext(
         };
       }
 
+      const skillsInstalled =
+        sendOptions.installSkills === true && install.commandString !== ':';
+
       // Install skills if requested
-      if (sendOptions.installSkills === true && install.commandString !== ':') {
+      if (skillsInstalled) {
         const installResult = await spawnCapture(install.command[0], install.command.slice(1), {
           cwd,
           env: callerEnv,
@@ -268,26 +269,29 @@ export function makeRunnablePersonaContext(
         }
       }
 
-      const result = await spawnCapture(bin, spec.args, {
-        cwd,
-        env: callerEnv,
-        signal,
-        timeoutSeconds: sendOptions.timeoutSeconds,
-        onProgress: sendOptions.onProgress,
-      });
+      // Wrap execution in try/finally so cleanup always runs even on error/cancellation.
+      let result: SpawnCaptureResult;
+      try {
+        result = await spawnCapture(bin, spec.args, {
+          cwd,
+          env: callerEnv,
+          signal,
+          timeoutSeconds: sendOptions.timeoutSeconds,
+          onProgress: sendOptions.onProgress,
+        });
+      } finally {
+        if (skillsInstalled && install.cleanupCommandString !== ':') {
+          await spawnCapture(install.cleanupCommand[0], install.cleanupCommand.slice(1), {
+            cwd,
+            env: callerEnv,
+            signal: undefined,
+            timeoutSeconds: 30,
+          }).catch(() => undefined);
+        }
+      }
 
       const status =
         result.status === 'completed' && (result.exitCode ?? 0) !== 0 ? 'failed' : result.status;
-
-      // Cleanup skills after execution
-      if (sendOptions.installSkills === true && install.cleanupCommandString !== ':') {
-        await spawnCapture(install.cleanupCommand[0], install.cleanupCommand.slice(1), {
-          cwd,
-          env: callerEnv,
-          signal: undefined,
-          timeoutSeconds: 30,
-        }).catch(() => undefined);
-      }
 
       return {
         status,
@@ -319,12 +323,17 @@ export function useRunnablePersona(
   intent: string,
   options: RunnablePersonaOptions = {},
 ): RunnablePersonaContext {
+  type UsePersonaOpts = NonNullable<Parameters<typeof usePersona>[1]>;
   // workload-router narrows intent to a specific union — cast through unknown.
-  const context = usePersona(intent as Parameters<typeof usePersona>[0], {
-    harness: options.harness as Parameters<typeof usePersona>[1] extends { harness?: infer H } ? H : never,
-    tier: options.tier as Parameters<typeof usePersona>[1] extends { tier?: infer T } ? T : never,
+  const opts: UsePersonaOpts = {
+    harness: options.harness as UsePersonaOpts['harness'],
+    tier: options.tier as UsePersonaOpts['tier'],
     installRoot: options.installRoot,
-  });
+    ...( options.profile !== undefined
+      ? { profile: options.profile as UsePersonaOpts['profile'] }
+      : {} ),
+  };
+  const context = usePersona(intent as Parameters<typeof usePersona>[0], opts);
   return makeRunnablePersonaContext(context, { commandOverrides: options.commandOverrides });
 }
 
