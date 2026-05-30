@@ -42,6 +42,54 @@ describe('power user parser defaults', () => {
     });
   });
 
+  it('parses --input KEY=VALUE flags into an inputs record', () => {
+    const parsed = parsePowerUserArgs([
+      'local', '--spec-file', './_review.md', '--run',
+      '--input', 'TARGET_SPEC=specs/021-sentry.md',
+      '--input', 'DIFF_RANGE=abc..HEAD',
+    ]);
+    expect(parsed.inputs).toEqual({
+      TARGET_SPEC: 'specs/021-sentry.md',
+      DIFF_RANGE: 'abc..HEAD',
+    });
+    expect(parsed).not.toHaveProperty('errors');
+  });
+
+  it('accepts the --input=KEY=VALUE inline form and an empty value', () => {
+    const parsed = parsePowerUserArgs([
+      'local', '--spec-file', './_review.md', '--run',
+      '--input=TARGET_SPEC=',
+    ]);
+    expect(parsed.inputs).toEqual({ TARGET_SPEC: '' });
+  });
+
+  it('reports an error for a malformed --input without KEY=VALUE', () => {
+    const parsed = parsePowerUserArgs([
+      'local', '--spec-file', './_review.md', '--run',
+      '--input', 'NOTAPAIR',
+    ]);
+    expect(parsed.errors).toBeDefined();
+    expect(parsed.errors?.some((e) => e.includes('KEY=VALUE'))).toBe(true);
+  });
+
+  it('reports an error for an invalid --input env var name', () => {
+    const parsed = parsePowerUserArgs([
+      'local', '--spec-file', './_review.md', '--run',
+      '--input', '1BAD=value',
+    ]);
+    expect(parsed.errors?.some((e) => e.includes('not a valid environment variable name'))).toBe(true);
+  });
+
+  it('does not consume a following flag when --input has no value (keeps --run intact)', () => {
+    const parsed = parsePowerUserArgs([
+      'local', '--spec-file', './_review.md', '--input', '--run',
+    ]);
+    // --run must still be recognized, not swallowed as the --input value.
+    expect(parsed.runRequested).toBe(true);
+    expect(parsed.errors?.some((e) => e.includes('--input requires a KEY=VALUE'))).toBe(true);
+    expect(parsed.inputs).toBeUndefined();
+  });
+
   it('parses the workflow one-shot command for local execution and Cloud generation', () => {
     expect(parsePowerUserArgs(['workflow', '--spec-file', './SPEC.md', '--run'])).toMatchObject({
       command: 'run',

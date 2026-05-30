@@ -21,6 +21,15 @@ export const DEFAULT_RUN_TIMEOUT_MS = 43_200_000; // 12 h
 
 export const DEFAULT_TIMEOUT_MS = DEFAULT_RUN_TIMEOUT_MS;
 
+// Inactivity (idle-output) watchdog for the workflow runner subprocess. A
+// healthy run constantly emits broker logs and agent output; total silence for
+// this long means the runner is hung (dead broker, half-open stdio pipe, a
+// subprocess parked at 0% CPU). When this fires the runner is aborted so the
+// run fails fast and the orchestrator can move on instead of stalling for the
+// full 12 h DEFAULT_RUN_TIMEOUT_MS. Override with RICKY_RUN_IDLE_TIMEOUT_MS=0
+// to disable, or any positive ms value to retune.
+export const DEFAULT_RUN_IDLE_TIMEOUT_MS = 1_800_000; // 30 min of zero output
+
 // Per-step budgets for generated workflows. Tuned so that:
 //   - implement/fix-loop steps (real codex code-writing) get ~20 min each
 //   - lead-plan and review steps get ~10 min each
