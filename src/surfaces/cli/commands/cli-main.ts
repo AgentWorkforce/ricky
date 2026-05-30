@@ -105,6 +105,8 @@ export interface ParsedArgs {
   bestJudgement?: boolean;
   login?: boolean;
   connectMissing?: boolean;
+  /** KEY=VALUE pairs from `--input KEY=VALUE` flags, injected into the workflow runner env. */
+  inputs?: Record<string, string>;
   workforcePersonaWriterCli?: boolean;
   errors?: string[];
 }
@@ -254,6 +256,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.bestJudgement) result.bestJudgement = true;
   if (parsed.login) result.login = true;
   if (parsed.connectMissing) result.connectMissing = true;
+  if (parsed.inputs && Object.keys(parsed.inputs).length > 0) result.inputs = parsed.inputs;
   if (parsed.workforcePersonaWriterCli !== undefined) result.workforcePersonaWriterCli = parsed.workforcePersonaWriterCli;
   if (parsed.errors && parsed.errors.length > 0) result.errors = parsed.errors;
   return result;
@@ -616,6 +619,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
       metadata: cliMetadataFor(parsed, 'artifact'),
     };
@@ -636,6 +640,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'inline-spec'),
     };
@@ -655,6 +660,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'spec-file'),
     };
@@ -675,6 +681,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'stdin'),
     };

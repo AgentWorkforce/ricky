@@ -58,6 +58,8 @@ export interface BaseHandoff {
    * assumptions instead of asking the user before generation.
    */
   bestJudgement?: boolean;
+  /** KEY=VALUE pairs from `--input KEY=VALUE` flags, injected into the workflow runner env. */
+  inputs?: Record<string, string>;
 }
 
 /** Free-form spec string from a direct local caller. */
@@ -158,6 +160,12 @@ export interface LocalInvocationRequest {
   refine?: false | { model?: string };
   /** Resolve blocking clarification questions using implementer best judgement. */
   bestJudgement?: boolean;
+  /**
+   * KEY=VALUE pairs from `--input KEY=VALUE` CLI flags. Injected into the
+   * workflow runner subprocess env so workflow scripts can read them via
+   * `process.env.KEY` (e.g. `TARGET_SPEC` for reusable review/fix workflows).
+   */
+  inputs?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,12 +319,13 @@ export async function normalizeRequest(
   }
 }
 
-function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'bestJudgement'> {
+function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'bestJudgement' | 'inputs'> {
   return {
     ...(raw.autoFix ? { autoFix: raw.autoFix } : {}),
     ...(raw.retry ? { retry: raw.retry } : {}),
     ...(raw.refine ? { refine: raw.refine } : {}),
     ...(raw.bestJudgement ? { bestJudgement: true } : {}),
+    ...(raw.inputs && Object.keys(raw.inputs).length > 0 ? { inputs: raw.inputs } : {}),
   };
 }
 

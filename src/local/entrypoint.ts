@@ -26,7 +26,7 @@ import { intake } from '../product/spec-intake/index.js';
 import type { ClarificationQuestion, ExecutionPreference, InputSurface, RawSpecPayload, RouteTarget } from '../product/spec-intake/index.js';
 import { defaultRepoDetector, type RepoDetector } from '../product/spec-intake/detect-current-repo.js';
 import { LocalCoordinator } from '../runtime/local-coordinator.js';
-import { DEFAULT_RUN_TIMEOUT_MS } from '../shared/constants.js';
+import { DEFAULT_RUN_TIMEOUT_MS, DEFAULT_RUN_IDLE_TIMEOUT_MS } from '../shared/constants.js';
 import { localRunArtifactDir, localRunStateRoot } from '../shared/state-paths.js';
 import type {
   CommandInvocation,
@@ -401,6 +401,25 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
 
     const abortController = new AbortController();
 
+    // Inactivity watchdog: a healthy run constantly emits broker/agent output.
+    // Total silence for the idle window means the runner is hung (dead broker,
+    // half-open stdio pipe, a subprocess parked at 0% CPU). Aborting on idle
+    // makes the run fail fast instead of stalling until DEFAULT_RUN_TIMEOUT_MS.
+    const idleTimeoutMs = resolveIdleTimeoutMs();
+    let lastOutputMs = Date.now();
+    let idleAborted = false;
+    const idleInterval = idleTimeoutMs > 0
+      ? setInterval(() => {
+          if (Date.now() - lastOutputMs >= idleTimeoutMs) {
+            idleAborted = true;
+            this.onRuntimeOutput?.('stderr', `[ricky] workflow runner idle for ${Math.round(idleTimeoutMs / 1000)}s with no output — aborting as hung.`);
+            abortController.abort();
+          }
+        }, Math.min(idleTimeoutMs, 60_000))
+      : undefined;
+    idleInterval?.unref?.();
+    const markActivity = (): void => { lastOutputMs = Date.now(); };
+
     try {
       const runnerResult = await withTimeout(
         this.runner(request.workflowFile, {
@@ -411,11 +430,13 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
           startFrom: retry.startFromStep,
           previousRunId: retry.previousRunId,
           onStdout: (line) => {
+            markActivity();
             stdout.push(line);
             this.onRuntimeOutput?.('stdout', line);
             emit('stdout', line, { stream: 'stdout' });
           },
           onStderr: (line) => {
+            markActivity();
             stderr.push(line);
             this.onRuntimeOutput?.('stderr', line);
             emit('stderr', line, { stream: 'stderr' });
@@ -423,7 +444,12 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
         }),
         request.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
         () => abortController.abort(),
-      );
+      ).finally(() => {
+        if (idleInterval) clearInterval(idleInterval);
+      });
+      if (idleAborted) {
+        stderr.push(`Workflow runner aborted after ${Math.round(idleTimeoutMs / 1000)}s of inactivity (suspected hang).`);
+      }
       const reportedFailure =
         failureFromScriptWorkflowResult(runnerResult) ?? failureFromScriptWorkflowOutput(stdout, stderr);
       if (reportedFailure) {
@@ -617,6 +643,19 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout?: () =
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeout) clearTimeout(timeout);
   });
+}
+
+/**
+ * Resolve the inactivity-watchdog window. `RICKY_RUN_IDLE_TIMEOUT_MS=0`
+ * disables it; any positive integer overrides the default. A non-numeric or
+ * negative value falls back to {@link DEFAULT_RUN_IDLE_TIMEOUT_MS}.
+ */
+function resolveIdleTimeoutMs(): number {
+  const raw = process.env.RICKY_RUN_IDLE_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_RUN_IDLE_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_RUN_IDLE_TIMEOUT_MS;
+  return Math.floor(parsed);
 }
 
 export function createSdkScriptWorkflowRunner(): ScriptWorkflowRunner {
@@ -1323,7 +1362,11 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         cwd,
         timeoutMs: options.timeoutMs,
         route,
-        env: { AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
+        // `--input KEY=VALUE` pairs are injected into the workflow runner env so
+        // workflow scripts can read them via process.env.KEY (e.g. TARGET_SPEC
+        // for the reusable review/fix workflows). AGENT_RELAY_RUN_ID_FILE wins
+        // on conflict since it is Ricky-owned runtime state.
+        env: { ...(activeRequest.inputs ?? {}), AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
         ...stableRunIdFor(activeRequest),
         retry: activeRequest.retry,
         metadata: {
