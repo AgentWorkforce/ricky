@@ -212,14 +212,22 @@ function parseInputFlags(argv: string[]): { values: Record<string, string>; erro
     const arg = argv[index];
     let pair: string | undefined;
     if (arg === '--input') {
-      pair = argv[index + 1];
+      const next = argv[index + 1];
+      // Only consume the next token as the value when it is a real argument,
+      // not another flag. Advancing the index past a following flag (e.g.
+      // `--input --run`) would silently drop that flag from parsing.
+      if (next === undefined || next.startsWith('--')) {
+        errors.push('--input requires a KEY=VALUE argument.');
+        continue;
+      }
+      pair = next;
       index += 1;
     } else if (arg.startsWith('--input=')) {
       pair = arg.slice('--input='.length);
     } else {
       continue;
     }
-    if (pair === undefined || pair.startsWith('--')) {
+    if (pair === '') {
       errors.push('--input requires a KEY=VALUE argument.');
       continue;
     }

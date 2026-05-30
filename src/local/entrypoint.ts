@@ -406,13 +406,20 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
     // half-open stdio pipe, a subprocess parked at 0% CPU). Aborting on idle
     // makes the run fail fast instead of stalling until DEFAULT_RUN_TIMEOUT_MS.
     const idleTimeoutMs = resolveIdleTimeoutMs();
+    const idleAbortMessage = `Workflow runner aborted after ${Math.round(idleTimeoutMs / 1000)}s of inactivity (suspected hang).`;
     let lastOutputMs = Date.now();
     let idleAborted = false;
     const idleInterval = idleTimeoutMs > 0
       ? setInterval(() => {
           if (Date.now() - lastOutputMs >= idleTimeoutMs) {
             idleAborted = true;
-            this.onRuntimeOutput?.('stderr', `[ricky] workflow runner idle for ${Math.round(idleTimeoutMs / 1000)}s with no output — aborting as hung.`);
+            // Record the abort reason on stderr + events *before* aborting, so
+            // it survives the runner promise rejecting and surfaces as the real
+            // cause in the coordinator result (the post-await path below is
+            // skipped once abort() makes the awaited promise reject).
+            stderr.push(idleAbortMessage);
+            this.onRuntimeOutput?.('stderr', idleAbortMessage);
+            emit('stderr', idleAbortMessage, { stream: 'stderr', reason: 'idle-timeout' });
             abortController.abort();
           }
         }, Math.min(idleTimeoutMs, 60_000))
@@ -444,12 +451,7 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
         }),
         request.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
         () => abortController.abort(),
-      ).finally(() => {
-        if (idleInterval) clearInterval(idleInterval);
-      });
-      if (idleAborted) {
-        stderr.push(`Workflow runner aborted after ${Math.round(idleTimeoutMs / 1000)}s of inactivity (suspected hang).`);
-      }
+      );
       const reportedFailure =
         failureFromScriptWorkflowResult(runnerResult) ?? failureFromScriptWorkflowOutput(stdout, stderr);
       if (reportedFailure) {
@@ -473,9 +475,16 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      status = message.startsWith('timed out after ') ? 'timed_out' : 'failed';
-      stderr.push(message);
-      emit(status === 'timed_out' ? 'timeout' : 'error', message, { error: message });
+      // An idle-watchdog abort is a timeout, not a generic failure. Its marker
+      // is already on stderr/events from the watchdog callback, so don't push
+      // the raw abort error on top of it.
+      status = idleAborted || message.startsWith('timed out after ') ? 'timed_out' : 'failed';
+      if (!idleAborted) stderr.push(message);
+      emit(
+        status === 'timed_out' ? 'timeout' : 'error',
+        idleAborted ? idleAbortMessage : message,
+        idleAborted ? { error: message, reason: 'idle-timeout' } : { error: message },
+      );
       return coordinatorResultFromSdkRun({
         request,
         runId,
@@ -491,6 +500,11 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
         snippetLimit,
         error: message,
       });
+    } finally {
+      // Always clear the watchdog — covers a synchronous throw from
+      // this.runner() (before withTimeout is even reached) and every other
+      // exit path, so the interval can never leak.
+      if (idleInterval) clearInterval(idleInterval);
     }
   }
 }
@@ -647,15 +661,19 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout?: () =
 
 /**
  * Resolve the inactivity-watchdog window. `RICKY_RUN_IDLE_TIMEOUT_MS=0`
- * disables it; any positive integer overrides the default. A non-numeric or
- * negative value falls back to {@link DEFAULT_RUN_IDLE_TIMEOUT_MS}.
+ * disables it; any positive integer overrides the default. A non-numeric,
+ * negative, or fractional value (e.g. `0.5`, which would floor to 0 and
+ * silently disable the watchdog) falls back to {@link DEFAULT_RUN_IDLE_TIMEOUT_MS}.
  */
 function resolveIdleTimeoutMs(): number {
   const raw = process.env.RICKY_RUN_IDLE_TIMEOUT_MS;
   if (raw === undefined || raw.trim() === '') return DEFAULT_RUN_IDLE_TIMEOUT_MS;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_RUN_IDLE_TIMEOUT_MS;
-  return Math.floor(parsed);
+  // Require a non-negative integer. 0 explicitly disables the watchdog; any
+  // other value must be a whole number of ms — reject fractions so a typo
+  // like `0.5` does not floor to 0 and quietly turn the watchdog off.
+  if (!Number.isInteger(parsed) || parsed < 0) return DEFAULT_RUN_IDLE_TIMEOUT_MS;
+  return parsed;
 }
 
 export function createSdkScriptWorkflowRunner(): ScriptWorkflowRunner {

@@ -80,6 +80,16 @@ describe('power user parser defaults', () => {
     expect(parsed.errors?.some((e) => e.includes('not a valid environment variable name'))).toBe(true);
   });
 
+  it('does not consume a following flag when --input has no value (keeps --run intact)', () => {
+    const parsed = parsePowerUserArgs([
+      'local', '--spec-file', './_review.md', '--input', '--run',
+    ]);
+    // --run must still be recognized, not swallowed as the --input value.
+    expect(parsed.runRequested).toBe(true);
+    expect(parsed.errors?.some((e) => e.includes('--input requires a KEY=VALUE'))).toBe(true);
+    expect(parsed.inputs).toBeUndefined();
+  });
+
   it('parses the workflow one-shot command for local execution and Cloud generation', () => {
     expect(parsePowerUserArgs(['workflow', '--spec-file', './SPEC.md', '--run'])).toMatchObject({
       command: 'run',
