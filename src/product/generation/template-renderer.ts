@@ -147,7 +147,6 @@ function renderSource(input: {
     '',
     renderPrepareContextStep(input.artifactsDir, contextSetup),
     '',
-    renderGateStep(input.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!),
     '',
     renderLeadPlanStep(input.artifactsDir, Boolean(input.spec.targetContext), input.isCodeWorkflow),
     '',
@@ -252,7 +251,7 @@ function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean): Work
   const implementer = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
   return [
     task('prepare-context', 'Prepare context', 'deterministic', 'Read or materialize the normalized spec and target context.', []),
-    task('lead-plan', 'Lead plan', isCodeWorkflow ? 'lead-claude' : 'lead-codex', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
+    task('lead-plan', 'Lead plan', isCodeWorkflow ? 'lead-claude' : 'lead-codex', 'Plan deliverables, non-goals, ownership, and verification gates.', ['prepare-context']),
     task('implement-artifact', 'Implement artifact', implementer, describeImplementation(spec), ['lead-plan']),
     task('review-claude', 'Fresh-eyes review with Claude', 'reviewer-claude', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
     task('fix-loop', 'Claude review-fix loop', 'validator-claude', 'Apply bounded fixes from Claude review and validation feedback.', ['review-claude', 'initial-soft-validation']),
@@ -297,17 +296,13 @@ function buildGates(
     listedValidationOnly ? executableAcceptanceCommands : [typecheckCommand, testCommand, ...executableAcceptanceCommands],
   );
   const regressionCommand = listedValidationOnly ? 'git diff --check' : isCodeWorkflow ? 'npx vitest run' : 'git diff --check';
-  const skillBoundaryPath = `${artifactsDir}/skill-application-boundary.json`;
 
   return [
-    gate(
-      'skill-boundary-metadata-gate',
-      buildSkillBoundaryGateCommand(skillBoundaryPath, skills),
-      'artifact_exists',
-      true,
-      ['prepare-context'],
-      'pre_review',
-    ),
+    // skill-boundary-metadata-gate removed: it greps skill-application-boundary.json
+    // (and friends) — files ricky writes itself, deterministically, at generation.
+    // A runtime shell-grep of ricky's own bookkeeping added no value and was brittle
+    // to JSON formatting (pretty vs compact). The boundary artifacts are now validated
+    // in-process at generation time via assertSkillBoundaryArtifacts().
     gate('lead-plan-gate', buildLeadPlanGateCommand(`${artifactsDir}/lead-plan.md`), 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('post-implementation-file-gate', fileGateCommand, 'file_exists', true, ['implement-artifact'], 'pre_review'),
     gate('initial-soft-validation', initialValidationCommand, 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
@@ -541,63 +536,6 @@ function buildActiveReferenceGateCommand(outputManifest: string, evidencePath: s
     'console.log(\'ACTIVE_REFERENCE_GATE_OK\');',
     'NODE',
   ].join('\n');
-}
-
-function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillContext): string {
-  const quotedPath = shellQuote(skillBoundaryPath);
-  const artifactsDir = skillBoundaryPath.replace(/\/skill-application-boundary\.json$/, '');
-  const commands = [
-    `test -f ${quotedPath}`,
-    `test -f ${shellQuote(`${artifactsDir}/skill-matches.json`)}`,
-    `test -f ${shellQuote(`${artifactsDir}/tool-selection.json`)}`,
-    `grep -F ${shellQuote('generation_time_only')} ${quotedPath}`,
-    `grep -F ${shellQuote('"runtimeEmbodiment":false')} ${quotedPath}`,
-    ...skills.applicableSkillNames.map((skillName) => `grep -F ${shellQuote(skillName)} ${quotedPath}`),
-  ];
-
-  if (skills.applicableSkillNames.length > 0) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_selection"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"stage":"generation_loading"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"effect":"metadata"')} ${quotedPath}`,
-    );
-  }
-
-  if (skills.applicableSkillNames.includes('choosing-swarm-patterns')) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"effect":"pattern_selection"')} ${quotedPath}`,
-    );
-  }
-
-  if (skills.applicableSkillNames.includes('writing-agent-relay-workflows')) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"effect":"workflow_contract"')} ${quotedPath}`,
-    );
-  }
-
-  if (skills.applicableSkillNames.includes('relay-80-100-workflow')) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"effect":"validation_gates"')} ${quotedPath}`,
-    );
-  }
-
-  if (skills.applicableSkillNames.includes('review-fix-signoff-loop')) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"skillName":"review-fix-signoff-loop"')} ${quotedPath}`,
-    );
-  }
-
-  return commands.join(' && ');
-}
-
-function applyToolSelection(team: TeamMemberSpec[], selections: ToolSelection[]): void {
-  for (const member of team) {
-    const selection = selections.find((candidate) => candidate.agent === member.name);
-    if (!selection) continue;
     if (selection.runner !== '@agent-relay/sdk') member.cli = selection.runner;
     if (selection.model) member.model = selection.model;
   }
@@ -879,7 +817,7 @@ function renderLeadPlanStep(artifactsDir: string, hasTargetContext: boolean, isC
   const agent = isCodeWorkflow ? 'lead-claude' : 'lead-codex';
   return `    .step('lead-plan', {
       agent: ${literal(agent)},
-      dependsOn: ['skill-boundary-metadata-gate'],
+      dependsOn: ['prepare-context'],
       timeoutMs: ${DEFAULT_LEAD_PLAN_TIMEOUT_MS},
       task: ${templateLiteral(`Plan the workflow execution from the packaged context files.
 
