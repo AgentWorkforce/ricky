@@ -166,7 +166,12 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).toContain('ricky run \'workflows/generated/runtime-master-children/01-nested-runner.ts\' --foreground');
     expect(rendered.content).not.toMatch(/^\s*command: "set -e\\nricky run .*--no-auto-fix/m);
     expect(rendered.content).toContain('MASTER_EXECUTOR_RESULT_READY');
-    expect(rendered.content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
+    expect(rendered.content).toContain('RICKY_MASTER_CHILD_WORKFLOWS_READY');
+    expect(rendered.content).not.toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
+    const masterStepConfigs = extractStepConfigs(rendered.content);
+    const verifyChildrenCommand = masterStepConfigs.get('verify-child-workflows')?.command;
+    expect(verifyChildrenCommand).toContain('ts.createSourceFile');
+    expect(verifyChildrenCommand).not.toContain("body.includes('.step(\"final-signoff\"')");
     // Child workflow sources live in the .children.json sidecar so the
     // master content stays under ARG_MAX. Assert child-only strings are in
     // the sidecar payload rather than inlined into the master TS.
@@ -200,7 +205,7 @@ describe('workflow generation pipeline', () => {
       expect(childStepPositions, `${childPath} declares every fresh-eyes step`).not.toContain(undefined);
       expect(childStepPositions, `${childPath} fresh-eyes step order`)
         .toEqual([...childStepPositions].sort((a, b) => a! - b!));
-      expect(childStepConfigs.get('final-review-pass-gate')?.command, `${childPath} child fresh-eyes marker`).toContain('RICKY_CHILD_FRESH_EYES_LOOP_READY');
+      expect(childStepConfigs.get('final-review-pass-gate')?.command, `${childPath} child final review file gate`).toContain('RICKY_CHILD_FINAL_REVIEW_FILES_READY');
     }
     expect(extractOnErrorConfigs(rendered.content), 'master workflow retry policy').toContainEqual({
       strategy: 'retry',
@@ -245,9 +250,9 @@ describe('workflow generation pipeline', () => {
     // entirely via a deterministic command.
     expect(leadPlan!.agent, 'lead-plan has no agent assignment').toBeUndefined();
     expect(leadPlan!.type, 'lead-plan is deterministic').toBe('deterministic');
-    expect(leadPlan!.command, 'lead-plan writes the marker into lead-plan.md').toContain('RICKY_MASTER_LEAD_PLAN_READY');
-    expect(leadPlan!.command, 'lead-plan self-verifies the marker after writing').toContain('grep -F RICKY_MASTER_LEAD_PLAN_READY');
-    expect(leadPlan!.command, 'lead-plan echoes the downstream verification marker').toContain('RICKY_MASTER_LEAD_PLAN_VERIFIED');
+    expect(leadPlan!.command, 'lead-plan writes a non-empty lead-plan.md').toContain('test -s');
+    expect(leadPlan!.command, 'lead-plan no longer self-verifies a marker with grep').not.toContain('grep -F RICKY_MASTER_LEAD_PLAN_READY');
+    expect(leadPlan!.command, 'lead-plan echoes structural completion').toContain('RICKY_MASTER_LEAD_PLAN_WRITTEN');
     // `materialize-child-workflows` formerly depended on the separate
     // `lead-plan-gate`; with the gate folded into `lead-plan`, the
     // dependency must move directly to `lead-plan`.
@@ -762,7 +767,7 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(artifact.content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
     expect(artifact.content).toContain('80-to-100 review-fix loop');
-    expect(artifact.content).toContain('deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion');
+    expect(artifact.content).toContain('deterministic structural sanity gate using a parser, inline assertion, or scoped file/diff check');
     expect(artifact.content).toContain('If using rg, guard it with command -v rg');
     expect(artifact.content).toContain('Generated workflow quality');
     expect(artifact.content).toContain('Keep each agent step bounded to one coherent slice');
@@ -922,27 +927,13 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('runtimeEmbodiment');
     expect(artifact.content).toContain('Skills are applied by Ricky during selection, loading, and template rendering.');
     expect(artifact.content).toContain('Do not claim generated agents load, retain, or embody skill files at runtime');
-    const skillBoundaryGate = artifact.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!;
-    expect(skillBoundaryGate.command).toContain('choosing-swarm-patterns');
-    expect(skillBoundaryGate.command).toContain('writing-agent-relay-workflows');
-    expect(skillBoundaryGate.command).toContain('relay-80-100-workflow');
-    expect(skillBoundaryGate.command).toContain('review-fix-signoff-loop');
-    expect(skillBoundaryGate.command).toContain('"stage":"generation_selection"');
-    expect(skillBoundaryGate.command).toContain('"stage":"generation_loading"');
-    expect(skillBoundaryGate.command).toContain('"stage":"generation_rendering"');
-    expect(skillBoundaryGate.command).toContain('"effect":"pattern_selection"');
-    expect(skillBoundaryGate.command).toContain('"effect":"workflow_contract"');
-    expect(skillBoundaryGate.command).toContain('"effect":"validation_gates"');
-    expect(artifact.gates).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: 'skill-boundary-metadata-gate',
-          command: expect.stringContaining('skill-application-boundary.json'),
-          failOnError: true,
-          stage: 'pre_review',
-        }),
-      ]),
-    );
+    expect(artifact.gates.map((candidate) => candidate.name)).not.toContain('skill-boundary-metadata-gate');
+    expect(artifact.content).not.toContain('.step("skill-boundary-metadata-gate"');
+    expect(gate(artifact, 'lead-plan-gate')).toMatchObject({
+      dependsOn: ['lead-plan'],
+      failOnError: true,
+      stage: 'pre_review',
+    });
   });
 
   it('accepts a natural doc/spec request and selects a lighter workflow with deterministic review gates', () => {
@@ -1497,15 +1488,13 @@ describe('workflow generation pipeline', () => {
       artifactPath: 'workflows/generated/inline-sanity.ts',
     });
     const base = artifact(result);
-    const gatesWithoutGrep = base.gates.map((gate) => ({
+    const gatesWithoutSanityChecks = base.gates.map((gate) => ({
       ...gate,
-      command: gate.command
-        .replace(/\bgit\s+grep\b/g, 'printf')
-        .replace(/\bgrep\b/g, 'printf'),
+      command: 'printf ok',
     }));
     const withPostImplementationCommand = (command: string) => ({
       ...base,
-      gates: gatesWithoutGrep.map((gate) => gate.name === 'post-implementation-file-gate'
+      gates: gatesWithoutSanityChecks.map((gate) => gate.name === 'post-implementation-file-gate'
         ? { ...gate, command }
         : gate),
     });
@@ -1591,9 +1580,7 @@ describe('workflow generation pipeline', () => {
       ...base,
       gates: base.gates.map((gate) => ({
         ...gate,
-        command: gate.command
-          .replace(/\bgit\s+grep\b/g, 'printf')
-          .replace(/\bgrep\b/g, 'printf'),
+        command: 'printf ok',
       })),
     };
 
@@ -1713,9 +1700,13 @@ describe('workflow generation pipeline', () => {
     expect(claudePathMatch).not.toBeNull();
     expect(codexPathMatch).not.toBeNull();
 
-    expect(passGate.command).toContain(claudePathMatch![1]);
-    expect(passGate.command).toContain(codexPathMatch![1]);
-    expect(passGate.command).toContain("tr -d '[:space:]*'");
+    expect(passGate.command).toContain('.workflow-artifacts/generated/path-consistency');
+    expect(passGate.command).toContain('claude-final-fix.md');
+    expect(passGate.command).toContain('codex-final-fix.md');
+    expect(passGate.command).toContain('claude-final-fix-status.json');
+    expect(passGate.command).toContain('codex-final-fix-status.json');
+    expect(passGate.command).toContain('JSON.parse');
+    expect(passGate.command).toContain('BLOCKED_NO_COMMIT.md');
   });
 
   it('no-target spec uses output manifest instead of artifact path in file gates', () => {
@@ -1751,7 +1742,7 @@ describe('workflow generation pipeline', () => {
     expect(consistencyGate.command).toContain("['final-review-codex.md', read('final-review-codex.md')]");
     expect(consistencyGate.command).toContain("['codex-final-fix.md', read('codex-final-fix.md')]");
     expect(consistencyGate.command).toContain("['signoff.md', read('signoff.md')]");
-    expect(consistencyGate.command).toContain('CODEX_FINAL_FIX_COMPLETE');
+    expect(consistencyGate.command).not.toContain('CODEX_FINAL_FIX_COMPLETE');
   });
 
   it('no-target code workflow file gate validates manifest contents, not source-shape grep', () => {
@@ -1900,7 +1891,8 @@ describe('workflow generation pipeline', () => {
     expect(leadPlanGate.command).toContain('out[- ]of[- ]scope');
     expect(leadPlanGate.command).toContain('Routing contract');
     expect(artifact.content).toContain('write .workflow-artifacts/generated/no-target-evidence-gates/fix-loop-report.md');
-    expect(fixLoopReportGate.command).toContain('FIX_LOOP_COMPLETE');
+    expect(fixLoopReportGate.command).toContain('test -s');
+    expect(fixLoopReportGate.command).toContain('fix-loop-report.md');
     expect(fixLoopReportGate.dependsOn).toEqual(['fix-loop']);
     expect(postFixGate.dependsOn).toEqual(['fix-loop-report-gate']);
     expect(postImplementationGate.command).toContain('cleanup-report.md');

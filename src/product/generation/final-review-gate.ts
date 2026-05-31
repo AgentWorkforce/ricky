@@ -1,60 +1,24 @@
-// Shared builder for the generated child-workflow `final-review-pass-gate`
-// command.
-//
-// Why this exists: the original gate joined marker greps and a
-// `test ! -f BLOCKED_NO_COMMIT.md` clause under `set -e` / `&&`. When an
-// agent deliberately wrote BLOCKED_NO_COMMIT.md (the "I cannot proceed
-// safely, do not commit" protocol), the gate aborted with a bare exit 1 and
-// the captured output showed only the *successful* marker greps — masking
-// the real cause. Operators saw "grep ... Command failed (exit code 1)"
-// with the success markers in stdout and assumed a grep-target mismatch,
-// and the auto-fix loop treated a deliberate "needs a human" signal as a
-// retryable INVALID_ARTIFACT, looping for hours.
-//
-// This builder produces a gate command that:
-//   1. Checks the BLOCKED sentinel FIRST and, if present, prints a distinct
-//      `RICKY_CHILD_BLOCKED_NO_COMMIT` marker plus the agent's evidence to
-//      stderr and exits with a dedicated code — so the failure is
-//      attributable and can be routed to escalation rather than retry.
-//   2. Runs each marker presence check quietly and, on failure, prints an
-//      explicit `RICKY_CHILD_GATE_MISSING_MARKER: <detail>` line — so a
-//      genuinely missing marker is diagnosable and never hidden behind a
-//      previous check's matched-line output.
+// Shared builder for the generated child-workflow `final-review-pass-gate`.
+// It verifies structural completion evidence only: expected artifact files
+// exist and no agent raised BLOCKED_NO_COMMIT.md. Behavioral proof remains in
+// the following hard validation gate.
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-export interface GateMarkerCheck {
-  /**
-   * A shell expression that exits 0 (and produces no stdout) when the marker
-   * is present. Keep it quiet — matched lines must not leak into the gate's
-   * captured output.
-   */
-  presenceTest: string;
-  /**
-   * Human/diagnostic detail appended after `RICKY_CHILD_GATE_MISSING_MARKER: `
-   * when `presenceTest` fails.
-   */
-  missingDetail: string;
-}
-
 export interface FinalReviewPassGateOptions {
   /** Directory holding the child workflow's review/fix artifacts. */
   artifactsDir: string;
-  /** Ordered marker presence checks (claude first, then codex, etc.). */
-  checks: GateMarkerCheck[];
-  /** Token echoed on success to satisfy the gate's output assertion. */
-  successMarker: string;
+  /** Expected non-empty final fix artifacts. */
+  requiredFiles: string[];
 }
 
 export const GATE_BLOCKED_MARKER = 'RICKY_CHILD_BLOCKED_NO_COMMIT';
-export const GATE_MISSING_MARKER_PREFIX = 'RICKY_CHILD_GATE_MISSING_MARKER';
+export const GATE_MISSING_ARTIFACT_PREFIX = 'RICKY_CHILD_GATE_MISSING_ARTIFACT';
 
 /**
- * Build the multi-line shell script for `final-review-pass-gate`. Returned as
- * a single string so it can be embedded as a step `command` by either
- * renderer regardless of how that renderer assembles its command.
+ * Build the multi-line shell script for `final-review-pass-gate`.
  */
 export function buildFinalReviewPassGateCommand(options: FinalReviewPassGateOptions): string {
   const blockedPath = `${options.artifactsDir}/BLOCKED_NO_COMMIT.md`;
@@ -78,20 +42,19 @@ export function buildFinalReviewPassGateCommand(options: FinalReviewPassGateOpti
     '  exit 3',
     'fi',
   ];
-  for (const check of options.checks) {
+  for (const file of options.requiredFiles) {
     lines.push(
-      `if ! { ${check.presenceTest}; }; then`,
-      `  echo ${shellQuote(`${GATE_MISSING_MARKER_PREFIX}: ${check.missingDetail}`)} >&2`,
+      `if [ ! -s ${shellQuote(file)} ]; then`,
+      `  echo ${shellQuote(`${GATE_MISSING_ARTIFACT_PREFIX}: ${file}`)} >&2`,
       '  exit 1',
       'fi',
     );
   }
-  // Shell-quote the success marker for consistency with every other
-  // dynamic value emitted in this script. Current callers pass the safe
-  // constant `'RICKY_CHILD_FRESH_EYES_LOOP_READY'`, but this is an exported
-  // shared builder; preserving the quoting discipline prevents future
-  // callers from accidentally injecting shell metacharacters via the
-  // option.
-  lines.push(`echo ${shellQuote(options.successMarker)}`);
+  for (const file of options.requiredFiles.filter((candidate) => candidate.endsWith('-status.json'))) {
+    lines.push(
+      `node -e ${shellQuote(`const fs=require('node:fs'); const parsed=JSON.parse(fs.readFileSync(${JSON.stringify(file)}, 'utf8')); if (!['fixed','no_issues_found'].includes(parsed.status)) throw new Error('${file} must declare status fixed or no_issues_found'); if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) throw new Error('${file} must include a non-empty summary');`)}`,
+    );
+  }
+  lines.push("echo 'RICKY_CHILD_FINAL_REVIEW_FILES_READY'");
   return lines.join('\n');
 }
