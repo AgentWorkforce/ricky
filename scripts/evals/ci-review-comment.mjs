@@ -39,6 +39,8 @@ if (process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY && process.env.PR_
 function renderComment({ result, runDir }) {
   const failed = result.tests.filter((test) => test.status === 'failed');
   const skipped = result.tests.filter((test) => test.status === 'skipped');
+  const providerInfraSkipped = skipped.filter(isProviderInfrastructureSkip);
+  const blockingSkipped = skipped.filter((test) => !isProviderInfrastructureSkip(test));
   const needsHuman = result.tests.filter((test) => test.status === 'needs-human');
   const reviewableNeedsHuman = needsHuman.filter(hasCapturedOutput);
   const missingOutputNeedsHuman = needsHuman.filter((test) => !hasCapturedOutput(test));
@@ -50,13 +52,25 @@ function renderComment({ result, runDir }) {
     `Mode: \`${result.mode}\``,
     `Git SHA: \`${result.git_sha}\``,
     '',
-    `**Passed:** ${result.passed} | **Needs human:** ${result.needs_human} | **Reviewable:** ${reviewableNeedsHuman.length} | **Missing output:** ${missingOutputNeedsHuman.length} | **Failed:** ${result.failed} | **Skipped:** ${result.skipped}`,
+    `**Passed:** ${result.passed} | **Needs human:** ${result.needs_human} | **Reviewable:** ${reviewableNeedsHuman.length} | **Missing output:** ${missingOutputNeedsHuman.length} | **Failed:** ${result.failed} | **Skipped:** ${result.skipped} | **Provider infra skipped:** ${providerInfraSkipped.length}`,
     '',
   ];
 
-  if (failed.length > 0 || skipped.length > 0) {
+  if (failed.length > 0 || blockingSkipped.length > 0) {
     lines.push('## Blocking Cases', '');
-    for (const test of [...failed, ...skipped]) {
+    for (const test of [...failed, ...blockingSkipped]) {
+      appendCaseDetails(lines, test, { forceOpen: true });
+    }
+  }
+
+  if (providerInfraSkipped.length > 0) {
+    lines.push(
+      '## Provider Infrastructure Skips',
+      '',
+      'These provider-backed cases were skipped after retryable provider outages. They are not treated as Ricky product regressions.',
+      '',
+    );
+    for (const test of providerInfraSkipped) {
       appendCaseDetails(lines, test, { forceOpen: true });
     }
   }
@@ -126,6 +140,11 @@ function appendCaseDetails(lines, test, { forceOpen }) {
   }
 
   lines.push('</details>', '');
+}
+
+function isProviderInfrastructureSkip(test) {
+  if (test.status !== 'skipped') return false;
+  return String(test.error ?? '').startsWith('openrouter executor skipped; transient provider infrastructure unavailable');
 }
 
 function appendRickyOutput(lines, test) {

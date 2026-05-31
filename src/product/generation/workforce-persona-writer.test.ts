@@ -47,7 +47,7 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('If the normalized spec declares `Worktree: <absolute path>`');
     expect(task).toContain('Never use `test -f` for a worktree/repository directory');
     expect(task).toContain('deterministic sanity gate');
-    expect(task).toContain('POSIX grep, git grep');
+    expect(task).toContain('structural checks, scoped file/diff checks');
     expect(task).toContain('If using rg, guard it with command -v rg');
     expect(task).toContain('Keep agent steps bounded');
     expect(task).toContain('Structured response contract');

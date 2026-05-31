@@ -1717,7 +1717,7 @@ function legacyChildWorkflowContent(): string {
     '    .step("final-signoff", {',
     '      type: "deterministic",',
     '      dependsOn: ["final-hard-validation"],',
-    '      command: "echo RICKY_CHILD_WORKFLOW_COMPLETE",',
+    '      command: "test -s .workflow-artifacts/generated/child/signoff.md",',
     '      captureOutput: true,',
     '      failOnError: true,',
     '    })',

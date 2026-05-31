@@ -168,10 +168,10 @@ contentIncludes:
 - status": "ok
 - RICKY_MASTER_EXECUTOR_WORKFLOW
 - Master plan:
-- RICKY_CHILD_WORKFLOW_COMPLETE
+- final-signoff
 - review-claude
 - final-fix-codex
-- RICKY_CHILD_FRESH_EYES_LOOP_READY
+- RICKY_CHILD_FINAL_REVIEW_FILES_READY
 - BLOCKED_NO_COMMIT
 contentMatches:
 - review-claude[\s\S]*fix-loop[\s\S]*final-review-claude[\s\S]*final-fix-claude[\s\S]*review-codex[\s\S]*fix-loop-codex[\s\S]*final-review-codex[\s\S]*final-fix-codex[\s\S]*final-review-pass-gate[\s\S]*final-hard-validation

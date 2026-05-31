@@ -94,7 +94,8 @@ describe('generated workflow reliability contract', () => {
     expect(content).not.toContain('--no-auto-fix');
     expect(childrenSidecar, 'children sidecar attached').toBeDefined();
     expect(childrenSidecarUnescaped).toMatch(/\.onError\('retry', \{ maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 \}\)/);
-    expect(childrenSidecar).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
+    expect(childrenSidecarUnescaped).toContain('.step("final-signoff"');
+    expect(childrenSidecar).not.toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
     expect(childrenSidecarUnescaped).toMatch(/\.step\("final-hard-validation"[\s\S]*?failOnError: false,[\s\S]*?\.step\("final-signoff"/);
     expect(content).toMatch(/\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/);
     expect(content).toContain('RICKY_MASTER_FINAL_VALIDATION_READY');
@@ -450,7 +451,7 @@ function legacyChildWorkflowContent(): string {
     '    .step("final-signoff", {',
     '      type: "deterministic",',
     '      dependsOn: ["final-hard-validation"],',
-    '      command: "echo RICKY_CHILD_WORKFLOW_COMPLETE",',
+    '      command: "test -s .workflow-artifacts/generated/child/signoff.md",',
     '      captureOutput: true,',
     '      failOnError: true,',
     '    })',

@@ -747,7 +747,7 @@ export function buildWorkflowPersonaTask(
     '- Use a dedicated workflow channel, not general.',
     '- Include explicit agents, step dependencies, deterministic gates, review stages, and final signoff.',
     '- Include an 80-to-100 fix loop: implement, validate, review, fix, final review, hard validation.',
-    '- Include a real deterministic sanity gate over produced files using POSIX grep, git grep, or an equivalent inline assertion that exits non-zero when expected content/state is missing.',
+    '- Include a real deterministic sanity gate over produced files using structural checks, scoped file/diff checks, or an equivalent inline assertion that exits non-zero when expected content/state is missing.',
     '- If using rg, guard it with command -v rg and provide a grep or git grep fallback because ripgrep is not guaranteed to be installed.',
     '- Keep agent steps bounded: split broad implementation or test-writing work into multiple sequential/fan-out steps with deterministic gates between them instead of one large step that can exhaust retries by timeout.',
     '- Before calling `.run(...)`, load repo-local `.env.local` and `.env` values into `process.env` without overwriting existing shell exports, so local BYOH runs inherit common project configuration. If the workflow requires named env vars, add a fast deterministic preflight/assertion that prints `MISSING_ENV_VAR: NAME` before long-running agent steps.',

@@ -25,12 +25,13 @@ describe('generated workflow hygiene', () => {
     expect(workflowBody).toContain('must not be presented as independent review evidence');
     expect(workflowBody).toContain('cleanup-candidate-prescan.txt');
     expect(workflowBody).toContain('cite that exact path in');
-    expect(workflowBody).toContain('CLEANUP_CANDIDATE_PRESCAN_OK');
+    expect(workflowBody).toContain("test -s '.workflow-artifacts/generated/i-want-to-clean-up-the-codebase-to-remove-outdat/cleanup-candidate-prescan.txt'");
+    expect(workflowBody).not.toContain('CLEANUP_CANDIDATE_PRESCAN_OK');
     expect(workflowBody).toContain('cleanup-evidence-sanity-gate');
     expect(workflowBody).toContain('CLEANUP_EVIDENCE_SANITY_GATE_OK');
     expect(workflowBody).toContain('final-artifact-consistency-gate');
     expect(workflowBody).toContain('FINAL_ARTIFACT_CONSISTENCY_GATE_OK');
-    expect(workflowBody).toContain('final-review-codex marker missing pass sentinel');
+    expect(workflowBody).not.toContain('final-review-codex marker missing pass sentinel');
     expect(workflowBody).not.toContain("['final-review-codex.md', read('final-review-codex.md')]");
     expect(workflowBody).not.toContain('timeoutMs: 300_000');
     expect(workflowBody).toContain('Tracked agent config files');
