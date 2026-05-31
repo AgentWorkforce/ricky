@@ -299,7 +299,7 @@ function buildGates(
 
   return [
     // skill-boundary-metadata-gate removed: it greps skill-application-boundary.json
-    // (and friends) — files ricky writes itself, deterministically, at generation.
+    // (and friends), files ricky writes itself, deterministically, at generation.
     // A runtime shell-grep of ricky's own bookkeeping added no value and was brittle
     // to JSON formatting (pretty vs compact). The boundary artifacts are now validated
     // in-process at generation time via assertSkillBoundaryArtifacts().
@@ -536,6 +536,12 @@ function buildActiveReferenceGateCommand(outputManifest: string, evidencePath: s
     'console.log(\'ACTIVE_REFERENCE_GATE_OK\');',
     'NODE',
   ].join('\n');
+}
+
+function applyToolSelection(team: TeamMemberSpec[], selections: ToolSelection[]): void {
+  for (const member of team) {
+    const selection = selections.find((candidate) => candidate.agent === member.name);
+    if (!selection) continue;
     if (selection.runner !== '@agent-relay/sdk') member.cli = selection.runner;
     if (selection.model) member.model = selection.model;
   }
