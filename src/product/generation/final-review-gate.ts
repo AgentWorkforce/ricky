@@ -51,8 +51,9 @@ export function buildFinalReviewPassGateCommand(options: FinalReviewPassGateOpti
     );
   }
   for (const file of options.requiredFiles.filter((candidate) => candidate.endsWith('-status.json'))) {
+    const fileJson = JSON.stringify(file);
     lines.push(
-      `node -e ${shellQuote(`const fs=require('node:fs'); const parsed=JSON.parse(fs.readFileSync(${JSON.stringify(file)}, 'utf8')); if (!['fixed','no_issues_found'].includes(parsed.status)) throw new Error('${file} must declare status fixed or no_issues_found'); if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) throw new Error('${file} must include a non-empty summary');`)}`,
+      `node -e ${shellQuote(`const fs=require('node:fs'); const parsed=JSON.parse(fs.readFileSync(${fileJson}, 'utf8')); if (!['fixed','no_issues_found'].includes(parsed.status)) throw new Error(${fileJson} + ' must declare status fixed or no_issues_found'); if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) throw new Error(${fileJson} + ' must include a non-empty summary');`)}`,
     );
   }
   lines.push("echo 'RICKY_CHILD_FINAL_REVIEW_FILES_READY'");

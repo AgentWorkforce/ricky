@@ -121,7 +121,7 @@ export async function runExternalCliProof(
 
     await writeFile(artifactFullPath, deterministicSdkSmokeWorkflow(), 'utf8');
 
-    const nextInvocation = await runner.run('sh', ['-lc', nextCommand], {
+    const nextInvocation = await runner.run('sh', ['-c', nextCommand], {
       cwd: repoDir,
       env: { INIT_CWD: repoDir, PATH: `${join(repoDir, 'node_modules/.bin')}:${process.env.PATH ?? ''}` },
     });

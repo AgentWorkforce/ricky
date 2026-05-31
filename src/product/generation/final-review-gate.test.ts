@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   buildFinalReviewPassGateCommand,
@@ -54,6 +58,21 @@ describe('buildFinalReviewPassGateCommand', () => {
     expect(command).toContain(`${ARTIFACTS}/codex-final-fix-status.json`);
     expect(command).toContain('includes(parsed.status)');
     expect(command).toContain('parsed.summary');
+  });
+
+  it('embeds status paths as JSON string literals inside node assertions', () => {
+    const base = join(tmpdir(), "ricky-final-review-gate-quote's");
+    mkdirSync(base, { recursive: true });
+    const quoted = join(base, 'claude-final-fix-status.json');
+    writeFileSync(quoted, '{"status":"fixed","summary":"quoted path passed"}\n');
+
+    const command = buildFinalReviewPassGateCommand({
+      artifactsDir: base,
+      requiredFiles: [quoted],
+    });
+
+    expect(execFileSync('bash', ['-lc', command], { encoding: 'utf8' })).toContain('RICKY_CHILD_FINAL_REVIEW_FILES_READY');
+    expect(command).not.toContain(`throw new Error('${quoted}`);
   });
 
   it('echoes a structural success marker last', () => {

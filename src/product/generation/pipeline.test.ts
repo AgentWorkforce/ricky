@@ -1524,6 +1524,23 @@ describe('workflow generation pipeline', () => {
         expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
       ]),
     );
+
+    const heredocNodeValidation = validateGeneratedArtifact(
+      withPostImplementationCommand(
+        `node << 'ASSERT-SANITY'
+const { readFileSync } = require('node:fs');
+if (!readFileSync('src/product/generation/pipeline.ts', 'utf8').includes('validateGeneratedArtifact')) throw new Error('missing validation symbol');
+ASSERT-SANITY`,
+      ),
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    );
+    expect(heredocNodeValidation.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
+      ]),
+    );
   });
 
   it('accepts ruby and perl inline assertions invoked with -e', () => {
