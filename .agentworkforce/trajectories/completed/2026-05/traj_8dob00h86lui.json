@@ -1,0 +1,53 @@
+{
+  "id": "traj_8dob00h86lui",
+  "version": 1,
+  "task": {
+    "title": "Support ricky run workflow --cloud shorthand"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T09:36:46.565Z",
+  "completedAt": "2026-05-07T09:39:06.573Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T09:39:06.214Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_821ookaa36r6",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T09:39:06.214Z",
+      "endedAt": "2026-05-07T09:39:06.573Z",
+      "events": [
+        {
+          "ts": 1778146746218,
+          "type": "decision",
+          "content": "Made ricky run <artifact> --cloud the preferred Cloud artifact command: Made ricky run <artifact> --cloud the preferred Cloud artifact command",
+          "raw": {
+            "question": "Made ricky run <artifact> --cloud the preferred Cloud artifact command",
+            "chosen": "Made ricky run <artifact> --cloud the preferred Cloud artifact command",
+            "alternatives": [],
+            "reasoning": "The user-facing mental model is run this workflow, with Cloud as an execution option; parser can map that directly to the existing Cloud artifact request path."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Added --cloud shorthand for ricky run artifact commands, updated Cloud run-command rendering and docs/help copy, and covered the shorthand with parser/CLI/summary tests.",
+    "approach": "Standard approach",
+    "confidence": 0.92
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "eb5f110bec18a61645c18dd22546a14e00c9082a",
+    "endRef": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+  }
+}

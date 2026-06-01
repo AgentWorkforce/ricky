@@ -1,0 +1,53 @@
+{
+  "id": "traj_ksfpdlzmurtc",
+  "version": 1,
+  "task": {
+    "title": "Clarify PR 55 Cloud coverage"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T10:09:03.728Z",
+  "completedAt": "2026-05-07T10:09:38.482Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T10:09:07.167Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_zfsvabm661ej",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T10:09:07.167Z",
+      "endedAt": "2026-05-07T10:09:38.482Z",
+      "events": [
+        {
+          "ts": 1778148547169,
+          "type": "decision",
+          "content": "Document Cloud coverage as a sibling Cloud spec, not implemented files: Document Cloud coverage as a sibling Cloud spec, not implemented files",
+          "raw": {
+            "question": "Document Cloud coverage as a sibling Cloud spec, not implemented files",
+            "chosen": "Document Cloud coverage as a sibling Cloud spec, not implemented files",
+            "alternatives": [],
+            "reasoning": "../cloud currently contains the Slack PR #412 implementation files and specs/ricky-linear-agent.md for Linear; the Ricky OSS spec should point reviewers to that Cloud spec instead of implying the Linear Cloud file tree already exists."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Clarified PR 55's Cloud file-layout section by linking it to ../cloud/specs/ricky-linear-agent.md, stating that the listed tree is the expected Cloud-side shape rather than Ricky-owned files, and fixed the malformed closing markdown fence. Pushed 843af6c to feat/linear-integration.",
+    "approach": "Standard approach",
+    "confidence": 0.95
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "50f9e735c822de9f59b751083fdd3960db89cd27",
+    "endRef": "50f9e735c822de9f59b751083fdd3960db89cd27"
+  }
+}

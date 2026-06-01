@@ -1,0 +1,53 @@
+{
+  "id": "traj_4dmr15ws9oxs",
+  "version": 1,
+  "task": {
+    "title": "Diagnose Ricky generated workflow lead-plan-gate failure"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T09:09:47.193Z",
+  "completedAt": "2026-05-07T09:10:57.623Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T09:10:57.550Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_ehnglss69dlr",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T09:10:57.550Z",
+      "endedAt": "2026-05-07T09:10:57.623Z",
+      "events": [
+        {
+          "ts": 1778145057551,
+          "type": "decision",
+          "content": "Diagnosed Ricky failure as lead-plan artifact marker mismatch plus repair response contract failure: Diagnosed Ricky failure as lead-plan artifact marker mismatch plus repair response contract failure",
+          "raw": {
+            "question": "Diagnosed Ricky failure as lead-plan artifact marker mismatch plus repair response contract failure",
+            "chosen": "Diagnosed Ricky failure as lead-plan artifact marker mismatch plus repair response contract failure",
+            "alternatives": [],
+            "reasoning": "The lead-plan.md artifact lacks literal Non-goals while lead-plan-gate requires it; deterministic auto-fix has no marker-mismatch repair and Workforce persona repair failed parser validation because artifact.content was missing."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Diagnosed generated workflow failure: lead-plan-gate rejects the generated lead-plan.md because it lacks the literal Non-goals marker; auto-fix cannot recover because deterministic repair does not cover this marker mismatch and Workforce persona repair requires a full artifact.content response that was not returned.",
+    "approach": "Standard approach",
+    "confidence": 0.86
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "eb5f110bec18a61645c18dd22546a14e00c9082a",
+    "endRef": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+  }
+}

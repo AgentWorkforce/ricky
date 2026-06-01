@@ -1,0 +1,53 @@
+{
+  "id": "traj_xncw7jflpg1u",
+  "version": 1,
+  "task": {
+    "title": "Add Ricky cloud workflow scheduling surface"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-09T19:35:06.288Z",
+  "completedAt": "2026-05-09T19:41:21.384Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-09T19:41:13.442Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_r7anserxkxus",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-09T19:41:13.442Z",
+      "endedAt": "2026-05-09T19:41:21.384Z",
+      "events": [
+        {
+          "ts": 1778355673443,
+          "type": "decision",
+          "content": "Added Ricky scheduling as a cloud workflow CLI surface: Added Ricky scheduling as a cloud workflow CLI surface",
+          "raw": {
+            "question": "Added Ricky scheduling as a cloud workflow CLI surface",
+            "chosen": "Added Ricky scheduling as a cloud workflow CLI surface",
+            "alternatives": [],
+            "reasoning": "Ricky already owns workflow authoring and cloud handoff UX, while Relay owns the lower-level cloud CLI. A thin Ricky schedule/list command lets users schedule generated workflow artifacts without moving scheduling state into Ricky itself."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Added Ricky CLI commands for scheduling and listing Cloud workflow schedules, backed by Cloud schedule endpoints and covered by CLI tests.",
+    "approach": "Standard approach",
+    "confidence": 0.86
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "98f3c3019e76acae1aa679a374e1f73e2e0265cc",
+    "endRef": "98f3c3019e76acae1aa679a374e1f73e2e0265cc"
+  }
+}

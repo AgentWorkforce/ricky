@@ -1,0 +1,53 @@
+{
+  "id": "traj_ybkkeamygxo7",
+  "version": 1,
+  "task": {
+    "title": "Fix wave13 regression hygiene failure handling"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T11:58:32.558Z",
+  "completedAt": "2026-05-07T11:59:52.420Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T11:59:52.304Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_ervi5hdxh8tv",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T11:59:52.304Z",
+      "endedAt": "2026-05-07T11:59:52.420Z",
+      "events": [
+        {
+          "ts": 1778155192305,
+          "type": "decision",
+          "content": "Quarantine untracked generated workflow residue before hard regression: Quarantine untracked generated workflow residue before hard regression",
+          "raw": {
+            "question": "Quarantine untracked generated workflow residue before hard regression",
+            "chosen": "Quarantine untracked generated workflow residue before hard regression",
+            "alternatives": [],
+            "reasoning": "Ricky's generated-workflow hygiene test checks directory contents, so an untracked generated .ts file from an earlier local run can fail npm test even though it is unrelated to wave13. The workflow now moves only untracked unexpected generated workflows into the wave13 artifact directory and fails on tracked unexpected files."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Updated wave13 master executor workflow to add quarantine-generated-workflow-residue before run-regression-final, removed a broken auto-injected GITHUB_TOKEN assertion, and verified npx tsc --noEmit plus agent-relay dry-run pass.",
+    "approach": "Standard approach",
+    "confidence": 0.92
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "83fd6b39b7336a68c145c54525aa40eb3df1ca55",
+    "endRef": "83fd6b39b7336a68c145c54525aa40eb3df1ca55"
+  }
+}

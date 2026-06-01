@@ -1,0 +1,69 @@
+{
+  "id": "traj_fska2tyh2abj",
+  "version": 1,
+  "task": {
+    "title": "ricky-demo-persona-repair-semantic-contract-workflow",
+    "description": "Semantic contract workflow with deterministic repairable gates and signoff evidence.",
+    "source": {
+      "system": "workflow-runner",
+      "id": "85200bc9087eca5fc8779f7c"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-02T00:01:56.535Z",
+  "completedAt": "2026-05-02T00:01:57.868Z",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "role": "workflow-runner",
+      "joinedAt": "2026-05-02T00:01:56.535Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_711b7bdk11yj",
+      "title": "Planning",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-02T00:01:56.536Z",
+      "endedAt": "2026-05-02T00:01:57.868Z",
+      "events": [
+        {
+          "ts": 1777680116536,
+          "type": "note",
+          "content": "Purpose: Semantic contract workflow with deterministic repairable gates and signoff evidence."
+        },
+        {
+          "ts": 1777680116536,
+          "type": "note",
+          "content": "Approach: 6-step pipeline workflow — Parsed 6 steps, 5 dependent steps, DAG validated, no cycles"
+        }
+      ]
+    },
+    {
+      "id": "chap_u3sulu3d49xx",
+      "title": "Retrospective",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-02T00:01:57.868Z",
+      "endedAt": "2026-05-02T00:01:57.868Z",
+      "events": [
+        {
+          "ts": 1777680117868,
+          "type": "reflection",
+          "content": "All 6 steps completed in 1s. (completed in 1 seconds)",
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "All 6 steps completed in 1s.",
+    "approach": "pipeline workflow (0 agents)",
+    "challenges": [],
+    "learnings": [],
+    "confidence": 0.75
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": []
+}

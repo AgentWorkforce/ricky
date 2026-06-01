@@ -1,0 +1,77 @@
+{
+  "id": "traj_ay0vaibyfo0g",
+  "version": 1,
+  "task": {
+    "title": "ricky-demo-persona-repair-semantic-contract-workflow",
+    "description": "Deliberately broken workflow that requires persona-level semantic repair.",
+    "source": {
+      "system": "workflow-runner",
+      "id": "b244d66e5e03a1447dcb976f"
+    }
+  },
+  "status": "abandoned",
+  "startedAt": "2026-05-02T12:23:24.431Z",
+  "completedAt": "2026-05-02T12:23:25.738Z",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "role": "workflow-runner",
+      "joinedAt": "2026-05-02T12:23:24.432Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_k9dnh8o57c6n",
+      "title": "Planning",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-02T12:23:24.432Z",
+      "endedAt": "2026-05-02T12:23:25.737Z",
+      "events": [
+        {
+          "ts": 1777724604432,
+          "type": "note",
+          "content": "Purpose: Deliberately broken workflow that requires persona-level semantic repair."
+        },
+        {
+          "ts": 1777724604432,
+          "type": "note",
+          "content": "Approach: 3-step pipeline workflow — Parsed 3 steps, 2 dependent steps, DAG validated, no cycles"
+        }
+      ]
+    },
+    {
+      "id": "chap_r9wyv6i8rzww",
+      "title": "Retrospective",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-02T12:23:25.737Z",
+      "endedAt": "2026-05-02T12:23:25.738Z",
+      "events": [
+        {
+          "ts": 1777724605738,
+          "type": "reflection",
+          "content": "Failed at \"verify-contract-ready\" [exit_nonzero] after 1s. 2/3 steps completed before failure. (abandoned after 1 seconds)",
+          "significance": "high"
+        },
+        {
+          "ts": 1777724605738,
+          "type": "error",
+          "content": "Workflow abandoned: Step \"verify-contract-ready\" failed: Step \"verify-contract-ready\" failed: Command failed with exit code 1: contract must be ready with at least one approval; got status=draft, approvals=0\n",
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Failed at \"verify-contract-ready\" [exit_nonzero] after 1s. 2/3 steps completed before failure.",
+    "approach": "pipeline workflow (0 agents)",
+    "challenges": [
+      "The agent process exited with a non-zero exit code. Check stderr for the root cause."
+    ],
+    "learnings": [],
+    "confidence": 0.5
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": []
+}

@@ -1,0 +1,108 @@
+{
+  "version": "1.0.0",
+  "id": "1e71320b-0360-4904-83d6-4655e8fda4b0",
+  "timestamp": "2026-05-08T15:48:10.575Z",
+  "trajectory": "traj_kz9wy9pohc5v",
+  "files": [
+    {
+      "path": ".github/workflows/ricky-evals.yml",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 110,
+              "revision": "da9f524516c2835eab25cb019b22c9d39616200c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "package.json",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 44,
+              "end_line": 50,
+              "revision": "da9f524516c2835eab25cb019b22c9d39616200c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "scripts/evals/ci-review-comment.mjs",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 259,
+              "revision": "da9f524516c2835eab25cb019b22c9d39616200c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "scripts/evals/ci-summary.mjs",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 161,
+              "revision": "da9f524516c2835eab25cb019b22c9d39616200c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "scripts/evals/run-ricky-evals.mjs",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 15,
+              "end_line": 22,
+              "revision": "da9f524516c2835eab25cb019b22c9d39616200c"
+            },
+            {
+              "start_line": 27,
+              "end_line": 33,
+              "revision": "da9f524516c2835eab25cb019b22c9d39616200c"
+            },
+            {
+              "start_line": 44,
+              "end_line": 136,
+              "revision": "da9f524516c2835eab25cb019b22c9d39616200c"
+            },
+            {
+              "start_line": 272,
+              "end_line": 281,
+              "revision": "da9f524516c2835eab25cb019b22c9d39616200c"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "id": "traj_0u081njcv5yv",
+  "version": 1,
+  "task": {
+    "title": "Make fresh-eyes workflow evals automatic"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-15T10:55:37.630Z",
+  "completedAt": "2026-05-15T11:00:34.459Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-15T11:00:28.897Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_ywb8c4r07az1",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-15T11:00:28.897Z",
+      "endedAt": "2026-05-15T11:00:34.459Z",
+      "events": [
+        {
+          "ts": 1778842828899,
+          "type": "reflection",
+          "content": "Fresh-eyes workflow evals now run through Ricky CLI automatically; harness reads generated workflow artifacts for deterministic assertions; typecheck, unit tests, and workflow-authoring eval suite are green.",
+          "raw": {
+            "confidence": 0.9
+          },
+          "significance": "high",
+          "tags": [
+            "confidence:0.9"
+          ]
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Converted the fresh-eyes workflow-authoring evals into automatic Ricky CLI evals, added generated-artifact inspection to the eval harness, enforced/generated the mandatory Claude-then-Codex review/fix/final-review/final-fix loop, and verified with workflow-authoring evals plus typecheck and full tests.",
+    "approach": "Standard approach",
+    "confidence": 0.92
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "1498c47f760d6ead40cc7ccdc88a570b2510d91a",
+    "endRef": "1498c47f760d6ead40cc7ccdc88a570b2510d91a"
+  }
+}

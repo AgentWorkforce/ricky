@@ -1,0 +1,25 @@
+{
+  "id": "traj_ud0rt66q7nye",
+  "version": 1,
+  "task": {
+    "title": "Review fresh-eyes workflow eval coverage"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-15T10:53:25.242Z",
+  "completedAt": "2026-05-15T10:54:01.261Z",
+  "agents": [],
+  "chapters": [],
+  "retrospective": {
+    "summary": "Reviewed fresh-eyes workflow eval coverage and ran the workflow-authoring eval suite plus generation regression tests. Evals compile and runner marks them needs-human with deterministic checks passing; found one coverage caveat around manual evals not automatically proving provider output and bounded final re-review versus literal unbounded until-no-issues semantics.",
+    "approach": "Standard approach",
+    "confidence": 0.86
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "1498c47f760d6ead40cc7ccdc88a570b2510d91a",
+    "endRef": "1498c47f760d6ead40cc7ccdc88a570b2510d91a"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "id": "traj_zrg5ucvdbvcf",
+  "version": 1,
+  "task": {
+    "title": "Address Ricky PR 74 eval compare feedback",
+    "source": {
+      "system": "plain",
+      "id": "ricky#74"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-08T15:08:19.710Z",
+  "completedAt": "2026-05-08T15:08:55.756Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-08T15:08:55.654Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_n7il0aps1wmw",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-08T15:08:55.654Z",
+      "endedAt": "2026-05-08T15:08:55.756Z",
+      "events": [
+        {
+          "ts": 1778252935655,
+          "type": "decision",
+          "content": "Do not double-count disappeared eval cases as regressions: Do not double-count disappeared eval cases as regressions",
+          "raw": {
+            "question": "Do not double-count disappeared eval cases as regressions",
+            "chosen": "Do not double-count disappeared eval cases as regressions",
+            "alternatives": [],
+            "reasoning": "The compare summary prints Regressed and Disappeared as separate fields; counting missing cases in both fields makes the totals look larger than the set of compared outcomes."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Addressed Ricky PR #74 feedback by making disappeared eval cases a separate compare bucket rather than also incrementing regressions; validated compare, compile, and typecheck.",
+    "approach": "Standard approach",
+    "confidence": 0.93
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "33549385e357061346be25e7be0c64d49abdfef9",
+    "endRef": "33549385e357061346be25e7be0c64d49abdfef9"
+  }
+}

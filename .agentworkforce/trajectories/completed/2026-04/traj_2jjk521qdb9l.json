@@ -1,0 +1,65 @@
+{
+  "id": "traj_2jjk521qdb9l",
+  "version": 1,
+  "task": {
+    "title": "Surface background workflow run id and status command"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T00:24:59.103Z",
+  "completedAt": "2026-05-01T00:28:43.996Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-01T00:27:20.665Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_th3ve6a0tlff",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-01T00:27:20.665Z",
+      "endedAt": "2026-05-01T00:28:43.996Z",
+      "events": [
+        {
+          "ts": 1777595240666,
+          "type": "decision",
+          "content": "Surface local background monitor ids and status command: Surface local background monitor ids and status command",
+          "raw": {
+            "question": "Surface local background monitor ids and status command",
+            "chosen": "Surface local background monitor ids and status command",
+            "alternatives": [],
+            "reasoning": "The monitor already persisted state, but the CLI did not print the run id after selection and status --run was not wired to read that state."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1777595304090,
+          "type": "decision",
+          "content": "Announce monitor run id before awaiting background execution: Announce monitor run id before awaiting background execution",
+          "raw": {
+            "question": "Announce monitor run id before awaiting background execution",
+            "chosen": "Announce monitor run id before awaiting background execution",
+            "alternatives": [],
+            "reasoning": "A background selection must give the user a run id immediately so status --run can be used from another terminal while execution is still in progress."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Background local run selection now prints the monitor run id immediately, final CLI output includes run/status/log/evidence details, and ricky status --run reads persisted monitor state for progress.",
+    "approach": "Standard approach",
+    "confidence": 0.95
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "0847dd59fd65afdfdec7424ad9340f728dc432a6",
+    "endRef": "0847dd59fd65afdfdec7424ad9340f728dc432a6"
+  }
+}

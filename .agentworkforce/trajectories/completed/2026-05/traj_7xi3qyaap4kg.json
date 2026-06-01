@@ -1,0 +1,62 @@
+{
+  "id": "traj_7xi3qyaap4kg",
+  "version": 1,
+  "task": {
+    "title": "Finish wiring PR 77"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-15T11:48:14.109Z",
+  "completedAt": "2026-05-15T11:51:42.915Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-15T11:51:04.551Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_pgmjeeyaqv23",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-15T11:51:04.551Z",
+      "endedAt": "2026-05-15T11:51:42.915Z",
+      "events": [
+        {
+          "ts": 1778845864551,
+          "type": "decision",
+          "content": "Handled PR 77 directly instead of adding a workflow: Handled PR 77 directly instead of adding a workflow",
+          "raw": {
+            "question": "Handled PR 77 directly instead of adding a workflow",
+            "chosen": "Handled PR 77 directly instead of adding a workflow",
+            "alternatives": [],
+            "reasoning": "The remaining work was merge conflict resolution and contract-test drift against current generation behavior; no new generated workflow artifact was needed."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Merged current main into PR 77, resolved the obsolete trajectory index conflict, aligned the generated workflow reliability contract test with the current 10000ms repair-aware retry contract and review-fix loop wording, and verified typecheck plus full test suite.",
+    "approach": "Standard approach",
+    "confidence": 0.93
+  },
+  "commits": [
+    "a64a6af",
+    "de6af50",
+    "0c3baa6"
+  ],
+  "filesChanged": [
+    ".trajectories/completed/2026-05/traj_nc2i7uwepync.json",
+    ".trajectories/completed/2026-05/traj_nc2i7uwepync.md",
+    "test/generated-workflow-reliability-contract.test.ts"
+  ],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "3f132b2f652faf8df6341438a70ea6ae9157a37d",
+    "endRef": "a64a6af0ca0c8e92ffbe8537714c178b336e139b",
+    "traceId": "db161e81-088b-4f9f-85d4-ffc98b77b14d"
+  }
+}

@@ -1,0 +1,174 @@
+{
+  "version": "1.0.0",
+  "id": "2eeb1907-59b0-4a26-838e-ca1bbbd49d23",
+  "timestamp": "2026-05-07T09:47:52.713Z",
+  "trajectory": "traj_xahwi1ha8uyl",
+  "files": [
+    {
+      "path": "README.md",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 63,
+              "end_line": 69,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            },
+            {
+              "start_line": 93,
+              "end_line": 99,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "docs/product/ricky-simplified-workflow-cli-spec.md",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 374,
+              "end_line": 380,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/surfaces/cli/commands/cli-main.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 95,
+              "end_line": 107,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            },
+            {
+              "start_line": 374,
+              "end_line": 380,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            },
+            {
+              "start_line": 1927,
+              "end_line": 1933,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            },
+            {
+              "start_line": 2034,
+              "end_line": 2040,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/surfaces/cli/commands/cli-main.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 293,
+              "end_line": 299,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            },
+            {
+              "start_line": 304,
+              "end_line": 310,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            },
+            {
+              "start_line": 316,
+              "end_line": 329,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/surfaces/cli/flows/power-user-parser.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 82,
+              "end_line": 97,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/surfaces/cli/flows/power-user-parser.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 70,
+              "end_line": 81,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/surfaces/cli/flows/workflow-summary.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 83,
+              "end_line": 91,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/surfaces/cli/flows/workflow-summary.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 237,
+              "end_line": 243,
+              "revision": "50f9e735c822de9f59b751083fdd3960db89cd27"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

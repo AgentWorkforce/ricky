@@ -1,0 +1,91 @@
+{
+  "id": "traj_uqu0xua4dczk",
+  "version": 1,
+  "task": {
+    "title": "Harden Ricky best-judgement workflow generation evals",
+    "source": {
+      "system": "plain",
+      "id": "ricky-best-judgement-evals"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-08T15:13:38.029Z",
+  "completedAt": "2026-05-08T15:23:07.019Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-08T15:15:40.453Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_hacy68m9871x",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-08T15:15:40.453Z",
+      "endedAt": "2026-05-08T15:23:07.019Z",
+      "events": [
+        {
+          "ts": 1778253340453,
+          "type": "decision",
+          "content": "Implement --best-judgement at the local invocation boundary: Implement --best-judgement at the local invocation boundary",
+          "raw": {
+            "question": "Implement --best-judgement at the local invocation boundary",
+            "chosen": "Implement --best-judgement at the local invocation boundary",
+            "alternatives": [],
+            "reasoning": "Clarification blocking currently happens before generation, so resolving questions there preserves the default ask-user behavior while allowing CLI/MCP/local callers to continue with explicit implementer assumptions."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1778253746195,
+          "type": "reflection",
+          "content": "Best-judgement clarification path is implemented at local intake, CLI flag plumbing is in place, focused tests pass, and deterministic evals now cover ask-user versus implementer-assumption modes.",
+          "raw": {
+            "focalPoints": [
+              "clarification",
+              "best-judgement",
+              "evals"
+            ],
+            "confidence": 0.86
+          },
+          "significance": "high",
+          "tags": [
+            "focal:clarification",
+            "focal:best-judgement",
+            "focal:evals",
+            "confidence:0.86"
+          ]
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Added --best-judgement clarification handling through Ricky local generation, CLI flag plumbing, deterministic eval harness temp-cwd support, unit coverage, and generation-quality eval cases for ask-user versus implementer-assumption behavior.",
+    "approach": "Standard approach",
+    "confidence": 0.9
+  },
+  "commits": [
+    "4783817"
+  ],
+  "filesChanged": [
+    "evals/suites/generation-quality/cases.jsonl",
+    "evals/suites/generation-quality/cases.md",
+    "scripts/evals/run-ricky-evals.mjs",
+    "src/local/entrypoint.test.ts",
+    "src/local/entrypoint.ts",
+    "src/local/request-normalizer.ts",
+    "src/surfaces/cli/commands/cli-main.test.ts",
+    "src/surfaces/cli/commands/cli-main.ts",
+    "src/surfaces/cli/flows/power-user-parser.test.ts",
+    "src/surfaces/cli/flows/power-user-parser.ts"
+  ],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "2254f74f66d9562a7f42b6f0c4f8353acda92d34",
+    "endRef": "478381797948de22db104f9ecc3fdda86574a9a6",
+    "traceId": "170b45d8-8935-4922-808e-519a9b318e34"
+  }
+}

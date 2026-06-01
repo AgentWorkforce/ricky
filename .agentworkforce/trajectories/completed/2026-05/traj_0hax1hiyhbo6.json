@@ -1,0 +1,25 @@
+{
+  "id": "traj_0hax1hiyhbo6",
+  "version": 1,
+  "task": {
+    "title": "Verify and wire workforce persona generation for interactive Ricky workflows"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T15:13:07.160Z",
+  "completedAt": "2026-05-01T15:18:28.799Z",
+  "agents": [],
+  "chapters": [],
+  "retrospective": {
+    "summary": "Confirmed interactive Ricky workflow generation was not fully wired to Workforce persona by default. Changed CLI preference to default true, preserved --no-workforce-persona/env opt-out, and threaded the preference through guided local workflow options.",
+    "approach": "Standard approach",
+    "confidence": 0.9
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "cf43908852e6f30805ff956b7ef6e78cad525a31",
+    "endRef": "cf43908852e6f30805ff956b7ef6e78cad525a31"
+  }
+}

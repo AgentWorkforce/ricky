@@ -1,0 +1,53 @@
+{
+  "id": "traj_jv88hrv611a5",
+  "version": 1,
+  "task": {
+    "title": "Fix master executor workflow snapshot printf gate"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T11:26:16.380Z",
+  "completedAt": "2026-05-07T11:26:41.333Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T11:26:41.230Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_l72d5d9wx0dt",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T11:26:41.230Z",
+      "endedAt": "2026-05-07T11:26:41.333Z",
+      "events": [
+        {
+          "ts": 1778153201231,
+          "type": "decision",
+          "content": "Patch snapshot printf labels to portable format strings: Patch snapshot printf labels to portable format strings",
+          "raw": {
+            "question": "Patch snapshot printf labels to portable format strings",
+            "chosen": "Patch snapshot printf labels to portable format strings",
+            "alternatives": [],
+            "reasoning": "The child workflow failed because sh printf treated a leading --- format as an option; using printf '%s\\n' with the label as an argument avoids shell-specific option parsing."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Fixed the snapshot-current-code gate in wave13 master executor workflow by changing leading-dash printf format strings to safe '%s' format usage. Re-ran npx tsc --noEmit and agent-relay dry-run successfully.",
+    "approach": "Standard approach",
+    "confidence": 0.95
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "83fd6b39b7336a68c145c54525aa40eb3df1ca55",
+    "endRef": "83fd6b39b7336a68c145c54525aa40eb3df1ca55"
+  }
+}

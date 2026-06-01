@@ -1,0 +1,57 @@
+{
+  "version": "1.0.0",
+  "id": "a86e5d46-3a45-4cdb-b7dd-7725315508a8",
+  "timestamp": "2026-05-18T19:22:36.723Z",
+  "trajectory": "traj_nhi0oa765fke",
+  "files": [
+    {
+      "path": "src/product/generation/workforce-persona-writer.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 2431,
+              "end_line": 2462,
+              "revision": "6b85bc50df91cf4e8928b8c7b832a99714d549d8"
+            },
+            {
+              "start_line": 2487,
+              "end_line": 2516,
+              "revision": "6b85bc50df91cf4e8928b8c7b832a99714d549d8"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/product/generation/workforce-persona-writer.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1915,
+              "end_line": 1921,
+              "revision": "6b85bc50df91cf4e8928b8c7b832a99714d549d8"
+            },
+            {
+              "start_line": 2016,
+              "end_line": 2043,
+              "revision": "6b85bc50df91cf4e8928b8c7b832a99714d549d8"
+            },
+            {
+              "start_line": 2048,
+              "end_line": 2091,
+              "revision": "6b85bc50df91cf4e8928b8c7b832a99714d549d8"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
