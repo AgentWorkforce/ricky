@@ -156,6 +156,13 @@ describe('debugger-facing classification contract', () => {
       nextAction: NextAction.FixAndRetry,
     },
     {
+      name: 'malformed GitHub primitive integration step evidence',
+      summary: 'Error: GitHub step "open-pr" requires an action',
+      category: FailureClass.WorkflowInvalid,
+      severity: Severity.High,
+      nextAction: NextAction.FixAndRetry,
+    },
+    {
       name: 'agent drift evidence',
       summary: 'agent drift: repeated narrative did not meet the step contract',
       category: FailureClass.AgentDrift,

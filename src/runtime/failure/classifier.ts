@@ -59,11 +59,14 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
 
 const GITHUB_STEP_CONFIG_ERROR_PATTERNS: readonly RegExp[] = [
   /\bGitHub step requires a non-empty name\b/i,
-  /\bGitHub step "[^"]*" requires an action name\b/i,
+  /\bGitHub step "[^"]*" requires an action(?: name)?\b/i,
   /\bGitHub step "[^"]*" uses unsupported action\b/i,
   /\bGitHub step "[^"]*" params must be an object\b/i,
+  /\bGitHub step params\.[^ ]+ must be (?:a JSON object|valid JSON)\b/i,
+  /\bGitHub step repo must be in owner\/repo format\b/i,
   /\bGitHub repo must be in owner\/repo format\b/i,
   /\bGitHub repo object requires owner and repo\b/i,
+  /\bUnsupported GitHub action:/i,
 ];
 
 // ── Step overflow threshold ──────────────────────────────────────────

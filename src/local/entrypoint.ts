@@ -2638,11 +2638,14 @@ function matchesRuntimeHandoffStall(text: string): boolean {
 function matchesInvalidGithubStepConfig(text: string): boolean {
   const patterns = [
     /\bGitHub step requires a non-empty name\b/i,
-    /\bGitHub step "[^"]*" requires an action name\b/i,
+    /\bGitHub step "[^"]*" requires an action(?: name)?\b/i,
     /\bGitHub step "[^"]*" uses unsupported action\b/i,
     /\bGitHub step "[^"]*" params must be an object\b/i,
+    /\bGitHub step params\.[^ ]+ must be (?:a JSON object|valid JSON)\b/i,
+    /\bGitHub step repo must be in owner\/repo format\b/i,
     /\bGitHub repo must be in owner\/repo format\b/i,
     /\bGitHub repo object requires owner and repo\b/i,
+    /\bUnsupported GitHub action:/i,
   ];
   for (const rawLine of text.split(/\r?\n/)) {
     const line = stripAnsi(rawLine);

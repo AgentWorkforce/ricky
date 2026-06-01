@@ -4251,7 +4251,7 @@ describe('runLocal', () => {
   it('classifies malformed GitHub primitive startup errors with a specific blocker code', async () => {
     const localExecutor = memoryLocalExecutorOptions({
       exitCode: 1,
-      stderr: ['Error: GitHub step requires a non-empty name'],
+      stderr: ['Error: GitHub step "open-pr" requires an action'],
     });
 
     const result = await runLocal(

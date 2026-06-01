@@ -2109,6 +2109,9 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '    .step("push-branch", { type: "deterministic", command: "git push" })',
       '    .step("open-pr", createGitHubStep({',
       '      dependsOn: ["push-branch"],',
+      '      id: "open-pr",',
+      '      owner: "AgentWorkforce",',
+      '      repo: "ricky",',
       '      command: ["gh pr create --title x"],',
       '    }))',
       '    .run({ cwd: process.cwd() });',
@@ -2124,6 +2127,8 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
         expect.stringContaining('requires a non-empty name field'),
         expect.stringContaining('requires a non-empty action field'),
         expect.stringContaining('must not include command'),
+        expect.stringContaining('must not include id'),
+        expect.stringContaining('must not include separate owner/repo fields'),
       ]),
     );
   });
@@ -2157,6 +2162,22 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       'import { createGitHubStep } from "@agent-relay/sdk";',
       'async function main() {',
       '  await workflow("real-sdk-root").step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" })).run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, realWorkflow)).toEqual([]);
+  });
+
+  it('accepts the SDK root github namespace import when name and action are valid', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const realWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { github } from "@agent-relay/sdk";',
+      'async function main() {',
+      '  await workflow("real-sdk-namespace").step("open-pr", github.createGitHubStep({ name: "open-pr", action: "createPR" })).run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
     ].join('\n');

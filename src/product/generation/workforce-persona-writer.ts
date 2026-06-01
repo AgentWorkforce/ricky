@@ -1669,6 +1669,9 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
           if (importedName === 'createGitHubStep') {
             githubIdentifierBindings.push(identifierBinding(element.name, 'createStepFunction'));
           }
+          if (importedName === 'github') {
+            githubIdentifierBindings.push(identifierBinding(element.name, 'githubNamespace'));
+          }
         }
       }
       if (isGithubPrimitiveModule && namedBindings && ts.isNamespaceImport(namedBindings)) {
@@ -1822,6 +1825,12 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
 
     if (objectPropertyInitializer(config, 'command')) {
       issues.push(`createGitHubStep at ${location} must not include command; use name/action/repo/params instead of deterministic shell-step shape`);
+    }
+    if (objectPropertyInitializer(config, 'id')) {
+      issues.push(`createGitHubStep at ${location} must not include id; use the required name field instead`);
+    }
+    if (objectPropertyInitializer(config, 'owner')) {
+      issues.push(`createGitHubStep at ${location} must not include separate owner/repo fields; use repo: "owner/repo" or repo: { owner, repo }`);
     }
 
     return issues;
