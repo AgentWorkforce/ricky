@@ -2507,6 +2507,30 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     expect(detectSpecIntentMismatch(spec, workflowWithExtensionlessFiles)).toEqual([]);
   });
 
+  it('allows test -f gates for extensionless executable files under bin and scripts directories', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-relay-slack-bridge-outbound-streaming',
+        'Target branch: feat/relay-slack-bridge-outbound-streaming',
+      ].join('\n'),
+    };
+    const workflowWithExecutableFileGates = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("extensionless-executable-file-gates")',
+      '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
+      '    .step("file-gates", { type: "deterministic", command: "test -f packages/cli/bin/ricky && test -f tools/scripts/provision" })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, workflowWithExecutableFileGates)).toEqual([]);
+  });
+
   it('accepts workflows that create the declared worktree before implementation', () => {
     const spec = {
       description: [

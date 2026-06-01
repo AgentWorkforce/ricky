@@ -1,0 +1,65 @@
+{
+  "id": "traj_g1lusytgyeik",
+  "version": 1,
+  "task": {
+    "title": "Scope relayflows workflow move SDK wiring"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-29T11:50:27.476Z",
+  "completedAt": "2026-05-29T11:53:10.598Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-29T11:52:52.926Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_5p609cugf9k4",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-29T11:52:52.926Z",
+      "endedAt": "2026-05-29T11:53:10.598Z",
+      "events": [
+        {
+          "ts": 1780055572930,
+          "type": "decision",
+          "content": "Scope relayflows as workflow runtime package boundary: Scope relayflows as workflow runtime package boundary",
+          "raw": {
+            "question": "Scope relayflows as workflow runtime package boundary",
+            "chosen": "Scope relayflows as workflow runtime package boundary",
+            "alternatives": [],
+            "reasoning": "Ricky has no ../relay path dependency; the move is primarily import/CLI compatibility from @agent-relay/sdk/workflows and agent-relay run to @relayflows/core and relayflows run, plus relayflows core still depends on Agent Relay SDK, config, cloud, and primitives."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1780055573080,
+          "type": "reflection",
+          "content": "Found relayflows typecheck blocked by unresolved primitive workspace builds and @agent-relay/cloud export mismatch; Ricky migration is a consumer compatibility layer problem plus generated-artifact template update.",
+          "raw": {
+            "confidence": 0.78
+          },
+          "significance": "high",
+          "tags": [
+            "confidence:0.78"
+          ]
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Scoped relay-to-relayflows workflow migration. Ricky has no ../relay filesystem dependency; migration touches SDK import compatibility, CLI command text/preflight, generator templates, validator checks, and local runtime loader. relayflows itself currently fails typecheck due primitive workspace package build visibility and @agent-relay/cloud export mismatch, so those must be fixed before Ricky can switch consumers.",
+    "approach": "Standard approach",
+    "confidence": 0.82
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "6b85bc50df91cf4e8928b8c7b832a99714d549d8",
+    "endRef": "6b85bc50df91cf4e8928b8c7b832a99714d549d8"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "id": "traj_0t95a2qouodq",
+  "version": 1,
+  "task": {
+    "title": "Fix mode override for execution-preference clarifications",
+    "source": {
+      "system": "plain",
+      "id": "ricky-76"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-08T15:23:51.782Z",
+  "completedAt": "2026-05-08T15:27:17.978Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-08T15:27:08.741Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_y14di4lu8wuk",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-08T15:27:08.741Z",
+      "endedAt": "2026-05-08T15:27:17.978Z",
+      "events": [
+        {
+          "ts": 1778254028741,
+          "type": "decision",
+          "content": "Let explicit mode and execution-mode answers override runtime keyword inference: Let explicit mode and execution-mode answers override runtime keyword inference",
+          "raw": {
+            "question": "Let explicit mode and execution-mode answers override runtime keyword inference",
+            "chosen": "Let explicit mode and execution-mode answers override runtime keyword inference",
+            "alternatives": [],
+            "reasoning": "Issue #76 showed design specs can mention both local and Cloud legitimately. CLI mode metadata and appended clarification answers are stronger signals than regex keyword inference."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Fixed issue #76 by letting explicit CLI execution mode and appended execution-mode clarification answers override local/cloud keyword inference. Added product-intake, local-entrypoint, and deterministic eval coverage for the mixed-runtime design spec regression.",
+    "approach": "Standard approach",
+    "confidence": 0.9
+  },
+  "commits": [
+    "1df8588"
+  ],
+  "filesChanged": [
+    "evals/suites/generation-quality/cases.jsonl",
+    "evals/suites/generation-quality/cases.md",
+    "src/local/entrypoint.test.ts",
+    "src/product/spec-intake/clarifications.ts",
+    "src/product/spec-intake/normalizer.ts",
+    "src/product/spec-intake/parser.test.ts"
+  ],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "478381797948de22db104f9ecc3fdda86574a9a6",
+    "endRef": "1df8588b76ed7722c4bfcc9221051d1417e663f8",
+    "traceId": "4a82ef5e-38e3-4ff3-9987-07954950eefc"
+  }
+}

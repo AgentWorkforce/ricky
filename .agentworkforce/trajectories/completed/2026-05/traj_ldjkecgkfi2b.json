@@ -1,0 +1,53 @@
+{
+  "id": "traj_ldjkecgkfi2b",
+  "version": 1,
+  "task": {
+    "title": "Fix Ricky auto-repair for lead plan marker gate failures"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T09:12:05.079Z",
+  "completedAt": "2026-05-07T09:17:11.301Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T09:17:11.193Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_d66suq8btfme",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T09:17:11.193Z",
+      "endedAt": "2026-05-07T09:17:11.301Z",
+      "events": [
+        {
+          "ts": 1778145431194,
+          "type": "decision",
+          "content": "Added deterministic auto-fix for generated lead-plan required marker gates: Added deterministic auto-fix for generated lead-plan required marker gates",
+          "raw": {
+            "question": "Added deterministic auto-fix for generated lead-plan required marker gates",
+            "chosen": "Added deterministic auto-fix for generated lead-plan required marker gates",
+            "alternatives": [],
+            "reasoning": "The failed run resumes from lead-plan-gate, so patching only the lead prompt would not fix existing lead-plan.md artifacts. The repair instead rewrites the generated gate to append missing plan sections before validation, preserving the sentinel and bounded trigger."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Added and PR'd a Ricky deterministic auto-fix for lead-plan marker gate failures, with regression coverage and full test validation.",
+    "approach": "Standard approach",
+    "confidence": 0.94
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "eb5f110bec18a61645c18dd22546a14e00c9082a",
+    "endRef": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+  }
+}

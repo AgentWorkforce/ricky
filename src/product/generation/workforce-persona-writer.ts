@@ -2093,6 +2093,8 @@ function isDirectoryLookingPath(value: string): boolean {
   const segments = value.split(/[\\/]+/).filter(Boolean);
   if (segments.length < 2) return false;
   const lastSegment = segments[segments.length - 1];
+  const parentSegment = segments[segments.length - 2]?.toLowerCase();
+  if (parentSegment === 'bin' || parentSegment === 'scripts') return false;
   return Boolean(
     lastSegment &&
     lastSegment !== '.' &&
@@ -2330,6 +2332,26 @@ function stripMarkdownListMarker(line: string): string {
 function propertyNameText(name: ts.PropertyName): string | undefined {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
+  }
+  return undefined;
+}
+
+function propertyLiteralText(object: ts.ObjectLiteralExpression, propertyName: string): string | undefined {
+  for (const property of object.properties) {
+    if (!ts.isPropertyAssignment(property) || propertyNameText(property.name) !== propertyName) continue;
+    return literalText(property.initializer);
+  }
+  return undefined;
+}
+
+function literalText(node: ts.Expression): string | undefined {
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) {
+    return [
+      node.head.text,
+      ...node.templateSpans.map((span) => `\${...}${span.literal.text}`),
+    ].join('');
   }
   return undefined;
 }

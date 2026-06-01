@@ -1,0 +1,97 @@
+{
+  "version": "1.0.0",
+  "id": "1b26aab6-6733-49df-91d4-9ef4a925493d",
+  "timestamp": "2026-05-07T08:41:31.077Z",
+  "trajectory": "traj_zpeofubalewe",
+  "files": [
+    {
+      "path": "src/runtime/failure/classifier.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 111,
+              "end_line": 128,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 170,
+              "end_line": 183,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 347,
+              "end_line": 360,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 496,
+              "end_line": 510,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 636,
+              "end_line": 643,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 837,
+              "end_line": 868,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/runtime/failure/classifier.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 36,
+              "end_line": 42,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 82,
+              "end_line": 88,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 138,
+              "end_line": 144,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 166,
+              "end_line": 172,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 344,
+              "end_line": 350,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 357,
+              "end_line": 363,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            },
+            {
+              "start_line": 439,
+              "end_line": 454,
+              "revision": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

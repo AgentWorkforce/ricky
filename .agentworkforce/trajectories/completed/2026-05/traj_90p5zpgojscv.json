@@ -1,0 +1,53 @@
+{
+  "id": "traj_90p5zpgojscv",
+  "version": 1,
+  "task": {
+    "title": "Generate workflow artifact: ricky-render-greeting-generate-a-workflow-that-runs-ec"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T11:05:50.347Z",
+  "completedAt": "2026-05-07T11:07:42.633Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T11:07:42.629Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_m9u82ufp8opf",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T11:07:42.629Z",
+      "endedAt": "2026-05-07T11:07:42.633Z",
+      "events": [
+        {
+          "ts": 1778152062632,
+          "type": "decision",
+          "content": "Use pipeline workflow with deterministic context, metadata, 80-to-100 loop, and hard gates: Use pipeline workflow with deterministic context, metadata, 80-to-100 loop, and hard gates",
+          "raw": {
+            "question": "Use pipeline workflow with deterministic context, metadata, 80-to-100 loop, and hard gates",
+            "chosen": "Use pipeline workflow with deterministic context, metadata, 80-to-100 loop, and hard gates",
+            "alternatives": [],
+            "reasoning": "Spec is linear and requires strict ordered evidence gates; pipeline minimizes coordination overhead while satisfying review/fix/final-review requirements."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Produced balanced TypeScript Agent Relay workflow artifact with generation-time skill boundary metadata, scoped change evidence, typecheck/test gates, and final signoff contract.",
+    "approach": "Standard approach",
+    "confidence": 0.9
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "750f03d3b9bf45e5b553c3aed5fd4da022c1191d",
+    "endRef": "750f03d3b9bf45e5b553c3aed5fd4da022c1191d"
+  }
+}

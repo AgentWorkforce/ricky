@@ -1,0 +1,53 @@
+{
+  "id": "traj_1eyqbl6ls4lc",
+  "version": 1,
+  "task": {
+    "title": "Fix PR 147 pre-merge flat layout proof failures"
+  },
+  "status": "completed",
+  "startedAt": "2026-06-01T12:12:48.522Z",
+  "completedAt": "2026-06-01T12:14:34.996Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-06-01T12:14:34.827Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_361rlxfvk13j",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-06-01T12:14:34.827Z",
+      "endedAt": "2026-06-01T12:14:34.996Z",
+      "events": [
+        {
+          "ts": 1780316074829,
+          "type": "decision",
+          "content": "Treat .agentworkforce trajectories as archived proof history: Treat .agentworkforce trajectories as archived proof history",
+          "raw": {
+            "question": "Treat .agentworkforce trajectories as archived proof history",
+            "chosen": "Treat .agentworkforce trajectories as archived proof history",
+            "alternatives": [],
+            "reasoning": "The flat-layout proof scans active repo files for obsolete artifact references. Committed .agentworkforce trajectory JSON contains historical references, analogous to .trajectories archives, and should not make live source cleanup proofs fail."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Fixed flat-layout proof failures by excluding .agentworkforce trajectory archives from active reference scans; verified npm run premerge passes.",
+    "approach": "Standard approach",
+    "confidence": 0.92
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "fe6f482accb33d8cddc01454f3fab4896c093e7f",
+    "endRef": "fe6f482accb33d8cddc01454f3fab4896c093e7f"
+  }
+}

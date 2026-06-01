@@ -1,0 +1,69 @@
+{
+  "id": "traj_3357wwfjz0n9",
+  "version": 1,
+  "task": {
+    "title": "ricky-demo-persona-repair-semantic-contract-workflow",
+    "description": "Persona-repair demo with deterministic semantic repair and resume-safe verification.",
+    "source": {
+      "system": "workflow-runner",
+      "id": "ecc8c6c5c8b2e5b2b63ab298"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-02T12:42:11.871Z",
+  "completedAt": "2026-05-02T12:42:12.577Z",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "role": "workflow-runner",
+      "joinedAt": "2026-05-02T12:42:11.871Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_a7rdtsdudex6",
+      "title": "Planning",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-02T12:42:11.871Z",
+      "endedAt": "2026-05-02T12:42:12.576Z",
+      "events": [
+        {
+          "ts": 1777725731871,
+          "type": "note",
+          "content": "Purpose: Persona-repair demo with deterministic semantic repair and resume-safe verification."
+        },
+        {
+          "ts": 1777725731871,
+          "type": "note",
+          "content": "Approach: 7-step pipeline workflow — Parsed 7 steps, 6 dependent steps, DAG validated, no cycles"
+        }
+      ]
+    },
+    {
+      "id": "chap_qq51m09plqfq",
+      "title": "Retrospective",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-02T12:42:12.576Z",
+      "endedAt": "2026-05-02T12:42:12.577Z",
+      "events": [
+        {
+          "ts": 1777725732576,
+          "type": "reflection",
+          "content": "All 7 steps completed in 1s. (completed in 1 seconds)",
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "All 7 steps completed in 1s.",
+    "approach": "pipeline workflow (0 agents)",
+    "challenges": [],
+    "learnings": [],
+    "confidence": 0.75
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": []
+}

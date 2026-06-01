@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "id": "65a832fb-09e6-4f9e-81ce-92ccc4b9b6d9",
+  "timestamp": "2026-05-01T15:41:08.951Z",
+  "trajectory": "traj_uivufyzddz4n",
+  "files": [
+    {
+      "path": ".gitignore",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 9,
+              "end_line": 15,
+              "revision": "ec7322e36a25578d9194cd903bdbf19420b31153"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": ".ricky/config.json",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": []
+        }
+      ]
+    }
+  ]
+}

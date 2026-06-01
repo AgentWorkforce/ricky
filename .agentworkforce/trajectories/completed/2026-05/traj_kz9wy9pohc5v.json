@@ -1,0 +1,66 @@
+{
+  "id": "traj_kz9wy9pohc5v",
+  "version": 1,
+  "task": {
+    "title": "Add PR-gated Ricky eval workflow",
+    "source": {
+      "system": "plain",
+      "id": "ricky-pr-evals"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-08T15:43:33.189Z",
+  "completedAt": "2026-05-08T15:48:10.515Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-08T15:47:57.330Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_k6haxfc8vmqe",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-08T15:47:57.330Z",
+      "endedAt": "2026-05-08T15:48:10.515Z",
+      "events": [
+        {
+          "ts": 1778255277333,
+          "type": "decision",
+          "content": "Use Sage-shaped provider eval CI for Ricky: Use Sage-shaped provider eval CI for Ricky",
+          "raw": {
+            "question": "Use Sage-shaped provider eval CI for Ricky",
+            "chosen": "Use Sage-shaped provider eval CI for Ricky",
+            "alternatives": [],
+            "reasoning": "The user explicitly asked to copy Sage's OpenRouter-backed PR eval pattern, so Ricky now gets an OpenRouter executor, CI summary/comment scripts, and a path-gated workflow with fork-secret safeguards."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Added Sage-shaped provider eval CI for Ricky: OpenRouter executor, evals:provider script, path-gated GitHub Actions workflow, CI summary helper, PR review comment helper, and artifact upload. Validated script syntax, typecheck, CI helper rendering, and the focused issue #76 eval.",
+    "approach": "Standard approach",
+    "confidence": 0.88
+  },
+  "commits": [
+    "da9f524"
+  ],
+  "filesChanged": [
+    ".github/workflows/ricky-evals.yml",
+    "package.json",
+    "scripts/evals/ci-review-comment.mjs",
+    "scripts/evals/ci-summary.mjs",
+    "scripts/evals/run-ricky-evals.mjs"
+  ],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "1df8588b76ed7722c4bfcc9221051d1417e663f8",
+    "endRef": "da9f524516c2835eab25cb019b22c9d39616200c",
+    "traceId": "1e71320b-0360-4904-83d6-4655e8fda4b0"
+  }
+}

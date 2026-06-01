@@ -1,0 +1,77 @@
+{
+  "id": "traj_wuo6uf8ea17d",
+  "version": 1,
+  "task": {
+    "title": "Reduce Ricky local state writes in user repositories"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T15:28:32.203Z",
+  "completedAt": "2026-05-01T15:36:41.485Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-01T15:30:11.961Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_f2yryn2l3ilr",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-01T15:30:11.961Z",
+      "endedAt": "2026-05-01T15:36:41.485Z",
+      "events": [
+        {
+          "ts": 1777649411961,
+          "type": "decision",
+          "content": "Make generated workflow metadata sidecars opt-in: Make generated workflow metadata sidecars opt-in",
+          "raw": {
+            "question": "Make generated workflow metadata sidecars opt-in",
+            "chosen": "Make generated workflow metadata sidecars opt-in",
+            "alternatives": [],
+            "reasoning": "The workflow .ts file is a user deliverable, but skill/tool/refinement/persona metadata is Ricky bookkeeping already returned in LocalResponse.decisions; writing it into .workflow-artifacts during generation pollutes user repositories."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1777649495233,
+          "type": "decision",
+          "content": "Move background run monitor state out of repositories: Move background run monitor state out of repositories",
+          "raw": {
+            "question": "Move background run monitor state out of repositories",
+            "chosen": "Move background run monitor state out of repositories",
+            "alternatives": [],
+            "reasoning": "Run logs, evidence, and status JSON are Ricky state for reattachment; they can live in the user's state directory keyed by repo hash, with legacy repo-local reads retained for old runs."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1777649792819,
+          "type": "reflection",
+          "content": "State spillover reduced in two places: generation metadata sidecars are opt-in, and background/runtime monitor state now routes through a repo-keyed user state directory with legacy read fallback for old runs.",
+          "raw": {
+            "confidence": 0.86
+          },
+          "significance": "high",
+          "tags": [
+            "confidence:0.86"
+          ]
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Reduced Ricky state writes in user repositories by making generation metadata sidecars opt-in and moving local run monitor/runtime log state to a repo-keyed user state directory with legacy status fallback.",
+    "approach": "Standard approach",
+    "confidence": 0.9
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "cf43908852e6f30805ff956b7ef6e78cad525a31",
+    "endRef": "cf43908852e6f30805ff956b7ef6e78cad525a31"
+  }
+}

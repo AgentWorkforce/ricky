@@ -105,6 +105,7 @@ function shouldSkipDirectory(repoPath: string): boolean {
     || repoPath.startsWith('.relay/')
     || repoPath.startsWith('.claude/worktrees/')
     || repoPath.startsWith('.workflow-artifacts/')
+    || repoPath.startsWith('.agentworkforce/trajectories/')
     || repoPath.startsWith('.trajectories/')
   );
 }

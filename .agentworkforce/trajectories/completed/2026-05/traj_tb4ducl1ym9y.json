@@ -1,0 +1,53 @@
+{
+  "id": "traj_tb4ducl1ym9y",
+  "version": 1,
+  "task": {
+    "title": "Package generated workflow context into sidecar files"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T09:18:41.519Z",
+  "completedAt": "2026-05-07T09:23:52.204Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T09:23:52.120Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_wl30hobkb5yj",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T09:23:52.120Z",
+      "endedAt": "2026-05-07T09:23:52.204Z",
+      "events": [
+        {
+          "ts": 1778145832121,
+          "type": "decision",
+          "content": "Packaged long generated workflow context into sidecar files: Packaged long generated workflow context into sidecar files",
+          "raw": {
+            "question": "Packaged long generated workflow context into sidecar files",
+            "chosen": "Packaged long generated workflow context into sidecar files",
+            "alternatives": [],
+            "reasoning": "Agent tasks were exceeding runner size warnings because full normalized specs were interpolated into lead, implementation, and review prompts. The generated workflow now materializes context sidecars in prepare-context and prompts agents to read those files."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Opened a PR that packages generated workflow context into sidecar files and shrinks agent task bodies, with regression coverage and full validation.",
+    "approach": "Standard approach",
+    "confidence": 0.94
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "eb5f110bec18a61645c18dd22546a14e00c9082a",
+    "endRef": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+  }
+}

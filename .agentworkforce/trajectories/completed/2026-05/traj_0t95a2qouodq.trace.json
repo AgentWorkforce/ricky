@@ -1,0 +1,120 @@
+{
+  "version": "1.0.0",
+  "id": "4a82ef5e-38e3-4ff3-9987-07954950eefc",
+  "timestamp": "2026-05-08T15:27:18.068Z",
+  "trajectory": "traj_0t95a2qouodq",
+  "files": [
+    {
+      "path": "evals/suites/generation-quality/cases.jsonl",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 9,
+              "end_line": 12,
+              "revision": "1df8588b76ed7722c4bfcc9221051d1417e663f8"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "evals/suites/generation-quality/cases.md",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 227,
+              "end_line": 265,
+              "revision": "1df8588b76ed7722c4bfcc9221051d1417e663f8"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/local/entrypoint.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1289,
+              "end_line": 1317,
+              "revision": "1df8588b76ed7722c4bfcc9221051d1417e663f8"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/product/spec-intake/clarifications.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 225,
+              "end_line": 231,
+              "revision": "1df8588b76ed7722c4bfcc9221051d1417e663f8"
+            },
+            {
+              "start_line": 237,
+              "end_line": 284,
+              "revision": "1df8588b76ed7722c4bfcc9221051d1417e663f8"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/product/spec-intake/normalizer.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 96,
+              "end_line": 107,
+              "revision": "1df8588b76ed7722c4bfcc9221051d1417e663f8"
+            },
+            {
+              "start_line": 116,
+              "end_line": 166,
+              "revision": "1df8588b76ed7722c4bfcc9221051d1417e663f8"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/product/spec-intake/parser.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 618,
+              "end_line": 659,
+              "revision": "1df8588b76ed7722c4bfcc9221051d1417e663f8"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
