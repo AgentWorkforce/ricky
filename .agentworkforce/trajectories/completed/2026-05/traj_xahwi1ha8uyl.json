@@ -99,7 +99,7 @@
     "src/surfaces/cli/flows/workflow-summary.test.ts",
     "src/surfaces/cli/flows/workflow-summary.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "eb5f110bec18a61645c18dd22546a14e00c9082a",

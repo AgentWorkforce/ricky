@@ -57,7 +57,7 @@
     "src/product/spec-intake/normalizer.ts",
     "src/product/spec-intake/parser.test.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "478381797948de22db104f9ecc3fdda86574a9a6",

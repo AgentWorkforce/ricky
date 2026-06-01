@@ -52,7 +52,7 @@
     ".trajectories/completed/2026-05/traj_nc2i7uwepync.md",
     "test/generated-workflow-reliability-contract.test.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "3f132b2f652faf8df6341438a70ea6ae9157a37d",

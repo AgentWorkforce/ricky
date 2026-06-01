@@ -52,7 +52,7 @@
   "filesChanged": [
     "scripts/evals/run-ricky-evals.mjs"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "da9f524516c2835eab25cb019b22c9d39616200c",

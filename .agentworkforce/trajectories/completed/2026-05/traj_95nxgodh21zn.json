@@ -78,7 +78,7 @@
     "test/package-proof/package-layout-proof.test.ts",
     "workflows/wave0-foundation/02-toolchain-and-validation-foundation.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "aa2c3c394e24e88454b945c73d3132b683711e74",

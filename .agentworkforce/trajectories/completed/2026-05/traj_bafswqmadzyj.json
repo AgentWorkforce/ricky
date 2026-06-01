@@ -343,7 +343,7 @@
     "workflows/wave5-scale-and-ops/05-split-ricky-into-workspace-packages.ts",
     "workflows/wave6-proof/01-close-first-wave-signoff-and-blockers.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "d9b5188052e8d6fd297dc6d95e588ecda3af0a13",

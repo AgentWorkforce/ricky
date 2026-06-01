@@ -49,7 +49,7 @@
     "src/surfaces/cli/commands/cli-main.test.ts",
     "src/surfaces/cli/commands/cli-main.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "d1ea9211f94e61d8e2c3e81d6f667bde8002cce1",

@@ -424,7 +424,7 @@
     "workflows/wave2-product/01-workflow-spec-intake.ts",
     "workflows/wave2-product/04-workflow-validator-specialist.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "883f960909f2f428e89a0329b0712a11b40c3fd0",

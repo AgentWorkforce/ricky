@@ -26,7 +26,7 @@
     "test/package-proof/package-layout-proof.test.ts",
     "test/package-proof/package-layout-proof.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "58dca4cb02e5ba3ad3c757c71e231b3093f77ddc",

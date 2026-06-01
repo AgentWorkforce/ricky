@@ -282,7 +282,7 @@
         {
           "ts": 1777652291175,
           "type": "completion-evidence",
-          "content": "\"fix-cloud-power-user-path\" verification-based completion — Verification passed (5 signal(s), 1 relevant channel post(s), 6 file change(s), exit=0; signals=0, **Resolved Finding 1**, Reading additional input from stdin..., .workflow-artifacts/review-findings-hardening/cloud-power-self-review.md, **[fix-cloud-power-user-path] Output:**; channel=**[fix-cloud-power-user-path] Output:**\n```\n**Resolved Finding 1**\nUpdated [cli-main.ts](/Users/khaliqgant/Projects/AgentWorkforce/ricky/src/surfaces/cli/comman; files=created:.workflow-artifacts/review-findings-hardening/cloud-guided-self-review.md, created:.workflow-artifacts/review-findings-hardening/cloud-power-self-review.md, created:.workflow-artifacts/review-findings-hardening/defaults-self-review.md, modified:dist/ricky.js, modified:docs/product/ricky-simplified-workflow-cli-spec.md, modified:specs/cli-auto-fix-and-resume.md; exit=0)",
+          "content": "\"fix-cloud-power-user-path\" verification-based completion — Verification passed (5 signal(s), 1 relevant channel post(s), 6 file change(s), exit=0; signals=0, **Resolved Finding 1**, Reading additional input from stdin..., .workflow-artifacts/review-findings-hardening/cloud-power-self-review.md, **[fix-cloud-power-user-path] Output:**; channel=**[fix-cloud-power-user-path] Output:**\n```\n**Resolved Finding 1**\nUpdated [cli-main.ts](AgentWorkforce/ricky/src/surfaces/cli/comman; files=created:.workflow-artifacts/review-findings-hardening/cloud-guided-self-review.md, created:.workflow-artifacts/review-findings-hardening/cloud-power-self-review.md, created:.workflow-artifacts/review-findings-hardening/defaults-self-review.md, modified:dist/ricky.js, modified:docs/product/ricky-simplified-workflow-cli-spec.md, modified:specs/cli-auto-fix-and-resume.md; exit=0)",
           "raw": {
             "stepName": "fix-cloud-power-user-path",
             "completionMode": "verification",
@@ -297,7 +297,7 @@
                 "**[fix-cloud-power-user-path] Output:**"
               ],
               "channelPosts": [
-                "**[fix-cloud-power-user-path] Output:**\n```\n**Resolved Finding 1**\nUpdated [cli-main.ts](/Users/khaliqgant/Projects/AgentWorkforce/ricky/src/surfaces/cli/comman"
+                "**[fix-cloud-power-user-path] Output:**\n```\n**Resolved Finding 1**\nUpdated [cli-main.ts](AgentWorkforce/ricky/src/surfaces/cli/comman"
               ],
               "files": [
                 "created:.workflow-artifacts/review-findings-hardening/cloud-guided-self-review.md",
@@ -578,6 +578,6 @@
   },
   "commits": [],
   "filesChanged": [],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": []
 }

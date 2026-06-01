@@ -58,7 +58,7 @@
     "src/surfaces/cli/flows/local-run-monitor.ts",
     "src/surfaces/cli/flows/local-workflow-flow.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "ec7322e36a25578d9194cd903bdbf19420b31153",

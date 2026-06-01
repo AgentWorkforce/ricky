@@ -20,7 +20,7 @@
   "filesChanged": [
     "workflows/generated/ricky-resolve-review-findings.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "b3f1bcf5636bcc55e725b69a509cee749449db26",

@@ -164,7 +164,7 @@
     "src/surfaces/cli/flows/power-user-parser.test.ts",
     "src/surfaces/cli/flows/power-user-parser.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "d17de78111748992e1501aefd06b8a9dcc7e19c6",

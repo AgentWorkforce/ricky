@@ -21,7 +21,7 @@
     ".gitignore",
     ".ricky/config.json"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "de6adba11970c5f35e41172beaea0c601dee71de",

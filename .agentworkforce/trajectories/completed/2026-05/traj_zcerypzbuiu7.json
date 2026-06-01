@@ -30,7 +30,7 @@
     "src/product/generation/template-renderer.ts",
     "src/shared/constants.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "1498c47f760d6ead40cc7ccdc88a570b2510d91a",

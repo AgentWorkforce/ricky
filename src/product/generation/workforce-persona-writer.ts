@@ -2093,6 +2093,8 @@ function isDirectoryLookingPath(value: string): boolean {
   const segments = value.split(/[\\/]+/).filter(Boolean);
   if (segments.length < 2) return false;
   const lastSegment = segments[segments.length - 1];
+  const parentSegment = segments[segments.length - 2]?.toLowerCase();
+  if (parentSegment === 'bin' || parentSegment === 'scripts') return false;
   return Boolean(
     lastSegment &&
     lastSegment !== '.' &&

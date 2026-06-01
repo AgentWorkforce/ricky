@@ -48,7 +48,7 @@
   "filesChanged": [
     ".agents/skills/writing-agent-relay-workflows/SKILL.md"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "da25de94766070280c8a0ca3d3ebf985d9ab705a",

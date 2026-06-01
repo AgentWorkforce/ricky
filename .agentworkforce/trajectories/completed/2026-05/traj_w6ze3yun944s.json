@@ -69,7 +69,7 @@
     "src/product/generation/workforce-persona-writer.test.ts",
     "src/product/generation/workforce-persona-writer.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "5edbf46ec51fb258356ac5ade48da36f41b7ed0d",

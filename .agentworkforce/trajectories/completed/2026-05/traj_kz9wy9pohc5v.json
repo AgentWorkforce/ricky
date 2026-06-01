@@ -56,7 +56,7 @@
     "scripts/evals/ci-summary.mjs",
     "scripts/evals/run-ricky-evals.mjs"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "1df8588b76ed7722c4bfcc9221051d1417e663f8",

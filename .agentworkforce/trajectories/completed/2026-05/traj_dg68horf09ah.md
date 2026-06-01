@@ -9,6 +9,6 @@
 
 ## Summary
 
-Addressed PR 99 review comments in sibling worktree /Users/khaliqgant/Projects/AgentWorkforce/ricky-pr99-comments. See that worktree for scoped changes and validation.
+Addressed PR 99 review comments in sibling worktree <repo-root>-pr99-comments. See that worktree for scoped changes and validation.
 
 **Approach:** Standard approach

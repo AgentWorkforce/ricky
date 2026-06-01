@@ -22,7 +22,7 @@
     "src/runtime/failure/classifier.test.ts",
     "src/runtime/failure/classifier.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "b63f443e93fbba8979015aed8261b340c79877cc",

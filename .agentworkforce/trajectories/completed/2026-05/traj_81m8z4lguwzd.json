@@ -24,7 +24,7 @@
     "src/product/generation/master-workflow-renderer.ts",
     "src/product/generation/pipeline.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "17626917424e20cde16a71045e50f6aa68744e98",

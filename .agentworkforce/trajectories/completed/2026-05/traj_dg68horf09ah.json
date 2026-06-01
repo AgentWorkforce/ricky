@@ -10,13 +10,13 @@
   "agents": [],
   "chapters": [],
   "retrospective": {
-    "summary": "Addressed PR 99 review comments in sibling worktree /Users/khaliqgant/Projects/AgentWorkforce/ricky-pr99-comments. See that worktree for scoped changes and validation.",
+    "summary": "Addressed PR 99 review comments in sibling worktree <repo-root>-pr99-comments. See that worktree for scoped changes and validation.",
     "approach": "Standard approach",
     "confidence": 0.9
   },
   "commits": [],
   "filesChanged": [],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "58dca4cb02e5ba3ad3c757c71e231b3093f77ddc",

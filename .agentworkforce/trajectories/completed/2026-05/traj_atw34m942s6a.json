@@ -56,7 +56,7 @@
     "workflows/meta/spec/ricky-master-executor-workflow-program.md",
     "workflows/wave13-master-executor/01-implement-master-executor-planner.ts"
   ],
-  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "projectId": "AgentWorkforce/ricky",
   "tags": [],
   "_trace": {
     "startRef": "83fd6b39b7336a68c145c54525aa40eb3df1ca55",
