@@ -179,6 +179,7 @@ describe('simplified workflow CLI E2E paths', () => {
     const generate = vi.fn().mockResolvedValue({
       artifacts: [{ path: 'cloud/workflow.ts', type: 'text/typescript' }],
       warnings: [],
+      validation: { ok: true, status: 'passed', issues: [] },
       followUpActions: [],
       runReceipt: {
         runId: 'cloud-run-1',

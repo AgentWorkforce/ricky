@@ -3,21 +3,27 @@
 export {
   CLOUD_GENERATE_METHOD,
   CLOUD_GENERATE_ROUTE,
+  cloudGenerateEndpoint,
   defaultCloudExecutor,
   handleCloudGenerate,
 } from './generate-endpoint.js';
 export type {
   CloudExecutor,
+  CloudGenerateEndpointContract,
   CloudGenerateEndpointOptions,
   CloudGenerateResult,
 } from './generate-endpoint.js';
 
 export type {
   CloudAuthContext,
+  CloudAutoFixApprovalBoundary,
   CloudGenerateMode,
+  CloudGenerationMode,
   CloudGenerateRequest,
   CloudGenerateRequestBody,
   CloudNaturalLanguageSpecPayload,
+  CloudRickyAutoFixPolicy,
+  CloudStructuredSpecFormat,
   CloudStructuredSpecPayload,
   CloudWorkflowSpecPayload,
   CloudWorkspaceContext,
@@ -26,7 +32,9 @@ export type {
 export type {
   CloudAssumption,
   CloudArtifact,
+  CloudArtifactBundle,
   CloudFollowUpAction,
+  CloudGenerateError,
   CloudGenerateResponse,
   CloudRunReceipt,
   CloudValidationIssue,

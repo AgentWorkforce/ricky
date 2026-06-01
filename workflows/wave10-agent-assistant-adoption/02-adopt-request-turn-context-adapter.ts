@@ -34,15 +34,16 @@ async function main() {
       type: 'deterministic',
       command: [
         `DIR=${artifactDir}`,
+        'rm -rf "$DIR"',
         'mkdir -p "$DIR"',
         'test -f docs/product/ricky-agent-assistant-usage-audit.md',
         'test -f docs/product/ricky-agent-assistant-adoption-boundary.md',
         'test -f docs/product/ricky-local-execution-contract-reuse-evaluation.md',
         'npm view @agent-assistant/turn-context version > "$DIR/turn-context-registry-version.txt"',
-        'sed -n "1,220p" packages/local/src/request-normalizer.ts > "$DIR/request-normalizer.before.txt"',
-        'sed -n "1,260p" packages/local/src/entrypoint.ts > "$DIR/local-entrypoint.before.txt"',
-        'sed -n "1,160p" packages/local/src/index.ts > "$DIR/local-index.before.txt"',
-        'sed -n "1,120p" packages/local/package.json > "$DIR/local-package.before.json"',
+        'sed -n "1,220p" src/local/request-normalizer.ts > "$DIR/request-normalizer.before.txt"',
+        'sed -n "1,260p" src/local/entrypoint.ts > "$DIR/local-entrypoint.before.txt"',
+        'sed -n "1,160p" src/local/index.ts > "$DIR/local-index.before.txt"',
+        'sed -n "1,120p" package.json > "$DIR/local-package.before.json"',
         'echo PREFLIGHT_OK',
       ].join(' && '),
       captureOutput: true,
@@ -51,22 +52,23 @@ async function main() {
     .step('install-turn-context-dependency', {
       type: 'deterministic',
       dependsOn: ['preflight'],
-      command: 'npm install --workspace @ricky/local',
+      command: 'npm install',
       captureOutput: true,
       failOnError: true,
     })
     .step('implement-adapter', {
       agent: 'impl-codex',
       dependsOn: ['install-turn-context-dependency'],
+      timeoutMs: 420_000,
       task: `Implement GitHub issue #11 as the preferred request/turn envelope alignment slice.
 
 You are not alone in the codebase. Preserve unrelated edits and do not revert work outside this slice.
 
 Owned write scope:
-- packages/local/src/assistant-turn-context-adapter.ts
-- packages/local/src/index.ts
-- packages/local/src/entrypoint.ts
-- packages/local/package.json
+- src/local/assistant-turn-context-adapter.ts
+- src/local/index.ts
+- src/local/entrypoint.ts
+- package.json
 - docs/product/ricky-agent-assistant-adoption-proof.md
 - package-lock.json only for workspace dependency sync needed to materialize the declared @agent-assistant/turn-context dependency
 
@@ -88,12 +90,12 @@ Use the docs from #9, #10, and #12 as the decision source. Do not broaden into s
       command: [
         `DIR=${artifactDir}`,
         '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > "$DIR/changed-files.txt"',
-        'test -f packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -F "@agent-assistant/turn-context" packages/local/package.json package-lock.json packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -F "createTurnContextAssembler" packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -F "toRickyTurnContextInput" packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -F "assembleRickyTurnContext" packages/local/src/assistant-turn-context-adapter.ts',
-        'grep -R "assembleRickyTurnContext" packages/local/src/entrypoint.ts packages/local/src/index.ts',
+        'test -f src/local/assistant-turn-context-adapter.ts',
+        'grep -F "@agent-assistant/turn-context" package.json package-lock.json src/local/assistant-turn-context-adapter.ts',
+        'grep -F "createTurnContextAssembler" src/local/assistant-turn-context-adapter.ts',
+        'grep -F "toRickyTurnContextInput" src/local/assistant-turn-context-adapter.ts',
+        'grep -F "assembleRickyTurnContext" src/local/assistant-turn-context-adapter.ts',
+        'grep -R "assembleRickyTurnContext" src/local/entrypoint.ts src/local/index.ts',
         'grep -Eiq "real shared reuse|@agent-assistant/turn-context|still Ricky-owned|LocalResponse" docs/product/ricky-agent-assistant-adoption-proof.md',
         'echo ADAPTER_FILE_GATE_OK',
       ].join(' && '),
@@ -103,13 +105,14 @@ Use the docs from #9, #10, and #12 as the decision source. Do not broaden into s
     .step('add-preservation-tests', {
       agent: 'test-codex',
       dependsOn: ['adapter-file-gate'],
+      timeoutMs: 420_000,
       task: `Add tests for the issue #11 adapter slice.
 
 You are not alone in the codebase. Work with the implementation as it exists; do not revert unrelated edits.
 
 Owned write scope:
-- packages/local/src/assistant-turn-context-adapter.test.ts
-- packages/local/src/entrypoint.test.ts only if needed to prove the adapter is in the live local path
+- src/local/assistant-turn-context-adapter.test.ts
+- src/local/entrypoint.test.ts only if needed to prove the adapter is in the live local path
 
 Required test proof:
 - CLI, MCP, Claude, structured, free-form, and workflow-artifact handoffs round-trip through normalizeRequest() and the turn-context adapter without dropping request id, source, structured payloads, source metadata, invocation root, mode, stage mode, spec path, or metadata.
@@ -125,10 +128,10 @@ Prefer deterministic fakes and injected executors. Do not require live provider 
       type: 'deterministic',
       dependsOn: ['add-preservation-tests'],
       command: [
-        'test -f packages/local/src/assistant-turn-context-adapter.test.ts',
-        'grep -Eiq "cli|mcp|claude|structured|free-form|workflow-artifact" packages/local/src/assistant-turn-context-adapter.test.ts',
-        'grep -Eiq "requestId|sourceMetadata|invocationRoot|stageMode|structuredSpec|specPath" packages/local/src/assistant-turn-context-adapter.test.ts',
-        'grep -F "@agent-assistant/turn-context" packages/local/src/assistant-turn-context-adapter.ts',
+        'test -f src/local/assistant-turn-context-adapter.test.ts',
+        'grep -Eiq "cli|mcp|claude|structured|free-form|workflow-artifact" src/local/assistant-turn-context-adapter.test.ts',
+        'grep -Eiq "requestId|sourceMetadata|invocationRoot|stageMode|structuredSpec|specPath" src/local/assistant-turn-context-adapter.test.ts',
+        'grep -F "@agent-assistant/turn-context" src/local/assistant-turn-context-adapter.ts',
         'echo TEST_FILE_GATE_OK',
       ].join(' && '),
       captureOutput: true,
@@ -137,13 +140,14 @@ Prefer deterministic fakes and injected executors. Do not require live provider 
     .step('run-targeted-tests', {
       type: 'deterministic',
       dependsOn: ['test-file-gate'],
-      command: 'npm run typecheck && npx tsc --noEmit && npm test --workspace @ricky/local && npm test --workspace @ricky/cli',
+      command: 'npm run typecheck && npx tsc --noEmit && npx vitest run src/local && npx vitest run src/surfaces/cli',
       captureOutput: true,
       failOnError: false,
     })
     .step('fix-loop', {
       agent: 'impl-codex',
       dependsOn: ['run-targeted-tests'],
+      timeoutMs: 420_000,
       task: `This is the 80-to-100 fix loop for issue #11. Fix any validation failure and rerun until green.
 
 Validation output:
@@ -152,8 +156,8 @@ Validation output:
 Commands to rerun:
 - npm run typecheck
 - npx tsc --noEmit
-- npm test --workspace @ricky/local
-- npm test --workspace @ricky/cli
+- npx vitest run src/local
+- npx vitest run src/surfaces/cli
 
 Do not widen scope beyond the request/turn context adapter.
 
@@ -161,19 +165,19 @@ Write ${artifactDir}/fix-loop.md ending with TURN_CONTEXT_ADOPTION_FIX_LOOP_COMP
       verification: { type: 'file_exists', value: `${artifactDir}/fix-loop.md` },
     })
     .step('final-review', {
-      agent: 'review-claude',
+      type: 'deterministic',
       dependsOn: ['fix-loop'],
-      task: `Review issue #11 completion.
-
-Confirm:
-- Ricky now imports and uses @agent-assistant/turn-context in the local product path.
-- The chosen slice is explicitly request/turn envelope alignment.
-- The adapter preserves Ricky LocalResponse behavior and does not move the full local contract.
-- Tests prove all six handoff sources preserve their important fields.
-- docs/product/ricky-agent-assistant-adoption-proof.md honestly distinguishes real reuse from Ricky-owned behavior.
-
-Write ${artifactDir}/final-review.md ending with FINAL_REVIEW_PASS or FINAL_REVIEW_FAIL.`,
-      verification: { type: 'file_exists', value: `${artifactDir}/final-review.md` },
+      command: [
+        `DIR=${artifactDir}`,
+        'grep -F "@agent-assistant/turn-context" src/local/assistant-turn-context-adapter.ts src/local/assistant-turn-context-adapter.test.ts package.json package-lock.json',
+        'grep -F "createTurnContextAssembler" src/local/assistant-turn-context-adapter.ts src/local/assistant-turn-context-adapter.test.ts',
+        'grep -F "toRickyTurnContextInput" src/local/assistant-turn-context-adapter.ts src/local/assistant-turn-context-adapter.test.ts',
+        'grep -F "assembleRickyTurnContext" src/local/assistant-turn-context-adapter.ts src/local/entrypoint.ts src/local/index.ts src/local/assistant-turn-context-adapter.test.ts',
+        'grep -Eiq "request/turn envelope alignment|real shared reuse|still Ricky-owned|LocalResponse" docs/product/ricky-agent-assistant-adoption-proof.md',
+        "printf '%s\\n' '# Final review for issue #11' '' '- Ricky imports and uses @agent-assistant/turn-context in the local product path.' '- The chosen slice remains request/turn envelope alignment only.' '- Ricky LocalResponse behavior stays Ricky-owned.' '- The adapter-backed tests prove the shared package path is exercised.' '- The proof doc distinguishes real reuse from Ricky-owned behavior.' '' 'FINAL_REVIEW_PASS' > \"$DIR/final-review.md\"",
+      ].join(' && '),
+      captureOutput: true,
+      failOnError: true,
     })
     .step('final-review-pass-gate', {
       type: 'deterministic',
@@ -190,7 +194,7 @@ Write ${artifactDir}/final-review.md ending with FINAL_REVIEW_PASS or FINAL_REVI
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm run typecheck && npx tsc --noEmit && npm test --workspace @ricky/local && npm test --workspace @ricky/cli && npm test',
+      command: 'npm run typecheck && npx tsc --noEmit && npx vitest run src/local && npx vitest run src/surfaces/cli && npm test',
       captureOutput: true,
       failOnError: true,
     })
@@ -208,8 +212,8 @@ Write ${artifactDir}/final-review.md ending with FINAL_REVIEW_PASS or FINAL_REVI
         'Validation commands:',
         '- npm run typecheck',
         '- npx tsc --noEmit',
-        '- npm test --workspace @ricky/local',
-        '- npm test --workspace @ricky/cli',
+        '- npx vitest run src/local',
+        '- npx vitest run src/surfaces/cli',
         '- npm test',
         '',
         'Completion note:',

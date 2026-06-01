@@ -223,7 +223,7 @@ function normalizeRunResult(
   child: ChildWorkflowPlan,
   options: RuntimeOptions,
 ): ChildWorkflowRunResult {
-  const gateResults = mergeGateResults(child, result.evidence.gateResults);
+  const gateResults = mergeGateResults(child, result.evidence);
   const normalized: ChildWorkflowRunResult = {
     ...result,
     evidence: {
@@ -243,21 +243,70 @@ function normalizeRunResult(
 
 function mergeGateResults(
   child: ChildWorkflowPlan,
-  gateResults: ChildWorkflowRunResult['evidence']['gateResults'],
+  evidence: ChildWorkflowRunResult['evidence'],
 ): ChildWorkflowRunResult['evidence']['gateResults'] {
   const observed = new Map<string, ChildWorkflowRunResult['evidence']['gateResults'][number]>();
-  for (const gateResult of gateResults) {
+  for (const gateResult of evidence.gateResults) {
     observed.set(gateResult.gateId, gateResult);
   }
 
   return child.gates
     .filter((gate) => gate.required)
-    .map((gate) => observed.get(gate.id) ?? {
-      gateId: gate.id,
-      kind: gate.kind,
-      passed: false,
-      detail: 'Required gate was not reported by the child runner.',
-    });
+    .map((gate) => evaluateRequiredGate(gate, child, evidence, observed.get(gate.id)));
+}
+
+function evaluateRequiredGate(
+  gate: ChildWorkflowGate,
+  child: ChildWorkflowPlan,
+  evidence: ChildWorkflowRunResult['evidence'],
+  observed: ChildWorkflowRunResult['evidence']['gateResults'][number] | undefined,
+): ChildWorkflowRunResult['evidence']['gateResults'][number] {
+  if (observed && !observed.passed) {
+    return observed;
+  }
+
+  switch (gate.kind) {
+    case 'signoff_artifact':
+      return {
+        gateId: gate.id,
+        kind: gate.kind,
+        passed: evidence.signoffPresent,
+        ...(evidence.signoffPresent ? {} : { detail: 'Signoff artifact was not reported present.' }),
+      };
+    case 'marker_string':
+      if (gate.marker === child.signoffMarker) {
+        return {
+          gateId: gate.id,
+          kind: gate.kind,
+          passed: evidence.markerPresent,
+          ...(evidence.markerPresent ? {} : { detail: `Required marker was not reported present: ${gate.marker}.` }),
+        };
+      }
+      return observed ?? {
+        gateId: gate.id,
+        kind: gate.kind,
+        passed: false,
+        detail: `Required marker was not reported by the child runner: ${gate.marker}.`,
+      };
+    case 'changed_files': {
+      const fileScope = new Set(gate.fileScope ?? child.targetFiles);
+      const outsideScope = evidence.changedFiles.find((changedFile) => !fileScope.has(changedFile));
+      return {
+        gateId: gate.id,
+        kind: gate.kind,
+        passed: !outsideScope,
+        ...(outsideScope ? { detail: `Changed file outside declared scope: ${outsideScope}.` } : {}),
+      };
+    }
+    case 'test_command':
+    case 'dryrun_command':
+      return observed ?? {
+        gateId: gate.id,
+        kind: gate.kind,
+        passed: false,
+        detail: 'Required command gate was not reported by the child runner.',
+      };
+  }
 }
 
 async function runWaveRespectingParallelizable(

@@ -114,6 +114,8 @@ const rules: readonly Rule[] = [
     label: 'Runtime handoff stall',
     match: (s) =>
       /handoff.*(stall|timeout|hung)/i.test(s.message) ||
+      /(?:broker|agent[-\s]?relay\s+broker).{0,80}(?:startup|ack|acknowledg(?:e|ement)).{0,80}(?:timeout|timed\s+out|stall(?:ed)?|hung)/i.test(s.message) ||
+      /(?:timeout|timed\s+out).{0,80}(?:broker|agent[-\s]?relay\s+broker).{0,80}(?:startup|ack|acknowledg(?:e|ement))/i.test(s.message) ||
       s.source === 'handoff' ||
       s.meta?.handoffStalled === true,
     unblocker: {

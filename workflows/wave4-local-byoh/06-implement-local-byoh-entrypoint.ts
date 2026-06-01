@@ -32,7 +32,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint',
-        'mkdir -p packages/local/src',
+        'mkdir -p src/local',
         'echo LOCAL_BYOH_ENTRYPOINT_IMPL_READY',
       ].join(' && '),
       captureOutput: true,
@@ -56,11 +56,11 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'find packages/local/src packages/cli/src -maxdepth 3 -type f | sort | sed -n "1,160p"',
+        'find src/local src/surfaces/cli -maxdepth 3 -type f | sort | sed -n "1,160p"',
         'printf "\n---\n\n"',
-        'test -f packages/cli/src/cli/onboarding.ts && sed -n "1,240p" packages/cli/src/cli/onboarding.ts || true',
+        'test -f src/surfaces/cli/cli/onboarding.ts && sed -n "1,240p" src/surfaces/cli/cli/onboarding.ts || true',
         'printf "\n---\n\n"',
-        'test -f packages/cli/src/cli/proof/onboarding-proof.ts && sed -n "1,220p" packages/cli/src/cli/proof/onboarding-proof.ts || true',
+        'test -f src/surfaces/cli/cli/proof/onboarding-proof.ts && sed -n "1,220p" src/surfaces/cli/cli/proof/onboarding-proof.ts || true',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -77,10 +77,10 @@ async function main() {
       agent: 'impl-claude',
       dependsOn: ['read-product-spec', 'read-backlog-plan', 'read-local-context', 'read-workflow-standards'],
       task: `Implement the Ricky local/BYOH entrypoint in only these files:
-- packages/local/src/entrypoint.ts
-- packages/local/src/request-normalizer.ts
-- packages/local/src/entrypoint.test.ts
-- packages/local/src/index.ts
+- src/local/entrypoint.ts
+- src/local/request-normalizer.ts
+- src/local/entrypoint.test.ts
+- src/local/index.ts
 
 Requirements:
 - accept spec handoff from CLI, MCP, Claude-style structured handoff, or workflow artifact path
@@ -91,19 +91,19 @@ Requirements:
 - keep tests deterministic and bounded
 
 This is bounded product implementation work. Write the files to disk, then exit cleanly.`,
-      verification: { type: 'file_exists', value: 'packages/local/src/entrypoint.ts' },
+      verification: { type: 'file_exists', value: 'src/local/entrypoint.ts' },
     })
     .step('implementation-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-local-entrypoint'],
       command: [
-        'test -f packages/local/src/entrypoint.ts',
-        'test -f packages/local/src/request-normalizer.ts',
-        'test -f packages/local/src/entrypoint.test.ts',
-        'test -f packages/local/src/index.ts',
-        "grep -q 'local\\|BYOH\\|agent-relay' packages/local/src/entrypoint.ts packages/local/src/request-normalizer.ts packages/local/src/entrypoint.test.ts",
-        "grep -q 'spec\\|workflow\\|artifact\\|Claude\\|MCP' packages/local/src/request-normalizer.ts packages/local/src/entrypoint.ts packages/local/src/entrypoint.test.ts",
-        "grep -q 'warning\\|log\\|artifact\\|next' packages/local/src/entrypoint.ts packages/local/src/entrypoint.test.ts",
+        'test -f src/local/entrypoint.ts',
+        'test -f src/local/request-normalizer.ts',
+        'test -f src/local/entrypoint.test.ts',
+        'test -f src/local/index.ts',
+        "grep -q 'local\\|BYOH\\|agent-relay' src/local/entrypoint.ts src/local/request-normalizer.ts src/local/entrypoint.test.ts",
+        "grep -q 'spec\\|workflow\\|artifact\\|Claude\\|MCP' src/local/request-normalizer.ts src/local/entrypoint.ts src/local/entrypoint.test.ts",
+        "grep -q 'warning\\|log\\|artifact\\|next' src/local/entrypoint.ts src/local/entrypoint.test.ts",
         'echo LOCAL_BYOH_ENTRYPOINT_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -179,11 +179,11 @@ This is bounded product implementation work. Write the files to disk, then exit 
       type: 'deterministic',
       dependsOn: ['fix-local-entrypoint'],
       command: [
-        'test -f packages/local/src/entrypoint.ts',
-        'test -f packages/local/src/request-normalizer.ts',
-        'test -f packages/local/src/entrypoint.test.ts',
-        'test -f packages/local/src/index.ts',
-        "grep -q 'local\\|BYOH\\|agent-relay' packages/local/src/entrypoint.ts packages/local/src/entrypoint.test.ts",
+        'test -f src/local/entrypoint.ts',
+        'test -f src/local/request-normalizer.ts',
+        'test -f src/local/entrypoint.test.ts',
+        'test -f src/local/index.ts',
+        "grep -q 'local\\|BYOH\\|agent-relay' src/local/entrypoint.ts src/local/entrypoint.test.ts",
         'echo LOCAL_BYOH_ENTRYPOINT_POST_FIX_PASS',
       ].join(' && '),
       captureOutput: true,
@@ -248,9 +248,9 @@ This is bounded product implementation work. Write the files to disk, then exit 
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only -- packages/local/src workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(packages/local/src/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"',
-        'if [ -n "$changed" ]; then ! printf "%s\n" "$changed" | grep -Ev "^(packages/local/src/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"; else true; fi',
+        'changed="$(git diff --name-only -- src/local workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint)"',
+        'printf "%s\n" "$changed" | grep -Eq "^(src/local/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"',
+        'if [ -n "$changed" ]; then ! printf "%s\n" "$changed" | grep -Ev "^(src/local/|workflows/wave4-local-byoh/06-implement-local-byoh-entrypoint\\.ts|\\.workflow-artifacts/wave4-local-byoh/implement-local-byoh-entrypoint/)"; else true; fi',
         'echo LOCAL_BYOH_ENTRYPOINT_REGRESSION_GATE_PASS',
       ].join(' && '),
       captureOutput: true,

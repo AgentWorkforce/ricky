@@ -62,7 +62,7 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
   const tasks = buildTasks(input.spec, isCodeWorkflow);
   const toolSelection = input.toolSelection ?? selectToolsForSteps(input.spec, tasks, input.skills);
   applyToolSelection(team, toolSelection.selections);
-  const gates = buildGates(input.spec, artifactsDir, artifactPath, isCodeWorkflow, input.skills);
+  const gates = buildGates(input.spec, artifactsDir, artifactPath, isCodeWorkflow);
   const skillApplicationEvidence = buildRenderingSkillEvidence(input.skills, tasks, gates);
   const content = renderSource({
     spec: input.spec,
@@ -147,8 +147,6 @@ function renderSource(input: {
     '',
     renderPrepareContextStep(input.artifactsDir, contextSetup),
     '',
-    renderGateStep(input.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!),
-    '',
     renderLeadPlanStep(input.artifactsDir, Boolean(input.spec.targetContext), input.isCodeWorkflow),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'lead-plan-gate')!),
@@ -161,7 +159,7 @@ function renderSource(input: {
     '',
     renderReviewStep('review-claude', 'reviewer-claude', ['initial-soft-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-claude')),
     '',
-    renderFixLoopStep('fix-loop', 'validator-claude', ['review-claude', 'initial-soft-validation'], `${input.artifactsDir}/review-claude.md`, `${input.artifactsDir}/fix-loop-report.md`, 'FIX_LOOP_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop')),
+    renderFixLoopStep('fix-loop', 'validator-claude', ['review-claude', 'initial-soft-validation'], `${input.artifactsDir}/review-claude.md`, `${input.artifactsDir}/fix-loop-report.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop')),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'fix-loop-report-gate')!),
     '',
@@ -173,11 +171,11 @@ function renderSource(input: {
     '',
     renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude'), true),
     '',
-    renderFixLoopStep('final-fix-claude', 'validator-claude', ['final-review-claude'], `${input.artifactsDir}/final-review-claude.md`, `${input.artifactsDir}/claude-final-fix.md`, 'CLAUDE_FINAL_FIX_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-claude'), true),
+    renderFixLoopStep('final-fix-claude', 'validator-claude', ['final-review-claude'], `${input.artifactsDir}/final-review-claude.md`, `${input.artifactsDir}/claude-final-fix.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-claude'), true),
     '',
     renderReviewStep('review-codex', 'reviewer-codex', ['final-fix-claude'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-codex')),
     '',
-    renderFixLoopStep('fix-loop-codex', 'validator-codex', ['review-codex'], `${input.artifactsDir}/review-codex.md`, `${input.artifactsDir}/codex-fix-loop-report.md`, 'CODEX_FIX_LOOP_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop-codex')),
+    renderFixLoopStep('fix-loop-codex', 'validator-codex', ['review-codex'], `${input.artifactsDir}/review-codex.md`, `${input.artifactsDir}/codex-fix-loop-report.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop-codex')),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'codex-fix-loop-report-gate')!),
     '',
@@ -185,7 +183,7 @@ function renderSource(input: {
     '',
     renderReviewStep('final-review-codex', 'reviewer-codex', ['post-codex-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-codex'), true),
     '',
-    renderFixLoopStep('final-fix-codex', 'validator-codex', ['final-review-codex'], `${input.artifactsDir}/final-review-codex.md`, `${input.artifactsDir}/codex-final-fix.md`, 'CODEX_FINAL_FIX_COMPLETE', input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-codex'), true),
+    renderFixLoopStep('final-fix-codex', 'validator-codex', ['final-review-codex'], `${input.artifactsDir}/final-review-codex.md`, `${input.artifactsDir}/codex-final-fix.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-codex'), true),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'final-review-pass-gate')!),
     '',
@@ -252,7 +250,7 @@ function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean): Work
   const implementer = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
   return [
     task('prepare-context', 'Prepare context', 'deterministic', 'Read or materialize the normalized spec and target context.', []),
-    task('lead-plan', 'Lead plan', isCodeWorkflow ? 'lead-claude' : 'lead-codex', 'Plan deliverables, non-goals, ownership, and verification gates.', ['skill-boundary-metadata-gate']),
+    task('lead-plan', 'Lead plan', isCodeWorkflow ? 'lead-claude' : 'lead-codex', 'Plan deliverables, non-goals, ownership, and verification gates.', ['prepare-context']),
     task('implement-artifact', 'Implement artifact', implementer, describeImplementation(spec), ['lead-plan']),
     task('review-claude', 'Fresh-eyes review with Claude', 'reviewer-claude', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
     task('fix-loop', 'Claude review-fix loop', 'validator-claude', 'Apply bounded fixes from Claude review and validation feedback.', ['review-claude', 'initial-soft-validation']),
@@ -271,82 +269,67 @@ function buildGates(
   artifactsDir: string,
   artifactPath: string,
   isCodeWorkflow: boolean,
-  skills: SkillContext,
 ): DeterministicGate[] {
   const outputManifest = `${artifactsDir}/output-manifest.txt`;
   const usingManifest = spec.targetFiles.length === 0;
-  const targetFiles = usingManifest ? [outputManifest] : spec.targetFiles;
-  const fileExistsCommand = targetFiles.map((file) => `test -f ${shellQuote(file)}`).join(' && ');
-  const grepPattern = isCodeWorkflow ? 'export|function|class|workflow\\(' : '#|##|TODO|Acceptance|Deliverables';
-  const grepCommand = usingManifest
-    ? buildManifestFileGateCommand(outputManifest)
-    : `grep -Eq ${shellQuote(grepPattern)} ${targetFiles.map(shellQuote).join(' ')}`;
   const gitDiffPath = `${artifactsDir}/git-diff.txt`;
+  const fileGateCommand = usingManifest
+    ? buildManifestFileGateCommand(outputManifest)
+    : buildTargetImplementationGateCommand(spec.targetFiles, `${artifactsDir}/implementation-file-gate.txt`);
   const gitDiffCommand = usingManifest
     ? buildManifestGitDiffCommand(outputManifest, gitDiffPath)
-    : `{ git diff --name-only -- ${targetFiles.map(shellQuote).join(' ')}; git ls-files --others --exclude-standard -- ${targetFiles.map(shellQuote).join(' ')}; } > ${shellQuote(gitDiffPath)} && sort -u ${shellQuote(gitDiffPath)} -o ${shellQuote(gitDiffPath)} && test -s ${shellQuote(gitDiffPath)}`;
+    : buildTargetGitDiffCommand(gitDiffPath);
   const activeReferenceCommand = usingManifest
     ? buildActiveReferenceGateCommand(outputManifest, `${artifactsDir}/active-reference-check.txt`)
     : `printf '%s\\n' 'No manifest-driven deleted paths to check.' > ${shellQuote(`${artifactsDir}/active-reference-check.txt`)}`;
+  const listedValidationOnly = usesOnlyListedValidationCommands(spec);
   const testCommand = deriveTestCommand(spec);
   const typecheckCommand = 'npx tsc --noEmit';
   const acceptanceCommands = spec.acceptanceGates.map((gate) => mapAcceptanceGateToCommand(gate.gate));
-  const executableAcceptanceCommands = acceptanceCommands.filter((cmd) => !cmd.startsWith("printf '%s\\n'"));
-  const skillBoundaryPath = `${artifactsDir}/skill-application-boundary.json`;
+  const executableAcceptanceCommands = acceptanceCommands.filter(isExecutableAcceptanceCommand);
+  const initialValidationCommand = listedValidationOnly
+    ? buildValidationCommand(executableAcceptanceCommands)
+    : [typecheckCommand, testCommand, ...acceptanceCommands].join(' && ');
+  const hardValidationCommand = buildValidationCommand(
+    listedValidationOnly ? executableAcceptanceCommands : [typecheckCommand, testCommand, ...executableAcceptanceCommands],
+  );
+  const regressionCommand = listedValidationOnly ? 'git diff --check' : isCodeWorkflow ? 'npx vitest run' : 'git diff --check';
 
   return [
-    gate(
-      'skill-boundary-metadata-gate',
-      buildSkillBoundaryGateCommand(skillBoundaryPath, skills),
-      'artifact_exists',
-      true,
-      ['prepare-context'],
-      'pre_review',
-    ),
     gate('lead-plan-gate', buildLeadPlanGateCommand(`${artifactsDir}/lead-plan.md`), 'output_contains', true, ['lead-plan'], 'pre_review'),
-    gate('post-implementation-file-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['implement-artifact'], 'pre_review'),
-    gate('initial-soft-validation', [typecheckCommand, testCommand, ...acceptanceCommands].join(' && '), 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
+    gate('post-implementation-file-gate', fileGateCommand, 'file_exists', true, ['implement-artifact'], 'pre_review'),
+    gate('initial-soft-validation', initialValidationCommand, 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
     gate(
       'fix-loop-report-gate',
-      [
-        `test -f ${shellQuote(`${artifactsDir}/fix-loop-report.md`)}`,
-        `tail -n 1 ${shellQuote(`${artifactsDir}/fix-loop-report.md`)} | tr -d '[:space:]' | grep -Eq '^FIX_LOOP_COMPLETE$'`,
-      ].join(' && '),
-      'output_contains',
+      `test -s ${shellQuote(`${artifactsDir}/fix-loop-report.md`)}`,
+      'file_exists',
       true,
       ['fix-loop'],
       'post_fix',
     ),
-    gate('post-fix-verification-gate', `${fileExistsCommand} && ${grepCommand}`, 'file_exists', true, ['fix-loop-report-gate'], 'post_fix'),
+    gate('post-fix-verification-gate', fileGateCommand, 'file_exists', true, ['fix-loop-report-gate'], 'post_fix'),
     gate('active-reference-gate', activeReferenceCommand, 'deterministic_gate', true, ['post-fix-verification-gate'], 'post_fix'),
-    gate('post-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['active-reference-gate'], 'post_fix'),
+    gate('post-fix-validation', hardValidationCommand, 'exit_code', false, ['active-reference-gate'], 'post_fix'),
     gate(
       'codex-fix-loop-report-gate',
-      [
-        `test -f ${shellQuote(`${artifactsDir}/codex-fix-loop-report.md`)}`,
-        `tail -n 1 ${shellQuote(`${artifactsDir}/codex-fix-loop-report.md`)} | tr -d '[:space:]' | grep -Eq '^CODEX_FIX_LOOP_COMPLETE$'`,
-      ].join(' && '),
-      'output_contains',
+      `test -s ${shellQuote(`${artifactsDir}/codex-fix-loop-report.md`)}`,
+      'file_exists',
       true,
       ['fix-loop-codex'],
       'post_fix',
     ),
-    gate('post-codex-fix-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
+    gate('post-codex-fix-validation', hardValidationCommand, 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
     gate(
       'final-review-pass-gate',
-      [
-        `tail -n 1 ${shellQuote(`${artifactsDir}/claude-final-fix.md`)} | tr -d '[:space:]*' | grep -Eq '^CLAUDE_FINAL_FIX_COMPLETE$'`,
-        `tail -n 1 ${shellQuote(`${artifactsDir}/codex-final-fix.md`)} | tr -d '[:space:]*' | grep -Eq '^CODEX_FINAL_FIX_COMPLETE$'`,
-        `test ! -f ${shellQuote(`${artifactsDir}/BLOCKED_NO_COMMIT.md`)}`,
-      ].join(' && '),
-      'output_contains',
+      buildStructuredFinalReviewPassGateCommand(artifactsDir),
+      'deterministic_gate',
       true,
       ['final-fix-codex'],
       'final',
     ),
-    gate('final-hard-validation', [typecheckCommand, testCommand, ...executableAcceptanceCommands].join(' && '), 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
+    gate('final-hard-validation', hardValidationCommand, 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', gitDiffCommand, 'artifact_exists', true, ['final-hard-validation'], 'final'),
-    gate('regression-gate', isCodeWorkflow ? 'npx vitest run' : 'git diff --check', 'exit_code', true, ['git-diff-gate'], 'regression'),
+    gate('regression-gate', regressionCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
     ...(usingManifest
       ? [
           gate(
@@ -390,6 +373,34 @@ function buildManifestFileGateCommand(outputManifest: string): string {
   ].join('\n');
 }
 
+function buildTargetImplementationGateCommand(targetFiles: readonly string[], evidencePath: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    "const { execFileSync } = require('node:child_process');",
+    `const evidencePath = ${literal(evidencePath)};`,
+    `const declaredTargets = ${literal(JSON.stringify(targetFiles, null, 2))};`,
+    'const changed = collectChangedPaths();',
+    'fs.mkdirSync(require(\'node:path\').dirname(evidencePath), { recursive: true });',
+    'fs.writeFileSync(evidencePath, [`Declared targets:`, declaredTargets, `Changed paths:`, ...changed].flat().join(\'\\n\') + \'\\n\');',
+    'if (changed.length === 0) throw new Error(\'implementation produced no repository diff outside workflow artifacts\');',
+    'const materialized = changed.filter((path) => fs.existsSync(path) && fs.statSync(path).isFile());',
+    'if (materialized.length === 0) throw new Error(\'implementation diff has no materialized file paths to review\');',
+    'console.log(\'IMPLEMENTATION_FILE_GATE_OK\');',
+    '',
+    'function collectChangedPaths() {',
+    '  const tracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'diff\', \'--name-only\', \'--diff-filter=ACMRT\'], { encoding: \'utf8\' });',
+    '  const untracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'ls-files\', \'--others\', \'--exclude-standard\'], { encoding: \'utf8\' });',
+    '  return [...tracked.split(/\\r?\\n/), ...untracked.split(/\\r?\\n/)]',
+    '    .map((line) => line.trim())',
+    '    .filter(Boolean)',
+    '    .filter((path) => !path.startsWith(\'.workflow-artifacts/\'))',
+    '    .sort();',
+    '}',
+    'NODE',
+  ].join('\n');
+}
+
 function buildLeadPlanGateCommand(leadPlanPath: string): string {
   return [
     'node <<\'NODE\'',
@@ -407,6 +418,34 @@ function buildLeadPlanGateCommand(leadPlanPath: string): string {
   ].join('\n');
 }
 
+function buildTargetGitDiffCommand(gitDiffPath: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const { execFileSync } = require('node:child_process');",
+    `const gitDiffPath = ${literal(gitDiffPath)};`,
+    '// Evidence commands: git diff --name-only and git ls-files --others --exclude-standard.',
+    'const tracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'diff\', \'--name-status\', \'--diff-filter=ACMRTD\'], { encoding: \'utf8\' })',
+    '  .split(/\\r?\\n/)',
+    '  .map((line) => line.trim())',
+    '  .filter(Boolean);',
+    'const untracked = execFileSync(\'git\', [\'-c\', \'core.quotePath=false\', \'ls-files\', \'--others\', \'--exclude-standard\'], { encoding: \'utf8\' })',
+    '  .split(/\\r?\\n/)',
+    '  .map((line) => line.trim())',
+    '  .filter(Boolean)',
+    '  .map((file) => `A\\t${file}`);',
+    'const actual = [...tracked, ...untracked]',
+    '  .filter((line) => !line.replace(/^[A-Z]+\\s+/, \'\').startsWith(\'.workflow-artifacts/\'))',
+    '  .sort();',
+    'fs.mkdirSync(path.dirname(gitDiffPath), { recursive: true });',
+    'fs.writeFileSync(gitDiffPath, `${actual.join(\'\\n\')}\\n`);',
+    'if (actual.length === 0) throw new Error(\'git diff evidence is empty\');',
+    'console.log(\'GIT_DIFF_GATE_OK\');',
+    'NODE',
+  ].join('\n');
+}
+
 function buildManifestGitDiffCommand(outputManifest: string, gitDiffPath: string): string {
   return [
     'node <<\'NODE\'',
@@ -414,6 +453,7 @@ function buildManifestGitDiffCommand(outputManifest: string, gitDiffPath: string
     "const { execFileSync } = require('node:child_process');",
     `const manifest = ${literal(outputManifest)};`,
     `const gitDiffPath = ${literal(gitDiffPath)};`,
+    '// Evidence commands: git diff --name-only and git ls-files --others --exclude-standard.',
     'const rawLines = fs.readFileSync(manifest, \'utf8\').split(/\\r?\\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith(\'#\'));',
     'if (rawLines.length === 0) throw new Error(\'output manifest is empty\');',
     'const parse = (line) => {',
@@ -481,55 +521,31 @@ function buildActiveReferenceGateCommand(outputManifest: string, evidencePath: s
   ].join('\n');
 }
 
-function buildSkillBoundaryGateCommand(skillBoundaryPath: string, skills: SkillContext): string {
-  const quotedPath = shellQuote(skillBoundaryPath);
-  const artifactsDir = skillBoundaryPath.replace(/\/skill-application-boundary\.json$/, '');
-  const commands = [
-    `test -f ${quotedPath}`,
-    `test -f ${shellQuote(`${artifactsDir}/skill-matches.json`)}`,
-    `test -f ${shellQuote(`${artifactsDir}/tool-selection.json`)}`,
-    `grep -F ${shellQuote('generation_time_only')} ${quotedPath}`,
-    `grep -F ${shellQuote('"runtimeEmbodiment":false')} ${quotedPath}`,
-    ...skills.applicableSkillNames.map((skillName) => `grep -F ${shellQuote(skillName)} ${quotedPath}`),
-  ];
-
-  if (skills.applicableSkillNames.length > 0) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_selection"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"stage":"generation_loading"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"effect":"metadata"')} ${quotedPath}`,
-    );
-  }
-
-  if (skills.applicableSkillNames.includes('choosing-swarm-patterns')) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"effect":"pattern_selection"')} ${quotedPath}`,
-    );
-  }
-
-  if (skills.applicableSkillNames.includes('writing-agent-relay-workflows')) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"effect":"workflow_contract"')} ${quotedPath}`,
-    );
-  }
-
-  if (skills.applicableSkillNames.includes('relay-80-100-workflow')) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"effect":"validation_gates"')} ${quotedPath}`,
-    );
-  }
-
-  if (skills.applicableSkillNames.includes('review-fix-signoff-loop')) {
-    commands.push(
-      `grep -F ${shellQuote('"stage":"generation_rendering"')} ${quotedPath}`,
-      `grep -F ${shellQuote('"skillName":"review-fix-signoff-loop"')} ${quotedPath}`,
-    );
-  }
-
-  return commands.join(' && ');
+function buildStructuredFinalReviewPassGateCommand(artifactsDir: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    `const base = ${literal(artifactsDir)};`,
+    "const requiredFiles = ['claude-final-fix.md', 'codex-final-fix.md', 'claude-final-fix-status.json', 'codex-final-fix-status.json'];",
+    "for (const name of requiredFiles) {",
+    "  const path = `${base}/${name}`;",
+    "  if (!fs.existsSync(path) || fs.statSync(path).size === 0) throw new Error(`required final review artifact missing or empty: ${path}`);",
+    '}',
+    "const blockedPath = `${base}/BLOCKED_NO_COMMIT.md`;",
+    "if (fs.existsSync(blockedPath)) throw new Error(`final review blocked; see ${blockedPath}`);",
+    "for (const name of ['claude-final-fix-status.json', 'codex-final-fix-status.json']) {",
+    "  const path = `${base}/${name}`;",
+    "  const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));",
+    "  if (!['fixed', 'no_issues_found'].includes(parsed.status)) {",
+    "    throw new Error(`${path} must declare status fixed or no_issues_found`);",
+    '  }',
+    "  if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) {",
+    "    throw new Error(`${path} must include a non-empty summary`);",
+    '  }',
+    '}',
+    "console.log('FINAL_REVIEW_STRUCTURED_GATE_OK');",
+    'NODE',
+  ].join('\n');
 }
 
 function applyToolSelection(team: TeamMemberSpec[], selections: ToolSelection[]): void {
@@ -656,7 +672,7 @@ function buildGeneratedContextPackage(
     : ['A generated workflow artifact and any requested output files'];
   const verificationCommands = [
     'file_exists gate for declared targets',
-    'deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion',
+    'deterministic structural sanity gate using a parser, inline assertion, or scoped file/diff check',
     'active-reference gate for deleted manifest paths',
     'npx tsc --noEmit',
     deriveTestCommand(spec),
@@ -745,7 +761,7 @@ function buildGeneratedContextPackage(
         'Generated workflow quality:',
         '',
         '- Include a real deterministic sanity gate over produced files, not just prose saying one exists.',
-        '- Prefer POSIX grep, git grep, or a small inline assertion command that exits non-zero when expected content/state is missing.',
+        '- Prefer structural checks, scoped file/diff checks, or a small inline assertion command that exits non-zero when expected content/state is missing.',
         '- If using rg, guard it with command -v rg and provide a grep or git grep fallback.',
         '- For cleanup or deletion work, persist a changed-files inventory with statuses, active-reference evidence for deleted paths, and command summaries for final signoff.',
         `- For cleanup or deletion work, start from ${artifactsDir}/cleanup-candidate-prescan.txt and cite that exact path in ${artifactsDir}/cleanup-report.md so the evidence trail names its prescan input.`,
@@ -817,7 +833,7 @@ function renderLeadPlanStep(artifactsDir: string, hasTargetContext: boolean, isC
   const agent = isCodeWorkflow ? 'lead-claude' : 'lead-codex';
   return `    .step('lead-plan', {
       agent: ${literal(agent)},
-      dependsOn: ['skill-boundary-metadata-gate'],
+      dependsOn: ['prepare-context'],
       timeoutMs: ${DEFAULT_LEAD_PLAN_TIMEOUT_MS},
       task: ${templateLiteral(`Plan the workflow execution from the packaged context files.
 
@@ -881,7 +897,6 @@ function renderReviewStep(
   selection?: ToolSelection,
   final = false,
 ): string {
-  const marker = final ? (agent.includes('claude') ? 'FINAL_REVIEW_CLAUDE_COMPLETE' : 'FINAL_REVIEW_CODEX_COMPLETE') : 'REVIEW_COMPLETE';
   const reviewPath = `${artifactsDir}/${stepName}.md`;
   const selectionLines = renderSelectionFields(selection);
   return `    .step(${literal(stepName)}, {
@@ -912,7 +927,7 @@ status: open | fixed | wontfix | blocked
 evidence: commands run, file paths, or blocker details
 
 If there are no actionable issues, write verdict: NO_ISSUES_FOUND.
-End the file with ${marker}.`)},
+Materialize the review file, then stop for the next deterministic gate.`)},
       verification: { type: 'file_exists', value: ${literal(reviewPath)} },
     })`;
 }
@@ -923,7 +938,6 @@ function renderFixLoopStep(
   dependsOn: string[],
   reviewPath: string,
   reportPath: string,
-  marker: string,
   spec: NormalizedWorkflowSpec,
   isCodeWorkflow: boolean,
   artifactsDir: string,
@@ -931,6 +945,9 @@ function renderFixLoopStep(
   final = false,
 ): string {
   const selectionLines = renderSelectionFields(selection);
+  const finalStatusInstructions = final
+    ? `\nAlso write ${reportPath.replace(/\.md$/, '-status.json')} as JSON with shape {"status":"fixed"|"no_issues_found"|"blocked","summary":"..."}. Use "blocked" only when you also wrote ${artifactsDir}/BLOCKED_NO_COMMIT.md.`
+    : '';
   return `    .step(${literal(stepName)}, {
       agent: ${literal(agent)},
       dependsOn: ${arrayLiteral(dependsOn)},
@@ -955,7 +972,7 @@ Preserve the declared target boundary:
 ${formatList(spec.targetFiles.length > 0 ? spec.targetFiles : ['No explicit targets supplied'])}
 ${renderToolSelectionSummary(selection)}
 
-Before exiting, write ${reportPath} summarizing the exact fixes you applied or explicitly saying that no repo changes were required, then end that file with ${marker}.
+Before exiting, write ${reportPath} summarizing the exact fixes you applied or explicitly saying that no repo changes were required.${finalStatusInstructions}
 Re-run ${isCodeWorkflow ? 'typecheck and tests' : 'document sanity checks'} before handing off to post-fix validation.`)},
       verification: { type: 'file_exists', value: ${literal(reportPath)} },
     })`;
@@ -1142,8 +1159,6 @@ function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string 
     "    if (!body.includes(path)) throw new Error(name + ' missing manifest path: ' + path);",
     '  }',
     '}',
-    'const codexMarker = read(\'codex-final-fix.md\');',
-    "if (!codexMarker.includes('CODEX_FINAL_FIX_COMPLETE')) throw new Error('codex-final-fix marker missing pass sentinel');",
     'const staleTargets = [',
     "  ['test', 'smoke' + '.test' + '.ts'].join('/'),",
     "  'smoke' + '.test' + '.ts',",
@@ -1289,6 +1304,38 @@ export function deriveTestCommand(spec: NormalizedWorkflowSpec): string {
   return 'npx vitest run';
 }
 
+export function executableAcceptanceCommandsForSpec(spec: NormalizedWorkflowSpec): string[] {
+  return spec.acceptanceGates
+    .map((gate) => mapAcceptanceGateToCommand(gate.gate))
+    .filter(isExecutableAcceptanceCommand);
+}
+
+export function usesOnlyListedValidationCommands(spec: NormalizedWorkflowSpec): boolean {
+  const text = [
+    spec.description,
+    spec.targetContext,
+    spec.desiredAction.summary,
+    ...spec.constraints.map((constraint) => constraint.constraint),
+    ...spec.evidenceRequirements.map((requirement) => requirement.requirement),
+    ...spec.acceptanceGates.map((gate) => gate.gate),
+  ].filter(Boolean).join('\n');
+  return [
+    /\b(?:use|run)\s+only\s+(?:the\s+)?(?:listed|declared|specified)\s+validation\s+commands?\b/i,
+    /\bonly\s+(?:the\s+)?(?:listed|declared|specified)\s+validation\s+commands?\b/i,
+    /\bno\s+(?:generic|root)\s+(?:validation\s+)?(?:gates?|commands?|typechecks?|tests?)\b/i,
+    /\b(?:do\s+not|don't|must\s+not)\s+(?:add|inject|emit|run)\s+(?:generic|root).{0,60}\b(?:validation|gate|typecheck|test)\b/i,
+  ].some((pattern) => pattern.test(text));
+}
+
+function buildValidationCommand(commands: string[], fallback = 'git diff --check'): string {
+  const executableCommands = commands.filter(isExecutableAcceptanceCommand);
+  return executableCommands.join(' && ') || fallback;
+}
+
+function isExecutableAcceptanceCommand(command: string): boolean {
+  return !command.startsWith("printf '%s\\n'");
+}
+
 const IN_REPO_SOURCE_ROOTS = new Set([
   'packages',
   'apps',
@@ -1352,13 +1399,13 @@ function mapAcceptanceGateToCommand(gateText: string): string {
   if (/\bvitest\b/i.test(gateText)) return gateText.trim();
   if (/\bnpm test\b/i.test(gateText)) return 'npm test';
   if (/\bfile exists|file_exists\b/i.test(gateText)) return `test -f ${shellQuote(gateText.replace(/.*(?:file exists|file_exists)\s*:?\s*/i, '').trim() || '.')}`;
-  if (/^\s*(?:grep|node|npx|npm|test)\b/i.test(gateText)) return gateText.trim();
+  if (/^\s*(?:grep|node|npx|npm|test|git|bash|sh|actionlint|ruby)\b/i.test(gateText)) return gateText.trim();
   return `printf '%s\\n' ${shellQuote(`Manual acceptance gate: ${gateText}`)}`;
 }
 
 function extractInlineShellCommand(text: string): string | null {
   const candidates = [...text.matchAll(/`([^`\n]+)`/g)].map((match) => match[1].trim());
-  return candidates.find((candidate) => /^(?:node|npx|npm|grep|test)\b/i.test(candidate)) ?? null;
+  return candidates.find((candidate) => /^(?:node|npx|npm|grep|test|git|bash|sh|actionlint|ruby)\b/i.test(candidate)) ?? null;
 }
 
 function isCodeWritingWorkflow(spec: NormalizedWorkflowSpec): boolean {

@@ -12,6 +12,15 @@ interface StepConfig {
   agent?: string;
   type?: string;
   dependsOn?: string[];
+  position: number;
+}
+
+interface OnErrorConfig {
+  strategy?: string;
+  maxRetries?: number;
+  retryDelayMs?: number;
+  repairAgent?: string;
+  repairRetries?: number;
 }
 
 /**
@@ -43,7 +52,7 @@ function extractStepConfigs(source: string): Map<string, StepConfig> {
       && ts.isObjectLiteralExpression(node.arguments[1])
     ) {
       const id = node.arguments[0].text;
-      const cfg: StepConfig = {};
+      const cfg: StepConfig = { position: node.getStart(sourceFile) };
       for (const prop of node.arguments[1].properties) {
         if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
         const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
@@ -63,6 +72,53 @@ function extractStepConfigs(source: string): Map<string, StepConfig> {
   };
   visit(sourceFile);
   return steps;
+}
+
+function extractOnErrorConfigs(source: string): OnErrorConfig[] {
+  const sourceFile = ts.createSourceFile('workflow.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const configs: OnErrorConfig[] = [];
+
+  const literalText = (node: ts.Expression): string | undefined => {
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    return undefined;
+  };
+  const literalNumber = (node: ts.Expression): number | undefined => {
+    if (ts.isNumericLiteral(node)) return Number(node.text);
+    if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(node.operand)) {
+      return -Number(node.operand.text);
+    }
+    return undefined;
+  };
+  const objectValue = (node: ts.Expression): Partial<OnErrorConfig> => {
+    if (!ts.isObjectLiteralExpression(node)) return {};
+    const cfg: Partial<OnErrorConfig> = {};
+    for (const prop of node.properties) {
+      if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
+      const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
+      if (key === 'repairAgent') cfg.repairAgent = literalText(prop.initializer);
+      if (key === 'maxRetries') cfg.maxRetries = literalNumber(prop.initializer);
+      if (key === 'retryDelayMs') cfg.retryDelayMs = literalNumber(prop.initializer);
+      if (key === 'repairRetries') cfg.repairRetries = literalNumber(prop.initializer);
+    }
+    return cfg;
+  };
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'onError'
+    ) {
+      configs.push({
+        strategy: node.arguments[0] && ts.isExpression(node.arguments[0]) ? literalText(node.arguments[0]) : undefined,
+        ...(node.arguments[1] && ts.isExpression(node.arguments[1]) ? objectValue(node.arguments[1]) : {}),
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return configs;
 }
 
 const RECEIVED_AT = '2026-04-26T00:00:00.000Z';
@@ -110,12 +166,54 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).toContain('ricky run \'workflows/generated/runtime-master-children/01-nested-runner.ts\' --foreground');
     expect(rendered.content).not.toMatch(/^\s*command: "set -e\\nricky run .*--no-auto-fix/m);
     expect(rendered.content).toContain('MASTER_EXECUTOR_RESULT_READY');
-    expect(rendered.content).toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
-    expect(rendered.content).toContain('review-claude');
-    expect(rendered.content).toContain('final-fix-codex');
-    expect(rendered.content).toContain('RICKY_CHILD_FRESH_EYES_LOOP_READY');
-    expect(rendered.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"master-lead\", repairRetries: 2 })");
-    expect(rendered.content.replace(/\\+"/g, '"')).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
+    expect(rendered.content).toContain('RICKY_MASTER_CHILD_WORKFLOWS_READY');
+    expect(rendered.content).not.toContain('RICKY_CHILD_WORKFLOW_COMPLETE');
+    const masterStepConfigs = extractStepConfigs(rendered.content);
+    const verifyChildrenCommand = masterStepConfigs.get('verify-child-workflows')?.command;
+    expect(verifyChildrenCommand).toContain('ts.createSourceFile');
+    expect(verifyChildrenCommand).not.toContain("body.includes('.step(\"final-signoff\"')");
+    // Child workflow sources live in the .children.json sidecar so the
+    // master content stays under ARG_MAX. Assert child-only strings are in
+    // the sidecar payload rather than inlined into the master TS.
+    const childrenSidecarPath = 'workflows/generated/runtime-master.children.json';
+    expect(rendered.sidecarFiles?.[childrenSidecarPath], 'children sidecar attached').toBeDefined();
+    const childrenSidecar = rendered.sidecarFiles![childrenSidecarPath];
+    const childSources = JSON.parse(childrenSidecar) as Record<string, string>;
+    expect(Object.keys(childSources), 'child sidecar contains child workflow sources').not.toHaveLength(0);
+    const expectedChildStepOrder = [
+      'review-claude',
+      'fix-loop',
+      'final-review-claude',
+      'final-fix-claude',
+      'review-codex',
+      'fix-loop-codex',
+      'final-review-codex',
+      'final-fix-codex',
+      'final-review-pass-gate',
+      'final-hard-validation',
+    ];
+    for (const [childPath, childSource] of Object.entries(childSources)) {
+      const childStepConfigs = extractStepConfigs(childSource);
+      expect(extractOnErrorConfigs(childSource), `${childPath} child workflow retry policy`).toContainEqual({
+        strategy: 'retry',
+        maxRetries: 2,
+        retryDelayMs: 10000,
+        repairAgent: 'validator-claude',
+        repairRetries: 2,
+      });
+      const childStepPositions = expectedChildStepOrder.map((step) => childStepConfigs.get(step)?.position);
+      expect(childStepPositions, `${childPath} declares every fresh-eyes step`).not.toContain(undefined);
+      expect(childStepPositions, `${childPath} fresh-eyes step order`)
+        .toEqual([...childStepPositions].sort((a, b) => a! - b!));
+      expect(childStepConfigs.get('final-review-pass-gate')?.command, `${childPath} child final review file gate`).toContain('RICKY_CHILD_FINAL_REVIEW_FILES_READY');
+    }
+    expect(extractOnErrorConfigs(rendered.content), 'master workflow retry policy').toContainEqual({
+      strategy: 'retry',
+      maxRetries: 2,
+      retryDelayMs: 10000,
+      repairAgent: 'master-lead',
+      repairRetries: 2,
+    });
     expect(rendered.content.replace(/\\+"/g, '"')).toMatch(
       /\.step\("final-hard-validation"[\s\S]*?failOnError: true,[\s\S]*?\.step\("final-signoff"/,
     );
@@ -152,9 +250,9 @@ describe('workflow generation pipeline', () => {
     // entirely via a deterministic command.
     expect(leadPlan!.agent, 'lead-plan has no agent assignment').toBeUndefined();
     expect(leadPlan!.type, 'lead-plan is deterministic').toBe('deterministic');
-    expect(leadPlan!.command, 'lead-plan writes the marker into lead-plan.md').toContain('RICKY_MASTER_LEAD_PLAN_READY');
-    expect(leadPlan!.command, 'lead-plan self-verifies the marker after writing').toContain('grep -F RICKY_MASTER_LEAD_PLAN_READY');
-    expect(leadPlan!.command, 'lead-plan echoes the downstream verification marker').toContain('RICKY_MASTER_LEAD_PLAN_VERIFIED');
+    expect(leadPlan!.command, 'lead-plan writes a non-empty lead-plan.md').toContain('test -s');
+    expect(leadPlan!.command, 'lead-plan no longer self-verifies a marker with grep').not.toContain('grep -F RICKY_MASTER_LEAD_PLAN_READY');
+    expect(leadPlan!.command, 'lead-plan echoes structural completion').toContain('RICKY_MASTER_LEAD_PLAN_WRITTEN');
     // `materialize-child-workflows` formerly depended on the separate
     // `lead-plan-gate`; with the gate folded into `lead-plan`, the
     // dependency must move directly to `lead-plan`.
@@ -475,6 +573,139 @@ describe('workflow generation pipeline', () => {
     expect(artifact(medium).content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
   });
 
+  it('keeps large single-PR worktree specs on the regular renderer instead of file-count master fallback', () => {
+    const singlePr = generate({
+      spec: spec({
+        description: [
+          'Implement PR 11 hardening, quotas, audit, docs, demo.',
+          'Outcome: exactly one pull request in cloud opened against origin/main.',
+          'Worktree: /private/tmp/cloud-mcp-cloud-spawn-hardening',
+          'Target branch: chore/mcp-cloud-spawn-hardening',
+          'The workflow must use createGitHubStep from @agent-relay/github-primitive.',
+        ].join('\n'),
+        targetFiles: [
+          'specs/mcp-cloud-spawn-and-slack-bridge.md',
+          '/private/tmp/cloud-mcp-cloud-spawn-hardening',
+          '/Users/khaliqgant/Projects/AgentWorkforce/cloud',
+          '/api/v1/*',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relaycast',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relay',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relayfile',
+          'packages/web/drizzle/meta/_journal.json',
+          'packages/web/lib/integrations/nango-service.ts',
+          'dev-stack/README.md',
+          '/api/v1/auth/cli-login/*',
+          'packages/web/lib/boot/resource-check.ts',
+          '.relay/conflicts/',
+          '.relay/conflicts/<path>.<ts>',
+          'cloud/dev-stack/',
+        ],
+      }),
+      artifactPath: 'workflows/generated/pr-11-hardening.ts',
+    });
+
+    expect(singlePr.masterExecutionPlan).toBeUndefined();
+    expect(artifact(singlePr).content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+  });
+
+  it('honors explicit single-workflow constraints before file-count master fallback', () => {
+    const result = generate({
+      spec: spec({
+        description: [
+          'Implement cloud issue 311 per-service deploy workflows with a single local workflow and static validation only.',
+          'Generate a single local implementation workflow.',
+          'Do not decompose this into child workflows.',
+          'Do not materialize child workflow files.',
+          'Do not invoke ricky run recursively.',
+          'Do not require an Agent Relay broker for implementation.',
+        ].join('\n'),
+        constraints: [
+          'Do not generate child workflows.',
+          'Use only listed validation commands and no generic root gates.',
+        ],
+        targetFiles: [
+          '.github/workflows/deploy-sage.yml',
+          '.github/workflows/deploy-relayauth.yml',
+          '.github/workflows/deploy-relayfile.yml',
+          '.github/workflows/deploy-sage-production-worker.yml',
+          '.github/workflows/_deploy-cloud-stage.yml',
+          '.github/actions/run-cloudflare-d1-migrations/action.yml',
+          '.github/actions/run-cloudflare-d1-migrations/run.sh',
+          '.github/workflows/bump-sage-worker.yml',
+          'infra/sage.ts',
+          'infra/relayauth.ts',
+          'infra/relayfile.ts',
+          'README.md',
+          'docs/deploy.md',
+        ],
+        acceptanceGates: [
+          'git diff --check',
+          'bash -n .github/actions/run-cloudflare-d1-migrations/run.sh',
+          'actionlint .github/workflows/deploy-sage.yml .github/workflows/deploy-relayauth.yml .github/workflows/deploy-relayfile.yml',
+          "ruby -e \"require 'yaml'; YAML.load_file('.github/workflows/deploy-sage.yml')\"",
+        ],
+      }),
+      artifactPath: 'workflows/generated/cloud-issue-311.ts',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.masterExecutionPlan).toBeUndefined();
+    const rendered = artifact(result);
+    expect(rendered.content).not.toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+    expect(rendered.content).not.toContain('Master plan:');
+    expect(rendered.content).not.toContain("ricky run 'workflows/generated");
+
+    for (const gateName of ['initial-soft-validation', 'post-fix-validation', 'post-codex-fix-validation', 'final-hard-validation']) {
+      const command = gate(rendered, gateName).command;
+      expect(command).toContain('git diff --check');
+      expect(command).toContain('bash -n .github/actions/run-cloudflare-d1-migrations/run.sh');
+      expect(command).toContain('actionlint .github/workflows/deploy-sage.yml');
+      expect(command).toContain("ruby -e \"require 'yaml'; YAML.load_file('.github/workflows/deploy-sage.yml')\"");
+      expect(command).not.toContain('npx tsc --noEmit');
+      expect(command).not.toContain('npx vitest run');
+    }
+
+    expect(gate(rendered, 'regression-gate').command).toBe('git diff --check');
+  });
+
+  it('ignores inert fenced worktree labels when deciding single-PR master fallback routing', () => {
+    const fencedLabelsOnly = generate({
+      spec: spec({
+        description: [
+          'Implement PR 11 hardening, quotas, audit, docs, demo.',
+          'Outcome: exactly one pull request in cloud opened against origin/main.',
+          'The following historical example is not the requested worktree contract:',
+          '```md',
+          'Worktree: /private/tmp/cloud-mcp-cloud-spawn-hardening',
+          'Target branch: chore/mcp-cloud-spawn-hardening',
+          '```',
+          'The workflow must use createGitHubStep from @agent-relay/github-primitive.',
+        ].join('\n'),
+        targetFiles: [
+          'specs/mcp-cloud-spawn-and-slack-bridge.md',
+          '/private/tmp/cloud-mcp-cloud-spawn-hardening',
+          '/Users/khaliqgant/Projects/AgentWorkforce/cloud',
+          '/api/v1/*',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relaycast',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relay',
+          '/Users/khaliqgant/Projects/AgentWorkforce/relayfile',
+          'packages/web/drizzle/meta/_journal.json',
+          'packages/web/lib/integrations/nango-service.ts',
+          'dev-stack/README.md',
+          '/api/v1/auth/cli-login/*',
+          'packages/web/lib/boot/resource-check.ts',
+          '.relay/conflicts/',
+          '.relay/conflicts/<path>.<ts>',
+          'cloud/dev-stack/',
+        ],
+      }),
+      artifactPath: 'workflows/generated/pr-11-hardening.ts',
+    });
+
+    expect(fencedLabelsOnly.masterExecutionPlan).toBeDefined();
+    expect(artifact(fencedLabelsOnly).content).toContain('RICKY_MASTER_EXECUTOR_WORKFLOW');
+  });
+
   it('turns a code-writing spec into an implementation team workflow with 80-to-100 validation', () => {
     const result = generate({
       spec: spec({
@@ -536,7 +767,7 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain(".onError('retry', { maxRetries: 2, retryDelayMs: 10000, repairAgent: \"validator-claude\", repairRetries: 2 })");
     expect(artifact.content).not.toMatch(/^\s*\.onError\('fail-fast'\)/m);
     expect(artifact.content).toContain('80-to-100 review-fix loop');
-    expect(artifact.content).toContain('deterministic sanity gate using POSIX grep, git grep, or an equivalent assertion');
+    expect(artifact.content).toContain('deterministic structural sanity gate using a parser, inline assertion, or scoped file/diff check');
     expect(artifact.content).toContain('If using rg, guard it with command -v rg');
     expect(artifact.content).toContain('Generated workflow quality');
     expect(artifact.content).toContain('Keep each agent step bounded to one coherent slice');
@@ -583,7 +814,7 @@ describe('workflow generation pipeline', () => {
       expect.arrayContaining([
         expect.stringContaining('npx tsc --noEmit'),
         expect.stringContaining('npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts'),
-        expect.stringContaining('git diff --name-only'),
+        expect.stringContaining("'diff', '--name-status'"),
       ]),
     );
     expect(result.validation.issues).toEqual([]);
@@ -696,27 +927,13 @@ describe('workflow generation pipeline', () => {
     expect(artifact.content).toContain('runtimeEmbodiment');
     expect(artifact.content).toContain('Skills are applied by Ricky during selection, loading, and template rendering.');
     expect(artifact.content).toContain('Do not claim generated agents load, retain, or embody skill files at runtime');
-    const skillBoundaryGate = artifact.gates.find((gate) => gate.name === 'skill-boundary-metadata-gate')!;
-    expect(skillBoundaryGate.command).toContain('choosing-swarm-patterns');
-    expect(skillBoundaryGate.command).toContain('writing-agent-relay-workflows');
-    expect(skillBoundaryGate.command).toContain('relay-80-100-workflow');
-    expect(skillBoundaryGate.command).toContain('review-fix-signoff-loop');
-    expect(skillBoundaryGate.command).toContain('"stage":"generation_selection"');
-    expect(skillBoundaryGate.command).toContain('"stage":"generation_loading"');
-    expect(skillBoundaryGate.command).toContain('"stage":"generation_rendering"');
-    expect(skillBoundaryGate.command).toContain('"effect":"pattern_selection"');
-    expect(skillBoundaryGate.command).toContain('"effect":"workflow_contract"');
-    expect(skillBoundaryGate.command).toContain('"effect":"validation_gates"');
-    expect(artifact.gates).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: 'skill-boundary-metadata-gate',
-          command: expect.stringContaining('skill-application-boundary.json'),
-          failOnError: true,
-          stage: 'pre_review',
-        }),
-      ]),
-    );
+    expect(artifact.gates.map((candidate) => candidate.name)).not.toContain('skill-boundary-metadata-gate');
+    expect(artifact.content).not.toContain('.step("skill-boundary-metadata-gate"');
+    expect(gate(artifact, 'lead-plan-gate')).toMatchObject({
+      dependsOn: ['lead-plan'],
+      failOnError: true,
+      stage: 'pre_review',
+    });
   });
 
   it('accepts a natural doc/spec request and selects a lighter workflow with deterministic review gates', () => {
@@ -934,11 +1151,12 @@ describe('workflow generation pipeline', () => {
       dependsOn: ['final-review-pass-gate'],
     });
     expect(gate(artifact, 'git-diff-gate')).toMatchObject({
-      command: expect.stringContaining('git diff --name-only'),
+      command: expect.stringContaining("'diff', '--name-status'"),
       failOnError: true,
       stage: 'final',
       dependsOn: ['final-hard-validation'],
     });
+    expect(gate(artifact, 'git-diff-gate').command).toContain("'ls-files', '--others', '--exclude-standard'");
     expect(gate(artifact, 'git-diff-gate').command).toContain('git ls-files --others --exclude-standard');
     expect(result.validation.issues).toEqual([]);
   });
@@ -1270,15 +1488,13 @@ describe('workflow generation pipeline', () => {
       artifactPath: 'workflows/generated/inline-sanity.ts',
     });
     const base = artifact(result);
-    const gatesWithoutGrep = base.gates.map((gate) => ({
+    const gatesWithoutSanityChecks = base.gates.map((gate) => ({
       ...gate,
-      command: gate.command
-        .replace(/\bgit\s+grep\b/g, 'printf')
-        .replace(/\bgrep\b/g, 'printf'),
+      command: 'printf ok',
     }));
     const withPostImplementationCommand = (command: string) => ({
       ...base,
-      gates: gatesWithoutGrep.map((gate) => gate.name === 'post-implementation-file-gate'
+      gates: gatesWithoutSanityChecks.map((gate) => gate.name === 'post-implementation-file-gate'
         ? { ...gate, command }
         : gate),
     });
@@ -1304,6 +1520,23 @@ describe('workflow generation pipeline', () => {
       implementationSpec,
     );
     expect(assertingNodeValidation.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
+      ]),
+    );
+
+    const heredocNodeValidation = validateGeneratedArtifact(
+      withPostImplementationCommand(
+        `node << 'ASSERT-SANITY'
+const { readFileSync } = require('node:fs');
+if (!readFileSync('src/product/generation/pipeline.ts', 'utf8').includes('validateGeneratedArtifact')) throw new Error('missing validation symbol');
+ASSERT-SANITY`,
+      ),
+      result.patternDecision,
+      result.skillContext,
+      implementationSpec,
+    );
+    expect(heredocNodeValidation.issues).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: 'GREP_GATE_MISSING' }),
       ]),
@@ -1364,9 +1597,7 @@ describe('workflow generation pipeline', () => {
       ...base,
       gates: base.gates.map((gate) => ({
         ...gate,
-        command: gate.command
-          .replace(/\bgit\s+grep\b/g, 'printf')
-          .replace(/\bgrep\b/g, 'printf'),
+        command: 'printf ok',
       })),
     };
 
@@ -1443,12 +1674,12 @@ describe('workflow generation pipeline', () => {
       expect.arrayContaining([
         expect.stringContaining('npx tsc --noEmit'),
         expect.stringContaining('npx vitest run'),
-        expect.stringContaining('git diff --name-only'),
+        expect.stringContaining("'diff', '--name-status'"),
       ]),
     );
     expect(result.deterministicValidationCommands).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('git ls-files --others --exclude-standard'),
+        expect.stringContaining("'ls-files', '--others', '--exclude-standard'"),
       ]),
     );
     expect(result.plannedChecks.map((check) => check.command)).toContain(result.dryRunCommand);
@@ -1486,9 +1717,13 @@ describe('workflow generation pipeline', () => {
     expect(claudePathMatch).not.toBeNull();
     expect(codexPathMatch).not.toBeNull();
 
-    expect(passGate.command).toContain(claudePathMatch![1]);
-    expect(passGate.command).toContain(codexPathMatch![1]);
-    expect(passGate.command).toContain("tr -d '[:space:]*'");
+    expect(passGate.command).toContain('.workflow-artifacts/generated/path-consistency');
+    expect(passGate.command).toContain('claude-final-fix.md');
+    expect(passGate.command).toContain('codex-final-fix.md');
+    expect(passGate.command).toContain('claude-final-fix-status.json');
+    expect(passGate.command).toContain('codex-final-fix-status.json');
+    expect(passGate.command).toContain('JSON.parse');
+    expect(passGate.command).toContain('BLOCKED_NO_COMMIT.md');
   });
 
   it('no-target spec uses output manifest instead of artifact path in file gates', () => {
@@ -1524,7 +1759,7 @@ describe('workflow generation pipeline', () => {
     expect(consistencyGate.command).toContain("['final-review-codex.md', read('final-review-codex.md')]");
     expect(consistencyGate.command).toContain("['codex-final-fix.md', read('codex-final-fix.md')]");
     expect(consistencyGate.command).toContain("['signoff.md', read('signoff.md')]");
-    expect(consistencyGate.command).toContain('CODEX_FINAL_FIX_COMPLETE');
+    expect(consistencyGate.command).not.toContain('CODEX_FINAL_FIX_COMPLETE');
   });
 
   it('no-target code workflow file gate validates manifest contents, not source-shape grep', () => {
@@ -1547,6 +1782,36 @@ describe('workflow generation pipeline', () => {
     expect(fileGate.command).toContain('deleted manifest path still exists');
     expect(fileGate.command).toContain('manifest path does not exist');
     expect(fileGate.command).toContain('MANIFEST_FILE_GATE_OK');
+  });
+
+  it('targeted code workflow file gate uses repository diff evidence instead of test-f on every declared target', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement Slack relay bridge with mixed context targets.',
+        targetFiles: [
+          'specs/mcp-cloud-spawn-and-slack-bridge.md',
+          '/private/tmp/cloud-slack-relay-bridge-inbound',
+          '/Users/khaliqgant/Projects/AgentWorkforce/cloud',
+          '/api/v1/*',
+          'packages/web/lib/integrations/slack-relay-bridge/',
+          'packages/web/drizzle/meta/_journal.json',
+        ],
+      }),
+      artifactPath: 'workflows/generated/mixed-targets.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const artifact = result.artifact!;
+    const fileGate = artifact.gates.find((g) => g.name === 'post-implementation-file-gate')!;
+    const gitDiffGate = artifact.gates.find((g) => g.name === 'git-diff-gate')!;
+
+    expect(fileGate.command).toContain('IMPLEMENTATION_FILE_GATE_OK');
+    expect(fileGate.command).toContain("'diff', '--name-only', '--diff-filter=ACMRT'");
+    expect(fileGate.command).not.toContain('test -f');
+    expect(fileGate.command).not.toContain("test -f '/private/tmp/cloud-slack-relay-bridge-inbound'");
+    expect(fileGate.command).not.toContain("test -f '/api/v1/*'");
+    expect(gitDiffGate.command).toContain('GIT_DIFF_GATE_OK');
+    expect(gitDiffGate.command).not.toContain('/api/v1/*');
   });
 
   it('renders deterministic artifact content for the same spec with controlled registry', () => {
@@ -1643,7 +1908,8 @@ describe('workflow generation pipeline', () => {
     expect(leadPlanGate.command).toContain('out[- ]of[- ]scope');
     expect(leadPlanGate.command).toContain('Routing contract');
     expect(artifact.content).toContain('write .workflow-artifacts/generated/no-target-evidence-gates/fix-loop-report.md');
-    expect(fixLoopReportGate.command).toContain('FIX_LOOP_COMPLETE');
+    expect(fixLoopReportGate.command).toContain('test -s');
+    expect(fixLoopReportGate.command).toContain('fix-loop-report.md');
     expect(fixLoopReportGate.dependsOn).toEqual(['fix-loop']);
     expect(postFixGate.dependsOn).toEqual(['fix-loop-report-gate']);
     expect(postImplementationGate.command).toContain('cleanup-report.md');
@@ -1681,10 +1947,9 @@ describe('workflow generation pipeline', () => {
     const artifact = result.artifact!;
     const gitDiffGate = artifact.gates.find((g) => g.name === 'git-diff-gate')!;
 
-    expect(gitDiffGate.command).toContain('git diff --name-only');
-    expect(gitDiffGate.command).toContain('git ls-files --others --exclude-standard');
-    expect(gitDiffGate.command).toContain('src/product/generation/new-file.ts');
-    expect(gitDiffGate.command).toContain('sort -u');
+    expect(gitDiffGate.command).toContain("'diff', '--name-status'");
+    expect(gitDiffGate.command).toContain("'ls-files', '--others', '--exclude-standard'");
+    expect(gitDiffGate.command).toContain('GIT_DIFF_GATE_OK');
   });
 
   it('maps prose acceptance gates with inline shell commands without emitting prose as shell', () => {
@@ -1703,6 +1968,32 @@ describe('workflow generation pipeline', () => {
     const initialValidation = result.artifact!.gates.find((gate) => gate.name === 'initial-soft-validation')!;
     expect(initialValidation.command).toContain("node dist/bin/ricky.js --version | grep -Eq '^ricky [0-9]+\\.[0-9]+\\.[0-9]+$'");
     expect(initialValidation.command).not.toContain('test for this layer');
+  });
+
+  it('treats static shell tools in acceptance gates as executable validation commands', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow static validation gates.',
+        targetFiles: ['src/product/generation/template-renderer.ts'],
+        constraints: ['Use only listed validation commands.'],
+        acceptanceGates: [
+          'git diff --check',
+          'bash -n scripts/check.sh',
+          'actionlint .github/workflows/deploy.yml',
+          "ruby -e \"require 'yaml'\"",
+        ],
+      }),
+      artifactPath: 'workflows/generated/static-tool-gates.ts',
+    });
+
+    expect(result.success).toBe(true);
+    const command = gate(artifact(result), 'final-hard-validation').command;
+    expect(command).toContain('git diff --check');
+    expect(command).toContain('bash -n scripts/check.sh');
+    expect(command).toContain('actionlint .github/workflows/deploy.yml');
+    expect(command).toContain("ruby -e \"require 'yaml'\"");
+    expect(command).not.toContain('npx tsc --noEmit');
+    expect(command).not.toContain('npx vitest run');
   });
 
   it('enforces executable acceptance gates in post-fix and final-hard validation stages', () => {
@@ -1732,6 +2023,45 @@ describe('workflow generation pipeline', () => {
     expect(initialValidation.failOnError).toBe(false);
     expect(postFixValidation.failOnError).toBe(false);
     expect(finalHardValidation.failOnError).toBe(true);
+  });
+
+  it('uses only listed validation commands when the spec forbids generic root gates', () => {
+    const result = generate({
+      spec: spec({
+        description: 'Implement workflow-only deploy plumbing.',
+        targetFiles: [
+          '.github/workflows/deploy-sage.yml',
+          '.github/actions/run-cloudflare-d1-migrations/run.sh',
+        ],
+        constraints: [
+          'Use only the validation commands listed in this spec.',
+          'Do not add generic root gates such as npm run typecheck, npx tsc, or npx vitest.',
+        ],
+        acceptanceGates: [
+          'git diff --check',
+          'bash -n .github/actions/run-cloudflare-d1-migrations/run.sh',
+          'actionlint .github/workflows/deploy-sage.yml',
+        ],
+      }),
+      artifactPath: 'workflows/generated/static-validation-only.ts',
+    });
+
+    const artifactResult = artifact(result);
+    const initialValidation = gate(artifactResult, 'initial-soft-validation');
+    const postFixValidation = gate(artifactResult, 'post-fix-validation');
+    const finalHardValidation = gate(artifactResult, 'final-hard-validation');
+    const regressionGate = gate(artifactResult, 'regression-gate');
+
+    for (const validationGate of [initialValidation, postFixValidation, finalHardValidation]) {
+      expect(validationGate.command).toContain('git diff --check');
+      expect(validationGate.command).toContain('bash -n .github/actions/run-cloudflare-d1-migrations/run.sh');
+      expect(validationGate.command).toContain('actionlint .github/workflows/deploy-sage.yml');
+      expect(validationGate.command).not.toContain('npx tsc --noEmit');
+      expect(validationGate.command).not.toContain('npx vitest run');
+    }
+    expect(regressionGate.command).toBe('git diff --check');
+    expect(artifactResult.gates.map((gate) => gate.command).join('\n')).not.toContain('npx tsc --noEmit');
+    expect(artifactResult.gates.map((gate) => gate.command).join('\n')).not.toContain('npx vitest run');
   });
 
   it('excludes prose-only acceptance gates from post-fix and final-hard validation', () => {

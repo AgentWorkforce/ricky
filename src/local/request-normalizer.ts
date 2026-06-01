@@ -58,6 +58,8 @@ export interface BaseHandoff {
    * assumptions instead of asking the user before generation.
    */
   bestJudgement?: boolean;
+  /** KEY=VALUE pairs from `--input KEY=VALUE` flags, injected into the workflow runner env. */
+  inputs?: Record<string, string>;
 }
 
 /** Free-form spec string from a direct local caller. */
@@ -136,6 +138,8 @@ export interface LocalInvocationRequest {
    * to inspect `mode`.
    */
   mode: LocalExecutionMode;
+  /** Normalized execution preference as supplied by CLI/MCP/Claude-style callers. */
+  executionPreference?: LocalExecutionPreference;
   /** Product-stage behavior. Undefined preserves legacy executor behavior for direct callers. */
   stageMode?: LocalStageMode;
   /** Caller repo root captured at the CLI boundary when available. */
@@ -156,6 +160,12 @@ export interface LocalInvocationRequest {
   refine?: false | { model?: string };
   /** Resolve blocking clarification questions using implementer best judgement. */
   bestJudgement?: boolean;
+  /**
+   * KEY=VALUE pairs from `--input KEY=VALUE` CLI flags. Injected into the
+   * workflow runner subprocess env so workflow scripts can read them via
+   * `process.env.KEY` (e.g. `TARGET_SPEC` for reusable review/fix workflows).
+   */
+  inputs?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +203,7 @@ export async function normalizeRequest(
         spec: raw.spec,
         source: 'free-form',
         mode,
+        executionPreference: executionPreferenceFor(raw, raw.spec, mode),
         stageMode: stageModeFor(raw, raw.spec),
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: raw.metadata ?? {},
@@ -209,6 +220,7 @@ export async function normalizeRequest(
         structuredSpec: raw.spec,
         source: 'structured',
         mode,
+        executionPreference: executionPreferenceFor(raw, raw.spec, mode),
         stageMode: stageModeFor(raw, raw.spec),
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: raw.metadata ?? {},
@@ -226,6 +238,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'cli',
         mode,
+        executionPreference: executionPreferenceFor(raw, raw.spec, mode),
         stageMode: stageModeFor(raw, raw.spec),
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         specPath: raw.specFile,
@@ -249,6 +262,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'mcp',
         mode,
+        executionPreference: executionPreferenceFor(raw, spec, mode),
         stageMode: stageModeFor(raw, spec),
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: {
@@ -274,6 +288,7 @@ export async function normalizeRequest(
         structuredSpec,
         source: 'claude',
         mode,
+        executionPreference: executionPreferenceFor(raw, raw.spec, mode),
         stageMode: stageModeFor(raw, raw.spec),
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata,
@@ -292,6 +307,7 @@ export async function normalizeRequest(
         spec,
         source: 'workflow-artifact',
         mode,
+        executionPreference: executionPreferenceFor(raw, undefined, mode),
         stageMode: stageModeFor(raw) ?? 'run',
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         specPath: raw.artifactPath,
@@ -303,12 +319,13 @@ export async function normalizeRequest(
   }
 }
 
-function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'bestJudgement'> {
+function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'bestJudgement' | 'inputs'> {
   return {
     ...(raw.autoFix ? { autoFix: raw.autoFix } : {}),
     ...(raw.retry ? { retry: raw.retry } : {}),
     ...(raw.refine ? { refine: raw.refine } : {}),
     ...(raw.bestJudgement ? { bestJudgement: true } : {}),
+    ...(raw.inputs && Object.keys(raw.inputs).length > 0 ? { inputs: raw.inputs } : {}),
   };
 }
 
@@ -327,6 +344,18 @@ function executionModeFor(raw: BaseHandoff, spec?: SpecInput): LocalExecutionMod
   return executionModeFromStructuredSpec(spec) ?? 'local';
 }
 
+function executionPreferenceFor(
+  raw: BaseHandoff,
+  spec: SpecInput | undefined,
+  mode: LocalExecutionMode,
+): LocalExecutionPreference {
+  if (raw.executionPreference) return raw.executionPreference;
+  if (raw.mode === 'local' || raw.mode === 'cloud' || raw.mode === 'both') return raw.mode;
+  const structured = executionPreferenceFromStructuredSpec(spec);
+  if (structured) return structured;
+  return mode === 'both' ? 'auto' : mode;
+}
+
 function stageModeFor(raw: BaseHandoff, spec?: SpecInput): LocalStageMode | undefined {
   if (raw.stageMode) return raw.stageMode;
   if (raw.behavior) return raw.behavior;
@@ -341,6 +370,14 @@ function executionModeFromStructuredSpec(spec?: SpecInput): LocalExecutionMode |
   if (value === 'local' || value === 'cloud' || value === 'both' || value === 'auto') {
     return normalizeExecutionPreference(value);
   }
+  return undefined;
+}
+
+function executionPreferenceFromStructuredSpec(spec?: SpecInput): LocalExecutionPreference | undefined {
+  if (!spec || typeof spec === 'string') return undefined;
+
+  const value = spec.executionPreference ?? spec.execution_preference ?? spec.mode ?? spec.execution_mode;
+  if (value === 'auto' || value === 'local' || value === 'cloud' || value === 'both') return value;
   return undefined;
 }
 

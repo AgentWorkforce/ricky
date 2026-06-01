@@ -34,11 +34,11 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" packages/runtime/src/local-coordinator.ts',
+        'sed -n "1,260p" src/runtime/local-coordinator.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/runtime/src/diagnostics/failure-diagnosis.ts',
+        'sed -n "1,260p" src/runtime/diagnostics/failure-diagnosis.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/runtime/src/evidence/capture.ts',
+        'sed -n "1,260p" src/runtime/evidence/capture.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -46,7 +46,7 @@ async function main() {
     .step('implement-runtime-outcome-proof', {
       agent: 'impl-codex',
       dependsOn: ['read-runtime-context'],
-      task: `Implement only bounded fixture-backed proof files needed for runtime outcome coverage. Favor package test/proof files under packages/runtime/src.
+      task: `Implement only bounded fixture-backed proof files needed for runtime outcome coverage. Favor runtime test/proof files under src/runtime.
 
 Requirements:
 - prove success, verification failure, timeout, and runner/environment failure outcomes

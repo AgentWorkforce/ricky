@@ -4,6 +4,7 @@
  * Proves the user-visible contract of the Cloud generate endpoint:
  * - Request validation rejects missing auth, workspace, and spec
  * - Successful generate response includes artifacts, warnings, follow-up actions, and request ID
+ * - Empty executor output fails closed instead of reporting validated success
  * - Explicit auth/workspace context is passed through to the executor
  * - The default executor is honest about being a stubbed runtime seam
  *
@@ -17,6 +18,7 @@ import type {
   CloudGenerateResult,
 } from '../index.js';
 import { handleCloudGenerate } from '../index.js';
+import type { AuthorizedWorkspaceScope } from '../../auth/types.js';
 
 // ---------------------------------------------------------------------------
 // Proof types
@@ -61,9 +63,19 @@ export interface CloudProofSummary {
 /** Deterministic request ID for all proof assertions. */
 const PROOF_REQUEST_ID = 'ricky-cloud-proof-000';
 
-function proofOptions(executor?: CloudExecutor) {
+const DEFAULT_PROOF_ARTIFACT = {
+  path: 'out/workflow.ts',
+  type: 'text/typescript',
+  content: '// generated',
+};
+
+function proofOptions(
+  executor?: CloudExecutor,
+  authorizedWorkspaceScope: AuthorizedWorkspaceScope = { workspaceId: 'ws-proof-001' },
+) {
   return {
     executor,
+    authorizedWorkspaceScope,
     requestIdFactory: () => PROOF_REQUEST_ID,
   };
 }
@@ -83,13 +95,21 @@ function mockExecutor(
   result?: Partial<CloudGenerateResult>,
 ): CloudExecutor & { calls: CloudGenerateRequest[] } {
   const calls: CloudGenerateRequest[] = [];
+  const artifacts = Object.prototype.hasOwnProperty.call(result ?? {}, 'artifacts')
+    ? result?.artifacts ?? []
+    : [DEFAULT_PROOF_ARTIFACT];
+  const validation: CloudGenerateResult['validation'] =
+    Object.prototype.hasOwnProperty.call(result ?? {}, 'validation')
+      ? result?.validation
+      : { ok: true, status: 'passed', issues: [] };
   return {
     calls,
     async generate(request: CloudGenerateRequest): Promise<CloudGenerateResult> {
       calls.push(request);
       return {
-        artifacts: result?.artifacts ?? [],
+        artifacts,
         warnings: result?.warnings ?? [],
+        validation,
         followUpActions: result?.followUpActions ?? [],
       };
     },
@@ -250,17 +270,19 @@ export function getCloudProofCases(): CloudProofCase[] {
     },
     {
       name: 'empty-executor-response',
-      description: 'When executor returns empty arrays, response still has correct shape with ok=true and 200.',
+      description: 'When executor returns no artifacts, response fails closed with a clear artifact validation issue.',
       async evaluate() {
-        const executor = mockExecutor();
+        const executor = mockExecutor({ artifacts: [] });
         const response = await handleCloudGenerate(validRequest(), proofOptions(executor));
 
         const checks = [
-          response.ok === true,
-          response.status === 200,
+          response.ok === false,
+          response.status === 500,
           response.artifacts.length === 0,
-          response.warnings.length === 0,
-          response.followUpActions.length === 0,
+          response.warnings.some((warning) => warning.severity === 'error'),
+          response.validation.status === 'failed',
+          response.validation.issues.some((issue) => issue.code === 'missing-generated-artifacts'),
+          response.followUpActions.some((action) => action.action === 'wire-runtime'),
           response.requestId === PROOF_REQUEST_ID,
         ];
 
@@ -268,8 +290,10 @@ export function getCloudProofCases(): CloudProofCase[] {
           `ok: ${response.ok}`,
           `status: ${response.status}`,
           `artifacts: ${response.artifacts.length}`,
-          `warnings: ${response.warnings.length}`,
-          `followUpActions: ${response.followUpActions.length}`,
+          `error warnings: ${response.warnings.filter((warning) => warning.severity === 'error').length}`,
+          `validation status: ${response.validation.status}`,
+          `validation issues: ${response.validation.issues.map((issue) => issue.code).join(',')}`,
+          `followUpActions: ${response.followUpActions.map((action) => action.action).join(',')}`,
           `requestId: ${response.requestId}`,
         ]);
       },
@@ -311,7 +335,7 @@ export function getCloudProofCases(): CloudProofCase[] {
           validRequest({
             workspace: { workspaceId: 'ws-prod-42', environment: 'production' },
           }),
-          proofOptions(executor),
+          proofOptions(executor, { workspaceId: 'ws-prod-42' }),
         );
 
         const req = executor.calls[0];
@@ -370,16 +394,18 @@ export function getCloudProofCases(): CloudProofCase[] {
         'follow-up actions tell the caller to wire the real runtime.',
       async evaluate() {
         const response = await handleCloudGenerate(validRequest(), {
+          authorizedWorkspaceScope: { workspaceId: 'ws-proof-001' },
           requestIdFactory: () => PROOF_REQUEST_ID,
         });
 
         const warningsText = response.warnings.map((w) => w.message).join('\n');
         const actionsText = response.followUpActions.map((a) => `${a.action}: ${a.label}`).join('\n');
         const checks = [
-          response.ok === true,
-          response.status === 200,
+          response.ok === false,
+          response.status === 500,
           warningsText.includes('stub'),
           response.followUpActions.some((a) => a.action === 'wire-runtime'),
+          response.validation.issues.some((issue) => issue.code === 'missing-generated-artifacts'),
         ];
 
         return result('stubbed-executor-honesty', checks, [
@@ -387,6 +413,7 @@ export function getCloudProofCases(): CloudProofCase[] {
           `status: ${response.status}`,
           `warnings mention stub: ${warningsText.includes('stub')}`,
           `follow-up actions include wire-runtime: ${response.followUpActions.some((a) => a.action === 'wire-runtime')}`,
+          `validation issues: ${response.validation.issues.map((issue) => issue.code).join(',')}`,
           `warnings: ${warningsText}`,
           `follow-up actions: ${actionsText}`,
         ]);
@@ -396,7 +423,7 @@ export function getCloudProofCases(): CloudProofCase[] {
     // --- Error path ---
     {
       name: 'executor-error-path',
-      description: 'When the executor throws, the response is ok=false, 500, with error details and retry action.',
+      description: 'When the executor throws, the response is ok=false, 500, with a sanitized warning and retry action.',
       async evaluate() {
         const failingExecutor: CloudExecutor = {
           async generate(): Promise<CloudGenerateResult> {
@@ -410,7 +437,9 @@ export function getCloudProofCases(): CloudProofCase[] {
           response.status === 500,
           response.warnings.length > 0,
           response.warnings[0].severity === 'error',
-          response.warnings[0].message.includes('Cloud runtime unavailable'),
+          response.warnings[0].message.includes('Cloud generation failed'),
+          response.warnings[0].message.includes(PROOF_REQUEST_ID),
+          !response.warnings[0].message.includes('Cloud runtime unavailable'),
           response.followUpActions.some((a) => a.action === 'retry'),
           response.requestId === PROOF_REQUEST_ID,
         ];

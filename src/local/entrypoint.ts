@@ -14,7 +14,7 @@ import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
@@ -26,7 +26,7 @@ import { intake } from '../product/spec-intake/index.js';
 import type { ClarificationQuestion, ExecutionPreference, InputSurface, RawSpecPayload, RouteTarget } from '../product/spec-intake/index.js';
 import { defaultRepoDetector, type RepoDetector } from '../product/spec-intake/detect-current-repo.js';
 import { LocalCoordinator } from '../runtime/local-coordinator.js';
-import { DEFAULT_RUN_TIMEOUT_MS } from '../shared/constants.js';
+import { DEFAULT_RUN_TIMEOUT_MS, DEFAULT_RUN_IDLE_TIMEOUT_MS } from '../shared/constants.js';
 import { localRunArtifactDir, localRunStateRoot } from '../shared/state-paths.js';
 import type {
   CommandInvocation,
@@ -111,6 +111,7 @@ export type LocalBlockerCode =
   | 'MISSING_BINARY'
   | 'INVALID_ARTIFACT'
   | 'UNSUPPORTED_RUNTIME'
+  | 'RUNTIME_HANDOFF_STALLED'
   | 'CREDENTIALS_REJECTED'
   | 'STEP_TIMEOUT'
   | 'WORKDIR_DIRTY'
@@ -400,6 +401,32 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
 
     const abortController = new AbortController();
 
+    // Inactivity watchdog: a healthy run constantly emits broker/agent output.
+    // Total silence for the idle window means the runner is hung (dead broker,
+    // half-open stdio pipe, a subprocess parked at 0% CPU). Aborting on idle
+    // makes the run fail fast instead of stalling until DEFAULT_RUN_TIMEOUT_MS.
+    const idleTimeoutMs = resolveIdleTimeoutMs();
+    const idleAbortMessage = `Workflow runner aborted after ${Math.round(idleTimeoutMs / 1000)}s of inactivity (suspected hang).`;
+    let lastOutputMs = Date.now();
+    let idleAborted = false;
+    const idleInterval = idleTimeoutMs > 0
+      ? setInterval(() => {
+          if (Date.now() - lastOutputMs >= idleTimeoutMs) {
+            idleAborted = true;
+            // Record the abort reason on stderr + events *before* aborting, so
+            // it survives the runner promise rejecting and surfaces as the real
+            // cause in the coordinator result (the post-await path below is
+            // skipped once abort() makes the awaited promise reject).
+            stderr.push(idleAbortMessage);
+            this.onRuntimeOutput?.('stderr', idleAbortMessage);
+            emit('stderr', idleAbortMessage, { stream: 'stderr', reason: 'idle-timeout' });
+            abortController.abort();
+          }
+        }, Math.min(idleTimeoutMs, 60_000))
+      : undefined;
+    idleInterval?.unref?.();
+    const markActivity = (): void => { lastOutputMs = Date.now(); };
+
     try {
       const runnerResult = await withTimeout(
         this.runner(request.workflowFile, {
@@ -410,11 +437,13 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
           startFrom: retry.startFromStep,
           previousRunId: retry.previousRunId,
           onStdout: (line) => {
+            markActivity();
             stdout.push(line);
             this.onRuntimeOutput?.('stdout', line);
             emit('stdout', line, { stream: 'stdout' });
           },
           onStderr: (line) => {
+            markActivity();
             stderr.push(line);
             this.onRuntimeOutput?.('stderr', line);
             emit('stderr', line, { stream: 'stderr' });
@@ -446,9 +475,16 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      status = message.startsWith('timed out after ') ? 'timed_out' : 'failed';
-      stderr.push(message);
-      emit(status === 'timed_out' ? 'timeout' : 'error', message, { error: message });
+      // An idle-watchdog abort is a timeout, not a generic failure. Its marker
+      // is already on stderr/events from the watchdog callback, so don't push
+      // the raw abort error on top of it.
+      status = idleAborted || message.startsWith('timed out after ') ? 'timed_out' : 'failed';
+      if (!idleAborted) stderr.push(message);
+      emit(
+        status === 'timed_out' ? 'timeout' : 'error',
+        idleAborted ? idleAbortMessage : message,
+        idleAborted ? { error: message, reason: 'idle-timeout' } : { error: message },
+      );
       return coordinatorResultFromSdkRun({
         request,
         runId,
@@ -464,6 +500,11 @@ class SdkScriptWorkflowCoordinator implements CoordinatorLauncher {
         snippetLimit,
         error: message,
       });
+    } finally {
+      // Always clear the watchdog — covers a synchronous throw from
+      // this.runner() (before withTimeout is even reached) and every other
+      // exit path, so the interval can never leak.
+      if (idleInterval) clearInterval(idleInterval);
     }
   }
 }
@@ -616,6 +657,23 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout?: () =
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeout) clearTimeout(timeout);
   });
+}
+
+/**
+ * Resolve the inactivity-watchdog window. `RICKY_RUN_IDLE_TIMEOUT_MS=0`
+ * disables it; any positive integer overrides the default. A non-numeric,
+ * negative, or fractional value (e.g. `0.5`, which would floor to 0 and
+ * silently disable the watchdog) falls back to {@link DEFAULT_RUN_IDLE_TIMEOUT_MS}.
+ */
+function resolveIdleTimeoutMs(): number {
+  const raw = process.env.RICKY_RUN_IDLE_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_RUN_IDLE_TIMEOUT_MS;
+  const parsed = Number(raw);
+  // Require a non-negative integer. 0 explicitly disables the watchdog; any
+  // other value must be a whole number of ms — reject fractions so a typo
+  // like `0.5` does not floor to 0 and quietly turn the watchdog off.
+  if (!Number.isInteger(parsed) || parsed < 0) return DEFAULT_RUN_IDLE_TIMEOUT_MS;
+  return parsed;
 }
 
 export function createSdkScriptWorkflowRunner(): ScriptWorkflowRunner {
@@ -923,6 +981,16 @@ function isNoSuchProcessError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'ESRCH';
 }
 
+function resolveRepoContainedOutputPath(cwd: string, outputPath: string): string | undefined {
+  if (isAbsolute(outputPath)) return undefined;
+
+  const root = resolve(cwd);
+  const resolved = resolve(root, outputPath);
+  if (resolved === root) return undefined;
+  if (!resolved.startsWith(`${root}${sep}`)) return undefined;
+  return resolved;
+}
+
 async function workflowSdkLoaderNodeOption(cwd: string): Promise<string | undefined> {
   const runtime = await resolveWorkflowSdkRuntime(cwd);
   if (!runtime) return undefined;
@@ -1126,7 +1194,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
       let generationResult: GenerationResult | null = null;
 
       if (intakeResult.routing.target === 'generate' || !workflowFile) {
-        const executionPreference: ExecutionPreference = activeRequest.mode === 'both' ? 'auto' : 'local';
+        const executionPreference = generationExecutionPreference(activeRequest);
         const normalizedSpec = {
           ...intakeResult.routing.normalizedSpec,
           executionPreference,
@@ -1198,6 +1266,21 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
         onProgress?.(`Writing workflow artifact to ${artifact.artifactPath}...`);
         await artifactWriter.writeArtifact(artifact.artifactPath, artifact.content, cwd);
+        // Sidecar files travel with the master workflow on disk so the
+        // generated TS can stay small (master-renderer pushes the spec text
+        // and child source map here to avoid argv-blow-out from spawn E2BIG).
+        if (artifact.sidecarFiles) {
+          for (const [sidecarPath, sidecarContent] of Object.entries(artifact.sidecarFiles)) {
+            const resolvedSidecarPath = resolveRepoContainedOutputPath(cwd, sidecarPath);
+            if (!resolvedSidecarPath) {
+              warnings.push(`Skipped unsafe workflow sidecar path outside invocation root: ${sidecarPath}`);
+              logs.push(`[local] skipped unsafe workflow sidecar: ${sidecarPath}`);
+              continue;
+            }
+            await artifactWriter.writeArtifact(resolvedSidecarPath, sidecarContent, cwd);
+            logs.push(`[local] wrote workflow sidecar: ${sidecarPath}`);
+          }
+        }
         if (options.persistGenerationMetadataArtifacts === true) {
           await writeGenerationMetadataArtifacts(generationResult, artifactWriter, cwd);
         }
@@ -1244,6 +1327,26 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
 
       const route = await resolveLocalRuntimeRoute(cwd, options.route ?? DEFAULT_LOCAL_ROUTE, options);
       const workflowId = artifact?.workflowId ?? generationStage.artifact?.workflow_id ?? workflowIdForPath(runTarget);
+      const packageContextBlocker = await precheckPackageWorkflowContext(activeRequest, cwd, runTarget);
+      if (packageContextBlocker) {
+        const execution = createBlockerExecutionStage({
+          workflowId,
+          artifactPath: runTarget,
+          cwd,
+          route,
+          blocker: packageContextBlocker,
+        });
+        warnings.push(packageContextBlocker.message);
+        nextActions.push(...packageContextBlocker.recovery.steps);
+        return {
+          ok: false,
+          artifacts: dedupeArtifacts(artifacts),
+          logs,
+          warnings,
+          nextActions,
+          ...stageResponse(includeStageContract, generationStage, execution, 2),
+        };
+      }
       const precheckBlocker = await precheckRuntimeLaunch(runTarget, cwd, route, options);
       if (precheckBlocker) {
         const execution = createBlockerExecutionStage({
@@ -1277,7 +1380,11 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
         cwd,
         timeoutMs: options.timeoutMs,
         route,
-        env: { AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
+        // `--input KEY=VALUE` pairs are injected into the workflow runner env so
+        // workflow scripts can read them via process.env.KEY (e.g. TARGET_SPEC
+        // for the reusable review/fix workflows). AGENT_RELAY_RUN_ID_FILE wins
+        // on conflict since it is Ricky-owned runtime state.
+        env: { ...(activeRequest.inputs ?? {}), AGENT_RELAY_RUN_ID_FILE: runtimeRunIdFile },
         ...stableRunIdFor(activeRequest),
         retry: activeRequest.retry,
         metadata: {
@@ -1568,6 +1675,7 @@ function toRawSpecPayload(
     metadata: {
       ...request.metadata,
       mode: request.mode,
+      executionPreference: request.executionPreference,
       specPath: request.specPath,
       refine: request.refine,
       sourceMetadata: request.sourceMetadata,
@@ -1667,6 +1775,11 @@ function stableRunIdFor(request: LocalInvocationRequest): Pick<RunRequest, 'runI
   return request.requestId ? { runId: request.requestId } : {};
 }
 
+function generationExecutionPreference(request: LocalInvocationRequest): ExecutionPreference {
+  if (request.mode === 'both') return 'auto';
+  return request.mode === 'cloud' ? 'cloud' : 'local';
+}
+
 function resolveWorkforcePersonaWriterOptions(
   request: LocalInvocationRequest,
   options: LocalExecutorOptions,
@@ -1700,8 +1813,15 @@ function workflowFileForRoute(
   if (request.specPath && isExecutableWorkflowPath(request.specPath)) return request.specPath;
   if (route !== 'execute') return null;
 
-  const candidate = request.structuredSpec?.workflowFile ?? request.structuredSpec?.workflowPath;
-  if (typeof candidate === 'string' && isExecutableWorkflowPath(candidate)) return candidate;
+  const candidates = [
+    request.structuredSpec?.workflowFile,
+    request.structuredSpec?.workflowPath,
+    request.structuredSpec?.artifactPath,
+    request.structuredSpec?.workflowArtifactPath,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && isExecutableWorkflowPath(candidate)) return candidate;
+  }
   return workflowFileHint && isExecutableWorkflowPath(workflowFileHint) ? workflowFileHint : null;
 }
 
@@ -1924,6 +2044,43 @@ function digestSpec(spec: string): string {
 
 function workflowIdForPath(path: string): string {
   return `wf-${digestSpec(path).slice(0, 12)}`;
+}
+
+async function precheckPackageWorkflowContext(
+  request: LocalInvocationRequest,
+  cwd: string,
+  artifactPath: string,
+): Promise<LocalClassifiedBlocker | null> {
+  if (!requiresPackageManifestForLocalRun(request)) return null;
+
+  const { access } = await import('node:fs/promises');
+  const packageJsonPath = resolve(cwd, 'package.json');
+  try {
+    await access(packageJsonPath);
+    return null;
+  } catch {
+    return blocker({
+      code: 'UNSUPPORTED_RUNTIME',
+      category: 'unsupported',
+      detectedDuring: 'precheck',
+      message: `Local package-check workflow cannot run because ${packageJsonPath} is missing.`,
+      missing: [packageJsonPath],
+      found: [`cwd=${cwd}`],
+      steps: [
+        'Run the command from a Node package workspace that contains package.json.',
+        'Generate only with `--no-run`, or create package.json before running package checks.',
+        localRunCommand(artifactPath),
+      ],
+    });
+  }
+}
+
+function requiresPackageManifestForLocalRun(request: LocalInvocationRequest): boolean {
+  if (request.source === 'workflow-artifact') return false;
+  const spec = request.spec.toLowerCase();
+  const asksForPackageChecks = /\bpackage(?:\s+checks?|\s+scripts?|\s+manager|\.json)\b/.test(spec);
+  const asksForPackageCommands = /\b(typecheck|type\s+check|tests?|vitest|npm\s+test|pnpm\s+test|yarn\s+test)\b/.test(spec);
+  return asksForPackageChecks && asksForPackageCommands;
 }
 
 async function precheckRuntimeLaunch(
@@ -2301,6 +2458,22 @@ function classifyCoordinatorBlocker(
   const combined = [result.error, ...result.stderr, ...result.stdout].filter(Boolean).join('\n');
   const runtimePackage = npxNoInstallPackage(result.invocation.args);
 
+  if (matchesRuntimeHandoffStall(combined)) {
+    return blocker({
+      code: 'RUNTIME_HANDOFF_STALLED',
+      category: 'resource',
+      detectedDuring: 'launch',
+      message: `Runtime handoff stalled before workflow execution: ${signal}.`,
+      missing: ['local Agent Relay broker startup acknowledgement'],
+      found: [`cwd=${result.cwd}`, `status=${result.status}`, `exitCode=${result.exitCode ?? 'unknown'}`],
+      steps: [
+        'Stop stale agent-relay or Ricky child processes, then retry the same workflow artifact.',
+        'Inspect the local Ricky run logs for a broker startup timeout or missing runtime acknowledgement.',
+        command,
+      ],
+    });
+  }
+
   if (/Workflow runtime reported failure despite a zero process exit|\[workflow\]\s+FAILED:/i.test(combined)) {
     return blocker({
       code: 'INVALID_ARTIFACT',
@@ -2423,6 +2596,25 @@ function npxNoInstallPackage(args: string[]): string | undefined {
   const noInstallIndex = args.indexOf('--no-install');
   if (noInstallIndex === -1) return undefined;
   return args[noInstallIndex + 1];
+}
+
+function matchesRuntimeHandoffStall(text: string): boolean {
+  const patterns = [
+    /\bBroker did not report API port within \d+ms\b/i,
+    /\bBroker process exited with code \d+ before becoming ready\b/i,
+    /\bBroker process exited with code \d+ during initial handshake\b/i,
+    /\bFailed to start broker:/i,
+    /\bBroker stdout not available\b/i,
+    /\b(?:local|runtime|agent[-\s]?relay)\s+(?:broker\s+)?(?:handoff|startup).{0,80}\b(?:stall(?:ed)?|hung|timeout|timed\s+out)\b/i,
+    /\b(?:broker|agent[-\s]?relay\s+broker).{0,80}\b(?:startup|start|ack|acknowledg(?:e|ement)).{0,80}\b(?:timeout|timed\s+out|stall(?:ed)?|hung)\b/i,
+    /\b(?:timeout|timed\s+out).{0,80}\b(?:broker|agent[-\s]?relay\s+broker).{0,80}\b(?:startup|ack|acknowledg(?:e|ement))\b/i,
+    /\bUNSUPPORTED_RUNTIME\b.{0,120}\b(?:broker|handoff|runtime\s+startup)\b/i,
+  ];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine);
+    if (patterns.some((pattern) => pattern.test(line))) return true;
+  }
+  return false;
 }
 
 // Match credential failures by requiring an explicit rejection signal — bare

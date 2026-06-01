@@ -17,6 +17,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const DEFAULT_OPENCODE_MODEL = 'opencode/minimax-m2.5-free';
 const DEFAULT_OPENROUTER_MODEL = 'openai/gpt-oss-120b:free';
 const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_PROVIDER_INFRA_SKIP_PREFIX = 'openrouter executor skipped; transient provider infrastructure unavailable';
 const { argv: evalArgv, executorOverride } = parseRickyEvalArgs(process.argv.slice(2));
 const defaultExecutors = createDefaultHumanEvalExecutors(ROOT);
 
@@ -93,6 +94,12 @@ async function executeOpenRouter(testCase, context) {
       emptyAttempts.push(`attempt ${attempt}: ${note || 'empty content'}`);
     } catch (error) {
       if (attempt >= maxAttempts || !isRetryableOpenRouterError(error)) {
+        if (isRetryableOpenRouterError(error)) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw createSkippedEvalError(
+            `${OPENROUTER_PROVIDER_INFRA_SKIP_PREFIX} after ${maxAttempts} attempts for ${testCase.id}: ${message}`,
+          );
+        }
         throw error;
       }
       emptyAttempts.push(`attempt ${attempt}: ${error instanceof Error ? error.message : String(error)}`);
@@ -338,24 +345,35 @@ function readGeneratedArtifactContent(stdout, workingDir) {
   const realWorkingDir = safeRealpath(workingDir);
   if (!realWorkingDir) return '';
   for (const artifactPath of artifactPaths) {
-    const fullPath = path.resolve(workingDir, artifactPath);
-    if (!existsSync(fullPath)) continue;
-    const realFullPath = safeRealpath(fullPath);
-    if (!realFullPath) continue;
-    if (realFullPath !== realWorkingDir && !realFullPath.startsWith(`${realWorkingDir}${path.sep}`)) {
-      continue;
+    for (const generatedPath of generatedArtifactAndSidecarPaths(artifactPath)) {
+      const fullPath = path.resolve(workingDir, generatedPath);
+      if (!existsSync(fullPath)) continue;
+      const realFullPath = safeRealpath(fullPath);
+      if (!realFullPath) continue;
+      if (realFullPath !== realWorkingDir && !realFullPath.startsWith(`${realWorkingDir}${path.sep}`)) {
+        continue;
+      }
+      try {
+        if (!statSync(realFullPath).isFile()) continue;
+      } catch {
+        continue;
+      }
+      sections.push([
+        `\n--- GENERATED ARTIFACT: ${generatedPath} ---`,
+        readFileSync(realFullPath, 'utf8'),
+      ].join('\n'));
     }
-    try {
-      if (!statSync(realFullPath).isFile()) continue;
-    } catch {
-      continue;
-    }
-    sections.push([
-      `\n--- GENERATED ARTIFACT: ${artifactPath} ---`,
-      readFileSync(realFullPath, 'utf8'),
-    ].join('\n'));
   }
   return sections.join('\n');
+}
+
+function generatedArtifactAndSidecarPaths(artifactPath) {
+  const paths = [artifactPath];
+  if (artifactPath.startsWith('workflows/generated/') && artifactPath.endsWith('.ts')) {
+    const stem = artifactPath.slice(0, -'.ts'.length);
+    paths.push(`${stem}.spec.md`, `${stem}.children.json`);
+  }
+  return paths;
 }
 
 function safeRealpath(value) {

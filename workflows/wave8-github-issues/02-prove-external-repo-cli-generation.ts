@@ -28,8 +28,8 @@ async function main() {
         'mkdir -p .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation',
         'printf "%s\\n" "Issue #6: add real-user external-repo proof for Ricky interactive/local CLI generation" "Summary: prove installed or linked CLI usage from a separate repo, with generated workflows written into that repo." "Acceptance: automated external-repo CLI proof, generated file exists where Ricky says it exists, next command works against that same path, proof belongs to product-facing readiness." > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/issue-6.md',
         'cat package.json > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/root-package.json',
-        'cat packages/cli/package.json > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/cli-package.json',
-        'sed -n "1,300p" packages/cli/src/commands/cli-main.test.ts > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/cli-main-test.before.txt',
+        'cat package.json > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/cli-package.json',
+        'sed -n "1,300p" src/surfaces/cli/commands/cli-main.test.ts > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/cli-main-test.before.txt',
         'echo PREPARE_CONTEXT_OK',
       ].join(' && '),
       captureOutput: true,
@@ -48,9 +48,9 @@ Acceptance contract:
 - make this product-facing readiness evidence, not only an internal package unit test
 
 Likely files:
-- packages/cli/src/commands/cli-main.test.ts
-- packages/cli/src/entrypoint/interactive-cli.test.ts
-- packages/cli/src/cli/proof/onboarding-proof.ts or a new external CLI proof helper under packages/cli/src/cli/proof/
+- src/surfaces/cli/commands/cli-main.test.ts
+- src/surfaces/cli/entrypoint/interactive-cli.test.ts
+- src/surfaces/cli/cli/proof/onboarding-proof.ts or a new external CLI proof helper under src/surfaces/cli/cli/proof/
 - docs/product/ricky-next-wave-backlog-and-proof-plan.md if readiness proof inventory needs updating
 
 Use mkdtemp external repos and injected runners when possible. If a linked binary is not currently exposed, document and implement the narrow packaging seam needed for local proof.`,
@@ -61,8 +61,8 @@ Use mkdtemp external repos and injected runners when possible. If a linked binar
       dependsOn: ['implement-external-repo-proof'],
       command: [
         '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/changed-files.txt',
-        'grep -Eq "packages/cli/src/.+\\.(ts|test\\.ts)$|docs/product/.+\\.md$|package\\.json|packages/cli/package\\.json" .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/changed-files.txt',
-        'grep -R "external repo\\|separate repo\\|INIT_CWD\\|workflows/generated\\|agent-relay run" packages/cli/src docs/product package.json packages/cli/package.json >/dev/null',
+        'grep -Eq "src/surfaces/cli/.+\\.(ts|test\\.ts)$|docs/product/.+\\.md$|package\\.json|packages/cli/package\\.json" .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/changed-files.txt',
+        'grep -R "external repo\\|separate repo\\|INIT_CWD\\|workflows/generated\\|agent-relay run" src/surfaces/cli docs/product package.json package.json >/dev/null',
         'echo POST_IMPLEMENTATION_FILE_GATE_OK',
       ].join(' && '),
       captureOutput: true,
@@ -97,7 +97,7 @@ Write .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation
       command: [
         'TMP_REPO=$(mktemp -d)',
         'trap "rm -rf $TMP_REPO" EXIT',
-        'RICKY_BIN="$PWD/packages/cli/bin/ricky"',
+        'RICKY_BIN="$PWD/dist/ricky.js"',
         'test -f "$RICKY_BIN"',
         'chmod +x "$RICKY_BIN"',
         '(cd "$TMP_REPO" && INIT_CWD="$TMP_REPO" "$RICKY_BIN" --mode local --spec "generate a workflow for external package checks") > .workflow-artifacts/wave8-github-issues/prove-external-repo-cli-generation/external-repo-smoke.txt 2>&1',

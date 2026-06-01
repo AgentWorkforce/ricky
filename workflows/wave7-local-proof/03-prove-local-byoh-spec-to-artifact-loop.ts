@@ -31,7 +31,7 @@ async function main() {
       type: 'deterministic',
       command: [
         'mkdir -p .workflow-artifacts/wave7-local-proof/prove-local-byoh-spec-to-artifact-loop',
-        'mkdir -p packages/local/src/proof packages/cli/src/proof',
+        'mkdir -p src/local/proof src/surfaces/cli/proof',
         'echo RICKY_WAVE7_LOCAL_SPEC_LOOP_READY',
       ].join(' && '),
       captureOutput: true,
@@ -41,13 +41,13 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" packages/local/src/entrypoint.ts',
+        'sed -n "1,260p" src/local/entrypoint.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/local/src/entrypoint.test.ts',
+        'sed -n "1,260p" src/local/entrypoint.test.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/cli/src/entrypoint/interactive-cli.ts',
+        'sed -n "1,260p" src/surfaces/cli/entrypoint/interactive-cli.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/product/src/generation/index.ts',
+        'sed -n "1,260p" src/product/generation/index.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -56,23 +56,23 @@ async function main() {
       agent: 'impl-codex',
       dependsOn: ['read-local-cli-product-context'],
       task: `Implement the proof slice only in these files:
-- packages/local/src/proof/local-entrypoint-proof.ts
-- packages/local/src/proof/local-entrypoint-proof.test.ts
-- packages/local/src/entrypoint.test.ts
-- packages/cli/src/entrypoint/interactive-cli.test.ts
+- src/local/proof/local-entrypoint-proof.ts
+- src/local/proof/local-entrypoint-proof.test.ts
+- src/local/entrypoint.test.ts
+- src/surfaces/cli/entrypoint/interactive-cli.test.ts
 
 Requirements:
 - prove a local CLI spec can become a normalized request, generated artifact metadata, validator result, and user-facing response
 - include a failure fixture for missing local prerequisites or missing spec material
 - keep the runtime adapter deterministic; do not require live Cloud or external credentials
 - make the proof artifact quality high enough that a human can tell whether Ricky is closer to testable after this slice`,
-      verification: { type: 'file_exists', value: 'packages/local/src/proof/local-entrypoint-proof.ts' },
+      verification: { type: 'file_exists', value: 'src/local/proof/local-entrypoint-proof.ts' },
     })
     .step('proof-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-local-spec-loop-proof'],
       command: [
-        'grep -Eq "normalized request|artifact|validator|blocker|local prerequisite|spec" packages/local/src/proof/local-entrypoint-proof.ts packages/local/src/proof/local-entrypoint-proof.test.ts packages/local/src/entrypoint.test.ts packages/cli/src/entrypoint/interactive-cli.test.ts',
+        'grep -Eq "normalized request|artifact|validator|blocker|local prerequisite|spec" src/local/proof/local-entrypoint-proof.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts',
         'echo LOCAL_SPEC_LOOP_PROOF_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,

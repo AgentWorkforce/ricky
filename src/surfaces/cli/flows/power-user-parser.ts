@@ -48,6 +48,12 @@ export interface PowerUserParsedArgs {
   bestJudgement?: boolean;
   login?: boolean;
   connectMissing?: boolean;
+  /**
+   * KEY=VALUE pairs from repeated `--input KEY=VALUE` flags. Injected into the
+   * workflow runner subprocess env so workflow scripts can read them via
+   * `process.env.KEY` (e.g. `TARGET_SPEC` for reusable review/fix workflows).
+   */
+  inputs?: Record<string, string>;
   /** Set only when the CLI passes --workforce-persona/--no-workforce-persona; omitted otherwise. */
   workforcePersonaWriterCli?: boolean;
   errors?: string[];
@@ -141,6 +147,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const login = effectiveArgv.includes('--login');
   const connectMissing = effectiveArgv.includes('--connect-missing');
   const workforcePersonaWriterCli = parseWorkforcePersonaWriterCliFlag(effectiveArgv);
+  const inputs = parseInputFlags(effectiveArgv);
 
   const errors: string[] = [...(parsed.errors ?? [])];
   if (surface === 'workflow' && modeFlagPresent && !explicitMode) {
@@ -153,6 +160,9 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
     if (effectiveArgv.includes(flag) && readFlagValue(effectiveArgv, flag) === undefined) {
       errors.push(`${flag} requires a value.`);
     }
+  }
+  if (inputs.errors.length > 0) {
+    errors.push(...inputs.errors);
   }
   if (artifact && (spec !== undefined || specFile !== undefined || stdin)) {
     errors.push('Artifact execution cannot be combined with --spec, --spec-file, --file, or --stdin.');
@@ -181,9 +191,60 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
     ...(bestJudgement ? { bestJudgement: true } : {}),
     ...(login ? { login: true } : {}),
     ...(connectMissing ? { connectMissing: true } : {}),
+    ...(Object.keys(inputs.values).length > 0 ? { inputs: inputs.values } : {}),
     ...(workforcePersonaWriterCli !== undefined ? { workforcePersonaWriterCli } : {}),
     ...(errors.length > 0 ? { errors } : {}),
   };
+}
+
+/**
+ * Parse repeated `--input KEY=VALUE` flags into a record. Both `--input K=V`
+ * and `--input=K=V` forms are accepted. The KEY must be a valid env-var name
+ * ([A-Za-z_][A-Za-z0-9_]*); anything else is reported as an error. The VALUE
+ * may be empty (`--input TARGET_SPEC=`) — callers fill it in via a trailing
+ * positional in some scripts, so an empty value is not an error here.
+ */
+function parseInputFlags(argv: string[]): { values: Record<string, string>; errors: string[] } {
+  const values: Record<string, string> = {};
+  const errors: string[] = [];
+  const KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    let pair: string | undefined;
+    if (arg === '--input') {
+      const next = argv[index + 1];
+      // Only consume the next token as the value when it is a real argument,
+      // not another flag. Advancing the index past a following flag (e.g.
+      // `--input --run`) would silently drop that flag from parsing.
+      if (next === undefined || next.startsWith('--')) {
+        errors.push('--input requires a KEY=VALUE argument.');
+        continue;
+      }
+      pair = next;
+      index += 1;
+    } else if (arg.startsWith('--input=')) {
+      pair = arg.slice('--input='.length);
+    } else {
+      continue;
+    }
+    if (pair === '') {
+      errors.push('--input requires a KEY=VALUE argument.');
+      continue;
+    }
+    const eq = pair.indexOf('=');
+    if (eq <= 0) {
+      errors.push(`--input "${pair}" must be in KEY=VALUE form.`);
+      continue;
+    }
+    const key = pair.slice(0, eq);
+    const value = pair.slice(eq + 1);
+    if (!KEY_RE.test(key)) {
+      errors.push(`--input key "${key}" is not a valid environment variable name.`);
+      continue;
+    }
+    values[key] = value;
+  }
+  return { values, errors };
 }
 
 function parseConnect(argv: string[]): PowerUserParsedArgs {

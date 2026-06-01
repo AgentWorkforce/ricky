@@ -47,7 +47,7 @@ describe('workforce persona workflow writer', () => {
     expect(task).toContain('If the normalized spec declares `Worktree: <absolute path>`');
     expect(task).toContain('Never use `test -f` for a worktree/repository directory');
     expect(task).toContain('deterministic sanity gate');
-    expect(task).toContain('POSIX grep, git grep');
+    expect(task).toContain('structural checks, scoped file/diff checks');
     expect(task).toContain('If using rg, guard it with command -v rg');
     expect(task).toContain('Keep agent steps bounded');
     expect(task).toContain('Structured response contract');
@@ -218,6 +218,18 @@ describe('workforce persona workflow writer', () => {
     expect(parsed.responseFormat).toBe('fenced-artifact');
     expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
     expect(parsed.metadata).toMatchObject({ workflowName: 'persona' });
+  });
+
+  it('parses a bare fenced TypeScript artifact without metadata', () => {
+    const parsed = parsePersonaWorkflowResponse([
+      '```ts',
+      workflowSource(),
+      '```',
+    ].join('\n'), 'workflows/generated/persona.ts');
+
+    expect(parsed.responseFormat).toBe('fenced-artifact');
+    expect(parsed.content).toContain('.run({ cwd: process.cwd() })');
+    expect(parsed.metadata).toEqual({});
   });
 
   it('accepts multiline run options when cwd is explicit', () => {
@@ -1247,30 +1259,14 @@ describe('workforce persona workflow writer', () => {
     );
   });
 
-  it('preserves npm load failure wording when harness-kit cannot be imported', async () => {
-    const failImport = async () => {
-      throw new Error('simulated package load failure');
-    };
-
-    await expect(loadWorkforcePersonaModule(failImport)).rejects.toMatchObject({
-      name: 'WorkforcePersonaWriterError',
-      message: expect.stringContaining('@agentworkforce/harness-kit could not be loaded'),
-      warnings: [expect.stringContaining('simulated package load failure')],
-    });
-  });
-
-  it('preserves missing-export wording when harness-kit imports but lacks runnable APIs', async () => {
-    const importWrongShape = async () => ({
-      buildInteractiveSpec() {
-        return {};
-      },
-    });
-
-    await expect(loadWorkforcePersonaModule(importWrongShape)).rejects.toMatchObject({
-      name: 'WorkforcePersonaWriterError',
-      message: expect.stringContaining('does not expose the runnable persona API'),
-      warnings: [expect.stringContaining('exports: buildInteractiveSpec')],
-    });
+  it('loadWorkforcePersonaModule resolves to a module with useRunnablePersona and useRunnableSelection', async () => {
+    // loadWorkforcePersonaModule now always loads the local persona-kit-runner adapter;
+    // the importPackage parameter is ignored.
+    const result = await loadWorkforcePersonaModule();
+    expect(typeof result.module.useRunnablePersona).toBe('function');
+    expect(typeof result.module.useRunnableSelection).toBe('function');
+    expect(result.source).toBe('package');
+    expect(result.warnings).toHaveLength(0);
   });
 
   it('preserves npm load failure wording when workload-router cannot be imported', async () => {
@@ -2533,6 +2529,72 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     ].join('\n');
 
     expect(detectSpecIntentMismatch(spec, workflowWithWorktreeSetup)).toEqual([]);
+  });
+
+  it('accepts worktree setup commands assembled with array join and constants', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-mcp-cloud-spawn-hardening',
+        'Target branch: chore/mcp-cloud-spawn-hardening',
+      ].join('\n'),
+    };
+    const workflowWithJoinedCommand = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'const REPO_ROOT = "/Users/khaliqgant/Projects/AgentWorkforce/cloud";',
+      'const WORKTREE = "/private/tmp/cloud-mcp-cloud-spawn-hardening";',
+      'const BRANCH = "chore/mcp-cloud-spawn-hardening";',
+      'async function main() {',
+      '  await workflow("with-joined-command")',
+      '    .step("setup-worktree", {',
+      '      type: "deterministic",',
+      '      command: [',
+      '        "set -e",',
+      '        `git -C ${REPO_ROOT} fetch origin main --quiet`,',
+      '        `git -C ${REPO_ROOT} worktree add ${WORKTREE} -b ${BRANCH} origin/main`,',
+      '      ].join("\\n"),',
+      '    })',
+      '    .step("implement", { type: "deterministic", command: `git -C ${WORKTREE} status --short` })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, workflowWithJoinedCommand)).toEqual([]);
+  });
+
+  it('resolves repeated variable references independently across joined command siblings', () => {
+    const spec = {
+      description: [
+        'Outcome: one pull request in cloud opened against origin/main.',
+        'Worktree: /private/tmp/cloud-repeated-worktree-var',
+        'Target branch: chore/repeated-worktree-var',
+      ].join('\n'),
+    };
+    const workflowWithRepeatedVariable = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'const WORKTREE = "/private/tmp/cloud-repeated-worktree-var";',
+      'const BRANCH = "chore/repeated-worktree-var";',
+      'async function main() {',
+      '  await workflow("with-repeated-variable")',
+      '    .step("setup-worktree", {',
+      '      type: "deterministic",',
+      '      command: [',
+      '        `test -d ${WORKTREE} || true`,',
+      '        `git worktree add ${WORKTREE} ${BRANCH}`,',
+      '      ].join("\\n"),',
+      '    })',
+      '    .step("implement", { type: "deterministic", command: `git -C ${WORKTREE} status --short` })',
+      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, workflowWithRepeatedVariable)).toEqual([]);
   });
 
   it('flags test -f gates over declared worktree directories and glob paths', () => {

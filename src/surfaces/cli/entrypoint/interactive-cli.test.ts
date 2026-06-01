@@ -536,6 +536,7 @@ describe('runInteractiveCli', () => {
         generate: vi.fn().mockResolvedValue({
           artifacts: [{ path: 'cloud/workflow.ts', type: 'text/typescript' }],
           warnings: [],
+          validation: { ok: true, status: 'passed', issues: [] },
           followUpActions: [{
             action: 'deploy',
             label: 'Deploy',
@@ -591,6 +592,7 @@ describe('runInteractiveCli', () => {
     const generate = vi.fn().mockResolvedValue({
       artifacts: [{ path: 'cloud/generated/workflow.ts', type: 'text/typescript' }],
       warnings: [],
+      validation: { ok: true, status: 'passed', issues: [] },
       followUpActions: [],
     });
 
@@ -617,8 +619,8 @@ describe('runInteractiveCli', () => {
 
       expect(result.ok).toBe(true);
       expect(generate).toHaveBeenCalledWith(expect.objectContaining({
-        auth: { token: 'token-from-env' },
-        workspace: { workspaceId: 'workspace-from-env' },
+        auth: expect.objectContaining({ token: 'token-from-env' }),
+        workspace: expect.objectContaining({ workspaceId: 'workspace-from-env' }),
         body: expect.objectContaining({
           spec: 'Generate a Cloud workflow from the interactive menu.',
           mode: 'cloud',
@@ -695,6 +697,7 @@ describe('runInteractiveCli', () => {
     const generate = vi.fn().mockResolvedValue({
       artifacts: [{ path: 'cloud/generated/readiness-first.ts', type: 'text/typescript' }],
       warnings: [],
+      validation: { ok: true, status: 'passed', issues: [] },
       followUpActions: [],
     });
 
@@ -748,8 +751,8 @@ describe('runInteractiveCli', () => {
       expect(selectOptionalCloudIntegrations).toHaveBeenCalledTimes(1);
       expect(connectCloudIntegrations).toHaveBeenCalledWith(['github']);
       expect(generate).toHaveBeenCalledWith(expect.objectContaining({
-        auth: { token: 'token-after-recovery' },
-        workspace: { workspaceId: 'workspace-after-recovery' },
+        auth: expect.objectContaining({ token: 'token-after-recovery' }),
+        workspace: expect.objectContaining({ workspaceId: 'workspace-after-recovery' }),
       }));
     } finally {
       if (previousToken === undefined) delete process.env.AGENTWORKFORCE_CLOUD_TOKEN;
@@ -809,6 +812,7 @@ describe('runInteractiveCli', () => {
     const generate = vi.fn().mockResolvedValue({
       artifacts: [{ path: 'cloud/generated/profile-workspace.ts', type: 'text/typescript' }],
       warnings: [],
+      validation: { ok: true, status: 'passed', issues: [] },
       followUpActions: [],
     });
 
@@ -838,8 +842,8 @@ describe('runInteractiveCli', () => {
       expect(result.ok).toBe(true);
       expect(resolveCloudWorkspace).toHaveBeenCalledWith(auth);
       expect(generate).toHaveBeenCalledWith(expect.objectContaining({
-        auth: { token: 'token-from-auth' },
-        workspace: { workspaceId: 'workspace-from-profile' },
+        auth: expect.objectContaining({ token: 'token-from-auth' }),
+        workspace: expect.objectContaining({ workspaceId: 'workspace-from-profile' }),
       }));
     } finally {
       if (previousToken === undefined) delete process.env.AGENTWORKFORCE_CLOUD_TOKEN;
@@ -863,6 +867,7 @@ describe('runInteractiveCli', () => {
     const generate = vi.fn().mockResolvedValue({
       artifacts: [{ path: 'cloud/workflow.ts', type: 'text/typescript' }],
       warnings: [],
+      validation: { ok: true, status: 'passed', issues: [] },
       followUpActions: [],
     });
 
@@ -944,6 +949,7 @@ describe('runInteractiveCli', () => {
         generate: vi.fn().mockResolvedValue({
           artifacts: [{ path: 'cloud/workflow.ts', type: 'text/typescript' }],
           warnings: [],
+          validation: { ok: true, status: 'passed', issues: [] },
           followUpActions: [],
         }),
       },
@@ -1005,6 +1011,7 @@ describe('runInteractiveCli', () => {
         generate: vi.fn().mockResolvedValue({
           artifacts: [{ path: 'cloud/workflow.ts', type: 'text/typescript' }],
           warnings: [],
+          validation: { ok: true, status: 'passed', issues: [] },
           followUpActions: [],
         }),
       },
@@ -1049,6 +1056,7 @@ describe('runInteractiveCli', () => {
     const generate = vi.fn().mockResolvedValue({
       artifacts: [{ path: 'cloud/generated/dynamic-integrations.ts', type: 'text/typescript' }],
       warnings: [],
+      validation: { ok: true, status: 'passed', issues: [] },
       followUpActions: [],
     });
 
@@ -1098,6 +1106,7 @@ describe('runInteractiveCli', () => {
     const generate = vi.fn().mockResolvedValue({
       artifacts: [{ path: 'cloud/workflow.ts', type: 'text/typescript' }],
       warnings: [],
+      validation: { ok: true, status: 'passed', issues: [] },
       followUpActions: [],
     });
 
@@ -1147,7 +1156,9 @@ describe('runInteractiveCli', () => {
 
     expect(result.ok).toBe(false);
     expect(result.guidance.join('\n')).toMatch(/Generation failed/i);
-    expect(result.guidance.join('\n')).toMatch(/provider offline/i);
+    expect(result.guidance.join('\n')).toMatch(/Cloud generation failed before validation completed/i);
+    expect(result.guidance.join('\n')).toMatch(/request ID/i);
+    expect(result.guidance.join('\n')).not.toMatch(/provider offline/i);
   });
 
   it('in both mode, runs cloud after a successful local pass when cloud context exists', async () => {
@@ -1171,6 +1182,7 @@ describe('runInteractiveCli', () => {
         generate: vi.fn().mockResolvedValue({
           artifacts: [{ path: 'cloud/workflow.ts', type: 'text/typescript' }],
           warnings: [],
+          validation: { ok: true, status: 'passed', issues: [] },
           followUpActions: [],
         }),
       },
@@ -1601,6 +1613,7 @@ describe('runInteractiveCli', () => {
         generate: vi.fn().mockResolvedValue({
           artifacts: [],
           warnings: [],
+          validation: { ok: true, status: 'passed', issues: [] },
           followUpActions: [],
         }),
       },

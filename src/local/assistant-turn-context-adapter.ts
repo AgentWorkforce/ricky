@@ -84,8 +84,10 @@ export async function assembleRickyTurnContext(
   request: LocalInvocationRequest,
   options: AssembleRickyTurnContextOptions = {},
 ): Promise<TurnContextAssembly> {
+  const input = toRickyTurnContextInput(request);
   const assembler = options.assembler ?? createTurnContextAssembler();
-  return assembler.assemble(toRickyTurnContextInput(request));
+  const assembly = await assembler.assemble(input);
+  return preserveRickyEnrichmentMetadata(assembly, input);
 }
 
 function enrichmentCandidatesFor(request: LocalInvocationRequest): TurnEnrichmentCandidate[] {
@@ -170,6 +172,44 @@ function enrichmentCandidatesFor(request: LocalInvocationRequest): TurnEnrichmen
   });
 
   return candidates;
+}
+
+function preserveRickyEnrichmentMetadata(
+  assembly: TurnContextAssembly,
+  input: TurnContextInput,
+): TurnContextAssembly {
+  const metadataByBlockId = new Map<string, Record<string, unknown>>();
+  for (const candidate of input.enrichment?.candidates ?? []) {
+    if (candidate.metadata) {
+      metadataByBlockId.set(`enrichment-${candidate.id}`, candidate.metadata);
+    }
+  }
+
+  if (metadataByBlockId.size === 0) return assembly;
+
+  let changed = false;
+  const blocks = assembly.context.blocks.map((block) => {
+    const metadata = metadataByBlockId.get(block.id);
+    if (!metadata) return block;
+
+    changed = true;
+    return {
+      ...block,
+      metadata: {
+        ...(block.metadata ?? {}),
+        ...metadata,
+      },
+    };
+  });
+
+  if (!changed) return assembly;
+  return {
+    ...assembly,
+    context: {
+      ...assembly.context,
+      blocks,
+    },
+  };
 }
 
 function fallbackTurnId(request: LocalInvocationRequest): string {

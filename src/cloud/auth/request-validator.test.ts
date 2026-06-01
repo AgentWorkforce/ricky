@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import {
   WorkspaceScopingError,
+  CLOUD_INTEGRATIONS_DASHBOARD_URL,
+  GITHUB_CONNECT_GUIDANCE,
+  GITHUB_CONNECT_INSTRUCTIONS,
+  GOOGLE_CONNECT_GUIDANCE,
+  GOOGLE_CONNECT_COMMAND,
+  GOOGLE_CONNECT_INSTRUCTIONS,
+  LINEAR_CONNECT_GUIDANCE,
+  LINEAR_CONNECT_DASHBOARD_URL,
+  LINEAR_CONNECT_INSTRUCTIONS,
+  NOTION_CONNECT_GUIDANCE,
+  PROVIDER_TYPES,
+  SLACK_CONNECT_GUIDANCE,
   assertWorkspaceMatch,
   createWorkspaceScopedQuery,
   getProviderConnectGuidance,
@@ -13,38 +25,45 @@ import {
   validateRequestMode,
   validateWorkspaceContext,
 } from './index.js';
-import type { CloudAuthContext, CloudWorkspaceContext, ProviderConnectionState } from './types.js';
+import type {
+  CloudAuthContext,
+  CloudRequestValidationOptions,
+  CloudWorkspaceContext,
+  ProviderConnectionState,
+} from './types.js';
 
 describe('validateAuthContext', () => {
+  const missingTokenFailure = {
+    ok: false,
+    error: 'Missing or empty auth token.',
+    status: 401,
+    code: 'missing-auth-token',
+    path: 'auth.token',
+  };
+
   it('rejects undefined auth', () => {
-    expect(validateAuthContext(undefined)).toEqual({
-      ok: false,
-      error: 'Missing or empty auth token.',
-      status: 401,
-    });
+    expect(validateAuthContext(undefined)).toEqual(missingTokenFailure);
   });
 
   it('rejects empty token', () => {
-    expect(validateAuthContext({ token: '' })).toEqual({
-      ok: false,
-      error: 'Missing or empty auth token.',
-      status: 401,
-    });
+    expect(validateAuthContext({ token: '' })).toEqual(missingTokenFailure);
   });
 
   it('rejects a missing API key', () => {
-    expect(validateAuthContext({ token: '', tokenType: 'api-key' })).toEqual({
-      ok: false,
-      error: 'Missing or empty auth token.',
-      status: 401,
-    });
+    expect(validateAuthContext({ token: '', tokenType: 'api-key' })).toEqual(missingTokenFailure);
   });
 
   it('rejects whitespace-only token', () => {
-    expect(validateAuthContext({ token: '   ' })).toEqual({
+    expect(validateAuthContext({ token: '   ' })).toEqual(missingTokenFailure);
+  });
+
+  it('rejects malformed token strings containing whitespace', () => {
+    expect(validateAuthContext({ token: 'bearer token' })).toEqual({
       ok: false,
-      error: 'Missing or empty auth token.',
+      error: 'Invalid auth token.',
       status: 401,
+      code: 'invalid-auth-token',
+      path: 'auth.token',
     });
   });
 
@@ -76,45 +95,53 @@ describe('validateAuthContext', () => {
       ok: false,
       error: 'Invalid auth token type.',
       status: 400,
+      code: 'invalid-auth-token-type',
+      path: 'auth.tokenType',
     });
   });
 
   it('returns 401 instead of throwing when token is null', () => {
     const auth = { token: null } as unknown as CloudAuthContext;
 
-    expect(validateAuthContext(auth)).toEqual({
-      ok: false,
-      error: 'Missing or empty auth token.',
-      status: 401,
-    });
+    expect(validateAuthContext(auth)).toEqual(missingTokenFailure);
   });
 
   it('returns 401 instead of throwing when token is a number', () => {
     const auth = { token: 12345 } as unknown as CloudAuthContext;
 
-    expect(validateAuthContext(auth)).toEqual({
-      ok: false,
-      error: 'Missing or empty auth token.',
-      status: 401,
-    });
+    expect(validateAuthContext(auth)).toEqual(missingTokenFailure);
   });
 });
 
 describe('validateWorkspaceContext', () => {
+  const missingWorkspaceFailure = {
+    ok: false,
+    error: 'Missing or empty workspace ID.',
+    status: 400,
+    code: 'missing-workspace-id',
+    path: 'workspace.workspaceId',
+  };
+  const invalidProjectFailure = {
+    ok: false,
+    error: 'Missing or empty project ID.',
+    status: 400,
+    code: 'invalid-project-id',
+    path: 'workspace.projectId',
+  };
+  const invalidEnvironmentFailure = {
+    ok: false,
+    error: 'Missing or empty environment.',
+    status: 400,
+    code: 'invalid-environment',
+    path: 'workspace.environment',
+  };
+
   it('rejects undefined workspace', () => {
-    expect(validateWorkspaceContext(undefined)).toEqual({
-      ok: false,
-      error: 'Missing or empty workspace ID.',
-      status: 400,
-    });
+    expect(validateWorkspaceContext(undefined)).toEqual(missingWorkspaceFailure);
   });
 
   it('rejects empty workspaceId', () => {
-    expect(validateWorkspaceContext({ workspaceId: '' })).toEqual({
-      ok: false,
-      error: 'Missing or empty workspace ID.',
-      status: 400,
-    });
+    expect(validateWorkspaceContext({ workspaceId: '' })).toEqual(missingWorkspaceFailure);
   });
 
   it('accepts valid workspaceId', () => {
@@ -145,53 +172,53 @@ describe('validateWorkspaceContext', () => {
   });
 
   it('rejects empty projectId when project context is present', () => {
-    expect(validateWorkspaceContext({ workspaceId: 'ws-001', projectId: ' ' })).toEqual({
-      ok: false,
-      error: 'Missing or empty project ID.',
-      status: 400,
-    });
+    expect(validateWorkspaceContext({ workspaceId: 'ws-001', projectId: ' ' })).toEqual(
+      invalidProjectFailure,
+    );
   });
 
   it('rejects missing projectId when project context is required', () => {
-    expect(validateWorkspaceContext({ workspaceId: 'ws-001' }, { requireProject: true })).toEqual({
-      ok: false,
-      error: 'Missing or empty project ID.',
-      status: 400,
-    });
+    expect(validateWorkspaceContext({ workspaceId: 'ws-001' }, { requireProject: true })).toEqual(
+      invalidProjectFailure,
+    );
   });
 
   it('returns 400 instead of throwing when workspaceId is null', () => {
     const workspace = { workspaceId: null } as unknown as CloudWorkspaceContext;
 
-    expect(validateWorkspaceContext(workspace)).toEqual({
-      ok: false,
-      error: 'Missing or empty workspace ID.',
-      status: 400,
-    });
+    expect(validateWorkspaceContext(workspace)).toEqual(missingWorkspaceFailure);
   });
 
   it('returns 400 instead of throwing when workspaceId is a number', () => {
     const workspace = { workspaceId: 42 } as unknown as CloudWorkspaceContext;
 
-    expect(validateWorkspaceContext(workspace)).toEqual({
-      ok: false,
-      error: 'Missing or empty workspace ID.',
-      status: 400,
-    });
+    expect(validateWorkspaceContext(workspace)).toEqual(missingWorkspaceFailure);
   });
 
   it('returns 400 when projectId is a non-string value', () => {
     const workspace = { workspaceId: 'ws-001', projectId: 123 } as unknown as CloudWorkspaceContext;
 
-    expect(validateWorkspaceContext(workspace)).toEqual({
-      ok: false,
-      error: 'Missing or empty project ID.',
-      status: 400,
-    });
+    expect(validateWorkspaceContext(workspace)).toEqual(invalidProjectFailure);
+  });
+
+  it('returns 400 when environment is empty or non-string', () => {
+    const emptyEnvironment = { workspaceId: 'ws-001', environment: ' ' };
+    const numericEnvironment = { workspaceId: 'ws-001', environment: 123 } as unknown as CloudWorkspaceContext;
+
+    expect(validateWorkspaceContext(emptyEnvironment)).toEqual(invalidEnvironmentFailure);
+    expect(validateWorkspaceContext(numericEnvironment)).toEqual(invalidEnvironmentFailure);
   });
 });
 
 describe('validateRequestMode', () => {
+  const invalidModeFailure = {
+    ok: false,
+    error: 'Invalid request mode.',
+    status: 400,
+    code: 'invalid-mode',
+    path: 'body.mode',
+  };
+
   it('defaults to cloud mode', () => {
     expect(validateRequestMode(undefined)).toEqual({ ok: true, mode: 'cloud' });
   });
@@ -205,11 +232,11 @@ describe('validateRequestMode', () => {
   });
 
   it('rejects invalid request mode', () => {
-    expect(validateRequestMode('local')).toEqual({
-      ok: false,
-      error: 'Invalid request mode.',
-      status: 400,
-    });
+    expect(validateRequestMode('local')).toEqual(invalidModeFailure);
+  });
+
+  it('rejects null request mode instead of defaulting it', () => {
+    expect(validateRequestMode(null as unknown as string)).toEqual(invalidModeFailure);
   });
 });
 
@@ -219,6 +246,8 @@ describe('validateProviderConnectionState', () => {
       ok: false,
       error: 'Missing google provider connection state.',
       status: 409,
+      code: 'missing-provider-connection',
+      path: 'providerConnection',
     });
   });
 
@@ -227,6 +256,8 @@ describe('validateProviderConnectionState', () => {
       ok: false,
       error: 'Provider connection mismatch: expected google.',
       status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
     });
   });
 
@@ -235,6 +266,8 @@ describe('validateProviderConnectionState', () => {
       ok: false,
       error: 'github provider is not connected.',
       status: 409,
+      code: 'provider-not-connected',
+      path: 'providerConnection',
     });
   });
 
@@ -250,8 +283,10 @@ describe('validateProviderConnectionState', () => {
 
     expect(validateProviderConnectionState(connection, 'github')).toEqual({
       ok: false,
-      error: 'github provider is not connected.',
-      status: 409,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
     });
   });
 
@@ -260,34 +295,129 @@ describe('validateProviderConnectionState', () => {
 
     expect(validateProviderConnectionState(connection, 'github')).toEqual({
       ok: false,
-      error: 'github provider is not connected.',
-      status: 409,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
     });
+  });
+
+  it('rejects provider connection objects that omit connected state', () => {
+    expect(validateProviderConnectionState({ provider: 'github' }, 'github')).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects null provider connection state as malformed', () => {
+    expect(validateProviderConnectionState(null, 'github')).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects primitive provider connection state as malformed', () => {
+    const connection = 'github' as unknown as ProviderConnectionState;
+
+    expect(validateProviderConnectionState(connection, 'github')).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects invalid provider values at runtime', () => {
+    const connection = { provider: 'dropbox', connected: true } as unknown as ProviderConnectionState;
+
+    expect(validateProviderConnectionState(connection, 'github')).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects invalid required provider values at runtime', () => {
+    expect(validateProviderConnectionState({ provider: 'github', connected: true }, 'dropbox')).toEqual({
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
+  it('runtime provider validation accepts every PROVIDER_TYPES entry', () => {
+    for (const provider of PROVIDER_TYPES) {
+      expect(validateProviderConnectionState({ provider, connected: true }, provider)).toEqual({
+        ok: true,
+        connection: { provider, connected: true },
+      });
+    }
   });
 });
 
 describe('validateCloudRequest', () => {
+  const missingAuthFailure = {
+    ok: false,
+    error: 'Missing or empty auth token.',
+    status: 401,
+    code: 'missing-auth-token',
+    path: 'auth.token',
+  };
+  const missingWorkspaceFailure = {
+    ok: false,
+    error: 'Missing or empty workspace ID.',
+    status: 400,
+    code: 'missing-workspace-id',
+    path: 'workspace.workspaceId',
+  };
+
   it('rejects missing auth before checking workspace', () => {
-    expect(validateCloudRequest(undefined, undefined)).toEqual({
-      ok: false,
-      error: 'Missing or empty auth token.',
-      status: 401,
-    });
+    expect(validateCloudRequest(undefined, undefined)).toEqual(missingAuthFailure);
+  });
+
+  it('rejects missing auth before provider state can authorize a request', () => {
+    expect(
+      validateCloudRequest(undefined, { workspaceId: 'ws-001' }, {
+        requiredProvider: 'google',
+        providerConnection: { provider: 'google', connected: true },
+      }),
+    ).toEqual(missingAuthFailure);
   });
 
   it('rejects missing workspace when auth is valid', () => {
-    expect(validateCloudRequest({ token: 'token' }, undefined)).toEqual({
-      ok: false,
-      error: 'Missing or empty workspace ID.',
-      status: 400,
-    });
+    expect(validateCloudRequest({ token: 'token' }, undefined)).toEqual(missingWorkspaceFailure);
   });
 
-  it('rejects unscoped API-key requests', () => {
-    expect(validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, undefined)).toEqual({
-      ok: false,
-      error: 'Missing or empty workspace ID.',
-      status: 400,
+  it('rejects API-key requests that omit workspace context', () => {
+    expect(validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, undefined)).toEqual(
+      missingWorkspaceFailure,
+    );
+  });
+
+  it('fails closed when valid auth is not scoped to a workspace', () => {
+    expect(validateCloudRequest({ token: 'valid-token', tokenType: 'bearer' }, undefined)).toEqual(
+      missingWorkspaceFailure,
+    );
+  });
+
+  it('accepts valid bearer requests with explicit workspace scope', () => {
+    expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-001' })).toEqual({
+      ok: true,
+      auth: { token: 'bearer-token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-001', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
     });
   });
 
@@ -295,12 +425,12 @@ describe('validateCloudRequest', () => {
     expect(
       validateCloudRequest(
         { token: 'api-key-token', tokenType: 'api-key' },
-        { workspaceId: 'ws-001' },
+        { workspaceId: 'api-key-workspace' },
       ),
     ).toEqual({
       ok: true,
       auth: { token: 'api-key-token', tokenType: 'api-key' },
-      workspace: { workspaceId: 'ws-001', projectId: undefined, environment: undefined },
+      workspace: { workspaceId: 'api-key-workspace', projectId: undefined, environment: undefined },
       mode: 'cloud',
       providerConnection: undefined,
     });
@@ -311,6 +441,8 @@ describe('validateCloudRequest', () => {
       ok: false,
       error: 'Invalid request mode.',
       status: 400,
+      code: 'invalid-mode',
+      path: 'body.mode',
     });
   });
 
@@ -321,6 +453,86 @@ describe('validateCloudRequest', () => {
       ok: false,
       error: 'Missing google provider connection state.',
       status: 409,
+      code: 'missing-provider-connection',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects invalid required provider values at runtime', () => {
+    expect(
+      validateCloudRequest(
+        { token: 'token' },
+        { workspaceId: 'ws-001' },
+        { requiredProvider: 'dropbox' },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
+  it('does not validate provider state when no provider is required', () => {
+    expect(
+      validateCloudRequest(
+        { token: 'token' },
+        { workspaceId: 'ws-001' },
+        { providerConnection: { provider: 'dropbox', connected: false } },
+      ),
+    ).toEqual({
+      ok: true,
+      auth: { token: 'token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-001', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
+    });
+  });
+
+  it('rejects empty required provider values at runtime', () => {
+    const options = { requiredProvider: '' } as unknown as CloudRequestValidationOptions;
+
+    expect(
+      validateCloudRequest(
+        { token: 'token' },
+        { workspaceId: 'ws-001' },
+        options,
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects null required provider values at runtime', () => {
+    const options = { requiredProvider: null } as unknown as CloudRequestValidationOptions;
+
+    expect(validateCloudRequest({ token: 'token' }, { workspaceId: 'ws-001' }, options)).toEqual({
+      ok: false,
+      error: 'Invalid required provider.',
+      status: 400,
+      code: 'invalid-required-provider',
+      path: 'providerConnection',
+    });
+  });
+
+  it('rejects malformed provider state after auth, workspace, and mode pass', () => {
+    expect(
+      validateCloudRequest(
+        { token: 'token' },
+        { workspaceId: 'ws-001' },
+        { requiredProvider: 'github', providerConnection: null },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Invalid provider connection state.',
+      status: 400,
+      code: 'invalid-provider-connection',
+      path: 'providerConnection',
     });
   });
 
@@ -376,6 +588,20 @@ describe('createWorkspaceScopedQuery', () => {
 
     expect(query.workspaceId).toBe(' Ws-Prod ');
   });
+
+  it('forces workspaceId over caller-provided query filters', () => {
+    const query = createWorkspaceScopedQuery('authorized-workspace', {
+      workspaceId: 'untrusted-workspace',
+      projectId: 'proj-001',
+      status: 'active',
+    });
+
+    expect(query).toEqual({
+      workspaceId: 'authorized-workspace',
+      projectId: 'proj-001',
+      status: 'active',
+    });
+  });
 });
 
 describe('assertWorkspaceMatch', () => {
@@ -426,6 +652,8 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-environment access denied.',
       status: 403,
+      code: 'cross-environment-access',
+      path: 'workspace.environment',
     });
   });
 
@@ -445,6 +673,22 @@ describe('resolveAuthorizedWorkspaceScope', () => {
     });
   });
 
+  it('lets requested project refine when authorized project is unset', () => {
+    expect(
+      resolveAuthorizedWorkspaceScope(
+        { workspaceId: 'ws-001' },
+        { workspaceId: 'ws-001', projectId: 'proj-001' },
+      ),
+    ).toEqual({
+      ok: true,
+      scope: {
+        workspaceId: 'ws-001',
+        projectId: 'proj-001',
+        environment: undefined,
+      },
+    });
+  });
+
   it('rejects cross-workspace mismatch', () => {
     expect(
       resolveAuthorizedWorkspaceScope({ workspaceId: 'ws-001' }, { workspaceId: 'ws-002' }),
@@ -452,6 +696,21 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-workspace access denied.',
       status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
+    });
+  });
+
+  it('fails if a request tries to use a workspace outside its authorized scope', () => {
+    const authorizedScope = { workspaceId: 'api-key-workspace' };
+    const requestWorkspace = { workspaceId: 'unscoped-request-workspace' };
+
+    expect(resolveAuthorizedWorkspaceScope(authorizedScope, requestWorkspace)).toEqual({
+      ok: false,
+      error: 'Cross-workspace access denied.',
+      status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
     });
   });
 
@@ -463,6 +722,8 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-workspace access denied.',
       status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
     });
   });
 
@@ -476,39 +737,239 @@ describe('resolveAuthorizedWorkspaceScope', () => {
       ok: false,
       error: 'Cross-project access denied.',
       status: 403,
+      code: 'cross-project-access',
+      path: 'workspace.projectId',
     });
   });
 });
 
 describe('getProviderConnectGuidance', () => {
-  it('Google guidance includes the exact CLI command', () => {
+  it('Google guidance is a CLI variant with the exact command', () => {
     const guidance = getProviderConnectGuidance('google');
+    const expectedCommand = 'npx agent-relay cloud connect google';
 
-    expect(guidance.command).toBe('npx agent-relay cloud connect google');
-    expect(guidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
+    expect(guidance.kind).toBe('cli');
+    if (guidance.kind !== 'cli') throw new Error('expected CLI guidance');
+    expect(GOOGLE_CONNECT_COMMAND).toBe(expectedCommand);
+    expect(guidance.command).toBe(expectedCommand);
+    expect(guidance).toBe(GOOGLE_CONNECT_GUIDANCE);
+    expect(guidance.instructions).toBe(GOOGLE_CONNECT_INSTRUCTIONS);
+    expect(guidance.dashboardUrl).toBeUndefined();
+    expect(guidance.instructions[0]).toBe(`Run: ${expectedCommand}`);
+    expect(guidance.instructions.join('\n')).toContain(expectedCommand);
+    expect(guidance.instructions).toContain(
+      'Once connected, Cloud workflows can access Google-integrated services.',
+    );
   });
 
   it('Google guidance instructions mention OAuth', () => {
     expect(getProviderConnectGuidance('google').instructions.join('\n')).toContain('OAuth');
   });
 
-  it('GitHub guidance includes dashboardUrl and no command field', () => {
+  it('GitHub guidance is a dashboard variant with no command field', () => {
     const guidance = getProviderConnectGuidance('github');
 
-    expect(guidance.dashboardUrl).toBe('/dashboard/integrations');
+    expect(guidance.kind).toBe('dashboard');
+    if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+    expect(guidance).toBe(GITHUB_CONNECT_GUIDANCE);
+    expect(guidance.dashboardUrl).toBe(CLOUD_INTEGRATIONS_DASHBOARD_URL);
     expect(guidance.command).toBeUndefined();
   });
 
   it('GitHub guidance mentions Nango and Cloud dashboard', () => {
     const instructions = getProviderConnectGuidance('github').instructions.join('\n');
 
+    expect(getProviderConnectGuidance('github').instructions).toBe(GITHUB_CONNECT_INSTRUCTIONS);
+    expect(Object.isFrozen(GITHUB_CONNECT_INSTRUCTIONS)).toBe(true);
     expect(instructions).toContain('Nango');
     expect(instructions).toContain('Cloud dashboard');
+    expect(instructions).toContain('GitHub App installation');
   });
 
   it('GitHub guidance does not include a CLI command', () => {
     const guidance = getProviderConnectGuidance('github');
+    const githubCliCommand = ['npx agent-relay cloud connect', 'github'].join(' ');
 
-    expect(guidance.instructions.join('\n')).not.toContain('npx agent-relay cloud connect github');
+    expect(guidance.instructions.join('\n')).not.toContain(githubCliCommand);
+  });
+
+  it('non-CLI providers default to dashboard-based guidance', () => {
+    const guidance = getProviderConnectGuidance('linear');
+
+    expect(guidance.kind).toBe('dashboard');
+    if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+    expect(guidance.dashboardUrl).toBe(LINEAR_CONNECT_DASHBOARD_URL);
+    expect(guidance.command).toBeUndefined();
+    expect(guidance.instructions.join('\n')).toContain('Cloud dashboard');
+    expect(guidance.instructions.join('\n')).toContain('Linear workspace');
+    expect(guidance.instructions.join('\n')).toContain('Ricky OAuth Actor app');
+  });
+
+  it('Linear guidance uses the canonical hosted connection instructions', () => {
+    const guidance = getProviderConnectGuidance('linear');
+
+    expect(guidance.kind).toBe('dashboard');
+    if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+    expect(guidance).toBe(LINEAR_CONNECT_GUIDANCE);
+    expect(guidance.dashboardUrl).toBe(LINEAR_CONNECT_DASHBOARD_URL);
+    expect(guidance.instructions).toBe(LINEAR_CONNECT_INSTRUCTIONS);
+    expect(Object.isFrozen(LINEAR_CONNECT_INSTRUCTIONS)).toBe(true);
+    expect(guidance.instructions.join('\n')).not.toContain('npx agent-relay cloud connect linear');
+  });
+
+  it('optional dashboard providers expose hosted guidance without CLI commands', () => {
+    const optionalProviderConstants = {
+      slack: SLACK_CONNECT_GUIDANCE,
+      notion: NOTION_CONNECT_GUIDANCE,
+    } as const;
+
+    for (const provider of ['slack', 'notion'] as const) {
+      const guidance = getProviderConnectGuidance(provider);
+
+      expect(guidance.kind).toBe('dashboard');
+      if (guidance.kind !== 'dashboard') throw new Error('expected dashboard guidance');
+      expect(guidance).toBe(optionalProviderConstants[provider]);
+      expect(guidance.dashboardUrl).toBe(CLOUD_INTEGRATIONS_DASHBOARD_URL);
+      expect(guidance.command).toBeUndefined();
+      expect(guidance.instructions.join('\n')).toContain(`Choose ${provider} from optional integrations.`);
+    }
+  });
+
+  it('every provider in PROVIDER_TYPES has discriminator-tagged guidance', () => {
+    for (const provider of PROVIDER_TYPES) {
+      const guidance = getProviderConnectGuidance(provider);
+      expect(guidance.provider).toBe(provider);
+      expect(guidance).toBe(getProviderConnectGuidance(provider));
+      expect(guidance.kind === 'cli' || guidance.kind === 'dashboard').toBe(true);
+      expect(Object.isFrozen(guidance)).toBe(true);
+      expect(Object.isFrozen(guidance.instructions)).toBe(true);
+      if (guidance.kind === 'cli') {
+        expect(typeof guidance.command).toBe('string');
+        expect(guidance.command.length).toBeGreaterThan(0);
+        expect(guidance.dashboardUrl).toBeUndefined();
+      } else {
+        expect(typeof guidance.dashboardUrl).toBe('string');
+        expect(guidance.dashboardUrl.length).toBeGreaterThan(0);
+        expect(guidance.command).toBeUndefined();
+      }
+    }
+  });
+});
+
+describe('Cloud auth module contract', () => {
+  it('covers fail-closed auth and workspace outcomes once', () => {
+    expect(validateCloudRequest({ token: '', tokenType: 'api-key' }, { workspaceId: 'ws-001' })).toEqual({
+      ok: false,
+      error: 'Missing or empty auth token.',
+      status: 401,
+      code: 'missing-auth-token',
+      path: 'auth.token',
+    });
+
+    expect(validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, undefined)).toEqual({
+      ok: false,
+      error: 'Missing or empty workspace ID.',
+      status: 400,
+      code: 'missing-workspace-id',
+      path: 'workspace.workspaceId',
+    });
+
+    for (const auth of [
+      { token: 'bearer-token', tokenType: 'bearer' },
+      { token: 'api-key-token', tokenType: 'api-key' },
+    ] satisfies CloudAuthContext[]) {
+      expect(validateCloudRequest(auth, undefined)).toEqual({
+        ok: false,
+        error: 'Missing or empty workspace ID.',
+        status: 400,
+        code: 'missing-workspace-id',
+        path: 'workspace.workspaceId',
+      });
+    }
+
+    const auth = { tokenType: 'api-key' } as unknown as CloudAuthContext;
+
+    expect(validateCloudRequest(auth, { workspaceId: 'ws-001' })).toEqual({
+      ok: false,
+      error: 'Missing or empty auth token.',
+      status: 401,
+      code: 'missing-auth-token',
+      path: 'auth.token',
+    });
+  });
+
+  it('accepts valid scoped bearer and API-key requests', () => {
+    expect(validateCloudRequest({ token: 'bearer-token' }, { workspaceId: 'ws-bearer' })).toEqual({
+      ok: true,
+      auth: { token: 'bearer-token', tokenType: 'bearer' },
+      workspace: { workspaceId: 'ws-bearer', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
+    });
+
+    expect(
+      validateCloudRequest({ token: 'api-key-token', tokenType: 'api-key' }, { workspaceId: 'ws-api-key' }),
+    ).toEqual({
+      ok: true,
+      auth: { token: 'api-key-token', tokenType: 'api-key' },
+      workspace: { workspaceId: 'ws-api-key', projectId: undefined, environment: undefined },
+      mode: 'cloud',
+      providerConnection: undefined,
+    });
+  });
+
+  it('rejects provider-backed requests before provider state can authorize unscoped access', () => {
+    for (const options of [
+      {
+        requiredProvider: 'google',
+        providerConnection: { provider: 'google', connected: true },
+        auth: { token: 'cloud-token', tokenType: 'bearer' },
+      },
+      {
+        requiredProvider: 'github',
+        providerConnection: { provider: 'github', connected: true },
+        auth: { token: 'api-key-token', tokenType: 'api-key' },
+      },
+    ] satisfies Array<CloudRequestValidationOptions & { auth: CloudAuthContext }>) {
+      expect(validateCloudRequest(options.auth, undefined, options)).toEqual({
+        ok: false,
+        error: 'Missing or empty workspace ID.',
+        status: 400,
+        code: 'missing-workspace-id',
+        path: 'workspace.workspaceId',
+      });
+    }
+  });
+
+  it('rejects authorized workspace mismatches', () => {
+    expect(
+      resolveAuthorizedWorkspaceScope(
+        { workspaceId: 'authorized-workspace' },
+        { workspaceId: 'requested-workspace' },
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'Cross-workspace access denied.',
+      status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
+    });
+  });
+
+  it('keeps provider connect guidance user-visible and provider-specific', () => {
+    const googleGuidance = getProviderConnectGuidance('google');
+    expect(googleGuidance.provider).toBe('google');
+    expect(googleGuidance.kind).toBe('cli');
+    if (googleGuidance.kind !== 'cli') throw new Error('expected Google CLI guidance');
+    expect(googleGuidance.command).toBe('npx agent-relay cloud connect google');
+    expect(googleGuidance.instructions.join('\n')).toContain('npx agent-relay cloud connect google');
+
+    const githubGuidance = getProviderConnectGuidance('github');
+    expect(githubGuidance.provider).toBe('github');
+    expect(githubGuidance.kind).toBe('dashboard');
+    if (githubGuidance.kind !== 'dashboard') throw new Error('expected GitHub dashboard guidance');
+    expect(githubGuidance.command).toBeUndefined();
+    expect(githubGuidance.instructions.join('\n')).toContain('Cloud dashboard');
+    expect(githubGuidance.instructions.join('\n')).toContain('Nango');
   });
 });

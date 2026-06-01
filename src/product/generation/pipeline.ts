@@ -797,6 +797,7 @@ function hasRipgrepFallback(command: string): boolean {
 
 function isInlineAssertionCommand(command: string): boolean {
   const invokesInlineRuntime =
+    /\bnode\s+<<\s*['"]?[\w-]+['"]?/.test(command) ||
     /\b(?:node|bun)\s+(?:--input-type=module\s+)?(?:-e|--eval)\b/.test(command) ||
     /\bpython3?\s+-c\b/.test(command) ||
     /\b(?:ruby|perl)\s+-e\b/.test(command);

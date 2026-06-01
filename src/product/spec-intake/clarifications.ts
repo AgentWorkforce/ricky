@@ -422,8 +422,20 @@ function metadataString(metadata: Record<string, unknown>, key: string): string 
 }
 
 function riskySideEffectQuestion(text: string): ClarificationQuestion | null {
-  const risky = /\b(deletes?|removes?|drops?|destroys?|resets?|migrates?|deploys?|publishes?|commits?|push(?:es)?|merges?|open pr|create pr)\b/i.test(text);
-  const guarded = /\b(pause|ask|confirm|approval|approve|dry[- ]run|no destructive|non[- ]destructive|do not commit|do not push)\b/i.test(text);
+  // Committing, pushing, and opening a pull request are Ricky's normal,
+  // always-intended outcome — generating a workflow that ships a PR is the
+  // product's job, so those verbs are NOT treated as risky-needing-approval on
+  // their own. Only genuinely destructive / irreversible actions
+  // (deletes, drops, resets, migrations, deploys, publishes, merges, force
+  // pushes) require an explicit approval boundary in the spec.
+  const risky =
+    /\b(deletes?|removes?|drops?|destroys?|resets?|migrates?|deploys?|publishes?|merges?|force[- ]?push(?:es)?)\b/i.test(
+      text,
+    );
+  const guarded =
+    /\b(pause|ask|confirm|approval|approve|dry[- ]run|no destructive|non[- ]destructive|do not commit|do not push)\b/i.test(
+      text,
+    );
   if (!risky || guarded) return null;
 
   return {
@@ -431,7 +443,8 @@ function riskySideEffectQuestion(text: string): ClarificationQuestion | null {
     question: 'Which side effects may the generated workflow perform automatically, and which ones require user approval first?',
     reason: 'The spec asks for potentially risky side effects without an approval boundary.',
     blocking: true,
-    defaultAssumption: 'Run validation and write artifacts only; pause before destructive actions, commits, pushes, deploys, or PR creation.',
+    defaultAssumption:
+      'Open a pull request as the normal outcome (commit + push + PR allowed); pause before destructive actions such as deletes, drops, resets, migrations, deploys, publishes, merges, or force-pushes.',
   };
 }
 

@@ -5,33 +5,29 @@
  * there is no implicit fallback or ambient credential resolution.
  */
 
-// ---------------------------------------------------------------------------
-// Auth context — required on every Cloud request
-// ---------------------------------------------------------------------------
-
-export interface CloudAuthContext {
-  /** Bearer token or API key for the Cloud API. */
-  token: string;
-  /** Optional token type hint (default: 'bearer'). */
-  tokenType?: 'bearer' | 'api-key';
-}
+import type {
+  CloudAuthContext as CanonicalCloudAuthContext,
+  CloudRequestMode,
+  CloudWorkspaceContext as CanonicalCloudWorkspaceContext,
+} from '../auth/types.js';
 
 // ---------------------------------------------------------------------------
-// Workspace context — scopes the request to a Cloud workspace
+// Auth and workspace context — required on every Cloud request
 // ---------------------------------------------------------------------------
 
-export interface CloudWorkspaceContext {
-  /** The workspace ID this request targets. */
-  workspaceId: string;
-  /** Optional environment override (e.g. 'staging', 'production'). */
-  environment?: string;
-}
+export type CloudAuthContext = CanonicalCloudAuthContext;
+export type CloudWorkspaceContext = CanonicalCloudWorkspaceContext;
 
 // ---------------------------------------------------------------------------
 // Generate request body
 // ---------------------------------------------------------------------------
 
-export type CloudGenerateMode = 'cloud' | 'both';
+export type CloudGenerateMode = CloudRequestMode;
+
+export type CloudGenerationMode =
+  | 'generate-only'
+  | 'generate-and-return-artifacts'
+  | 'generate-and-run';
 
 export type CloudAutoFixApprovalBoundary =
   | 'code_push'
@@ -48,13 +44,15 @@ export interface CloudNaturalLanguageSpecPayload {
 export interface CloudStructuredSpecPayload {
   kind: 'structured';
   document: Record<string, unknown>;
-  format?: 'json' | 'yaml' | 'ricky-workflow';
+  format?: CloudStructuredSpecFormat;
 }
 
 export type CloudWorkflowSpecPayload =
   | string
   | CloudNaturalLanguageSpecPayload
   | CloudStructuredSpecPayload;
+
+export type CloudStructuredSpecFormat = 'json' | 'yaml' | 'ricky-workflow';
 
 export interface CloudRickyAutoFixPolicy {
   /** Whether Ricky should diagnose and repair failed Cloud workflow runs. */
@@ -74,8 +72,10 @@ export interface CloudGenerateRequestBody {
   spec: CloudWorkflowSpecPayload;
   /** Optional file path hint for the spec origin. */
   specPath?: string;
-  /** Execution mode — Cloud-only or both (local + Cloud). */
+  /** Target routing mode — Cloud-only or both local/BYOH + Cloud artifact paths. */
   mode?: CloudGenerateMode;
+  /** Generation behavior — generate only, return artifacts, or request Cloud execution. */
+  generationMode?: CloudGenerationMode;
   /** Ricky supervision policy for executing existing workflow artifacts in Cloud. */
   autoFix?: CloudRickyAutoFixPolicy;
   /** Opaque metadata from the originating surface. */

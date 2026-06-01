@@ -4,6 +4,10 @@ import type {
   CloudWorkspaceContext,
 } from './types.js';
 
+export type WorkspaceScopedQuery<T extends Record<string, unknown>> = Omit<T, 'workspaceId'> & {
+  workspaceId: string;
+};
+
 export class WorkspaceScopingError extends Error {
   readonly workspaceId: string;
   readonly requestedWorkspaceId: string;
@@ -25,8 +29,14 @@ export function scopeToWorkspace<T extends { workspaceId: string }>(
   return resource.workspaceId === requestedWorkspaceId ? resource : null;
 }
 
-export function createWorkspaceScopedQuery(workspaceId: string): { workspaceId: string } {
-  return { workspaceId };
+export function createWorkspaceScopedQuery<T extends Record<string, unknown> = Record<string, never>>(
+  workspaceId: string,
+  query?: T,
+): WorkspaceScopedQuery<T> {
+  return {
+    ...query,
+    workspaceId,
+  } as WorkspaceScopedQuery<T>;
 }
 
 export function assertWorkspaceMatch(resourceWorkspaceId: string, requestWorkspaceId: string): void {
@@ -35,6 +45,17 @@ export function assertWorkspaceMatch(resourceWorkspaceId: string, requestWorkspa
   }
 }
 
+/**
+ * Resolve a request's workspace scope against the caller's authorized scope.
+ *
+ * Denies cross-workspace access, and denies cross-project / cross-environment
+ * access when the authorized scope pins those dimensions. When the authorized
+ * scope pins a `projectId` or `environment` and the request omits it, the
+ * authorized value is filled into the resolved scope (defaults to authorized
+ * scope rather than rejecting). Callers that require the request to name a
+ * project explicitly should compose with
+ * `validateWorkspaceContext(..., { requireProject: true })`.
+ */
 export function resolveAuthorizedWorkspaceScope(
   authorizedScope: AuthorizedWorkspaceScope,
   requestedScope: CloudWorkspaceContext,
@@ -44,6 +65,8 @@ export function resolveAuthorizedWorkspaceScope(
       ok: false,
       error: 'Cross-workspace access denied.',
       status: 403,
+      code: 'cross-workspace-access',
+      path: 'workspace.workspaceId',
     };
   }
 
@@ -56,6 +79,8 @@ export function resolveAuthorizedWorkspaceScope(
       ok: false,
       error: 'Cross-project access denied.',
       status: 403,
+      code: 'cross-project-access',
+      path: 'workspace.projectId',
     };
   }
 
@@ -68,6 +93,8 @@ export function resolveAuthorizedWorkspaceScope(
       ok: false,
       error: 'Cross-environment access denied.',
       status: 403,
+      code: 'cross-environment-access',
+      path: 'workspace.environment',
     };
   }
 

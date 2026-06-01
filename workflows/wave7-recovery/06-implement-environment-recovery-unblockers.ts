@@ -34,9 +34,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" packages/runtime/src/diagnostics/failure-diagnosis.ts',
+        'sed -n "1,260p" src/runtime/diagnostics/failure-diagnosis.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/product/src/specialists/validator/index.ts',
+        'sed -n "1,260p" src/product/specialists/validator/index.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,

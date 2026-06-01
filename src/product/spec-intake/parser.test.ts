@@ -298,6 +298,25 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBe('workflows/failure-analysis.workflow.ts');
   });
 
+  it('accepts workflowArtifactPath aliases on structured execute requests', () => {
+    const result = intake({
+      kind: 'structured_json',
+      surface: 'api',
+      receivedAt: RECEIVED_AT,
+      requestId: 'api-execute-workflow-artifact-path',
+      data: {
+        intent: 'execute',
+        description: 'Run the ready workflow artifact locally.',
+        workflowArtifactPath: 'workflows/generated/normalized-workflow-artifact.ts',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.routing?.target).toBe('execute');
+    expect(result.routing?.normalizedSpec.intent).toBe('execute');
+    expect(result.routing?.normalizedSpec.desiredAction.workflowFileHint).toBe('workflows/generated/normalized-workflow-artifact.ts');
+  });
+
   it('excludes repository slugs from targetFiles', () => {
     const result = intake(
       natural('Build a workflow for repo AgentWorkforce/ricky to verify the local runtime.'),
@@ -654,7 +673,7 @@ describe('spec intake parser, normalizer, and router', () => {
     expect(result.clarificationQuestions).toEqual([]);
   });
 
-  it('asks for a side-effect boundary before generating risky workflows', () => {
+  it('asks for a side-effect boundary before generating destructive workflows', () => {
     const result = intake(
       natural('Generate a workflow that deletes obsolete files, commits the cleanup, and pushes the branch.'),
     );
@@ -668,6 +687,18 @@ describe('spec intake parser, normalizer, and router', () => {
         blocking: true,
       }),
     ]);
+  });
+
+  it('does not ask for approval when the only side effects are commit/push/open-PR', () => {
+    // Opening a PR is Ricky's normal intended outcome — committing, pushing,
+    // and creating the pull request must not trip the risky-side-effect gate.
+    const result = intake(
+      natural(
+        'Generate a workflow that implements the fix, commits the change, pushes the branch, and opens exactly one pull request.',
+      ),
+    );
+
+    expect(result.clarificationQuestions.find((q) => q.id === 'side-effect-approval')).toBeUndefined();
   });
 
   describe('targetFiles extraction (AST-driven)', () => {

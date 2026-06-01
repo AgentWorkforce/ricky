@@ -69,7 +69,7 @@ describe('Ricky Cloud generate proof', () => {
 
   it.each([
     ['success-response-shape', ['ok: true', 'status: 200', 'artifact count: 1', 'out/workflow.ts', 'Assumed default region', 'deploy', 'requestId: ricky-cloud-proof-000']],
-    ['empty-executor-response', ['ok: true', 'status: 200', 'artifacts: 0', 'warnings: 0', 'followUpActions: 0']],
+    ['empty-executor-response', ['ok: false', 'status: 500', 'artifacts: 0', 'validation status: failed', 'missing-generated-artifacts', 'wire-runtime']],
   ] satisfies Array<[ProofCaseName, string[]]>)(
     '%s proves response contract shape is faithfully returned',
     async (name, expectedEvidence) => {
@@ -113,9 +113,11 @@ describe('Ricky Cloud generate proof', () => {
     const evidence = result.evidence.join('\n');
 
     expect(result.passed).toBe(true);
-    expect(evidence).toContain('ok: true');
+    expect(evidence).toContain('ok: false');
+    expect(evidence).toContain('status: 500');
     expect(evidence).toContain('warnings mention stub: true');
-    expect(evidence).toContain('wire-runtime: true');
+    expect(evidence).toContain('follow-up actions include wire-runtime: true');
+    expect(evidence).toContain('missing-generated-artifacts');
   });
 
   it('proves executor errors return actionable error response', async () => {
@@ -125,7 +127,9 @@ describe('Ricky Cloud generate proof', () => {
     expect(result.passed).toBe(true);
     expect(evidence).toContain('ok: false');
     expect(evidence).toContain('status: 500');
-    expect(evidence).toContain('Cloud runtime unavailable');
+    expect(evidence).toContain('Cloud generation failed');
+    expect(evidence).toContain('ricky-cloud-proof-000');
+    expect(evidence).not.toContain('Cloud runtime unavailable');
     expect(evidence).toContain('retry action present: true');
   });
 });

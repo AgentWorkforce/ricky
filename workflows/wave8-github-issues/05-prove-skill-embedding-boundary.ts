@@ -27,10 +27,10 @@ async function main() {
       command: [
         'mkdir -p .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary',
         'printf "%s\\n" "Issue #5: define and prove Ricky skill-embedding boundary for workflow generation" "Summary: Ricky is skill-aware at generation time but must clearly distinguish generation-time skill loading from deeper future runtime skill behavior." "Acceptance: explicit skill-application proof for generated output, docs distinguish current generation-time loading from richer future runtime execution, product copy avoids deeper skill embodiment claims." > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/issue-5.md',
-        'sed -n "1,260p" packages/product/src/generation/skill-loader.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/skill-loader.before.txt',
-        'sed -n "1,320p" packages/product/src/generation/pipeline.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/pipeline.before.txt',
-        'sed -n "1,360p" packages/product/src/generation/template-renderer.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/template-renderer.before.txt',
-        'sed -n "1,320p" packages/product/src/generation/pipeline.test.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/pipeline-test.before.txt',
+        'sed -n "1,260p" src/product/generation/skill-loader.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/skill-loader.before.txt',
+        'sed -n "1,320p" src/product/generation/pipeline.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/pipeline.before.txt',
+        'sed -n "1,360p" src/product/generation/template-renderer.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/template-renderer.before.txt',
+        'sed -n "1,320p" src/product/generation/pipeline.test.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/pipeline-test.before.txt',
         'echo PREPARE_CONTEXT_OK',
       ].join(' && '),
       captureOutput: true,
@@ -49,10 +49,10 @@ Acceptance contract:
 - product copy must not imply skills are embodied by agents at runtime unless tests prove that path
 
 Likely files:
-- packages/product/src/generation/skill-loader.ts
-- packages/product/src/generation/template-renderer.ts
-- packages/product/src/generation/pipeline.test.ts
-- packages/product/src/generation/types.ts if explicit evidence fields are needed
+- src/product/generation/skill-loader.ts
+- src/product/generation/template-renderer.ts
+- src/product/generation/pipeline.test.ts
+- src/product/generation/types.ts if explicit evidence fields are needed
 - docs/product/ricky-skill-embedding-boundary.md`,
       verification: { type: 'file_exists', value: 'docs/product/ricky-skill-embedding-boundary.md' },
     })
@@ -62,9 +62,9 @@ Likely files:
       command: [
         '{ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/changed-files.txt',
         'grep -F "docs/product/ricky-skill-embedding-boundary.md" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/changed-files.txt',
-        'grep -Eq "packages/product/src/generation/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/changed-files.txt',
-        'grep -F "writing-agent-relay-workflows" docs/product/ricky-skill-embedding-boundary.md packages/product/src/generation/pipeline.test.ts',
-        'grep -F "relay-80-100-workflow" docs/product/ricky-skill-embedding-boundary.md packages/product/src/generation/pipeline.test.ts',
+        'grep -Eq "src/product/generation/.+\\.(ts|test\\.ts)$" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/changed-files.txt',
+        'grep -F "writing-agent-relay-workflows" docs/product/ricky-skill-embedding-boundary.md src/product/generation/pipeline.test.ts',
+        'grep -F "relay-80-100-workflow" docs/product/ricky-skill-embedding-boundary.md src/product/generation/pipeline.test.ts',
         'grep -Ei "generation-time|runtime|future|boundary|overclaim" docs/product/ricky-skill-embedding-boundary.md',
         'echo POST_IMPLEMENTATION_FILE_GATE_OK',
       ].join(' && '),
@@ -98,9 +98,9 @@ Write .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/fix
       type: 'deterministic',
       dependsOn: ['fix-loop'],
       command: [
-        'npm test --workspace @ricky/product -- packages/product/src/generation/pipeline.test.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/generated-output-proof.txt 2>&1',
-        'grep -F "writing-agent-relay-workflows" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/generated-output-proof.txt docs/product/ricky-skill-embedding-boundary.md packages/product/src/generation/pipeline.test.ts',
-        'grep -F "relay-80-100-workflow" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/generated-output-proof.txt docs/product/ricky-skill-embedding-boundary.md packages/product/src/generation/pipeline.test.ts',
+        'npm test --workspace @ricky/product -- src/product/generation/pipeline.test.ts > .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/generated-output-proof.txt 2>&1',
+        'grep -F "writing-agent-relay-workflows" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/generated-output-proof.txt docs/product/ricky-skill-embedding-boundary.md src/product/generation/pipeline.test.ts',
+        'grep -F "relay-80-100-workflow" .workflow-artifacts/wave8-github-issues/prove-skill-embedding-boundary/generated-output-proof.txt docs/product/ricky-skill-embedding-boundary.md src/product/generation/pipeline.test.ts',
         'echo GENERATED_OUTPUT_PROOF_OK',
       ].join(' && '),
       captureOutput: true,

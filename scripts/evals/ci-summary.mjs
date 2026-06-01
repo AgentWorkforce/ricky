@@ -23,6 +23,8 @@ const result = readResultJson(resultPath);
 
 const failed = result.tests.filter((test) => test.status === 'failed');
 const skipped = result.tests.filter((test) => test.status === 'skipped');
+const providerInfraSkipped = skipped.filter(isProviderInfrastructureSkip);
+const blockingSkipped = skipped.filter((test) => !isProviderInfrastructureSkip(test));
 const needsHuman = result.tests.filter((test) => test.status === 'needs-human');
 const reviewableNeedsHuman = needsHuman.filter(hasCapturedOutput);
 const missingOutputNeedsHuman = needsHuman.filter((test) => !hasCapturedOutput(test));
@@ -39,11 +41,14 @@ const lines = [
   `- Human cases missing Ricky output: ${missingOutputNeedsHuman.length}`,
   `- Failed: ${result.failed}`,
   `- Skipped: ${result.skipped}`,
+  `- Provider infrastructure skipped: ${providerInfraSkipped.length}`,
+  `- Blocking skipped: ${blockingSkipped.length}`,
   '',
 ];
 
 appendStatusSection(lines, 'Failed', failed);
-appendStatusSection(lines, 'Skipped', skipped);
+appendStatusSection(lines, 'Skipped', blockingSkipped);
+appendStatusSection(lines, 'Provider Infrastructure Skips', providerInfraSkipped);
 appendHumanReviewSection(lines, reviewableNeedsHuman, missingOutputNeedsHuman);
 
 const summary = `${lines.join('\n')}\n`;
@@ -53,7 +58,7 @@ if (process.env.GITHUB_STEP_SUMMARY) {
   writeFileSync(process.env.GITHUB_STEP_SUMMARY, summary, { flag: 'a' });
 }
 
-if (failed.length > 0 || skipped.length > 0 || missingOutputNeedsHuman.length > 0) {
+if (failed.length > 0 || blockingSkipped.length > 0 || missingOutputNeedsHuman.length > 0) {
   process.exitCode = 1;
 }
 
@@ -127,6 +132,11 @@ function getCapturedOutput(test) {
       test.candidate?.content ??
       '',
   );
+}
+
+function isProviderInfrastructureSkip(test) {
+  if (test.status !== 'skipped') return false;
+  return String(test.error ?? '').startsWith('openrouter executor skipped; transient provider infrastructure unavailable');
 }
 
 function findLatestRunDir() {

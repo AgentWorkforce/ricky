@@ -25,13 +25,50 @@ export interface CloudWorkspaceContext {
 
 export type CloudRequestMode = 'cloud' | 'both';
 
+/**
+ * Discriminated error codes emitted by the Cloud request validators.
+ *
+ * Endpoints map these to their own response contracts. Adding a new code is a
+ * type-level change downstream callers can keep current via exhaustiveness
+ * checks instead of substring-matching the user-facing `error` string.
+ */
+export type CloudValidationErrorCode =
+  | 'missing-auth-token'
+  | 'invalid-auth-token'
+  | 'invalid-auth-token-type'
+  | 'missing-workspace-id'
+  | 'invalid-project-id'
+  | 'invalid-environment'
+  | 'invalid-mode'
+  | 'missing-provider-connection'
+  | 'invalid-provider-connection'
+  | 'provider-not-connected'
+  | 'invalid-required-provider';
+
+export type CloudValidationErrorPath =
+  | 'auth.token'
+  | 'auth.tokenType'
+  | 'workspace.workspaceId'
+  | 'workspace.projectId'
+  | 'workspace.environment'
+  | 'body.mode'
+  | 'providerConnection';
+
+export interface CloudValidationFailure {
+  ok: false;
+  error: string;
+  status: number;
+  code: CloudValidationErrorCode;
+  path: CloudValidationErrorPath;
+}
+
 export type AuthValidationResult =
   | { ok: true; context: CloudAuthContext }
-  | { ok: false; error: string; status: number };
+  | CloudValidationFailure;
 
 export type WorkspaceScopingResult =
   | { ok: true; workspaceId: string; projectId?: string; environment?: string }
-  | { ok: false; error: string; status: number };
+  | CloudValidationFailure;
 
 export interface AuthorizedWorkspaceScope {
   workspaceId: string;
@@ -41,13 +78,21 @@ export interface AuthorizedWorkspaceScope {
 
 export type AuthorizedWorkspaceScopeResult =
   | { ok: true; scope: AuthorizedWorkspaceScope }
-  | { ok: false; error: string; status: number };
+  | {
+      ok: false;
+      error: string;
+      status: number;
+      code: 'cross-workspace-access' | 'cross-project-access' | 'cross-environment-access';
+      path: 'workspace.workspaceId' | 'workspace.projectId' | 'workspace.environment';
+    };
 
 export type RequestModeValidationResult =
   | { ok: true; mode: CloudRequestMode }
-  | { ok: false; error: string; status: number };
+  | CloudValidationFailure;
 
-export type ProviderType = 'google' | 'github' | 'slack' | 'notion' | 'linear';
+export const PROVIDER_TYPES = ['google', 'github', 'slack', 'notion', 'linear'] as const;
+
+export type ProviderType = (typeof PROVIDER_TYPES)[number];
 
 export interface ProviderConnectionState {
   provider: ProviderType;
@@ -56,7 +101,7 @@ export interface ProviderConnectionState {
 
 export type ProviderConnectionValidationResult =
   | { ok: true; connection: ProviderConnectionState }
-  | { ok: false; error: string; status: number };
+  | CloudValidationFailure;
 
 export type CloudRequestValidationResult =
   | {
@@ -66,22 +111,34 @@ export type CloudRequestValidationResult =
       mode: CloudRequestMode;
       providerConnection?: ProviderConnectionState;
     }
-  | { ok: false; error: string; status: number };
+  | CloudValidationFailure;
 
 export interface CloudRequestValidationOptions {
   /** Request execution mode. Defaults to 'cloud'. */
   mode?: CloudRequestMode | string;
   /** Require a non-empty projectId in the workspace context. */
   requireProject?: boolean;
-  /** Require a connected provider before accepting the request. */
-  requiredProvider?: ProviderType;
-  /** Current provider connection state for provider-backed requests. */
-  providerConnection?: ProviderConnectionState;
+  /** Require a connected provider before accepting the request. Runtime input may be malformed. */
+  requiredProvider?: ProviderType | string;
+  /** Current provider connection state for provider-backed request input. */
+  providerConnection?: unknown;
 }
 
-export interface ProviderConnectGuidance {
+interface ProviderConnectGuidanceBase {
   provider: ProviderType;
-  command?: string;
-  dashboardUrl?: string;
-  instructions: string[];
+  instructions: readonly string[];
 }
+
+export interface ProviderConnectCliGuidance extends ProviderConnectGuidanceBase {
+  kind: 'cli';
+  command: string;
+  dashboardUrl?: undefined;
+}
+
+export interface ProviderConnectDashboardGuidance extends ProviderConnectGuidanceBase {
+  kind: 'dashboard';
+  dashboardUrl: string;
+  command?: undefined;
+}
+
+export type ProviderConnectGuidance = ProviderConnectCliGuidance | ProviderConnectDashboardGuidance;

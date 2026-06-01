@@ -1,4 +1,5 @@
-import { createTurnContextAssembler } from '@agent-assistant/turn-context';
+import * as turnContextPackage from '@agent-assistant/turn-context';
+import { createTurnContextAssembler, toExecutionRequest } from '@agent-assistant/turn-context';
 import { describe, expect, it } from 'vitest';
 
 import type { LocalInvocationRequest, RawHandoff } from './index.js';
@@ -12,10 +13,30 @@ function artifactReader(content: string) {
   };
 }
 
+function recordingArtifactReader(content: string) {
+  const reads: string[] = [];
+  return {
+    reads,
+    async readArtifact(path: string): Promise<string> {
+      reads.push(path);
+      return content;
+    },
+  };
+}
+
 function contextBlockContent(blocks: Array<{ id: string; content: string }>, id: string): string {
   const block = blocks.find((candidate) => candidate.id === id);
   expect(block, id).toBeDefined();
   return block!.content;
+}
+
+function contextBlock(
+  blocks: Array<{ id: string; content: string; source?: string; importance?: string; metadata?: unknown }>,
+  id: string,
+): { id: string; content: string; source?: string; importance?: string; metadata?: unknown } {
+  const block = blocks.find((candidate) => candidate.id === id);
+  expect(block, id).toBeDefined();
+  return block!;
 }
 
 function parseJsonBlock(blocks: Array<{ id: string; content: string }>, id: string): unknown {
@@ -32,15 +53,552 @@ interface PreservationCase {
     spec: string;
     structuredSpec?: Record<string, unknown>;
     sourceMetadata?: Record<string, unknown>;
-    invocationRoot: string;
+    invocationRoot?: string;
     mode: LocalInvocationRequest['mode'];
-    stageMode: NonNullable<LocalInvocationRequest['stageMode']>;
+    stageMode?: LocalInvocationRequest['stageMode'];
     specPath?: string;
     metadata: Record<string, unknown>;
   };
 }
 
+function expectIssue11RickyMetadata(
+  label: string,
+  actual: Record<string, unknown> | undefined,
+  expected: PreservationCase['expected'],
+): void {
+  expect(actual, label).toBeDefined();
+  for (const key of [
+    'requestId',
+    'source',
+    'sourceMetadata',
+    'structuredSpec',
+    'invocationRoot',
+    'mode',
+    'stageMode',
+    'specPath',
+    'metadata',
+  ]) {
+    expect(Object.prototype.hasOwnProperty.call(actual, key), `${label}.${key}`).toBe(true);
+  }
+  expect(actual, label).toMatchObject({
+    requestId: expected.requestId,
+    source: expected.source,
+    invocationRoot: expected.invocationRoot,
+    mode: expected.mode,
+    stageMode: expected.stageMode,
+    specPath: expected.specPath,
+  });
+  expect(actual?.metadata, `${label}.metadata`).toEqual(expected.metadata);
+  expect(actual?.structuredSpec, `${label}.structuredSpec`).toEqual(expected.structuredSpec);
+  expect(actual?.sourceMetadata, `${label}.sourceMetadata`).toEqual(expected.sourceMetadata);
+}
+
 describe('Ricky turn-context adapter', () => {
+  it('imports and exercises the installed turn-context backing package directly', async () => {
+    const normalized = await normalizeRequest({
+      source: 'free-form',
+      spec: 'generate a direct backing-package proof workflow',
+      requestId: 'req-issue-11-direct-backing-package',
+      invocationRoot: '/repo/direct-backing-package',
+      mode: 'both',
+      stageMode: 'generate-and-run',
+      metadata: { issue: 11, proof: 'direct-backing-package' },
+    });
+
+    const backingAssembler = turnContextPackage.createTurnContextAssembler();
+    const assembly = await backingAssembler.assemble(toRickyTurnContextInput(normalized));
+    const executionRequest = turnContextPackage.toExecutionRequest(assembly, {
+      id: 'msg-issue-11-direct-backing-package',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const metadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(turnContextPackage.createTurnContextAssembler).toBe(createTurnContextAssembler);
+    expect(turnContextPackage.toExecutionRequest).toBe(toExecutionRequest);
+    expect(executionRequest).toMatchObject({
+      assistantId: 'ricky',
+      turnId: 'req-issue-11-direct-backing-package',
+      message: {
+        id: 'msg-issue-11-direct-backing-package',
+        text: 'generate a direct backing-package proof workflow',
+      },
+      context: {
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-summary',
+            text: expect.stringContaining('source: free-form'),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-spec-text',
+            text: 'generate a direct backing-package proof workflow',
+          }),
+        ]),
+      },
+    });
+    expect(metadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expectIssue11RickyMetadata(
+      'direct-backing-package.executionRequest.metadata.ricky',
+      metadata?.ricky,
+      {
+        requestId: 'req-issue-11-direct-backing-package',
+        source: 'free-form',
+        spec: 'generate a direct backing-package proof workflow',
+        invocationRoot: '/repo/direct-backing-package',
+        mode: 'both',
+        stageMode: 'generate-and-run',
+        metadata: { issue: 11, proof: 'direct-backing-package' },
+      },
+    );
+  });
+
+  it('uses the installed turn-context assembler as the production backing adapter', async () => {
+    const normalized = await normalizeRequest({
+      source: 'cli',
+      spec: {
+        description: 'generate a local workflow through the production turn-context adapter',
+        stageMode: 'generate',
+        targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+      },
+      specFile: 'specs/issue-11.production-adapter.json',
+      requestId: 'req-production-turn-context-adapter',
+      invocationRoot: '/repo/production-adapter',
+      metadata: { issue: 11, proof: 'production-adapter' },
+      cliMetadata: { argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.production-adapter.json'] },
+    });
+
+    const assembly = await assembleRickyTurnContext(normalized);
+    const packageBackedAssembly = await turnContextPackage
+      .createTurnContextAssembler()
+      .assemble(toRickyTurnContextInput(normalized));
+    const assemblyMetadata = assembly.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(turnContextPackage.createTurnContextAssembler).toBe(createTurnContextAssembler);
+    expect(assembly.assistantId).toBe('ricky');
+    expect(assembly.turnId).toBe('req-production-turn-context-adapter');
+    expect(packageBackedAssembly).toMatchObject({
+      assistantId: 'ricky',
+      turnId: 'req-production-turn-context-adapter',
+      context: {
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ id: 'enrichment-ricky-request-summary' }),
+          expect.objectContaining({ id: 'enrichment-ricky-spec-text' }),
+        ]),
+      },
+    });
+    expect(assemblyMetadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expect(assemblyMetadata?.ricky).toMatchObject({
+      requestId: 'req-production-turn-context-adapter',
+      source: 'cli',
+      invocationRoot: '/repo/production-adapter',
+      mode: 'local',
+      stageMode: 'generate',
+      specPath: 'specs/issue-11.production-adapter.json',
+      metadata: {
+        issue: 11,
+        proof: 'production-adapter',
+        argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.production-adapter.json'],
+      },
+    });
+    expect(assembly.context.blocks.map((block) => block.id)).toEqual(
+      expect.arrayContaining([
+        'enrichment-ricky-request-summary',
+        'enrichment-ricky-spec-text',
+        'enrichment-ricky-structured-spec',
+        'enrichment-ricky-source-metadata',
+        'enrichment-ricky-request-metadata',
+      ]),
+    );
+    expect(assembly.context.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'enrichment-ricky-request-summary',
+          source: 'ricky-local',
+          importance: 'high',
+        }),
+        expect.objectContaining({
+          id: 'enrichment-ricky-source-metadata',
+          content: JSON.stringify(
+            {
+              cli: {
+                argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.production-adapter.json'],
+                specFile: 'specs/issue-11.production-adapter.json',
+              },
+            },
+            null,
+            2,
+          ),
+        }),
+      ]),
+    );
+    expect(assembly.harnessProjection.instructions.developerPrompt).toContain(
+      'Current mode: ricky-local:local:generate',
+    );
+  });
+
+  it('keeps optional Ricky metadata fields present when the real execution adapter projects a minimal handoff', async () => {
+    const normalized = await normalizeRequest({
+      source: 'free-form',
+      spec: 'generate a minimal adapter metadata proof workflow',
+      requestId: 'req-issue-11-minimal-metadata',
+      metadata: { issue: 11, proof: 'minimal-metadata' },
+    });
+
+    const assembly = await assembleRickyTurnContext(normalized);
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-issue-11-minimal-metadata',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const metadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(metadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expectIssue11RickyMetadata(
+      'minimal-metadata.executionRequest.metadata.ricky',
+      metadata?.ricky,
+      {
+        requestId: 'req-issue-11-minimal-metadata',
+        source: 'free-form',
+        spec: 'generate a minimal adapter metadata proof workflow',
+        mode: 'local',
+        metadata: { issue: 11, proof: 'minimal-metadata' },
+      },
+    );
+    expect(executionRequest).toMatchObject({
+      assistantId: 'ricky',
+      turnId: 'req-issue-11-minimal-metadata',
+      context: {
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-summary',
+            text: expect.stringContaining('stageMode: (default)'),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-metadata',
+            text: JSON.stringify({ issue: 11, proof: 'minimal-metadata' }, null, 2),
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('projects preserved Ricky request metadata through the real turn-context execution request adapter', async () => {
+    const structuredSpec = {
+      description: 'generate a workflow that proves execution request projection keeps Ricky request context',
+      targetFiles: ['src/local/assistant-turn-context-adapter.test.ts'],
+      stageMode: 'run',
+    };
+    const normalized = await normalizeRequest({
+      source: 'cli',
+      spec: structuredSpec,
+      specFile: 'specs/issue-11.execution-request.json',
+      requestId: 'req-issue-11-execution-request',
+      invocationRoot: '/repo/execution-request',
+      executionPreference: 'both',
+      metadata: { issue: 11, proof: 'execution-request-projection' },
+      cliMetadata: { argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.execution-request.json'] },
+    });
+
+    const assembly = await assembleRickyTurnContext(normalized);
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-issue-11-execution-request',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const metadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(executionRequest).toMatchObject({
+      assistantId: 'ricky',
+      turnId: 'req-issue-11-execution-request',
+      message: {
+        id: 'msg-issue-11-execution-request',
+        text: 'generate a workflow that proves execution request projection keeps Ricky request context',
+      },
+      instructions: {
+        responseStyle: { preferMarkdown: true },
+      },
+      context: {
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-summary',
+            text: expect.stringContaining('source: cli'),
+            metadata: expect.objectContaining({ source: 'ricky-local', importance: 'high' }),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-spec-text',
+            text: normalized.spec,
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-structured-spec',
+            text: JSON.stringify(structuredSpec, null, 2),
+          }),
+          expect.objectContaining({
+            id: 'enrichment-ricky-source-metadata',
+            text: JSON.stringify(
+              {
+                cli: {
+                  argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.execution-request.json'],
+                  specFile: 'specs/issue-11.execution-request.json',
+                },
+              },
+              null,
+              2,
+            ),
+          }),
+        ]),
+      },
+    });
+    expect(metadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expect(metadata?.ricky).toMatchObject({
+      requestId: 'req-issue-11-execution-request',
+      source: 'cli',
+      invocationRoot: '/repo/execution-request',
+      mode: 'both',
+      stageMode: 'run',
+      specPath: 'specs/issue-11.execution-request.json',
+      metadata: {
+        issue: 11,
+        proof: 'execution-request-projection',
+        argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.execution-request.json'],
+      },
+    });
+    expect(metadata?.ricky?.structuredSpec).toEqual(structuredSpec);
+    expect(metadata?.ricky?.sourceMetadata).toEqual({
+      cli: {
+        argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.execution-request.json'],
+        specFile: 'specs/issue-11.execution-request.json',
+      },
+    });
+  });
+
+  it('keeps Ricky metadata identical from adapter input through assembly and execution projection', async () => {
+    const normalized = await normalizeRequest({
+      source: 'mcp',
+      toolName: 'ricky.generate',
+      arguments: {
+        prompt: 'generate an adapter identity preservation workflow',
+        targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+        stageMode: 'generate-and-run',
+      },
+      requestId: 'req-issue-11-identical-metadata',
+      invocationRoot: '/repo/identical-metadata',
+      executionPreference: 'auto',
+      metadata: { issue: 11, proof: 'identical-metadata' },
+      mcpMetadata: { toolCallId: 'tool-identical-metadata' },
+    });
+    const adapterInput = toRickyTurnContextInput(normalized);
+    const assembly = await createTurnContextAssembler().assemble(adapterInput);
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-issue-11-identical-metadata',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    expect(assembly.metadata).toEqual(adapterInput.metadata);
+    expect(executionRequest.metadata).toEqual(adapterInput.metadata);
+    expect(adapterInput.metadata?.ricky).toEqual({
+      requestId: 'req-issue-11-identical-metadata',
+      source: 'mcp',
+      sourceMetadata: {
+        mcp: {
+          toolCallId: 'tool-identical-metadata',
+          toolName: 'ricky.generate',
+        },
+      },
+      structuredSpec: {
+        prompt: 'generate an adapter identity preservation workflow',
+        targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+        stageMode: 'generate-and-run',
+      },
+      invocationRoot: '/repo/identical-metadata',
+      mode: 'both',
+      stageMode: 'generate-and-run',
+      specPath: undefined,
+      metadata: {
+        issue: 11,
+        proof: 'identical-metadata',
+        toolCallId: 'tool-identical-metadata',
+        toolName: 'ricky.generate',
+      },
+    });
+  });
+
+  it('preserves workflow-artifact handoff identity while resolving reads from the invocation root', async () => {
+    const reader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const normalized = await normalizeRequest(
+      {
+        source: 'workflow-artifact',
+        artifactPath: 'workflows/issue-11/from-root.workflow.ts',
+        requestId: 'req-issue-11-artifact-root',
+        invocationRoot: '/workspace/issue-11-root',
+        metadata: { issue: 11, surface: 'workflow-artifact', proof: 'root-preservation' },
+      },
+      reader,
+    );
+    const assembly = await assembleRickyTurnContext(normalized, {
+      assembler: createTurnContextAssembler(),
+    });
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-req-issue-11-artifact-root',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const metadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(reader.reads).toEqual(['/workspace/issue-11-root/workflows/issue-11/from-root.workflow.ts']);
+    expect(normalized).toMatchObject({
+      requestId: 'req-issue-11-artifact-root',
+      source: 'workflow-artifact',
+      invocationRoot: '/workspace/issue-11-root',
+      mode: 'local',
+      stageMode: 'run',
+      specPath: 'workflows/issue-11/from-root.workflow.ts',
+      metadata: { issue: 11, surface: 'workflow-artifact', proof: 'root-preservation' },
+    });
+    expect(metadata?.adapter).toMatchObject({
+      name: 'ricky-local-turn-context-adapter',
+      package: '@agent-assistant/turn-context',
+    });
+    expectIssue11RickyMetadata(
+      'workflow-artifact-root.executionRequest.metadata.ricky',
+      metadata?.ricky,
+      {
+        requestId: 'req-issue-11-artifact-root',
+        source: 'workflow-artifact',
+        spec: 'import { workflow } from "@agent-relay/sdk/workflows";',
+        invocationRoot: '/workspace/issue-11-root',
+        mode: 'local',
+        stageMode: 'run',
+        specPath: 'workflows/issue-11/from-root.workflow.ts',
+        metadata: { issue: 11, surface: 'workflow-artifact', proof: 'root-preservation' },
+      },
+    );
+    expect(executionRequest.context?.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'enrichment-ricky-request-summary',
+          text: expect.stringContaining('specPath: workflows/issue-11/from-root.workflow.ts'),
+        }),
+        expect.objectContaining({
+          id: 'enrichment-ricky-spec-text',
+          text: 'import { workflow } from "@agent-relay/sdk/workflows";',
+        }),
+      ]),
+    );
+  });
+
+  it('keeps source metadata nested when caller metadata has overlapping keys', async () => {
+    const normalized = await normalizeRequest({
+      source: 'mcp',
+      toolName: 'ricky.generate',
+      arguments: {
+        prompt: 'generate a local workflow while preserving source metadata boundaries',
+        stageMode: 'generate-and-run',
+        targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+      },
+      requestId: 'req-issue-11-source-boundary',
+      invocationRoot: '/repo/source-boundary',
+      executionPreference: 'auto',
+      metadata: {
+        toolName: 'caller-owned-tool-name',
+        toolCallId: 'caller-owned-tool-call',
+        nested: { owner: 'caller' },
+      },
+      mcpMetadata: {
+        toolCallId: 'mcp-owned-tool-call',
+        nested: { owner: 'mcp' },
+      },
+    });
+
+    const assembly = await assembleRickyTurnContext(normalized, {
+      assembler: createTurnContextAssembler(),
+    });
+    const executionRequest = toExecutionRequest(assembly, {
+      id: 'msg-issue-11-source-boundary',
+      text: normalized.spec,
+      receivedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const executionMetadata = executionRequest.metadata as
+      | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+      | undefined;
+
+    expect(normalized.metadata).toEqual({
+      toolName: 'ricky.generate',
+      toolCallId: 'mcp-owned-tool-call',
+      nested: { owner: 'mcp' },
+    });
+    expect(normalized.sourceMetadata).toEqual({
+      mcp: {
+        toolName: 'ricky.generate',
+        toolCallId: 'mcp-owned-tool-call',
+        nested: { owner: 'mcp' },
+      },
+    });
+    expectIssue11RickyMetadata(
+      'source-boundary.executionRequest.metadata.ricky',
+      executionMetadata?.ricky,
+      {
+        requestId: 'req-issue-11-source-boundary',
+        source: 'mcp',
+        spec: 'generate a local workflow while preserving source metadata boundaries',
+        structuredSpec: {
+          prompt: 'generate a local workflow while preserving source metadata boundaries',
+          stageMode: 'generate-and-run',
+          targetFiles: ['src/local/assistant-turn-context-adapter.ts'],
+        },
+        sourceMetadata: {
+          mcp: {
+            toolName: 'ricky.generate',
+            toolCallId: 'mcp-owned-tool-call',
+            nested: { owner: 'mcp' },
+          },
+        },
+        invocationRoot: '/repo/source-boundary',
+        mode: 'both',
+        stageMode: 'generate-and-run',
+        metadata: {
+          toolName: 'ricky.generate',
+          toolCallId: 'mcp-owned-tool-call',
+          nested: { owner: 'mcp' },
+        },
+      },
+    );
+    expect(executionRequest.context?.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'enrichment-ricky-source-metadata',
+          text: JSON.stringify(normalized.sourceMetadata, null, 2),
+        }),
+        expect.objectContaining({
+          id: 'enrichment-ricky-request-metadata',
+          text: JSON.stringify(normalized.metadata, null, 2),
+        }),
+      ]),
+    );
+  });
+
   it('round-trips every handoff surface through normalizeRequest and the real turn-context-backed adapter', async () => {
     const cases: PreservationCase[] = [
       {
@@ -252,10 +810,18 @@ describe('Ricky turn-context adapter', () => {
       const assembly = await assembleRickyTurnContext(normalized, {
         assembler: createTurnContextAssembler(),
       });
+      const executionRequest = toExecutionRequest(assembly, {
+        id: `msg-${testCase.expected.requestId}`,
+        text: normalized.spec,
+        receivedAt: '2026-01-01T00:00:00.000Z',
+      });
       const assemblyMetadata = assembly.metadata as
         | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
         | undefined;
       const rickyMetadata = assemblyMetadata?.ricky;
+      const executionMetadata = executionRequest.metadata as
+        | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+        | undefined;
 
       expect(normalized, testCase.name).toMatchObject({
         _normalized: true,
@@ -275,6 +841,29 @@ describe('Ricky turn-context adapter', () => {
         name: 'ricky-local-turn-context-adapter',
         package: '@agent-assistant/turn-context',
       });
+      expect(adapterInput, testCase.name).toMatchObject({
+        assistantId: 'ricky',
+        turnId: testCase.expected.requestId,
+        shaping: {
+          mode: `ricky-local:${testCase.expected.mode}:${testCase.expected.stageMode}`,
+        },
+      });
+      expect(adapterInput.enrichment?.candidates, testCase.name).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'ricky-request-summary',
+            content: expect.stringContaining(`requestId: ${testCase.expected.requestId}`),
+          }),
+          expect.objectContaining({
+            id: 'ricky-spec-text',
+            content: testCase.expected.spec,
+          }),
+          expect.objectContaining({
+            id: 'ricky-request-metadata',
+            content: JSON.stringify(testCase.expected.metadata, null, 2),
+          }),
+        ]),
+      );
       expect(adapterInput.metadata?.ricky, testCase.name).toMatchObject({
         requestId: testCase.expected.requestId,
         source: testCase.expected.source,
@@ -289,6 +878,11 @@ describe('Ricky turn-context adapter', () => {
       );
       expect((adapterInput.metadata?.ricky as Record<string, unknown>).sourceMetadata, testCase.name).toEqual(
         testCase.expected.sourceMetadata,
+      );
+      expectIssue11RickyMetadata(
+        `${testCase.name}.adapterInput.metadata.ricky`,
+        adapterInput.metadata?.ricky as Record<string, unknown> | undefined,
+        testCase.expected,
       );
 
       expect(assembly.assistantId, testCase.name).toBe('ricky');
@@ -308,6 +902,11 @@ describe('Ricky turn-context adapter', () => {
       });
       expect(rickyMetadata?.structuredSpec, testCase.name).toEqual(testCase.expected.structuredSpec);
       expect(rickyMetadata?.sourceMetadata, testCase.name).toEqual(testCase.expected.sourceMetadata);
+      expectIssue11RickyMetadata(
+        `${testCase.name}.assembly.metadata.ricky`,
+        rickyMetadata,
+        testCase.expected,
+      );
       expect(assembly.instructions.developerSegments, testCase.name).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -339,27 +938,419 @@ describe('Ricky turn-context adapter', () => {
           'ricky-request-metadata',
         ]),
       );
-      expect(contextBlockContent(assembly.context.blocks, 'enrichment-ricky-request-summary'), testCase.name).toContain(
-        `source: ${testCase.expected.source}`,
+      const requestSummaryBlock = contextBlock(assembly.context.blocks, 'enrichment-ricky-request-summary');
+      expect(requestSummaryBlock, testCase.name).toMatchObject({
+        source: 'ricky-local',
+        importance: 'high',
+        metadata: {
+          requestId: testCase.expected.requestId,
+          source: testCase.expected.source,
+          mode: testCase.expected.mode,
+          stageMode: testCase.expected.stageMode,
+          invocationRoot: testCase.expected.invocationRoot,
+          specPath: testCase.expected.specPath,
+        },
+      });
+      const requestSummary = requestSummaryBlock.content;
+      expect(requestSummary, testCase.name).toContain(`source: ${testCase.expected.source}`);
+      expect(requestSummary, testCase.name).toContain(`requestId: ${testCase.expected.requestId}`);
+      expect(requestSummary, testCase.name).toContain(`mode: ${testCase.expected.mode}`);
+      expect(requestSummary, testCase.name).toContain(`stageMode: ${testCase.expected.stageMode}`);
+      expect(requestSummary, testCase.name).toContain(`invocationRoot: ${testCase.expected.invocationRoot}`);
+      expect(requestSummary, testCase.name).toContain(
+        `specPath: ${testCase.expected.specPath ?? '(not supplied)'}`,
       );
-      expect(contextBlockContent(assembly.context.blocks, 'enrichment-ricky-spec-text'), testCase.name).toBe(
-        testCase.expected.spec,
-      );
+      expect(contextBlock(assembly.context.blocks, 'enrichment-ricky-spec-text'), testCase.name).toMatchObject({
+        content: testCase.expected.spec,
+        source: 'ricky-local',
+        importance: 'high',
+      });
       expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-request-metadata'), testCase.name).toEqual(
         testCase.expected.metadata,
       );
+      expect(executionRequest.context?.blocks, testCase.name).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'enrichment-ricky-request-metadata',
+            text: JSON.stringify(testCase.expected.metadata, null, 2),
+            metadata: expect.objectContaining({
+              source: 'ricky-local',
+              importance: 'medium',
+            }),
+          }),
+        ]),
+      );
+      expect(executionRequest, testCase.name).toMatchObject({
+        assistantId: 'ricky',
+        turnId: testCase.expected.requestId,
+        message: {
+          id: `msg-${testCase.expected.requestId}`,
+          text: testCase.expected.spec,
+        },
+        context: {
+          blocks: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'enrichment-ricky-request-summary',
+              text: expect.stringContaining(`source: ${testCase.expected.source}`),
+              metadata: expect.objectContaining({
+                source: 'ricky-local',
+                importance: 'high',
+              }),
+            }),
+            expect.objectContaining({
+              id: 'enrichment-ricky-spec-text',
+              text: testCase.expected.spec,
+              metadata: expect.objectContaining({
+                source: 'ricky-local',
+                importance: 'high',
+              }),
+            }),
+          ]),
+        },
+      });
+      expect(executionRequest.metadata, testCase.name).toEqual(assembly.metadata);
+      expect(executionRequest.context?.blocks.map((block) => block.id), testCase.name).toEqual(
+        assembly.context.blocks.map((block) => block.id),
+      );
+      const executionSummary = executionRequest.context?.blocks.find(
+        (block) => block.id === 'enrichment-ricky-request-summary',
+      )?.text;
+      const executionSummaryMetadata = executionRequest.context?.blocks.find(
+        (block) => block.id === 'enrichment-ricky-request-summary',
+      )?.metadata;
+      expect(executionSummary, testCase.name).toContain(`requestId: ${testCase.expected.requestId}`);
+      expect(executionSummary, testCase.name).toContain(`mode: ${testCase.expected.mode}`);
+      expect(executionSummary, testCase.name).toContain(`stageMode: ${testCase.expected.stageMode}`);
+      expect(executionSummary, testCase.name).toContain(`invocationRoot: ${testCase.expected.invocationRoot}`);
+      expect(executionSummary, testCase.name).toContain(
+        `specPath: ${testCase.expected.specPath ?? '(not supplied)'}`,
+      );
+      expect(executionSummaryMetadata, testCase.name).toMatchObject({
+        source: 'ricky-local',
+        requestId: testCase.expected.requestId,
+        mode: testCase.expected.mode,
+        stageMode: testCase.expected.stageMode,
+        invocationRoot: testCase.expected.invocationRoot,
+        specPath: testCase.expected.specPath,
+      });
+      expect(executionMetadata?.adapter, testCase.name).toMatchObject({
+        name: 'ricky-local-turn-context-adapter',
+        package: '@agent-assistant/turn-context',
+      });
+      expect(executionMetadata?.ricky, testCase.name).toMatchObject({
+        requestId: testCase.expected.requestId,
+        source: testCase.expected.source,
+        invocationRoot: testCase.expected.invocationRoot,
+        mode: testCase.expected.mode,
+        stageMode: testCase.expected.stageMode,
+        specPath: testCase.expected.specPath,
+        metadata: testCase.expected.metadata,
+      });
+      expect(executionMetadata?.ricky?.structuredSpec, testCase.name).toEqual(
+        testCase.expected.structuredSpec,
+      );
+      expect(executionMetadata?.ricky?.sourceMetadata, testCase.name).toEqual(
+        testCase.expected.sourceMetadata,
+      );
+      expectIssue11RickyMetadata(
+        `${testCase.name}.executionRequest.metadata.ricky`,
+        executionMetadata?.ricky,
+        testCase.expected,
+      );
 
       if (testCase.expected.structuredSpec) {
-        expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-structured-spec'), testCase.name).toEqual(
-          testCase.expected.structuredSpec,
+        expect(adapterInput.enrichment?.candidates, testCase.name).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 'ricky-structured-spec',
+              content: JSON.stringify(testCase.expected.structuredSpec, null, 2),
+            }),
+          ]),
         );
+        const structuredSpecBlock = contextBlock(assembly.context.blocks, 'enrichment-ricky-structured-spec');
+        expect(structuredSpecBlock, testCase.name).toMatchObject({
+          content: JSON.stringify(testCase.expected.structuredSpec, null, 2),
+          source: 'ricky-local',
+          importance: 'high',
+        });
+        expect(JSON.parse(structuredSpecBlock.content), testCase.name).toEqual(testCase.expected.structuredSpec);
+        expect(executionRequest.context?.blocks, testCase.name).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 'enrichment-ricky-structured-spec',
+              text: JSON.stringify(testCase.expected.structuredSpec, null, 2),
+              metadata: expect.objectContaining({
+                source: 'ricky-local',
+                importance: 'high',
+              }),
+            }),
+          ]),
+        );
+      } else {
+        expect(
+          adapterInput.enrichment?.candidates?.some((candidate) => candidate.id === 'ricky-structured-spec'),
+          testCase.name,
+        ).toBe(false);
+        expect(
+          assembly.context.blocks.some((block) => block.id === 'enrichment-ricky-structured-spec'),
+          testCase.name,
+        ).toBe(false);
+        expect(
+          executionRequest.context?.blocks.some((block) => block.id === 'enrichment-ricky-structured-spec'),
+          testCase.name,
+        ).toBe(false);
       }
 
       if (testCase.expected.sourceMetadata) {
-        expect(parseJsonBlock(assembly.context.blocks, 'enrichment-ricky-source-metadata'), testCase.name).toEqual(
-          testCase.expected.sourceMetadata,
+        expect(adapterInput.enrichment?.candidates, testCase.name).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 'ricky-source-metadata',
+              content: JSON.stringify(testCase.expected.sourceMetadata, null, 2),
+            }),
+          ]),
         );
+        const sourceMetadataBlock = contextBlock(assembly.context.blocks, 'enrichment-ricky-source-metadata');
+        expect(sourceMetadataBlock, testCase.name).toMatchObject({
+          content: JSON.stringify(testCase.expected.sourceMetadata, null, 2),
+          source: 'ricky-local',
+          importance: 'medium',
+        });
+        expect(JSON.parse(sourceMetadataBlock.content), testCase.name).toEqual(testCase.expected.sourceMetadata);
+        expect(executionRequest.context?.blocks, testCase.name).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 'enrichment-ricky-source-metadata',
+              text: JSON.stringify(testCase.expected.sourceMetadata, null, 2),
+              metadata: expect.objectContaining({
+                source: 'ricky-local',
+                importance: 'medium',
+              }),
+            }),
+          ]),
+        );
+      } else {
+        expect(
+          adapterInput.enrichment?.candidates?.some((candidate) => candidate.id === 'ricky-source-metadata'),
+          testCase.name,
+        ).toBe(false);
+        expect(
+          assembly.context.blocks.some((block) => block.id === 'enrichment-ricky-source-metadata'),
+          testCase.name,
+        ).toBe(false);
+        expect(
+          executionRequest.context?.blocks.some((block) => block.id === 'enrichment-ricky-source-metadata'),
+          testCase.name,
+        ).toBe(false);
       }
+    }
+  });
+
+  it('uses the default real backing adapter for every handoff surface without injected assemblers', async () => {
+    const cases: Array<{
+      name: string;
+      raw: RawHandoff;
+      artifactContent?: string;
+      expected: {
+        requestId: string;
+        source: LocalInvocationRequest['source'];
+        mode: LocalInvocationRequest['mode'];
+        stageMode?: LocalInvocationRequest['stageMode'];
+        specPath?: string;
+        metadata: Record<string, unknown>;
+        structuredSpec?: Record<string, unknown>;
+        sourceMetadata?: Record<string, unknown>;
+      };
+    }> = [
+      {
+        name: 'cli',
+        raw: {
+          source: 'cli',
+          requestId: 'req-real-cli-11',
+          spec: { description: 'generate from CLI through the real adapter', stageMode: 'generate' },
+          specFile: 'specs/real-cli.json',
+          cliMetadata: { argv: ['ricky', 'generate', '--spec-file', 'specs/real-cli.json'] },
+          metadata: { surface: 'cli' },
+        },
+        expected: {
+          requestId: 'req-real-cli-11',
+          source: 'cli',
+          mode: 'local',
+          stageMode: 'generate',
+          specPath: 'specs/real-cli.json',
+          metadata: {
+            surface: 'cli',
+            argv: ['ricky', 'generate', '--spec-file', 'specs/real-cli.json'],
+          },
+          structuredSpec: { description: 'generate from CLI through the real adapter', stageMode: 'generate' },
+          sourceMetadata: {
+            cli: {
+              argv: ['ricky', 'generate', '--spec-file', 'specs/real-cli.json'],
+              specFile: 'specs/real-cli.json',
+            },
+          },
+        },
+      },
+      {
+        name: 'mcp',
+        raw: {
+          source: 'mcp',
+          requestId: 'req-real-mcp-11',
+          toolName: 'ricky.generate',
+          arguments: { prompt: 'generate from MCP through the real adapter', stageMode: 'generate-and-run' },
+          mcpMetadata: { toolCallId: 'tool-real-mcp-11' },
+          executionPreference: 'auto',
+          metadata: { surface: 'mcp' },
+        },
+        expected: {
+          requestId: 'req-real-mcp-11',
+          source: 'mcp',
+          mode: 'both',
+          stageMode: 'generate-and-run',
+          metadata: {
+            surface: 'mcp',
+            toolCallId: 'tool-real-mcp-11',
+            toolName: 'ricky.generate',
+          },
+          structuredSpec: { prompt: 'generate from MCP through the real adapter', stageMode: 'generate-and-run' },
+          sourceMetadata: {
+            mcp: {
+              toolCallId: 'tool-real-mcp-11',
+              toolName: 'ricky.generate',
+            },
+          },
+        },
+      },
+      {
+        name: 'claude',
+        raw: {
+          source: 'claude',
+          requestId: 'req-real-claude-11',
+          spec: { request: 'generate from Claude through the real adapter', stage_mode: 'run' },
+          conversationId: 'conv-real-11',
+          turnId: 'turn-real-11',
+          metadata: { surface: 'claude' },
+        },
+        expected: {
+          requestId: 'req-real-claude-11',
+          source: 'claude',
+          mode: 'local',
+          stageMode: 'run',
+          metadata: {
+            surface: 'claude',
+            conversationId: 'conv-real-11',
+            turnId: 'turn-real-11',
+          },
+          structuredSpec: { request: 'generate from Claude through the real adapter', stage_mode: 'run' },
+          sourceMetadata: {
+            claude: {
+              conversationId: 'conv-real-11',
+              turnId: 'turn-real-11',
+            },
+          },
+        },
+      },
+      {
+        name: 'structured',
+        raw: {
+          source: 'structured',
+          requestId: 'req-real-structured-11',
+          spec: { description: 'generate structured through the real adapter', stageMode: 'generate' },
+          metadata: { surface: 'structured' },
+        },
+        expected: {
+          requestId: 'req-real-structured-11',
+          source: 'structured',
+          mode: 'local',
+          stageMode: 'generate',
+          metadata: { surface: 'structured' },
+          structuredSpec: { description: 'generate structured through the real adapter', stageMode: 'generate' },
+        },
+      },
+      {
+        name: 'free-form',
+        raw: {
+          source: 'free-form',
+          requestId: 'req-real-free-form-11',
+          spec: 'generate free-form through the real adapter',
+          stageMode: 'generate',
+          metadata: { surface: 'free-form' },
+        },
+        expected: {
+          requestId: 'req-real-free-form-11',
+          source: 'free-form',
+          mode: 'local',
+          stageMode: 'generate',
+          metadata: { surface: 'free-form' },
+        },
+      },
+      {
+        name: 'workflow-artifact',
+        raw: {
+          source: 'workflow-artifact',
+          requestId: 'req-real-artifact-11',
+          artifactPath: 'workflows/real-artifact.workflow.ts',
+          metadata: { surface: 'workflow-artifact' },
+        },
+        artifactContent: 'import { workflow } from "@agent-relay/sdk/workflows";',
+        expected: {
+          requestId: 'req-real-artifact-11',
+          source: 'workflow-artifact',
+          mode: 'local',
+          stageMode: 'run',
+          specPath: 'workflows/real-artifact.workflow.ts',
+          metadata: { surface: 'workflow-artifact' },
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const normalized = await normalizeRequest(
+        testCase.raw,
+        artifactReader(testCase.artifactContent ?? 'unused artifact content'),
+      );
+      const assembly = await assembleRickyTurnContext(normalized);
+      const executionRequest = turnContextPackage.toExecutionRequest(assembly, {
+        id: `msg-${testCase.expected.requestId}`,
+        text: normalized.spec,
+        receivedAt: '2026-01-01T00:00:00.000Z',
+      });
+      const metadata = executionRequest.metadata as
+        | { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> }
+        | undefined;
+
+      expect(metadata?.adapter, testCase.name).toMatchObject({
+        name: 'ricky-local-turn-context-adapter',
+        package: '@agent-assistant/turn-context',
+      });
+      expectIssue11RickyMetadata(
+        `${testCase.name}.default-real-adapter.metadata.ricky`,
+        metadata?.ricky,
+        {
+          ...testCase.expected,
+          spec: normalized.spec,
+        },
+      );
+      expect(metadata?.ricky?.structuredSpec, testCase.name).toEqual(testCase.expected.structuredSpec);
+      expect(metadata?.ricky?.sourceMetadata, testCase.name).toEqual(testCase.expected.sourceMetadata);
+      expect(executionRequest, testCase.name).toMatchObject({
+        assistantId: 'ricky',
+        turnId: testCase.expected.requestId,
+        message: {
+          id: `msg-${testCase.expected.requestId}`,
+          text: normalized.spec,
+        },
+        context: {
+          blocks: expect.arrayContaining([
+            expect.objectContaining({ id: 'enrichment-ricky-request-summary' }),
+            expect.objectContaining({ id: 'enrichment-ricky-spec-text', text: normalized.spec }),
+            expect.objectContaining({
+              id: 'enrichment-ricky-request-metadata',
+              text: JSON.stringify(testCase.expected.metadata, null, 2),
+            }),
+          ]),
+        },
+      });
     }
   });
 });

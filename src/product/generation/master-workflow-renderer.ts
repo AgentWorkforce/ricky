@@ -1,12 +1,19 @@
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
+import type { Nodes } from 'mdast';
+import { fromMarkdown } from 'mdast-util-from-markdown';
 import {
   DEFAULT_REPAIR_RETRY_ATTEMPTS,
   DEFAULT_RETRY_BACKOFF_MS,
   DEFAULT_RETRY_MAX_ATTEMPTS,
 } from '../../shared/constants.js';
 import { planMasterExecution, type ChildWorkflowPlan, type MasterExecutionPlan } from '../orchestration/index.js';
-import { deriveTestCommand } from './template-renderer.js';
+import {
+  deriveTestCommand,
+  executableAcceptanceCommandsForSpec,
+  usesOnlyListedValidationCommands,
+} from './template-renderer.js';
 import { buildFinalReviewPassGateCommand } from './final-review-gate.js';
+import { markdownLabelFields } from './workforce-persona-writer.js';
 import type {
   DeterministicGate,
   PatternDecision,
@@ -74,9 +81,82 @@ const MASTER_FILE_COUNT_THRESHOLD = 12;
 export function shouldUseMasterExecutionWorkflow(spec: NormalizedWorkflowSpec): boolean {
   const text = workflowText(spec);
   if (!IMPLEMENTATION_PATTERN.test(text)) return false;
+  if (hasSingleWorkflowVeto(text)) return false;
   if (MASTER_EXPLICIT_PATTERN.test(text)) return true;
+  if (hasSinglePrWorktreeContract(text)) return false;
   if (spec.targetFiles.length >= MASTER_FILE_COUNT_THRESHOLD) return true;
   return false;
+}
+
+function hasSingleWorkflowVeto(text: string): boolean {
+  const parsedSignals = parseConstraintTextCandidates(text);
+  if (parsedSignals.length > 0 && parsedSignals.some(hasSingleWorkflowSignal)) return true;
+  return hasSingleWorkflowSignal(text);
+}
+
+function parseConstraintTextCandidates(text: string): string[] {
+  const jsonSignals = parseJsonTextCandidates(text);
+  if (jsonSignals.length > 0) return jsonSignals;
+
+  try {
+    const root = fromMarkdown(text);
+    return collectMarkdownText(root);
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonTextCandidates(text: string): string[] {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const values: string[] = [];
+    collectJsonStrings(parsed, values);
+    return values;
+  } catch {
+    return [];
+  }
+}
+
+function collectJsonStrings(value: unknown, values: string[]): void {
+  if (typeof value === 'string') {
+    values.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectJsonStrings(item, values);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) collectJsonStrings(item, values);
+  }
+}
+
+function collectMarkdownText(node: Nodes): string[] {
+  const ownText = 'value' in node && typeof node.value === 'string' ? [node.value] : [];
+  if (!('children' in node)) return ownText;
+  const childText = node.children.flatMap((child) => collectMarkdownText(child));
+  const combined = childText.join(' ').replace(/\s+/g, ' ').trim();
+  return combined ? [...ownText, combined] : ownText;
+}
+
+function hasSingleWorkflowSignal(text: string): boolean {
+  return [
+    /\b(?:single|one)\s+(?:local\s+)?workflow\b/i,
+    /\b(?:single|one)\s+(?:local\s+)?implementation\s+workflow\b/i,
+    /\bno\s+child\s+workflows?\b/i,
+    /\bno\s+(?:nested|multi-child|multi child)\s+workflows?\b/i,
+    /\b(?:do\s+not|don't|must\s+not|without)\s+(?:generate|emit|create|use|run)?\s*(?:any\s+)?child\s+workflows?\b/i,
+    /\b(?:do\s+not|don't|must\s+not)\s+(?:decompose|materialize\s+child\s+workflows?|invoke\s+`?ricky run`?\s+recursively|require\s+an?\s+Agent Relay broker)\b/i,
+    /\b(?:static|deterministic)\s+validation\s+only\b/i,
+  ].some((pattern) => pattern.test(text));
+}
+
+function hasSinglePrWorktreeContract(text: string): boolean {
+  if (!/\b(?:Outcome\s*:\s*)?(?:exactly\s+)?one\s+pull\s+request\b/i.test(text)) return false;
+  const fields = markdownLabelFields(text);
+  const worktree = fields.get('worktree') ?? fields.get('target worktree');
+  const branch = fields.get('target branch') ?? fields.get('branch');
+  return Boolean(worktree && branch);
 }
 
 export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput): RenderedMasterWorkflow {
@@ -94,7 +174,6 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
     desiredSlices: desiredSlicesFor(input.spec),
     constraints: {
       maxChildren: 12,
-      requiredGateMarkers: ['RICKY_CHILD_WORKFLOW_COMPLETE'],
     },
   });
   const channel = `wf-ricky-${slug}`;
@@ -102,6 +181,16 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
   const gates = buildMasterGates(artifactsDir, plan, input.spec);
   const skillApplicationEvidence = buildMasterSkillEvidence(input.skills);
   const toolSelections = buildMasterToolSelections(plan);
+  // Sidecars travel with the generated workflow on disk. Embedding the spec
+  // and the child-source map inline ballooned the master workflow past
+  // ARG_MAX (spawn E2BIG) every time `materialize-child-workflows` ran; the
+  // sidecars push that payload off of argv entirely.
+  const artifactPathNoExt = artifactPath.replace(/\.ts$/, '');
+  const specSidecarPath = `${artifactPathNoExt}.spec.md`;
+  const childrenSidecarPath = `${artifactPathNoExt}.children.json`;
+  const childSources = Object.fromEntries(
+    plan.children.map((child) => [child.workflowFilePath, childWorkflowSource(child, input.spec, specSidecarPath)]),
+  );
   const content = renderMasterSource({
     spec: input.spec,
     pattern: input.pattern,
@@ -111,6 +200,9 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
     plan,
     skills: input.skills,
     skillApplicationEvidence,
+    childSources,
+    specSidecarPath,
+    childrenSidecarPath,
   });
 
   return {
@@ -130,6 +222,10 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
       skillMatches: input.skills.matches,
       toolSelections,
       artifactsDir,
+      sidecarFiles: {
+        [specSidecarPath]: input.spec.description,
+        [childrenSidecarPath]: `${JSON.stringify(childSources, null, 2)}\n`,
+      },
     },
   };
 }
@@ -160,10 +256,10 @@ function renderMasterSource(input: {
   plan: MasterExecutionPlan;
   skills: SkillContext;
   skillApplicationEvidence: SkillApplicationEvidence[];
+  childSources: Record<string, string>;
+  specSidecarPath: string;
+  childrenSidecarPath: string;
 }): string {
-  const childSources = Object.fromEntries(
-    input.plan.children.map((child) => [child.workflowFilePath, childWorkflowSource(child, input.spec)]),
-  );
   const planJson = JSON.stringify(input.plan, null, 2);
   const skillMatchesJson = JSON.stringify(input.skills.matches, null, 2);
   const skillBoundaryJson = JSON.stringify({
@@ -173,11 +269,14 @@ function renderMasterSource(input: {
     loadedSkills: input.skills.applicableSkillNames,
     applicationEvidence: input.skillApplicationEvidence,
   }, null, 2);
+  // Read the child source map from disk at runtime instead of inlining the
+  // JSON into this shell command. Inlining once N children deep produced a
+  // multi-megabyte argv element and triggered `spawn E2BIG`.
   const materializeCommand = [
     'node --input-type=module <<\'NODE\'',
-    'import { mkdirSync, writeFileSync } from \'node:fs\';',
+    'import { mkdirSync, writeFileSync, readFileSync } from \'node:fs\';',
     'import { dirname } from \'node:path\';',
-    `const childSources = ${JSON.stringify(childSources, null, 2)};`,
+    `const childSources = JSON.parse(readFileSync(${literal(input.childrenSidecarPath)}, 'utf8'));`,
     'for (const [filePath, source] of Object.entries(childSources)) {',
     '  mkdirSync(dirname(filePath), { recursive: true });',
     '  writeFileSync(filePath, source, \'utf8\');',
@@ -201,10 +300,8 @@ function renderMasterSource(input: {
     '',
     '## Non-goals and gates',
     '',
-    '- Each child workflow is independently 80-to-100 gated; the master executor only checks signoff markers afterward.',
+    '- Each child workflow is independently 80-to-100 gated; the master executor only checks signoff artifacts afterward.',
     '- Source edits happen inside child workflows, not in this lead-plan step.',
-    '',
-    'RICKY_MASTER_LEAD_PLAN_READY',
   ];
   const leadPlanCommand = [
     'set -e',
@@ -212,16 +309,80 @@ function renderMasterSource(input: {
     `cat > ${shellQuote(`${input.artifactsDir}/lead-plan.md`)} <<'EOF'`,
     ...leadPlanSummaryLines,
     'EOF',
-    // Re-verify the marker landed on disk so the deterministic guarantee
-    // is self-checked and any future template edit that drops it fails
-    // loudly here instead of silently passing through.
-    `grep -F RICKY_MASTER_LEAD_PLAN_READY ${shellQuote(`${input.artifactsDir}/lead-plan.md`)} >/dev/null`,
-    'echo RICKY_MASTER_LEAD_PLAN_VERIFIED',
+    `test -s ${shellQuote(`${input.artifactsDir}/lead-plan.md`)}`,
+    'echo RICKY_MASTER_LEAD_PLAN_WRITTEN',
   ].join('\n');
   const verifyChildrenCommand = [
     'set -e',
     ...input.plan.children.map((child) => `test -f ${shellQuote(child.workflowFilePath)}`),
-    'if command -v rg >/dev/null 2>&1; then rg "RICKY_CHILD_WORKFLOW_COMPLETE" workflows/generated >/dev/null; else grep -R "RICKY_CHILD_WORKFLOW_COMPLETE" workflows/generated >/dev/null; fi',
+    `node <<'NODE'
+const fs = require('node:fs');
+const ts = require('typescript');
+const children = ${JSON.stringify(input.plan.children.map((child) => ({
+  workflowFilePath: child.workflowFilePath,
+  signoffArtifactPath: child.signoffArtifactPath,
+})))};
+function propertyNameText(name) {
+  return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name) ? name.text : undefined;
+}
+function propertyValue(objectLiteral, propertyName) {
+  for (const property of objectLiteral.properties) {
+    if (ts.isPropertyAssignment(property) && propertyNameText(property.name) === propertyName) return property.initializer;
+  }
+  return undefined;
+}
+function stringValue(node) {
+  if (!node) return undefined;
+  return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : undefined;
+}
+function isCallNamed(node, methodName) {
+  return ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === methodName;
+}
+function hasFinalSignoffStep(sourceFile, signoffArtifactPath) {
+  let found = false;
+  const visit = (node) => {
+    if (isCallNamed(node, 'step')) {
+      const [nameArg, configArg] = node.arguments;
+      if (stringValue(nameArg) === 'final-signoff' && configArg && ts.isObjectLiteralExpression(configArg)) {
+        const command = propertyValue(configArg, 'command');
+        found = found || stringValue(command)?.includes(signoffArtifactPath) === true;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+function hasRunWithProcessCwd(sourceFile) {
+  let found = false;
+  const visit = (node) => {
+    if (isCallNamed(node, 'run')) {
+      const [configArg] = node.arguments;
+      if (configArg && ts.isObjectLiteralExpression(configArg)) {
+        const cwd = propertyValue(configArg, 'cwd');
+        found = found || Boolean(cwd && ts.isCallExpression(cwd)
+          && ts.isPropertyAccessExpression(cwd.expression)
+          && ts.isIdentifier(cwd.expression.expression)
+          && cwd.expression.expression.text === 'process'
+          && cwd.expression.name.text === 'cwd');
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+for (const child of children) {
+  const body = fs.readFileSync(child.workflowFilePath, 'utf8');
+  const sourceFile = ts.createSourceFile(child.workflowFilePath, body, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  if (!hasFinalSignoffStep(sourceFile, child.signoffArtifactPath)) {
+    throw new Error(\`child workflow missing final-signoff step for signoff artifact path: \${child.workflowFilePath}\`);
+  }
+  if (!hasRunWithProcessCwd(sourceFile)) {
+    throw new Error(\`child workflow missing explicit cwd run call: \${child.workflowFilePath}\`);
+  }
+}
+NODE`,
     'echo RICKY_MASTER_CHILD_WORKFLOWS_READY',
   ].join('\n');
   const finalSignoffCommand = [
@@ -231,14 +392,30 @@ function renderMasterSource(input: {
     '# Ricky master executor signoff',
     '',
     `Master plan: ${input.plan.children.length} child workflows across ${waveCount(input.plan)} waves.`,
-    'The master executor ran child workflows through ricky run and checked deterministic signoff markers.',
+    'The master executor ran child workflows through ricky run and checked deterministic signoff artifacts.',
     'Source changes, code changes, tests, git diff evidence, and PR URL or explicit result reporting are required from child workflows.',
     '',
     'MASTER_EXECUTOR_RESULT_READY',
     'EOF',
     'echo MASTER_EXECUTOR_RESULT_READY',
   ].join('\n');
+  const listedValidationOnly = usesOnlyListedValidationCommands(input.spec);
+  const listedValidationCommands = executableAcceptanceCommandsForSpec(input.spec);
+  const finalHardValidationCommands = [
+    'set -e',
+    ...(listedValidationOnly
+      ? listedValidationCommands
+      : [TYPECHECK_COMMAND, deriveTestCommand(input.spec)]),
+    'git diff --name-only',
+    'echo RICKY_MASTER_FINAL_VALIDATION_READY',
+  ];
 
+  // The master workflow's `.description()` is sent to runtime agents as
+  // context. Inlining the full spec text here meant every agent invocation
+  // carried ~100KB+ of markdown that the agents did not need (the spec lives
+  // on disk at specSidecarPath and child slices `cp` it locally). The short
+  // ref keeps the description small without losing the pointer.
+  const masterDescription = `${firstHeadingOrSummary(input.spec.description)} (full spec on disk at ${input.specSidecarPath}; child workflows read it from there).`;
   return `${[
     "import { workflow } from '@agent-relay/sdk/workflows';",
     '',
@@ -248,7 +425,7 @@ function renderMasterSource(input: {
     '',
     'async function main() {',
     `  const result = await workflow(${literal(input.workflowId)})`,
-    `    .description(${literal(input.spec.description)})`,
+    `    .description(${literal(masterDescription)})`,
     `    .pattern(${literal(input.pattern.pattern)})`,
     `    .channel(${literal(input.channel)})`,
     '    .maxConcurrency(4)',
@@ -323,22 +500,24 @@ function renderMasterSource(input: {
     `      task: ${templateLiteral([
       'Review child workflow signoffs and deterministic gates for the master executor run.',
       `Read ${input.artifactsDir}/master-plan.json and each child signoff path.`,
-      `Write ${input.artifactsDir}/review-codex.md ending with RICKY_MASTER_REVIEW_READY.`,
+      `Write ${input.artifactsDir}/review-codex.md with your review findings.`,
+      `Also write ${input.artifactsDir}/review-codex-status.json as JSON with shape {"status":"approved"|"blocked","summary":"..."}.`,
     ].join('\n'))},`,
     `      verification: { type: "file_exists", value: ${literal(`${input.artifactsDir}/review-codex.md`)} },`,
     '    })',
     '',
-    '    .step("final-hard-validation", {',
+    '    .step("final-review-pass-gate", {',
     '      type: "deterministic",',
     '      dependsOn: ["review-child-evidence"],',
-    `      command: ${literal([
-      'set -e',
-      TYPECHECK_COMMAND,
-      deriveTestCommand(input.spec),
-      'git diff --name-only',
-      `grep -F RICKY_MASTER_REVIEW_READY ${shellQuote(`${input.artifactsDir}/review-codex.md`)}`,
-      'echo RICKY_MASTER_FINAL_VALIDATION_READY',
-    ].join('\n'))},`,
+    `      command: ${literal(buildMasterReviewPassGateCommand(input.artifactsDir))},`,
+    '      captureOutput: true,',
+    '      failOnError: true,',
+    '    })',
+    '',
+    '    .step("final-hard-validation", {',
+    '      type: "deterministic",',
+    '      dependsOn: ["final-review-pass-gate"],',
+    `      command: ${literal(finalHardValidationCommands.join('\n'))},`,
     '      captureOutput: true,',
     '      failOnError: true,',
     '    })',
@@ -370,8 +549,7 @@ function renderChildRunStep(child: ChildWorkflowPlan): string[] {
   const command = [
     'set -e',
     `ricky run ${shellQuote(child.workflowFilePath)} --foreground`,
-    `test -f ${shellQuote(child.signoffArtifactPath)}`,
-    `grep -F ${shellQuote(child.signoffMarker)} ${shellQuote(child.signoffArtifactPath)}`,
+    `test -s ${shellQuote(child.signoffArtifactPath)}`,
     'echo RICKY_MASTER_CHILD_RUN_VERIFIED',
   ].join('\n');
 
@@ -387,11 +565,10 @@ function renderChildRunStep(child: ChildWorkflowPlan): string[] {
   ];
 }
 
-export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowSpec): string {
+export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowSpec, specSidecarPath?: string): string {
   const artifactsDir = child.signoffArtifactPath.replace(/\/signoff\.md$/, '');
   const validationCommand = child.validationCommands[0] ?? 'npm run typecheck';
   const targetScope = child.targetFiles.length > 0 ? child.targetFiles.join(' ') : 'NO_TARGET_FILES_DECLARED';
-  const marker = child.signoffMarker;
   // Injected into every review/fix task. The master executor runs all child
   // slices in one shared checkout, so by the time a later child is reviewed
   // the worktree already contains earlier siblings' dirty files. Reviewers
@@ -431,7 +608,14 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
     `      command: ${literal([
       'set -e',
       `mkdir -p ${shellQuote(artifactsDir)}`,
-      `printf '%s\\n' ${shellQuote(spec.description)} > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
+      // Copy the spec from its sidecar file rather than embedding it via
+      // `printf '%s\\n' '<huge spec text>'`. The embedded form pushed every
+      // child's prepare-context heredoc to ~100KB and made the materialize
+      // step's argv multi-megabyte. When the sidecar path isn't known
+      // (legacy call sites), fall back to a no-op so this child still runs.
+      specSidecarPath
+        ? `cp ${shellQuote(specSidecarPath)} ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`
+        : `: > ${shellQuote(`${artifactsDir}/normalized-spec.txt`)}`,
       `printf '%s\\n' ${shellQuote(targetScope)} > ${shellQuote(`${artifactsDir}/target-files.txt`)}`,
       // Snapshot the worktree's dirty set BEFORE this child touches anything.
       // The master executor runs every child in the SAME checkout, so by the
@@ -539,7 +723,8 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
       'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
       sharedWorktreeScopeRule,
       `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
-      `Write ${artifactsDir}/claude-final-fix.md ending with RICKY_CHILD_CLAUDE_FINAL_FIX_READY.`,
+      `Write ${artifactsDir}/claude-final-fix.md and ${artifactsDir}/claude-final-fix-status.json.`,
+      'The status JSON must have shape {"status":"fixed"|"no_issues_found"|"blocked","summary":"..."}. Use "blocked" only when BLOCKED_NO_COMMIT.md exists.',
     ].join('\n'))},`,
     `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/claude-final-fix.md`)} },`,
     '    })',
@@ -550,7 +735,7 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
       'Second-pass fresh-eyes review after the Claude loop. Read the actual files, diff, review artifacts, and validation evidence.',
       sharedWorktreeScopeRule,
       'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
-      `Write ${artifactsDir}/review-codex.md ending with RICKY_CHILD_CODEX_REVIEW_READY.`,
+      `Write ${artifactsDir}/review-codex.md.`,
     ].join('\n'))},`,
     `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/review-codex.md`)} },`,
     '    })',
@@ -580,7 +765,7 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
       'Final Codex fresh-eyes review after Codex fixes.',
       sharedWorktreeScopeRule,
       'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
-      `Write ${artifactsDir}/final-review-codex.md ending with RICKY_CHILD_CODEX_FINAL_REVIEW_READY.`,
+      `Write ${artifactsDir}/final-review-codex.md.`,
     ].join('\n'))},`,
     `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/final-review-codex.md`)} },`,
     '    })',
@@ -592,7 +777,8 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
       'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
       sharedWorktreeScopeRule,
       `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
-      `Write ${artifactsDir}/codex-final-fix.md ending with RICKY_CHILD_CODEX_FINAL_FIX_READY.`,
+      `Write ${artifactsDir}/codex-final-fix.md and ${artifactsDir}/codex-final-fix-status.json.`,
+      'The status JSON must have shape {"status":"fixed"|"no_issues_found"|"blocked","summary":"..."}. Use "blocked" only when BLOCKED_NO_COMMIT.md exists.',
     ].join('\n'))},`,
     `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/codex-final-fix.md`)} },`,
     '    })',
@@ -601,17 +787,7 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
     '      dependsOn: ["final-fix-codex"],',
     `      command: ${literal(buildFinalReviewPassGateCommand({
       artifactsDir,
-      checks: [
-        {
-          presenceTest: `grep -qF RICKY_CHILD_CLAUDE_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/claude-final-fix.md`)}`,
-          missingDetail: `${artifactsDir}/claude-final-fix.md is missing RICKY_CHILD_CLAUDE_FINAL_FIX_READY`,
-        },
-        {
-          presenceTest: `grep -qF RICKY_CHILD_CODEX_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/codex-final-fix.md`)}`,
-          missingDetail: `${artifactsDir}/codex-final-fix.md is missing RICKY_CHILD_CODEX_FINAL_FIX_READY`,
-        },
-      ],
-      successMarker: 'RICKY_CHILD_FRESH_EYES_LOOP_READY',
+      requiredFiles: [`${artifactsDir}/claude-final-fix.md`, `${artifactsDir}/codex-final-fix.md`, `${artifactsDir}/claude-final-fix-status.json`, `${artifactsDir}/codex-final-fix-status.json`],
     }))},`,
     '      captureOutput: true,',
     '      failOnError: true,',
@@ -623,10 +799,6 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
       'set -e',
       validationCommand,
       'git diff --name-only',
-      // Quiet greps with explicit diagnostics — a missing marker here must
-      // not be hidden behind the previous grep's matched-line output.
-      `if ! grep -qF RICKY_CHILD_CLAUDE_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/claude-final-fix.md`)}; then echo ${shellQuote(`RICKY_CHILD_GATE_MISSING_MARKER: ${artifactsDir}/claude-final-fix.md is missing RICKY_CHILD_CLAUDE_FINAL_FIX_READY`)} >&2; exit 1; fi`,
-      `if ! grep -qF RICKY_CHILD_CODEX_FINAL_FIX_READY ${shellQuote(`${artifactsDir}/codex-final-fix.md`)}; then echo ${shellQuote(`RICKY_CHILD_GATE_MISSING_MARKER: ${artifactsDir}/codex-final-fix.md is missing RICKY_CHILD_CODEX_FINAL_FIX_READY`)} >&2; exit 1; fi`,
       'echo RICKY_CHILD_FINAL_VALIDATION_READY',
     ].join('\n'))},`,
     '      captureOutput: true,',
@@ -638,14 +810,14 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
     `      command: ${literal([
       'set -e',
       `mkdir -p ${shellQuote(artifactsDir)}`,
-      `cat > ${shellQuote(child.signoffArtifactPath)} <<'EOF'`,
-      `# Child workflow signoff: ${child.title}`,
-      '',
-      'RICKY_CHILD_WORKFLOW_COMPLETE',
-      marker,
-      'EOF',
-      'echo RICKY_CHILD_WORKFLOW_COMPLETE',
-    ].join('\n'))},`,
+	      `cat > ${shellQuote(child.signoffArtifactPath)} <<'EOF'`,
+	      `# Child workflow signoff: ${child.title}`,
+	      '',
+	      `Signoff artifact: ${child.signoffArtifactPath}`,
+	      'Child workflow completed final review, hard validation, and signoff artifact materialization.',
+	      'EOF',
+	      `test -s ${shellQuote(child.signoffArtifactPath)}`,
+	    ].join('\n'))},`,
     '      captureOutput: true,',
     '      failOnError: true,',
     '    })',
@@ -681,15 +853,37 @@ function buildMasterTasks(plan: MasterExecutionPlan): WorkflowTask[] {
 
 function buildMasterGates(artifactsDir: string, plan: MasterExecutionPlan, spec: NormalizedWorkflowSpec): DeterministicGate[] {
   const testCommand = deriveTestCommand(spec);
+  const listedValidationOnly = usesOnlyListedValidationCommands(spec);
+  const finalValidationCommand = listedValidationOnly
+    ? executableAcceptanceCommandsForSpec(spec).join(' && ')
+    : `{ ${TYPECHECK_COMMAND}; } && ${testCommand}`;
+  const safeFinalValidationCommand = finalValidationCommand || "printf '%s\\n' 'No executable validation commands listed by spec.'";
   return [
-    gate('skill-boundary-metadata-gate', `test -f ${artifactsDir}/skill-application-boundary.json`, 'file_exists', true, ['prepare-context'], 'pre_review'),
     gate('child-workflow-file-gate', plan.children.map((child) => `test -f ${child.workflowFilePath}`).join(' && '), 'file_exists', true, ['materialize-child-workflows'], 'pre_review'),
-    gate('initial-soft-validation', `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
-    gate('final-review-pass-gate', `grep -F RICKY_MASTER_REVIEW_READY ${artifactsDir}/review-codex.md`, 'output_contains', true, ['review-child-evidence'], 'final'),
-    gate('final-hard-validation', `{ ${TYPECHECK_COMMAND}; } && ${testCommand}`, 'exit_code', true, ['final-review-pass-gate'], 'final'),
+    gate('initial-soft-validation', listedValidationOnly ? safeFinalValidationCommand : `{ ${TYPECHECK_COMMAND}; } 2>&1 | tail -160`, 'output_contains', false, ['child-workflow-file-gate'], 'pre_review'),
+    gate('final-review-pass-gate', buildMasterReviewPassGateCommand(artifactsDir), 'deterministic_gate', true, ['review-child-evidence'], 'final'),
+    gate('final-hard-validation', safeFinalValidationCommand, 'exit_code', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', 'git diff --name-only', 'output_contains', true, ['final-hard-validation'], 'final'),
-    gate('regression-gate', testCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
+    gate('regression-gate', listedValidationOnly ? safeFinalValidationCommand : testCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
   ];
+}
+
+function buildMasterReviewPassGateCommand(artifactsDir: string): string {
+  return [
+    'node <<\'NODE\'',
+    "const fs = require('node:fs');",
+    `const base = ${literal(artifactsDir)};`,
+    "const reviewPath = `${base}/review-codex.md`;",
+    "const statusPath = `${base}/review-codex-status.json`;",
+    "for (const path of [reviewPath, statusPath]) {",
+    "  if (!fs.existsSync(path) || fs.statSync(path).size === 0) throw new Error(`required master review artifact missing or empty: ${path}`);",
+    '}',
+    "const parsed = JSON.parse(fs.readFileSync(statusPath, 'utf8'));",
+    "if (parsed.status !== 'approved') throw new Error(`${statusPath} must declare status approved`);",
+    "if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) throw new Error(`${statusPath} must include a non-empty summary`);",
+    "console.log('RICKY_MASTER_REVIEW_STRUCTURED_GATE_OK');",
+    'NODE',
+  ].join('\n');
 }
 
 function buildMasterSkillEvidence(skills: SkillContext): SkillApplicationEvidence[] {
@@ -808,6 +1002,58 @@ function titleCase(value: string): string {
 
 function literal(value: string | string[]): string {
   return JSON.stringify(value);
+}
+
+function firstHeadingOrSummary(specText: string): string {
+  const candidate = firstMarkdownHeadingOrParagraph(specText)
+    ?? specText.split('\n').find((line) => line.trim().length > 0)?.trim()
+    ?? 'Ricky master workflow';
+  return candidate.length > 200 ? `${candidate.slice(0, 197)}...` : candidate;
+}
+
+function firstMarkdownHeadingOrParagraph(specText: string): string | undefined {
+  let root: Nodes;
+  try {
+    root = fromMarkdown(specText);
+  } catch {
+    return undefined;
+  }
+
+  let fallback: string | undefined;
+  const visit = (node: Nodes): string | undefined => {
+    if (node.type === 'heading' && 'depth' in node && (node.depth === 1 || node.depth === 2)) {
+      const text = markdownNodeText(node);
+      if (text) return text;
+    }
+
+    if (!fallback && (node.type === 'paragraph' || node.type === 'text')) {
+      fallback = markdownNodeText(node);
+    }
+
+    if ('children' in node) {
+      for (const child of node.children) {
+        const found = visit(child);
+        if (found) return found;
+      }
+    }
+
+    return undefined;
+  };
+
+  return visit(root) ?? fallback;
+}
+
+function markdownNodeText(node: Nodes): string | undefined {
+  if ('value' in node && typeof node.value === 'string') {
+    return node.value.replace(/\s+/g, ' ').trim() || undefined;
+  }
+  if (!('children' in node)) return undefined;
+  const text = node.children
+    .map((child) => markdownNodeText(child) ?? '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text || undefined;
 }
 
 function templateLiteral(value: string): string {

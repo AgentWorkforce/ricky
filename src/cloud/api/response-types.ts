@@ -5,6 +5,8 @@
  * assumptions the generator made, and suggested follow-up actions.
  */
 
+import type { CloudGenerateMode, CloudGenerationMode } from './request-types.js';
+
 // ---------------------------------------------------------------------------
 // Artifact bundle
 // ---------------------------------------------------------------------------
@@ -16,6 +18,15 @@ export interface CloudArtifact {
   type?: string;
   /** Artifact content when returned inline. */
   content?: string;
+}
+
+export interface CloudArtifactBundle {
+  /** Generated artifacts returned by this response. Mirrors top-level artifacts for compatibility. */
+  artifacts: CloudArtifact[];
+  /** Generation behavior used for this response. */
+  generationMode: CloudGenerationMode;
+  /** Cloud/local target routing used for the generated artifacts. */
+  targetMode: CloudGenerateMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +87,19 @@ export interface CloudValidationStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Error response
+// ---------------------------------------------------------------------------
+
+export interface CloudGenerateError {
+  /** Stable machine-readable error code for Cloud API clients. */
+  code: string;
+  /** Human-readable error message safe to show to callers. */
+  message: string;
+  /** Optional field path associated with the error. */
+  path?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Run receipt
 // ---------------------------------------------------------------------------
 
@@ -101,8 +125,12 @@ export interface CloudGenerateResponse {
   ok: boolean;
   /** HTTP-like status code for the response. */
   status: number;
-  /** The generated artifact bundle. */
+  /** Stable error payload when ok=false. */
+  error?: CloudGenerateError;
+  /** The generated artifacts, kept top-level for existing callers. */
   artifacts: CloudArtifact[];
+  /** Explicit artifact bundle response contract for Cloud API callers. */
+  artifactBundle: CloudArtifactBundle;
   /** Warnings and assumptions surfaced during generation. */
   warnings: CloudWarning[];
   /** Explicit assumptions made while interpreting or generating from the spec. */

@@ -94,6 +94,7 @@ RUN_PID="$$"
 RUN_PGID=""
 SCRIPT_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')"
 RUNNER_START_PID=""
+RUNNER_WAIT_PID=""
 RUNNER_EXPECTS_DETACHED_PGID="false"
 STATUS_MARKED="false"
 RESTORED_ARTIFACT_DIR=""
@@ -240,6 +241,57 @@ clear_artifact_checkpoint() {
   rm -f "$artifact_dir/checkpoint.env"
 }
 
+clear_artifact_runner_pid() {
+  local artifact_dir="$1"
+
+  [[ -n "$artifact_dir" ]] || return 0
+  rm -f "$artifact_dir/runner.pid"
+}
+
+restore_quarantined_runtime_state_for_artifact() {
+  local artifact_dir="$1"
+  local quarantine_root="$artifact_dir/runtime-state-quarantine"
+  local entry=""
+  local base=""
+  local candidate=""
+
+  [[ -d "$quarantine_root" ]] || return 0
+
+  shopt -s nullglob
+  for entry in "$quarantine_root"/*; do
+    [[ -e "$entry" ]] || continue
+    base="$(basename "$entry")"
+    candidate=""
+
+    case "$base" in
+      agent-relay-*) candidate=".agent-relay" ;;
+      relay-*) candidate=".relay" ;;
+      trajectories-*) candidate=".trajectories" ;;
+      *)
+        log "leaving unknown quarantined runtime state in place: $entry"
+        continue
+        ;;
+    esac
+
+    if [[ ! -e "$candidate" ]]; then
+      mv "$entry" "$candidate"
+      log "restored quarantined runtime state from stale artifact: $entry -> $candidate"
+      continue
+    fi
+
+    if [[ -d "$candidate" && -d "$entry" ]]; then
+      mkdir -p "$candidate"
+      cp -R "$entry"/. "$candidate"/
+      rm -rf "$entry"
+      log "merged quarantined runtime state from stale artifact: $entry -> $candidate"
+      continue
+    fi
+
+    log "leaving quarantined runtime state in place because restore target already exists: $entry (target: $candidate)"
+  done
+  shopt -u nullglob
+}
+
 mark_artifact_stale_or_complete() {
   local artifact_dir="$1"
   local status_file="$artifact_dir/status.txt"
@@ -256,8 +308,11 @@ mark_artifact_stale_or_complete() {
     resolved_status="$(artifact_queue_exhausted_terminal_status "$artifact_dir")"
     resolved_reason="queue exhausted before harness status flush"
   elif artifact_runner_logs_show_success "$artifact_dir" && (
-    ! artifact_checkpoint_has_active_workflow "$artifact_dir" ||
-    artifact_active_workflow_runner_log_shows_success "$artifact_dir"
+    artifact_checkpoint_indicates_queue_exhausted "$artifact_dir" ||
+    (
+      artifact_checkpoint_has_active_workflow "$artifact_dir" &&
+      artifact_active_workflow_runner_log_shows_success "$artifact_dir"
+    )
   ); then
     resolved_status="complete"
     resolved_reason="runner completed before harness status flush"
@@ -316,6 +371,7 @@ reconcile_stale_state_dir() {
   if [[ -f "$status_file" ]] && grep -Eqx 'running|checkpointed' "$status_file"; then
     if ! is_pid_running "$run_pid" && ! is_process_group_running "$run_pgid"; then
       mark_artifact_stale_or_complete "$artifact_dir"
+      restore_quarantined_runtime_state_for_artifact "$artifact_dir"
       reconciled_status="$(cat "$status_file" 2>/dev/null || true)"
       log "reconciled stale overnight state from $checkpoint_file -> $artifact_dir"
 
@@ -412,6 +468,7 @@ reconcile_stale_state_dirs() {
   while IFS= read -r artifact_dir; do
     [[ -d "$artifact_dir" ]] || continue
     mark_artifact_stale_or_complete "$artifact_dir"
+    restore_quarantined_runtime_state_for_artifact "$artifact_dir"
     log "reconciled orphaned overnight artifact without checkpoint -> $artifact_dir"
   done < <(iterate_running_artifact_dirs_without_checkpoints)
 }
@@ -498,20 +555,108 @@ EOF
   LOCK_ACQUIRED="true"
 }
 
+path_contains_tracked_files() {
+  local candidate="$1"
+
+  [[ -n "$candidate" ]] || return 1
+  [[ -e "$candidate" ]] || return 1
+  [[ -n "$(git ls-files -- "$candidate")" ]]
+}
+
+prune_stale_trajectory_index_entries() {
+  local index_path=".trajectories/index.json"
+  local prune_report=""
+
+  [[ -f "$index_path" ]] || return 0
+
+  prune_report="$(python3 - <<'PY'
+import json
+from pathlib import Path
+
+index_path = Path('.trajectories/index.json')
+try:
+    data = json.loads(index_path.read_text())
+except Exception:
+    print('invalid')
+    raise SystemExit(0)
+
+trajectories = data.get('trajectories')
+if not isinstance(trajectories, dict):
+    print('invalid')
+    raise SystemExit(0)
+
+removed = []
+for key, entry in list(trajectories.items()):
+    if not isinstance(entry, dict):
+        continue
+    if entry.get('status') != 'active':
+        continue
+    entry_path = entry.get('path')
+    if not isinstance(entry_path, str) or not entry_path:
+        continue
+    if Path(entry_path).exists():
+        continue
+    removed.append(key)
+    del trajectories[key]
+
+if not removed:
+    print('0')
+    raise SystemExit(0)
+
+data['lastUpdated'] = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+index_path.write_text(json.dumps(data, indent=2) + '\n')
+print(str(len(removed)))
+PY
+)"
+
+  case "$prune_report" in
+    ''|0)
+      ;;
+    invalid)
+      log "warning: failed to prune stale trajectory index entries because $index_path is invalid json"
+      ;;
+    *)
+      log "pruned ${prune_report} stale active trajectory entr$( [[ "$prune_report" == "1" ]] && printf 'y' || printf 'ies' ) from .trajectories/index.json"
+      ;;
+  esac
+}
+
 quarantine_repo_runtime_state() {
   local quarantine_root="$ARTIFACT_DIR/runtime-state-quarantine"
   local candidate=""
   local stamp="$(date +%Y%m%d-%H%M%S)"
   local destination=""
 
-  for candidate in .agent-relay .relay .trajectories; do
+  for candidate in .agent-relay .relay; do
     [[ -e "$candidate" ]] || continue
+    if path_contains_tracked_files "$candidate"; then
+      log "leaving repo runtime state in place because git tracks files under it: $candidate"
+      continue
+    fi
     mkdir -p "$quarantine_root"
     destination="$quarantine_root/${candidate#.}-$stamp"
     mv "$candidate" "$destination"
     QUARANTINED_RUNTIME_PATHS+=("$candidate:$destination")
     log "quarantined repo runtime state: $candidate -> $destination"
   done
+
+  if [[ -d .trajectories/active ]]; then
+    mkdir -p "$quarantine_root/.trajectories"
+    destination="$quarantine_root/.trajectories/active-$stamp"
+    mv .trajectories/active "$destination"
+    QUARANTINED_RUNTIME_PATHS+=(".trajectories/active:$destination")
+    log "quarantined repo runtime state: .trajectories/active -> $destination"
+    prune_stale_trajectory_index_entries
+  elif [[ -e .trajectories ]] && path_contains_tracked_files .trajectories; then
+    log "leaving repo runtime state in place because git tracks files under it: .trajectories"
+    prune_stale_trajectory_index_entries
+  elif [[ -e .trajectories ]]; then
+    mkdir -p "$quarantine_root"
+    destination="$quarantine_root/trajectories-$stamp"
+    mv .trajectories "$destination"
+    QUARANTINED_RUNTIME_PATHS+=(".trajectories:$destination")
+    log "quarantined repo runtime state: .trajectories -> $destination"
+  fi
 }
 
 restore_repo_runtime_state() {
@@ -525,6 +670,11 @@ restore_repo_runtime_state() {
     candidate="${entry%%:*}"
     destination="${entry#*:}"
     [[ -e "$destination" ]] || continue
+
+    if [[ "$candidate" == ".trajectories/active" ]]; then
+      log "leaving quarantined stale trajectory active state in artifact: $destination"
+      continue
+    fi
 
     if [[ ! -e "$candidate" ]]; then
       mv "$destination" "$candidate"
@@ -557,7 +707,13 @@ on_exit() {
     if [[ -f "$STATUS_FILE" ]] && grep -qx 'running' "$STATUS_FILE"; then
       local recovered_status=""
 
-      if artifact_runner_logs_show_success "$ARTIFACT_DIR" && ! artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR"; then
+      if artifact_runner_logs_show_success "$ARTIFACT_DIR" && (
+        artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR" ||
+        (
+          artifact_checkpoint_has_active_workflow "$ARTIFACT_DIR" &&
+          artifact_active_workflow_runner_log_shows_success "$ARTIFACT_DIR"
+        )
+      ); then
         STATUS_REASON="runner completed before harness status flush"
         recovered_status="complete"
       elif artifact_checkpoint_indicates_queue_exhausted "$ARTIFACT_DIR"; then
@@ -857,6 +1013,16 @@ artifact_signoff_has_marker() {
   [[ -f "$signoff_path" ]] && grep -q "$marker" "$signoff_path"
 }
 
+artifact_review_declares_pass() {
+  local review_path="$1"
+  local ready_marker="$2"
+
+  [[ -f "$review_path" ]] \
+    && grep -q "$ready_marker" "$review_path" \
+    && grep -Eq '^(PASS|\*\*PASS\*\*)$' "$review_path" \
+    && ! grep -Eq '^(FAIL|\*\*FAIL\*\*)$' "$review_path"
+}
+
 append_unique_lines_from_file() {
   local source_file="$1"
   local destination_file="$2"
@@ -948,15 +1114,30 @@ workflow_is_already_satisfied() {
         'RICKY_FAILURE_UNBLOCKER_PROOF_COMPLETE'
       ;;
     workflows/wave4-local-byoh/07-prove-local-spec-handoff-and-artifact-return.ts)
-      git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/local/src/proof/local-entrypoint-proof.test.ts 2>/dev/null
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/prove-local-spec-handoff-and-artifact-return/signoff.md \
+        'LOCAL_BYOH_PROOF_COMPLETE' \
+        && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.test.ts 2>/dev/null \
+        && npx vitest run src/local/proof/local-entrypoint-proof.test.ts >/dev/null
       ;;
     workflows/wave5-scale-and-ops/01-workflow-health-analytics.ts)
-      git cat-file -e HEAD:packages/product/src/analytics/health-analyzer.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/product/src/analytics/digest-generator.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/product/src/analytics/types.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/product/src/analytics/health-analyzer.test.ts 2>/dev/null \
-        && git cat-file -e HEAD:packages/product/src/analytics/index.ts 2>/dev/null
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/signoff.md \
+        'HEALTH_ANALYTICS_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave5-scale-and-ops/workflow-health-analytics/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && git cat-file -e HEAD:src/product/analytics/health-analyzer.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/analytics/digest-generator.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/analytics/types.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/analytics/health-analyzer.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/product/analytics/index.ts 2>/dev/null \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/product/analytics/health-analyzer.test.ts >/dev/null
       ;;
     workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts)
       git cat-file -e HEAD:docs/product/ricky-cli-onboarding-ux-spec.md 2>/dev/null \
@@ -1075,10 +1256,84 @@ workflow_is_already_satisfied() {
         .workflow-artifacts/wave10-agent-assistant-adoption/verify-and-close-wave9-docs/signoff.md \
         'WAVE9_AGENT_ASSISTANT_DOC_ISSUES_COMPLETE'
       ;;
+    workflows/wave10-agent-assistant-adoption/02-adopt-request-turn-context-adapter.ts)
+      git cat-file -e HEAD:src/local/assistant-turn-context-adapter.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/assistant-turn-context-adapter.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/entrypoint-turn-context-resilience.test.ts 2>/dev/null \
+        && grep -q '@agent-assistant/turn-context' src/local/assistant-turn-context-adapter.ts \
+        && grep -q 'assembleRickyTurnContext' src/local/entrypoint.ts \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/local/assistant-turn-context-adapter.test.ts src/local/entrypoint-turn-context-resilience.test.ts >/dev/null
+      ;;
+    workflows/wave10-agent-assistant-adoption/03-prove-live-product-path.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/signoff.md \
+        'RICKY_AGENT_ASSISTANT_ADOPTION_LIVE_PROOF_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/final-review.md \
+        'FINAL_REVIEW_PASS' \
+        && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/adapter-runtime-smoke.json \
+        && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/external-generate.json \
+        && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/external-generate-and-run.json \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/local src/surfaces/cli >/dev/null
+      ;;
     workflows/wave10-agent-assistant-adoption/04-close-agent-assistant-handoff-issue.ts)
       artifact_signoff_has_marker \
         .workflow-artifacts/wave10-agent-assistant-adoption/close-agent-assistant-handoff-issue/signoff.md \
         'RICKY_AGENT_ASSISTANT_HANDOFF_COMPLETE'
+      ;;
+    workflows/wave3-cloud-api/01-cloud-connect-and-auth.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/signoff.md \
+        'CLOUD_AUTH_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/cloud/auth/ >/dev/null
+      ;;
+    workflows/wave3-cloud-api/02-generate-endpoint.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/generate-endpoint/signoff.md \
+        'GENERATE_ENDPOINT_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
+      ;;
+    workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/signoff.md \
+        'RICKY_CLOUD_GENERATE_SLICE_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
+      ;;
+    workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/signoff.md \
+        'RICKY_CLOUD_PROOF_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/cloud/auth/ src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
       ;;
     workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts)
       artifact_signoff_has_marker \
@@ -1112,6 +1367,22 @@ workflow_is_already_satisfied() {
         && grep -q 'vitest' package.json \
         && npm run typecheck >/dev/null \
         && npm test >/dev/null
+      ;;
+    workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts)
+      artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/signoff.md \
+        'LOCAL_ENTRYPOINT_WORKFLOW_COMPLETE' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-claude.md \
+        'FINAL_REVIEW_CLAUDE_PASS' \
+        && artifact_signoff_has_marker \
+        .workflow-artifacts/wave4-local-byoh/local-invocation-entrypoint/final-review-codex.md \
+        'FINAL_REVIEW_CODEX_PASS' \
+        && git cat-file -e HEAD:src/local/entrypoint.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/entrypoint.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.test.ts 2>/dev/null \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts >/dev/null
       ;;
     workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts)
       artifact_signoff_has_marker \
@@ -1169,6 +1440,16 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:src/surfaces/cli/entrypoint/index.ts 2>/dev/null \
         && grep -Eq 'runOnboarding|runLocal|handleCloudGenerate|diagnose' src/surfaces/cli/entrypoint/interactive-cli.ts
       ;;
+    workflows/wave4-local-byoh/09-implement-cli-command-surface.ts)
+      git cat-file -e HEAD:src/surfaces/cli/commands/cli-main.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/commands/cli-main.test.ts 2>/dev/null \
+        && git cat-file -e HEAD:src/surfaces/cli/commands/index.ts 2>/dev/null \
+        && grep -Eq 'help|mode|interactive|runInteractiveCli' src/surfaces/cli/commands/cli-main.ts src/surfaces/cli/commands/cli-main.test.ts \
+        && grep -q '"bin"' package.json \
+        && grep -q '"start"' package.json \
+        && npm run typecheck >/dev/null \
+        && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts >/dev/null
+      ;;
     workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts)
       git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.ts 2>/dev/null \
         && git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.test.ts 2>/dev/null \
@@ -1210,10 +1491,10 @@ workflow_is_already_satisfied() {
       artifact_signoff_has_marker \
         .workflow-artifacts/wave13-master-executor/implement-master-executor/signoff.md \
         'RICKY_MASTER_EXECUTOR_IMPLEMENTED' \
-        && artifact_signoff_has_marker \
+        && artifact_review_declares_pass \
         .workflow-artifacts/wave13-master-executor/implement-master-executor/review-claude.md \
         'RICKY_MASTER_EXECUTOR_CLAUDE_REVIEW_READY' \
-        && artifact_signoff_has_marker \
+        && artifact_review_declares_pass \
         .workflow-artifacts/wave13-master-executor/implement-master-executor/review-codex.md \
         'RICKY_MASTER_EXECUTOR_CODEX_REVIEW_READY' \
         && test -f src/product/orchestration/types.ts \
@@ -1384,6 +1665,7 @@ restore_checkpoint() {
   if [[ -n "$previous_status_file" && -f "$previous_status_file" ]] && grep -Eqx 'running|checkpointed' "$previous_status_file"; then
     if ! is_pid_running "$previous_pid" && ! is_process_group_running "$previous_pgid"; then
       mark_artifact_stale_or_complete "$previous_artifact_dir"
+      restore_quarantined_runtime_state_for_artifact "$previous_artifact_dir"
       log "reconciled prior overnight artifact with no live process: $previous_artifact_dir"
     fi
   fi
@@ -1489,6 +1771,14 @@ $(sed 's/^/  - /' "$SKIPPED_FILE" 2>/dev/null || true)
 EOF
 }
 
+prune_empty_artifact_marker_files() {
+  local marker_file=""
+
+  for marker_file in "$FAILED_FILE" "$SKIPPED_FILE" "$STALE_FILE"; do
+    [[ -f "$marker_file" && ! -s "$marker_file" ]] && rm -f "$marker_file"
+  done
+}
+
 mark_status() {
   local status="$1"
   STATUS_REASON="${2:-}"
@@ -1496,6 +1786,7 @@ mark_status() {
   STATUS_MARKED="true"
   persist_checkpoint
   write_summary "$status"
+  prune_empty_artifact_marker_files
 }
 
 validate_repo() {
@@ -1555,31 +1846,15 @@ repo_has_meaningful_delta() {
 }
 
 commit_if_clean_delta() {
+  # Auto-commit and auto-push directly to origin/main were disabled
+  # intentionally: this loop was shipping unreviewed changes straight to a
+  # shared branch (commits authored as "Miya"). Future progress capture
+  # belongs in a per-run branch + PR. Keep the function as a no-op so the
+  # callers don't need to change.
   local workflow_path="$1"
-  if ! repo_has_meaningful_delta; then
-    log "no tracked/untracked repo delta after $workflow_path"
-    return 0
-  fi
-
-  validate_repo
-
-  local short
-  local head_advanced="false"
-  short="$(basename "$workflow_path" .ts)"
-  if repo_has_captured_head_delta; then
-    head_advanced="true"
-  fi
-
-  if meaningful_tracked_delta_exists || meaningful_untracked_delta_exists; then
-    git add -A ':!tmp/' ':!.workflow-artifacts/' ':!.trajectories/'
-    git commit -m "chore(overnight): capture $short progress" || true
-  elif [[ "$head_advanced" == "true" ]]; then
-    log "repo HEAD already advanced during $workflow_path; capturing committed state"
-  fi
-
-  git push origin main || true
-  git rev-parse HEAD > "$LAST_COMMIT_FILE"
+  log "auto-commit/auto-push disabled; skipping post-workflow capture for $workflow_path"
   inspect_repo_changes
+  return 0
 }
 
 workflow_hit_claude_rate_limit() {
@@ -1641,37 +1916,72 @@ runner_output_size() {
 start_runner() {
   local workflow_path="$1"
   local runner_output="$2"
+  local runner_pid_file="$ARTIFACT_DIR/runner.pid"
+  local launched_pid=""
 
   RUNNER_EXPECTS_DETACHED_PGID="false"
+  RUNNER_WAIT_PID=""
+  rm -f "$runner_pid_file"
 
   if command -v setsid >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
     setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+    RUNNER_START_PID="$!"
+    RUNNER_WAIT_PID="$RUNNER_START_PID"
+    return 0
   elif command -v python3 >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
-    log "setsid unavailable; detaching runner via python3 setsid fallback" >&2
-    python3 - "$RUNNER" "$workflow_path" "$runner_output" <<'PY' &
-import os
+    log "setsid unavailable; detaching runner via python3 subprocess fallback" >&2
+    python3 - "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file" <<'PY' &
+import subprocess
 import sys
 
-runner, workflow_path, runner_output = sys.argv[1:4]
-os.setsid()
-stream = os.open(runner_output, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-os.dup2(stream, 1)
-os.dup2(stream, 2)
-os.close(stream)
-os.execvp(runner, [runner, 'run', workflow_path])
+runner, workflow_path, runner_output, runner_pid_file = sys.argv[1:5]
+with open(runner_output, 'ab', buffering=0) as stream:
+    proc = subprocess.Popen(
+        [runner, 'run', workflow_path],
+        stdin=subprocess.DEVNULL,
+        stdout=stream,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+with open(runner_pid_file, 'w', encoding='utf-8') as handle:
+    handle.write(f"{proc.pid}\n")
+raise SystemExit(proc.wait())
 PY
+    RUNNER_WAIT_PID="$!"
   elif command -v perl >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
-    log "setsid unavailable; detaching runner via perl setsid fallback" >&2
-    perl -e 'use POSIX qw(setsid); my ($runner, $workflow, $output) = @ARGV; open my $fh, q{>>}, $output or die "open $output: $!"; setsid() or die "setsid: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!";' "$RUNNER" "$workflow_path" "$runner_output" &
+    log "setsid unavailable; detaching runner via perl subprocess fallback" >&2
+    perl -e 'use strict; use warnings; use POSIX qw(setsid); my ($runner, $workflow, $output, $pidfile) = @ARGV; my $pid = fork(); die "fork: $!" unless defined $pid; if ($pid == 0) { setsid() or die "setsid: $!"; open STDIN, q{<}, q{/dev/null} or die "stdin: $!"; open my $fh, q{>>}, $output or die "open $output: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!"; } open my $pidfh, q{>}, $pidfile or die "open $pidfile: $!"; print {$pidfh} "$pid\n"; close $pidfh or die "close $pidfile: $!"; waitpid($pid, 0); exit($? >> 8);' "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file" &
+    RUNNER_WAIT_PID="$!"
   else
     log "setsid unavailable and no python3/perl fallback found; launching runner without detached process-group isolation" >&2
     "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+    RUNNER_START_PID="$!"
+    RUNNER_WAIT_PID="$RUNNER_START_PID"
+    return 0
   fi
 
-  RUNNER_START_PID="$!"
+  local pid_wait_attempt="0"
+  while [[ ! -s "$runner_pid_file" && "$pid_wait_attempt" -lt 20 ]]; do
+    sleep 0.1
+    pid_wait_attempt="$((pid_wait_attempt + 1))"
+  done
+
+  if [[ -f "$runner_pid_file" ]]; then
+    launched_pid="$(tr -d '[:space:]' < "$runner_pid_file")"
+  fi
+
+  if [[ -z "$launched_pid" ]]; then
+    log "detached runner launcher did not record a child pid" >&2
+    RUNNER_START_PID=""
+    return 1
+  fi
+
+  RUNNER_START_PID="$launched_pid"
+  [[ -n "$RUNNER_WAIT_PID" ]] || RUNNER_WAIT_PID="$RUNNER_START_PID"
 }
 
 resolve_runner_pgid() {
@@ -1759,16 +2069,34 @@ if latest:
 PY
 }
 
+runner_output_declares_expected_workflow() {
+  local runner_output="$1"
+  local expected_workflow_name="$2"
+
+  [[ -n "$expected_workflow_name" && -f "$runner_output" ]] || return 1
+
+  grep -Fq "Starting workflow \"$expected_workflow_name-workflow\"" "$runner_output" || \
+    grep -Fq "Starting workflow \"$expected_workflow_name\"" "$runner_output" || \
+    grep -Fq "Workflow \"$expected_workflow_name-workflow\"" "$runner_output" || \
+    grep -Fq "Workflow \"$expected_workflow_name\"" "$runner_output"
+}
+
 runner_executed_unexpected_workflow() {
   local workflow_path="$1"
   local runs_start_line="${2:-0}"
+  local runner_output="${3:-}"
   local expected_workflow_name=""
   local actual_workflow_name=""
 
   expected_workflow_name="$(extract_declared_workflow_name "$workflow_path")"
-  actual_workflow_name="$(latest_runtime_workflow_name_after_line "$runs_start_line")"
 
   [[ -n "$expected_workflow_name" ]] || return 1
+  if runner_output_declares_expected_workflow "$runner_output" "$expected_workflow_name"; then
+    return 1
+  fi
+
+  actual_workflow_name="$(latest_runtime_workflow_name_after_line "$runs_start_line")"
+
   [[ -n "$actual_workflow_name" ]] || return 1
   if [[ "$expected_workflow_name" == "$actual_workflow_name" || "$actual_workflow_name" == "$expected_workflow_name-workflow" ]]; then
     return 1
@@ -1869,8 +2197,8 @@ run_one() {
     fi
     last_observed_size="$current_output_size"
 
-    if runner_output_idle_for_too_long "$last_output_epoch" "$(date +%s)"; then
-      log "workflow runner produced no output for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
+    if runner_output_idle_for_too_long "$last_progress_epoch" "$(date +%s)"; then
+      log "workflow runner produced no meaningful progress for ${IDLE_TIMEOUT_SECONDS}s: $workflow_path"
       kill_process_group "$RUN_PGID"
       wait "$runner_pid" 2>/dev/null || true
       echo "$workflow_path" >> "$FAILED_FILE"
@@ -1878,7 +2206,12 @@ run_one() {
 
       if repo_has_meaningful_delta; then
         log "idle workflow produced repo changes; validating before capture"
-        commit_if_clean_delta "$workflow_path"
+        if ! commit_if_clean_delta "$workflow_path"; then
+          mark_status "blocked" "push rejected after idle workflow delta capture: $workflow_path"
+          CURRENT_WORKFLOW=""
+          persist_checkpoint
+          return 1
+        fi
         remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
         CURRENT_WORKFLOW=""
         persist_checkpoint
@@ -1894,14 +2227,15 @@ run_one() {
     sleep "$POLL_SECONDS"
   done
 
-  if ! wait "$runner_pid"; then
+  if ! wait "${RUNNER_WAIT_PID:-$runner_pid}"; then
     runner_exit=$?
   fi
+  clear_artifact_runner_pid "$ARTIFACT_DIR"
   RUN_PID="$$"
   RUN_PGID=""
   persist_checkpoint
 
-  if runner_executed_unexpected_workflow "$workflow_path" "$workflow_runs_start_line"; then
+  if runner_executed_unexpected_workflow "$workflow_path" "$workflow_runs_start_line" "$runner_output"; then
     echo "$workflow_path" >> "$FAILED_FILE"
     inspect_repo_changes
     mark_status "blocked" "runner workflow identity mismatch: $workflow_path"
@@ -1938,7 +2272,12 @@ run_one() {
     fi
 
     log "failure produced repo changes; validating before capture"
-    commit_if_clean_delta "$workflow_path"
+    if ! commit_if_clean_delta "$workflow_path"; then
+      mark_status "blocked" "push rejected after failed workflow delta capture: $workflow_path"
+      CURRENT_WORKFLOW=""
+      persist_checkpoint
+      return 1
+    fi
     remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
     CURRENT_WORKFLOW=""
     persist_checkpoint
@@ -1946,7 +2285,12 @@ run_one() {
   fi
 
   log "workflow completed: $workflow_path"
-  commit_if_clean_delta "$workflow_path"
+  if ! commit_if_clean_delta "$workflow_path"; then
+    mark_status "blocked" "push rejected after workflow delta capture: $workflow_path"
+    CURRENT_WORKFLOW=""
+    persist_checkpoint
+    return 1
+  fi
   remove_workflow_from_tracked_file "$workflow_path" "$FAILED_FILE"
   CURRENT_WORKFLOW=""
   persist_checkpoint
@@ -2054,6 +2398,8 @@ if (( QUEUE_TOTAL == 0 )); then
   exit 0
 fi
 
+SHOULD_FINALIZE_AND_EXIT="false"
+
 for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
   local_start_index="$CURRENT_INDEX"
   if (( pass > CURRENT_PASS )); then
@@ -2068,7 +2414,8 @@ for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
     persist_checkpoint
 
     if should_stop_before_next_workflow; then
-      exit 0
+      SHOULD_FINALIZE_AND_EXIT="true"
+      break 2
     fi
 
     workflow_path="${QUEUE_ITEMS[$idx]}"
@@ -2092,6 +2439,14 @@ for (( pass = CURRENT_PASS; pass <= PASSES; pass++ )); do
   persist_checkpoint
 
 done
+
+if [[ "$SHOULD_FINALIZE_AND_EXIT" == "true" ]]; then
+  clear_all_state_checkpoints
+  finalize_current_artifact_checkpoint
+  write_summary "$(cat "$STATUS_FILE")"
+  log "overnight queue finalized after stop condition"
+  exit 0
+fi
 
 CURRENT_PASS="$PASSES"
 CURRENT_INDEX="$QUEUE_TOTAL"

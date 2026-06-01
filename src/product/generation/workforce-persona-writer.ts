@@ -258,10 +258,10 @@ export async function writeWorkflowWithWorkforcePersona(
   // which a stale leftover could falsely satisfy the freshness check.
   const writerInvokedAtMs = Date.now();
   // Normalize the timeout once before threading it into both
-  // `sendMessage` (harness-kit subprocess timeout) and the outer watchdog
+  // `sendMessage` (persona-kit subprocess timeout) and the outer watchdog
   // so they're guaranteed to run on the same schedule. If the configured
-  // value is missing, zero, or negative, harness-kit otherwise disables
-  // its internal timeout entirely (see harness-kit/dist/runner.js:
+  // value is missing, zero, or negative, persona-kit otherwise disables
+  // its internal timeout entirely (see persona-kit/dist/runner.js:
   // `options.timeoutSeconds && options.timeoutSeconds > 0 ? setTimeout(...) : undefined`)
   // — and a watchdog firing on a fallback window while the subprocess has
   // no inner timeout at all is exactly the divergence coderabbit flagged.
@@ -288,11 +288,11 @@ export async function writeWorkflowWithWorkforcePersona(
     },
   });
 
-  // Defense-in-depth watchdog around the harness-kit await. Observed in
+  // Defense-in-depth watchdog around the persona-kit await. Observed in
   // production (2026-05-15): claude subprocess exited cleanly after the
-  // harness-kit timeoutSeconds expired and SIGTERM/SIGKILL fired, but the
+  // persona-kit timeoutSeconds expired and SIGTERM/SIGKILL fired, but the
   // subprocess's stdio pipe stayed half-open with buffered bytes, and the
-  // harness-kit `finish()` resolution never landed on its `exit` handler.
+  // persona-kit `finish()` resolution never landed on its `exit` handler.
   // Ricky's `await Promise.all([run, run.runId])` then hung indefinitely
   // (60+ minutes with 0% CPU, FD 4/5 = PIPE waiting on a dead writer).
   // The watchdog forces a settle at `timeoutSeconds + grace`, calling
@@ -444,7 +444,7 @@ export async function defaultWorkforcePersonaResolver(
       source: 'package',
       warnings: [
         ...(writerError?.warnings ?? []),
-        `Workforce harness-kit unavailable; trying usePersona(...).sendMessage() seam: ${errorMessage(error)}`,
+        `Workforce persona-kit unavailable; trying usePersona(...).sendMessage() seam: ${errorMessage(error)}`,
       ],
     };
   }
@@ -585,27 +585,26 @@ export async function resolveWorkforcePersonaContextWithModules(
   );
 }
 
-export async function loadWorkforcePersonaModule(importPackage: WorkforcePackageImporter = importWorkforcePackage): Promise<{
+export async function loadWorkforcePersonaModule(_importPackage?: WorkforcePackageImporter): Promise<{
   module: WorkforcePersonaModule;
   source: 'package';
   warnings: string[];
 }> {
-  const warnings: string[] = [];
-  let importFailure: string | undefined;
+  // Use the local persona-kit-runner adapter instead of @agentworkforce/persona-kit.
+  // persona-kit's buildNonInteractiveSpec uses the correct codex flags (no --ask-for-approval).
   try {
-    const packageName = '@agentworkforce/harness-kit';
-    const module = await importPackage(packageName) as WorkforcePersonaModule;
-    if (isRunnablePersonaModule(module)) return { module, source: 'package', warnings };
-    warnings.push(`@agentworkforce/harness-kit did not export useRunnablePersona() or useRunnableSelection(); exports: ${moduleExports(module)}.`);
+    const { useRunnablePersona, useRunnableSelection } = await import('./persona-kit-runner.js');
+    // Cast: persona-kit-runner returns structurally-compatible types but
+    // uses workload-router's PersonaSelection instead of WorkforcePersonaSelection.
+    // The two are structurally equivalent — PersonaTier ⊆ string, PersonaRuntime ≅ WorkforcePersonaRuntime.
+    const module = { useRunnablePersona, useRunnableSelection } as unknown as WorkforcePersonaModule;
+    return { module, source: 'package', warnings: [] };
   } catch (error) {
-    importFailure = errorMessage(error);
-    warnings.push(`Package Workforce harness-kit unavailable: ${importFailure}`);
+    throw new WorkforcePersonaWriterError(
+      workforcePersonaModuleLoadError(errorMessage(error)),
+      [`persona-kit runner unavailable: ${errorMessage(error)}`],
+    );
   }
-
-  throw new WorkforcePersonaWriterError(
-    workforcePersonaModuleLoadError(importFailure),
-    warnings,
-  );
 }
 
 export async function loadWorkforceSelectionModule(importPackage: WorkforcePackageImporter = importWorkforcePackage): Promise<{
@@ -748,7 +747,7 @@ export function buildWorkflowPersonaTask(
     '- Use a dedicated workflow channel, not general.',
     '- Include explicit agents, step dependencies, deterministic gates, review stages, and final signoff.',
     '- Include an 80-to-100 fix loop: implement, validate, review, fix, final review, hard validation.',
-    '- Include a real deterministic sanity gate over produced files using POSIX grep, git grep, or an equivalent inline assertion that exits non-zero when expected content/state is missing.',
+    '- Include a real deterministic sanity gate over produced files using structural checks, scoped file/diff checks, or an equivalent inline assertion that exits non-zero when expected content/state is missing.',
     '- If using rg, guard it with command -v rg and provide a grep or git grep fallback because ripgrep is not guaranteed to be installed.',
     '- Keep agent steps bounded: split broad implementation or test-writing work into multiple sequential/fan-out steps with deterministic gates between them instead of one large step that can exhaust retries by timeout.',
     '- Before calling `.run(...)`, load repo-local `.env.local` and `.env` values into `process.env` without overwriting existing shell exports, so local BYOH runs inherit common project configuration. If the workflow requires named env vars, add a fast deterministic preflight/assertion that prints `MISSING_ENV_VAR: NAME` before long-running agent steps.',
@@ -1060,6 +1059,23 @@ export function parsePersonaWorkflowResponse(
     return tryFencedResponseOrDiskRecovery(tsFence, metadata, expectedPath, options);
   }
 
+  // Tolerant fallback: Claude Sonnet has been observed (2026-05-23 driving
+  // sage proactive-unification workforce slice) to emit a bare ```ts opening
+  // fence as its first line — with the workflow source inside — but skip
+  // the structured-JSON metadata wrapper and the matching ```metadata fence
+  // the prompt asks for. The output is otherwise valid TypeScript that
+  // contains a `workflow(` call; the lack of metadata makes us fall through
+  // here. Trying disk recovery with empty metadata is a strict superset of
+  // the strict path: validateArtifactContent inside
+  // tryFencedResponseOrDiskRecovery still rejects content without a
+  // `workflow(` call, so we can't silently accept a stub. Captured fix for
+  // the workforce#1 first-attempt parse-error case where the writer dumped
+  // ~12 KB of valid ```ts source and ricky lost it to the harder
+  // "must have metadata too" rule.
+  if (tsFence) {
+    return tryFencedResponseOrDiskRecovery(tsFence, metadata ?? undefined, expectedPath, options);
+  }
+
   // Tolerant fallback: Claude Sonnet has been observed to emit a prose
   // preamble plus a ```json opening fence without a matching closing fence,
   // which defeats both the direct-JSON and fenced-block matchers above. As
@@ -1306,12 +1322,12 @@ function recoverExpectedArtifactContent(
 
 function validateFencedResponse(
   artifactContent: string,
-  metadata: Record<string, unknown>,
+  metadata: Record<string, unknown> | undefined,
   expectedPath: string,
 ): ParsedPersonaResponse {
   validateArtifactContent(artifactContent);
-  validateMetadata(metadata);
-  const artifactPath = metadata.path ?? metadata.outputPath ?? metadata.artifactPath;
+  if (metadata) validateMetadata(metadata);
+  const artifactPath = metadata?.path ?? metadata?.outputPath ?? metadata?.artifactPath;
   if (typeof artifactPath === 'string' && artifactPath !== expectedPath) {
     throw new WorkforcePersonaWriterError(
       `Workforce persona fenced metadata path ${artifactPath} did not match expected output path ${expectedPath}.`,
@@ -1319,7 +1335,7 @@ function validateFencedResponse(
   }
   return {
     content: artifactContent.trimEnd() + '\n',
-    metadata,
+    metadata: metadata ?? {},
     responseFormat: 'fenced-artifact',
   };
 }
@@ -1349,7 +1365,7 @@ function validateFencedResponse(
  */
 function tryFencedResponseOrDiskRecovery(
   tsFence: string,
-  metadata: Record<string, unknown>,
+  metadata: Record<string, unknown> | undefined,
   expectedPath: string,
   options: PersonaResponseParseOptions,
 ): ParsedPersonaResponse {
@@ -1826,7 +1842,12 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     const [rawStepName, rawConfig] = node.arguments;
     const config = resolveIdentifierInitializer(rawConfig);
     if (!config || !ts.isObjectLiteralExpression(config)) return null;
-    const command = propertyLiteralText(config, 'command');
+    const commandProperty = config.properties.find((property) =>
+      ts.isPropertyAssignment(property) && propertyNameText(property.name) === 'command',
+    );
+    const command = commandProperty && ts.isPropertyAssignment(commandProperty)
+      ? expressionText(commandProperty.initializer)
+      : undefined;
     if (command === undefined) return null;
     return {
       stepName: rawStepName && ts.isStringLiteralLike(rawStepName) ? rawStepName.text : '(unknown-step)',
@@ -1835,6 +1856,47 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
         ? node.expression.name.getStart(workflowSourceFile)
         : node.getStart(workflowSourceFile),
     };
+  }
+
+  function expressionText(node: ts.Expression | undefined, seen = new Set<string>()): string | undefined {
+    if (!node) return undefined;
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isTemplateExpression(node)) {
+      const parts = [node.head.text];
+      for (const span of node.templateSpans) {
+        parts.push(expressionText(span.expression, new Set(seen)) ?? '${...}');
+        parts.push(span.literal.text);
+      }
+      return parts.join('');
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = expressionText(node.left, new Set(seen));
+      const right = expressionText(node.right, new Set(seen));
+      return left !== undefined && right !== undefined ? left + right : undefined;
+    }
+    if (ts.isIdentifier(node)) {
+      const binding = findVisibleBinding(variableInitializers.get(node.text) ?? [], node);
+      if (!binding) return undefined;
+      const seenKey = `${binding.name}:${binding.declarationStart}`;
+      if (seen.has(seenKey)) return undefined;
+      seen.add(seenKey);
+      return expressionText(binding.initializer, seen);
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'join' &&
+      ts.isArrayLiteralExpression(node.expression.expression)
+    ) {
+      const separator = expressionText(node.arguments[0] as ts.Expression | undefined, new Set(seen)) ?? ',';
+      const elements = node.expression.expression.elements.map((element) =>
+        ts.isSpreadElement(element) ? undefined : expressionText(element, new Set(seen)),
+      );
+      if (elements.some((element) => element === undefined)) return undefined;
+      return (elements as string[]).join(separator);
+    }
+    return undefined;
   }
 }
 
@@ -2210,7 +2272,7 @@ function shellCommandSegments(command: string): string[][] {
   return segments;
 }
 
-function markdownLabelFields(markdown: string): Map<string, string> {
+export function markdownLabelFields(markdown: string): Map<string, string> {
   let tree: Root;
   try {
     tree = fromMarkdown(markdown);
@@ -2436,13 +2498,13 @@ function isRunnablePersonaModule(value: WorkforcePersonaModule): boolean {
 function workforcePersonaModuleLoadError(importFailure: string | undefined): string {
   if (importFailure) {
     return [
-      '@agentworkforce/harness-kit could not be loaded from the installed npm dependencies.',
+      '@agentworkforce/persona-kit could not be loaded from the installed npm dependencies.',
       'Try reinstalling @agentworkforce/ricky (`npm install` in this project).',
       'Ricky only resolves npm packages for Workforce persona execution; local ../workforce checkouts are intentionally ignored.',
     ].join(' ');
   }
   return [
-    '@agentworkforce/harness-kit is installed but does not expose the runnable persona API Ricky needs.',
+    '@agentworkforce/persona-kit is installed but does not expose the runnable persona API Ricky needs.',
     'Install a published npm version that exports useRunnablePersona() or useRunnableSelection().',
     'Ricky only resolves npm packages for Workforce persona execution; local ../workforce checkouts are intentionally ignored.',
   ].join(' ');
@@ -2609,11 +2671,11 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Default grace window (seconds) added on top of the harness-kit
+ * Default grace window (seconds) added on top of the persona-kit
  * subprocess timeout before ricky's outer watchdog fires. Has to absorb
- * harness-kit's SIGTERM → SIGKILL window plus the final pipe-drain — but
+ * persona-kit's SIGTERM → SIGKILL window plus the final pipe-drain — but
  * not so much that an actually-hung writer holds up a multi-spec run for
- * an hour. 90s has handled every observed harness-kit-timely settle case
+ * an hour. 90s has handled every observed persona-kit-timely settle case
  * in testing while still releasing within ~1.5 min of a true pipe-hang.
  */
 const WRITER_WATCHDOG_GRACE_SECONDS = 90;
@@ -2631,7 +2693,7 @@ const WRITER_WATCHDOG_GRACE_SECONDS = 90;
 const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
 
 /**
- * Awaits the harness-kit writer execution with a watchdog so a stuck
+ * Awaits the persona-kit writer execution with a watchdog so a stuck
  * subprocess settle path can't hang the caller indefinitely.
  *
  * ⚠️  Known limitation: the watchdog uses `setTimeout`, which only fires
@@ -2646,10 +2708,10 @@ const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
  * for the common half-open-pipe case.
  *
  * Background — production hang on 2026-05-15:
- * - claude writer subprocess ran to its harness-kit-declared timeout
+ * - claude writer subprocess ran to its persona-kit-declared timeout
  *   (3600s), got SIGTERM, then SIGKILL.
  * - The subprocess exited (gone from `ps`) but its stdio pipe stayed
- *   half-open with ~16 KB of buffered bytes. harness-kit's `finish()`
+ *   half-open with ~16 KB of buffered bytes. persona-kit's `finish()`
  *   resolution never fired because its `exit` handler was waiting on a
  *   `stdout` close that never came.
  * - Ricky's `await Promise.all([run, run.runId])` then hung at 0% CPU
@@ -2663,7 +2725,7 @@ const WRITER_DEFAULT_WATCHDOG_SECONDS = 60 * 60;
  *
  * The watchdog is opt-out by design: every caller already passes
  * `timeoutSeconds` via the persona's `harnessSettings`, so the watchdog
- * fires at most `grace` seconds after the harness-kit-internal timeout
+ * fires at most `grace` seconds after the persona-kit-internal timeout
  * was supposed to land. The happy path (writer settles before its own
  * timeout) clears the watchdog timer in the `finally` block and never
  * pays any wall-clock cost.
@@ -2692,7 +2754,7 @@ export async function waitForWriterWithWatchdog<R extends Promise<unknown> & { r
       }
       reject(
         new WorkforcePersonaWriterError(
-          `Workforce persona writer did not settle within ${effectiveTimeoutSeconds + WRITER_WATCHDOG_GRACE_SECONDS}s (declared timeout ${effectiveTimeoutSeconds}s + watchdog grace ${WRITER_WATCHDOG_GRACE_SECONDS}s). The harness-kit subprocess likely exited but left its stdio pipe half-open; aborting to avoid an indefinite wait.`,
+          `Workforce persona writer did not settle within ${effectiveTimeoutSeconds + WRITER_WATCHDOG_GRACE_SECONDS}s (declared timeout ${effectiveTimeoutSeconds}s + watchdog grace ${WRITER_WATCHDOG_GRACE_SECONDS}s). The persona-kit subprocess likely exited but left its stdio pipe half-open; aborting to avoid an indefinite wait.`,
           resolverWarnings,
         ),
       );
@@ -2757,7 +2819,7 @@ export interface PersonaDebugDumpInput {
  *   is set, so green production runs do not litter the artifact tree.
  *
  * Dump layout (one directory per `(kind, promptDigest)` pair):
- * - `output.raw.txt`   — the persona's stdout as captured by harness-kit
+ * - `output.raw.txt`   — the persona's stdout as captured by persona-kit
  * - `task.prompt.txt`  — the task body that was sent to the persona
  * - `meta.json`        — selection, status, exit code, stderr, durationMs
  *

@@ -1,53 +1,97 @@
 # Ricky Agent-Assistant Live Proof Verdict
 
-GitHub issue #13 verdict: the agent-assistant adoption is real in Ricky's local product path, but the adopted boundary should stay narrow.
+GitHub issue #13 verdict: Ricky's agent-assistant adoption is present in the live local product path. The evidence supports continued adoption while holding the boundary to neutral request/turn context reuse.
 
 ## What was adopted
 
-Ricky adopted `@agent-assistant/turn-context` as a bounded request/turn envelope primitive in the local runtime path. The adapter maps Ricky's normalized `LocalInvocationRequest` into a shared turn context and preserves request id, source metadata, structured spec data, invocation root, execution mode, stage mode, spec path, request metadata, and spec text as metadata/enrichment context.
+Ricky adopted the real `@agent-assistant/turn-context` package through the `ricky-local-turn-context-adapter`.
 
-The local executor now records the assembled context as compact provenance through `generation.decisions.assistant_turn_context` and local coordinator run metadata. The adoption still does not move Ricky's local request normalization, workflow artifact contract, runtime precheck behavior, blocker taxonomy, recovery wording, or coordinator execution semantics into `agent-assistant`.
+The adapter runtime smoke artifact records assistant id `ricky`, turn id `req-wave10-live-proof`, adapter package `@agent-assistant/turn-context`, adapter version `1`, source `cli`, invocation root `/Users/khaliqgant/Projects/AgentWorkforce/ricky`, `mode: local`, and `stageMode: run`.
+
+It also records the bounded enrichment blocks Ricky contributes to the shared turn context:
+
+- `enrichment-ricky-request-summary`
+- `enrichment-ricky-spec-text`
+- `enrichment-ricky-structured-spec`
+- `enrichment-ricky-source-metadata`
+- `enrichment-ricky-request-metadata`
+
+The adopted slice is the request/turn envelope. Ricky still owns request normalization, workflow generation, artifact selection, runtime prechecks, blocker classification, recovery wording, execution semantics, and the public local response contract.
 
 ## Product path exercised
 
-The adapter smoke artifact exercised assistant `ricky` and turn `req-wave10-live-proof`. It confirmed adapter `ricky-local-turn-context-adapter`, package `@agent-assistant/turn-context`, version `1`, with CLI-sourced Ricky metadata and `stageMode: run`.
+The proof exercised Ricky from the user-facing local CLI path, not only from an isolated adapter check.
 
-The live product path generated `workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts` with workflow id `ricky-generate-a-workflow-for-package-checks-with-type` and spec digest `841a2ef99ffb18fd74b8300e3c10fb3c5e876218087582f457f6eae46d415dbd`. The generated response exposed the user-facing run command:
+Generation invoked:
 
 ```text
-npx --no-install agent-relay run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
+ricky --mode local --spec generate a workflow for package checks with typecheck and tests --no-workforce-persona
 ```
+
+That produced:
+
+```text
+workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
+```
+
+The generated workflow was then executed through the printed foreground command:
+
+```text
+ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
+```
+
+This covers the local generate-and-run product path with the adopted turn-context adapter present in Ricky's runtime.
 
 ## Deterministic test proof
 
-The issue #11 implementation signoff records the deterministic validation suite:
+The issue #11 implementation signoff records the adopted adapter slice passing:
 
 ```text
 npm run typecheck
 npx tsc --noEmit
+npx vitest run src/local
+npx vitest run src/surfaces/cli
 npm test
 ```
 
-The adoption proof confirms the local executor calls the adapter before product intake, workflow generation, artifact selection, runtime prechecks, or coordinator launch. That makes the shared package part of the runtime path rather than copied types or documentation-only alignment.
+The issue #13 artifacts add deterministic live-path evidence:
+
+- `adapter-runtime-smoke.json` confirms the real adapter package, assistant id, turn id, CLI source, request metadata, and enrichment block ids.
+- `external-generate.json` records generation `status: ok`, the generated workflow path, the CLI command invoked, and the run commands shown to the user.
+- `external-generate-and-run.json` records generation `status: ok`, execution `status: success`, command `ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts`, and assertion `external_cli_execution: pass`.
+- `external-generate-and-run.exit` is `0`.
+
+The adoption proof document confirms the shared adapter is called by the real local executor before product intake, workflow generation, artifact selection, runtime prechecks, or coordinator launch. This is runtime-path adoption, not copied types or documentation-only alignment.
 
 ## Live/user-facing validation proof
 
-The live generate artifact returned status `ok`, produced the generated workflow artifact, and returned the expected next action plus Ricky run-mode hint. This proves the adopted adapter is present in the live user-facing generation path.
+The external generate artifact printed user-facing next commands:
 
-The live generate-and-run artifact reached the execution stage and stopped at Ricky's local runtime precheck with blocker code `MISSING_BINARY`, category `dependency`, and message `Runtime package "agent-relay" is not installed in this workspace.` The process exit artifact recorded exit code `2`.
+```text
+Run: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts
+Background: ricky run workflows/generated/ricky-generate-a-workflow-for-package-checks-with-type.ts --background
+```
 
-The blocker evidence identified failed step `runtime-precheck`, zero workflow steps completed, no files written during failed execution, and the invoked command as the generated `agent-relay run` command. Recovery guidance was actionable: run `npm install`, verify the local `agent-relay` binary, then rerun the generated workflow command.
+The external generate-and-run artifact executed the printed foreground command successfully. It recorded workflow name `wf-51009be3b0c7`, execution run `9dc3bec086dbc660e42b15a4`, stdout log `/Users/khaliqgant/.local/state/ricky/local-runs/f5536fe45932/a269f8c2-33f5-4849-9eba-e4a8d8968a01/stdout.log`, stderr log `/Users/khaliqgant/.local/state/ricky/local-runs/f5536fe45932/a269f8c2-33f5-4849-9eba-e4a8d8968a01/stderr.log`, and assertion `external_cli_execution: pass`.
+
+The run also recorded:
+
+```text
+Auto-fix: repaired after 1/7 attempt(s)
+```
+
+That proves the user-facing run path completed through Ricky's existing repair loop.
 
 ## Regression or product cost observed
 
-No regression in Ricky's product boundary was observed. The live failure occurred after generation, inside Ricky-owned runtime dependency prechecks, not inside the adopted turn-context adapter.
+No regression is shown by the captured proof artifacts. Generation succeeded, the generated workflow executed, the external run completed successfully, and the captured process exit was `0`.
 
-The product cost is explicit: full live run validation still depends on the workspace containing the local `agent-relay` runtime binary. When that dependency is absent, Ricky correctly reports a dependency blocker instead of claiming execution success.
+The observed product cost is that live execution may still require a repair pass. That cost belongs to Ricky's workflow generation and repair loop, not to the shared turn-context adapter.
 
 ## Verdict: keep adopting, hold boundary, or redesign
 
 Verdict: keep adopting, hold boundary.
 
-The adoption should remain because it proves real shared reuse in the local product path while preserving Ricky-owned workflow generation, staged run UX, runtime prechecks, blocker classification, recovery guidance, and response semantics. Future adoption should stay limited to similarly neutral runtime primitives unless a later proof shows product-owned Ricky behavior can move without weakening the local execution contract.
+The proof supports continued adoption because a real agent-assistant runtime primitive is exercised in Ricky's live local product path. The boundary should remain narrow: shared neutral request/turn context is appropriate, while Ricky keeps ownership of workflow-specific product behavior, execution UX, evidence, recovery, and reliability semantics.
 
 RICKY_AGENT_ASSISTANT_LIVE_PROOF_COMPLETE

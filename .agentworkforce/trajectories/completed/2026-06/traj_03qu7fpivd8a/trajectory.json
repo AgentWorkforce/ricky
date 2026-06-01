@@ -1,0 +1,53 @@
+{
+  "id": "traj_03qu7fpivd8a",
+  "version": 1,
+  "task": {
+    "title": "Resolve PR 147 merge conflicts"
+  },
+  "status": "completed",
+  "startedAt": "2026-06-01T12:01:50.044Z",
+  "completedAt": "2026-06-01T12:04:26.381Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-06-01T12:04:26.270Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_mcwgys0iqz9b",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-06-01T12:04:26.270Z",
+      "endedAt": "2026-06-01T12:04:26.381Z",
+      "events": [
+        {
+          "ts": 1780315466271,
+          "type": "decision",
+          "content": "Resolved PR 147 conflicts by merging origin/main: Resolved PR 147 conflicts by merging origin/main",
+          "raw": {
+            "question": "Resolved PR 147 conflicts by merging origin/main",
+            "chosen": "Resolved PR 147 conflicts by merging origin/main",
+            "alternatives": [],
+            "reasoning": "main added richer command-expression parsing and longer persona timeouts; the PR added stricter declared worktree and test -f validation, so the resolution preserves both sets of behavior."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Merged origin/main into PR 147 branch, resolved generator/persona conflicts, refreshed dependencies, and verified focused writer tests plus typecheck.",
+    "approach": "Standard approach",
+    "confidence": 0.86
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "64db7bda2525c61f59b42129abc3d8a883a2173d",
+    "endRef": "64db7bda2525c61f59b42129abc3d8a883a2173d"
+  }
+}

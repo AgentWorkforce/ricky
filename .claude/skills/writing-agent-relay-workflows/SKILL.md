@@ -923,7 +923,7 @@ For bug-fix or reliability workflows, do **not** stop at unit or integration tes
 8. **Record residual risks**
    - Call out what was not covered
 9. **Ship the result as a PR**
-   - Open the pull request from the workflow itself with `createGitHubStep`
+   - Open the pull request from the workflow itself with `createGitHubStep` from `@agent-relay/sdk` — **never** `gh pr create`, never `id:` inside the config, never `action: 'createPullRequest'`, never separate `owner`/`repo` fields
    - See [Shipping the Result — Open a PR via `createGitHubStep`](#shipping-the-result--open-a-pr-via-creategithubstep) below
    - A workflow that fixes a bug and stops short of the PR has only done half the loop
 
@@ -1028,9 +1028,23 @@ runWorkflow().catch((error) => {
 
 `createGitHubStep` is bundled with `@agent-relay/sdk`; do not add a separate install. Its actions are stable across runtimes: `getRepo`, `createBranch`, `createFile`, `updateFile`, `createPR`, `updatePR`, `getPR`, `listPRs`, `mergePR`, `createIssue`, etc. See the SDK GitHub primitive docs for the full enum.
 
+#### Common authoring mistakes that cause startup parse errors
+
+These produce hard errors at workflow boot (before any step runs), not at runtime:
+
+| Mistake | Correct form |
+|---|---|
+| `createGitHubStep({ id: 'open-pr', ... })` | No `id` field — the step name comes from `.step('open-pr', createGitHubStep({...}))` |
+| `action: 'createPullRequest'` | `action: 'createPR'` (camelCase enum, not the GitHub API method name) |
+| `owner: 'AgentWorkforce', repo: 'nightcto'` | `repo: 'AgentWorkforce/nightcto'` — single `owner/repo` string |
+| `import { createGitHubStep } from '@agent-relay/github-primitive'` | `import { createGitHubStep } from '@agent-relay/sdk'` |
+| `{ ...createGitHubStep({...}) }` spread inside `.step('name', { ...createGitHubStep({...}) })` | Pass directly: `.step('name', createGitHubStep({...}))` |
+
+**Do not use `gh pr create` as a fallback.** Even on older SDKs the runner handles `type: 'integration'` steps — it is only the builder's `.step()` validation that is strict. Pass `createGitHubStep({...})` directly as the second argument to `.step()`; the SDK runner executes it correctly in both local and cloud modes.
+
 ### Authoring rules for PR-shipping workflows
 
-1. **Open the PR from the workflow, not from the operator's shell.** "Tell the user to run `gh pr create`" is a regression to a manual step the workflow could have done. The whole point of running this in cloud is that there is no operator's shell.
+1. **Use `createGitHubStep`, never `gh pr create`.** `gh pr create` is a local-only shell command that bypasses the SDK's local/cloud transport detection — the workflow loses portability and the ricky validator flags it as a missing PR-shipping step. `createGitHubStep({ action: 'createPR', repo: 'owner/repo', params: {...} })` works identically in local iteration and cloud runs without any env-var sniffing.
 2. **One PR per workflow, by default.** A workflow that opens five PRs from one run is almost always wrong — humans review one PR at a time. If you genuinely need multiple, prefer a tracking issue + linked PRs, or split into separate workflows.
 3. **Branch name encodes the run.** `agent-relay/run-${runId}` or `agent-relay/${workflow-name}-${timestamp}` so reviewers can tell the PR apart from other automation, and so reruns don't clash.
 4. **`draft: true` while iterating.** Once the workflow is stable end-to-end, flip to `draft: false`.
@@ -1827,15 +1841,20 @@ For long rollouts, keep the critical path evidence-based:
   agent: 'impl-runtime',
   dependsOn: ['context'],
   task: 'Implement the runtime slice and write .workflow-artifacts/runtime.md',
+  failOnError: false,   // transport failure is advisory, not a hard gate
 })
 .step('adapter-implementation', {
   agent: 'impl-adapters',
   dependsOn: ['context'],
   task: 'Implement adapter wiring and write .workflow-artifacts/adapters.md',
+  failOnError: false,   // transport failure is advisory, not a hard gate
 })
 .step('implementation-reconcile', {
   type: 'deterministic',
-  dependsOn: ['context'],
+  // Depend on the agent steps so reconcile runs AFTER they finish (not in
+  // parallel via a shared 'context' dep). They are failOnError:false above,
+  // so a transport failure stays advisory while ordering is preserved.
+  dependsOn: ['runtime-implementation', 'adapter-implementation'],
   command: `git status --short -- packages/core packages/*/src/writeback.ts scripts tests .workflow-artifacts
 test -f scripts/verify-e2e.mjs || echo "MISSING_E2E"
 test -f packages/core/src/runtime/router.ts || echo "MISSING_ROUTER"`,
@@ -1857,8 +1876,13 @@ test -f packages/core/src/runtime/router.ts || echo "MISSING_ROUTER"`,
 })
 ```
 
-Implementation agents may still run and coordinate on a channel, but tests
-depend on the reconcile/repair path. That makes transport failures advisory.
+The reconcile step still waits for the implementation agents (it depends on
+them, so its `git status`/`test -f` checks see their output), but those agent
+steps are `failOnError: false`, so a transport failure does not block the
+reconcile/repair path. Keep the ordering constraint — do not drop the agent
+deps to `['context']`, or reconcile races the agents and always reports files
+missing. Tests then depend on the reconcile/repair path, making transport
+failures advisory.
 If final deterministic evidence is still red after repair, write a blocked
 artifact and skip commit/PR creation rather than failing the workflow.
 
@@ -1976,7 +2000,7 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 | Thinking `agent-relay run` inspects exports | It executes the file as a subprocess. Only `.run()` invocations trigger steps |
 | `pattern('single')` on cloud runner | Not supported — use `dag` |
 | `pattern('supervisor')` with one agent | Same agent is owner + specialist. Use `dag` |
-| Invalid verification type (`type: 'deterministic'`) | Only `exit_code`, `output_contains`, `file_exists`, `custom` are valid |
+| Invalid verification type (`type: 'deterministic'`) | Only `exit_code`, `output_contains`, `file_exists`, `custom`, `pr_url` are valid |
 | Chaining `{{steps.X.output}}` from interactive agents | PTY output is garbled. Use deterministic steps or `preset: 'worker'` |
 | Single step editing 4+ files | Agents modify 1-2 then exit. Split to one file per step with verify gates |
 | Relying on agents to `git commit` | Agents emit markers without running git. Use deterministic commit step |

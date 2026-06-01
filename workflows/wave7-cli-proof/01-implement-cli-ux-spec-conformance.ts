@@ -52,11 +52,11 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" packages/cli/src/commands/cli-main.ts',
+        'sed -n "1,260p" src/surfaces/cli/commands/cli-main.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/cli/src/commands/cli-main.test.ts',
+        'sed -n "1,260p" src/surfaces/cli/commands/cli-main.test.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/cli/src/cli/onboarding.ts',
+        'sed -n "1,260p" src/surfaces/cli/cli/onboarding.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -65,9 +65,9 @@ async function main() {
       type: 'deterministic',
       dependsOn: ['prepare-artifacts'],
       command: [
-        'sed -n "1,260p" packages/local/src/request-normalizer.ts',
+        'sed -n "1,260p" src/local/request-normalizer.ts',
         'printf "\n---\n\n"',
-        'sed -n "1,260p" packages/local/src/entrypoint.ts',
+        'sed -n "1,260p" src/local/entrypoint.ts',
       ].join(' && '),
       captureOutput: true,
       failOnError: true,
@@ -86,10 +86,10 @@ async function main() {
       task: `Implement only the minimum real CLI UX follow-through needed to make Ricky testable after onboarding.
 
 Write or update only these files:
-- packages/cli/src/commands/cli-main.ts
-- packages/cli/src/entrypoint/interactive-cli.ts
-- packages/cli/src/cli/onboarding.ts
-- packages/cli/src/cli/mode-selector.ts
+- src/surfaces/cli/commands/cli-main.ts
+- src/surfaces/cli/entrypoint/interactive-cli.ts
+- src/surfaces/cli/cli/onboarding.ts
+- src/surfaces/cli/cli/mode-selector.ts
 
 Before code edits, write .workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance/plan.md ending with CLI_UX_CONFORMANCE_PLAN_READY.
 
@@ -107,7 +107,7 @@ Non-goals:
 - do not claim full live runtime proof from this implementation alone
 
 Exit after writing files to disk cleanly.`,
-      verification: { type: 'file_exists', value: 'packages/cli/src/entrypoint/interactive-cli.ts' },
+      verification: { type: 'file_exists', value: 'src/surfaces/cli/entrypoint/interactive-cli.ts' },
     })
     .step('plan-gate', {
       type: 'deterministic',
@@ -124,9 +124,9 @@ Exit after writing files to disk cleanly.`,
       type: 'deterministic',
       dependsOn: ['implement-cli-ux-conformance', 'plan-gate'],
       command: [
-        'test -f packages/cli/src/commands/cli-main.ts',
-        'test -f packages/cli/src/entrypoint/interactive-cli.ts',
-        'grep -Eq "spec|stdin|file|handoff|local" packages/cli/src/commands/cli-main.ts packages/cli/src/entrypoint/interactive-cli.ts',
+        'test -f src/surfaces/cli/commands/cli-main.ts',
+        'test -f src/surfaces/cli/entrypoint/interactive-cli.ts',
+        'grep -Eq "spec|stdin|file|handoff|local" src/surfaces/cli/commands/cli-main.ts src/surfaces/cli/entrypoint/interactive-cli.ts',
         'echo CLI_UX_CONFORMANCE_FILES_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -136,22 +136,22 @@ Exit after writing files to disk cleanly.`,
       agent: 'tests-codex',
       dependsOn: ['implementation-file-gate'],
       task: `Add or tighten tests only in these files:
-- packages/cli/src/commands/cli-main.test.ts
-- packages/cli/src/entrypoint/interactive-cli.test.ts
-- packages/cli/src/cli/onboarding.test.ts
+- src/surfaces/cli/commands/cli-main.test.ts
+- src/surfaces/cli/entrypoint/interactive-cli.test.ts
+- src/surfaces/cli/cli/onboarding.test.ts
 
 Requirements:
 - prove the exact local journey: npm start -- --mode local accepts a real spec instead of ending at rerun-later guidance
 - cover inline spec, missing spec/file blocker, and honest help output
 - keep tests deterministic and injectable
 - assertions must be user-journey focused, not implementation trivia`,
-      verification: { type: 'file_exists', value: 'packages/cli/src/commands/cli-main.test.ts' },
+      verification: { type: 'file_exists', value: 'src/surfaces/cli/commands/cli-main.test.ts' },
     })
     .step('test-file-gate', {
       type: 'deterministic',
       dependsOn: ['implement-cli-ux-tests'],
       command: [
-        'grep -Eq "mode local|inline spec|stdin|missing spec|help output|handoff" packages/cli/src/commands/cli-main.test.ts packages/cli/src/entrypoint/interactive-cli.test.ts packages/cli/src/cli/onboarding.test.ts',
+        'grep -Eq "mode local|inline spec|stdin|missing spec|help output|handoff" src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.test.ts',
         'echo CLI_UX_CONFORMANCE_TESTS_PRESENT',
       ].join(' && '),
       captureOutput: true,
@@ -208,9 +208,9 @@ Write .workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance/fix-
       type: 'deterministic',
       dependsOn: ['final-hard-validation'],
       command: [
-        'changed="$(git diff --name-only -- packages/cli/src/commands/cli-main.ts packages/cli/src/commands/cli-main.test.ts packages/cli/src/entrypoint/interactive-cli.ts packages/cli/src/entrypoint/interactive-cli.test.ts packages/cli/src/cli/onboarding.ts packages/cli/src/cli/onboarding.test.ts packages/cli/src/cli/mode-selector.ts workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance)"',
-        'printf "%s\n" "$changed" | grep -Eq "^(packages/cli/src/commands/cli-main\.ts|packages/cli/src/commands/cli-main\.test\.ts|packages/cli/src/entrypoint/interactive-cli\.ts|packages/cli/src/entrypoint/interactive-cli\.test\.ts|packages/cli/src/cli/onboarding\.ts|packages/cli/src/cli/onboarding\.test\.ts|packages/cli/src/cli/mode-selector\.ts|workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance\.ts|\.workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance/)"',
-        '! printf "%s\n" "$changed" | grep -Ev "^(packages/cli/src/commands/cli-main\.ts|packages/cli/src/commands/cli-main\.test\.ts|packages/cli/src/entrypoint/interactive-cli\.ts|packages/cli/src/entrypoint/interactive-cli\.test\.ts|packages/cli/src/cli/onboarding\.ts|packages/cli/src/cli/onboarding\.test\.ts|packages/cli/src/cli/mode-selector\.ts|workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance\.ts|\.workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance/)"',
+        'changed="$(git diff --name-only -- src/surfaces/cli/commands/cli-main.ts src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts src/surfaces/cli/cli/onboarding.ts src/surfaces/cli/cli/onboarding.test.ts src/surfaces/cli/cli/mode-selector.ts workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance.ts; git ls-files --others --exclude-standard -- .workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance)"',
+        'printf "%s\n" "$changed" | grep -Eq "^(src/surfaces/cli/commands/cli-main\.ts|src/surfaces/cli/commands/cli-main\.test\.ts|src/surfaces/cli/entrypoint/interactive-cli\.ts|src/surfaces/cli/entrypoint/interactive-cli\.test\.ts|src/surfaces/cli/cli/onboarding\.ts|src/surfaces/cli/cli/onboarding\.test\.ts|src/surfaces/cli/cli/mode-selector\.ts|workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance\.ts|\.workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance/)"',
+        '! printf "%s\n" "$changed" | grep -Ev "^(src/surfaces/cli/commands/cli-main\.ts|src/surfaces/cli/commands/cli-main\.test\.ts|src/surfaces/cli/entrypoint/interactive-cli\.ts|src/surfaces/cli/entrypoint/interactive-cli\.test\.ts|src/surfaces/cli/cli/onboarding\.ts|src/surfaces/cli/cli/onboarding\.test\.ts|src/surfaces/cli/cli/mode-selector\.ts|workflows/wave7-cli-proof/01-implement-cli-ux-spec-conformance\.ts|\.workflow-artifacts/wave7-cli-proof/implement-cli-ux-spec-conformance/)"',
         'echo CLI_UX_CONFORMANCE_REGRESSION_PASS',
       ].join(' && '),
       captureOutput: true,

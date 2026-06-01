@@ -35,7 +35,7 @@ import type {
   CloudReadinessCheck,
   CloudReadinessSnapshot,
 } from '../flows/cloud-workflow-flow.js';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -105,6 +105,8 @@ export interface ParsedArgs {
   bestJudgement?: boolean;
   login?: boolean;
   connectMissing?: boolean;
+  /** KEY=VALUE pairs from `--input KEY=VALUE` flags, injected into the workflow runner env. */
+  inputs?: Record<string, string>;
   workforcePersonaWriterCli?: boolean;
   errors?: string[];
 }
@@ -254,6 +256,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.bestJudgement) result.bestJudgement = true;
   if (parsed.login) result.login = true;
   if (parsed.connectMissing) result.connectMissing = true;
+  if (parsed.inputs && Object.keys(parsed.inputs).length > 0) result.inputs = parsed.inputs;
   if (parsed.workforcePersonaWriterCli !== undefined) result.workforcePersonaWriterCli = parsed.workforcePersonaWriterCli;
   if (parsed.errors && parsed.errors.length > 0) result.errors = parsed.errors;
   return result;
@@ -440,6 +443,7 @@ export function renderHelp(): string[] {
     '  --no-refine         Disable refinement; emit only the deterministic artifact',
     '  --with-llm[=model]  Alias for --refine',
     '  --best-judgement    Answer unresolved spec questions with implementer assumptions',
+    '  --input KEY=VALUE   Set an env var for the workflow run (repeatable); read via process.env.KEY',
     '  --workforce-persona Use Workforce personas to author the workflow',
     '  --no-workforce-persona Disable Workforce persona authoring',
     `  --auto-fix[=N]      Local diagnose/repair/resume loop (default ${DEFAULT_AUTO_FIX_ATTEMPTS} attempts, max 10)`,
@@ -601,7 +605,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
   const handoffMode = parsed.mode ?? 'local';
   const invocationRoot = resolveInvocationRoot(deps.cwd);
   const stageMode = parsed.runRequested ? 'run' : 'generate';
-  const runAutoFix = parsed.autoFix && stageMode === 'run'
+  const runAutoFix = parsed.autoFix && stageMode === 'run' && !shouldDisableAutoFixForPolicylessExternalHandoff(parsed, deps)
     ? { autoFix: { maxAttempts: parsed.autoFix } }
     : {};
   const retry = retryMetadataFor(parsed);
@@ -616,6 +620,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
       metadata: cliMetadataFor(parsed, 'artifact'),
     };
@@ -636,6 +641,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'inline-spec'),
     };
@@ -655,6 +661,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'spec-file'),
     };
@@ -675,6 +682,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+      ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
       cliMetadata: cliMetadataFor(parsed, 'stdin'),
     };
@@ -2014,7 +2022,7 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     ...cloudRecoveryDeps,
     preferWorkforcePersonaWorkflowWriter:
       deps.preferWorkforcePersonaWorkflowWriter ??
-      resolvePreferWorkforcePersonaWorkflowWriter({ workforcePersonaWriterCli: parsed.workforcePersonaWriterCli }),
+      resolveCliWorkforcePersonaWorkflowWriterPreference(parsed, cliHandoff, deps),
   };
 
   let interactiveResult: InteractiveCliResult;
@@ -2106,6 +2114,60 @@ export async function cliMain(deps: CliMainDeps = {}): Promise<CliMainResult> {
     output,
     interactiveResult,
   };
+}
+
+function resolveCliWorkforcePersonaWorkflowWriterPreference(
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff | undefined,
+  deps: CliMainDeps,
+): undefined | boolean {
+  const explicitPreference = parsed.workforcePersonaWriterCli !== undefined || process.env.RICKY_WORKFORCE_PERSONA_CLI !== undefined;
+  if (explicitPreference) {
+    return resolvePreferWorkforcePersonaWorkflowWriter({ workforcePersonaWriterCli: parsed.workforcePersonaWriterCli });
+  }
+
+  if (shouldUseDeterministicWriterForPolicylessExternalHandoff(parsed, cliHandoff, deps)) {
+    return false;
+  }
+
+  return resolvePreferWorkforcePersonaWorkflowWriter({ workforcePersonaWriterCli: parsed.workforcePersonaWriterCli });
+}
+
+function shouldUseDeterministicWriterForPolicylessExternalHandoff(
+  parsed: ParsedArgs,
+  cliHandoff: RawHandoff | undefined,
+  deps: CliMainDeps,
+): boolean {
+  if (!cliHandoff || parsed.mode === 'cloud') return false;
+  if (!parsed.json && !parsed.quiet) return false;
+
+  const invocationRoot = cliHandoff.invocationRoot ?? resolveInvocationRoot(deps.cwd);
+  if (invocationRoot === cliPackageRoot()) return false;
+
+  return !hasLocalPolicyContext(invocationRoot);
+}
+
+function shouldDisableAutoFixForPolicylessExternalHandoff(
+  parsed: ParsedArgs,
+  deps: CliMainDeps,
+): boolean {
+  if (parsed.mode === 'cloud') return false;
+  if (!parsed.json && !parsed.quiet) return false;
+
+  const invocationRoot = resolveInvocationRoot(deps.cwd);
+  if (invocationRoot === cliPackageRoot()) return false;
+
+  return !hasLocalPolicyContext(invocationRoot);
+}
+
+function hasLocalPolicyContext(root: string): boolean {
+  return [
+    'package.json',
+    '.git',
+    'AGENTS.md',
+    'CLAUDE.md',
+    '.ricky',
+  ].some((candidate) => existsSync(join(root, candidate)));
 }
 
 /**

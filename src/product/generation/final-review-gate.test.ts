@@ -1,38 +1,38 @@
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   buildFinalReviewPassGateCommand,
   GATE_BLOCKED_MARKER,
-  GATE_MISSING_MARKER_PREFIX,
+  GATE_MISSING_ARTIFACT_PREFIX,
 } from './final-review-gate.js';
 
 const ARTIFACTS = '.workflow-artifacts/generated/demo/update-last-week';
 
 function gate(overrides: { successMarker?: string } = {}): string {
+  void overrides;
   return buildFinalReviewPassGateCommand({
     artifactsDir: ARTIFACTS,
-    checks: [
-      {
-        presenceTest: `grep -qF RICKY_CHILD_CLAUDE_FINAL_FIX_READY '${ARTIFACTS}/claude-final-fix.md'`,
-        missingDetail: `${ARTIFACTS}/claude-final-fix.md is missing RICKY_CHILD_CLAUDE_FINAL_FIX_READY`,
-      },
-      {
-        presenceTest: `grep -qF RICKY_CHILD_CODEX_FINAL_FIX_READY '${ARTIFACTS}/codex-final-fix.md'`,
-        missingDetail: `${ARTIFACTS}/codex-final-fix.md is missing RICKY_CHILD_CODEX_FINAL_FIX_READY`,
-      },
+    requiredFiles: [
+      `${ARTIFACTS}/claude-final-fix.md`,
+      `${ARTIFACTS}/codex-final-fix.md`,
+      `${ARTIFACTS}/claude-final-fix-status.json`,
+      `${ARTIFACTS}/codex-final-fix-status.json`,
     ],
-    successMarker: overrides.successMarker ?? 'RICKY_CHILD_FRESH_EYES_LOOP_READY',
   });
 }
 
 describe('buildFinalReviewPassGateCommand', () => {
-  it('checks the BLOCKED sentinel before any marker grep', () => {
+  it('checks the BLOCKED sentinel before artifact file checks', () => {
     const command = gate();
     const blockedIdx = command.indexOf('BLOCKED_NO_COMMIT.md');
-    const firstGrepIdx = command.indexOf('grep -qF RICKY_CHILD_CLAUDE_FINAL_FIX_READY');
+    const firstFileIdx = command.indexOf(`${ARTIFACTS}/claude-final-fix.md`);
     expect(blockedIdx).toBeGreaterThan(-1);
-    expect(firstGrepIdx).toBeGreaterThan(-1);
-    expect(blockedIdx).toBeLessThan(firstGrepIdx);
+    expect(firstFileIdx).toBeGreaterThan(-1);
+    expect(blockedIdx).toBeLessThan(firstFileIdx);
   });
 
   it('emits a distinct, greppable marker plus the agent evidence when blocked', () => {
@@ -43,30 +43,41 @@ describe('buildFinalReviewPassGateCommand', () => {
     expect(command).toContain('exit 3');
   });
 
-  it('makes each marker check quiet with an explicit missing-marker diagnostic', () => {
+  it('checks non-empty expected artifacts with explicit diagnostics', () => {
     const command = gate();
-    // Quiet grep — matched lines must not leak into captured output and look
-    // like success while the command actually failed.
-    expect(command).toContain('grep -qF RICKY_CHILD_CLAUDE_FINAL_FIX_READY');
-    expect(command).not.toMatch(/grep -F RICKY_CHILD_CLAUDE_FINAL_FIX_READY(?!\w)/);
-    expect(command).toContain(
-      `${GATE_MISSING_MARKER_PREFIX}: ${ARTIFACTS}/claude-final-fix.md is missing RICKY_CHILD_CLAUDE_FINAL_FIX_READY`,
-    );
-    expect(command).toContain(
-      `${GATE_MISSING_MARKER_PREFIX}: ${ARTIFACTS}/codex-final-fix.md is missing RICKY_CHILD_CODEX_FINAL_FIX_READY`,
-    );
+    expect(command).toContain(`if [ ! -s '${ARTIFACTS}/claude-final-fix.md' ]; then`);
+    expect(command).toContain(`if [ ! -s '${ARTIFACTS}/codex-final-fix.md' ]; then`);
+    expect(command).toContain(`${GATE_MISSING_ARTIFACT_PREFIX}: ${ARTIFACTS}/claude-final-fix.md`);
+    expect(command).toContain(`${GATE_MISSING_ARTIFACT_PREFIX}: ${ARTIFACTS}/codex-final-fix.md`);
+    expect(command).not.toContain('grep');
   });
 
-  it('still echoes the success marker last so the gate can pass', () => {
+  it('parses final fix status JSON and rejects blocked statuses', () => {
     const command = gate();
-    // shellQuote wraps the marker in single quotes for safe shell embedding.
-    expect(command.trimEnd().endsWith("echo 'RICKY_CHILD_FRESH_EYES_LOOP_READY'")).toBe(true);
+    expect(command).toContain(`${ARTIFACTS}/claude-final-fix-status.json`);
+    expect(command).toContain(`${ARTIFACTS}/codex-final-fix-status.json`);
+    expect(command).toContain('includes(parsed.status)');
+    expect(command).toContain('parsed.summary');
   });
 
-  it('shell-quotes the success marker (defends against future callers passing metacharacters)', () => {
-    const command = gate({ successMarker: 'DONE $(touch /tmp/pwned)' });
-    expect(command).toContain("echo 'DONE $(touch /tmp/pwned)'");
-    expect(command).not.toContain('echo DONE $(touch');
+  it('embeds status paths as JSON string literals inside node assertions', () => {
+    const base = join(tmpdir(), "ricky-final-review-gate-quote's");
+    mkdirSync(base, { recursive: true });
+    const quoted = join(base, 'claude-final-fix-status.json');
+    writeFileSync(quoted, '{"status":"fixed","summary":"quoted path passed"}\n');
+
+    const command = buildFinalReviewPassGateCommand({
+      artifactsDir: base,
+      requiredFiles: [quoted],
+    });
+
+    expect(execFileSync('bash', ['-lc', command], { encoding: 'utf8' })).toContain('RICKY_CHILD_FINAL_REVIEW_FILES_READY');
+    expect(command).not.toContain(`throw new Error('${quoted}`);
+  });
+
+  it('echoes a structural success marker last', () => {
+    const command = gate();
+    expect(command.trimEnd().endsWith("echo 'RICKY_CHILD_FINAL_REVIEW_FILES_READY'")).toBe(true);
   });
 
   it('guards the blocked-evidence cat so a failing read does not short-circuit exit 3', () => {

@@ -608,7 +608,7 @@ export function applyCloudRepoSetup<T>(wf: T, opts: CloudRepoSetupOptions): T {
 - **Record residual risks**
 - Call out what was not covered
 - **Ship the result as a PR**
-- Open the pull request from the workflow itself with `createGitHubStep`
+- Open the pull request from the workflow itself with `createGitHubStep` from `@agent-relay/sdk` — **never** `gh pr create`, never `id:` inside the config, never `action: 'createPullRequest'`, never separate `owner`/`repo` fields
 - See [Shipping the Result — Open a PR via `createGitHubStep`](#shipping-the-result--open-a-pr-via-creategithubstep) below
 - A workflow that fixes a bug and stops short of the PR has only done half the loop
 - disposable sandbox / cloud workspace
@@ -1275,15 +1275,20 @@ steps:
   agent: 'impl-runtime',
   dependsOn: ['context'],
   task: 'Implement the runtime slice and write .workflow-artifacts/runtime.md',
+  failOnError: false,   // transport failure is advisory, not a hard gate
 })
 .step('adapter-implementation', {
   agent: 'impl-adapters',
   dependsOn: ['context'],
   task: 'Implement adapter wiring and write .workflow-artifacts/adapters.md',
+  failOnError: false,   // transport failure is advisory, not a hard gate
 })
 .step('implementation-reconcile', {
   type: 'deterministic',
-  dependsOn: ['context'],
+  // Depend on the agent steps so reconcile runs AFTER they finish (not in
+  // parallel via a shared 'context' dep). They are failOnError:false above,
+  // so a transport failure stays advisory while ordering is preserved.
+  dependsOn: ['runtime-implementation', 'adapter-implementation'],
   command: `git status --short -- packages/core packages/*/src/writeback.ts scripts tests .workflow-artifacts
 test -f scripts/verify-e2e.mjs || echo "MISSING_E2E"
 test -f packages/core/src/runtime/router.ts || echo "MISSING_ROUTER"`,
@@ -1417,7 +1422,7 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 | Thinking `agent-relay run` inspects exports | It executes the file as a subprocess. Only `.run()` invocations trigger steps |
 | `pattern('single')` on cloud runner | Not supported — use `dag` |
 | `pattern('supervisor')` with one agent | Same agent is owner + specialist. Use `dag` |
-| Invalid verification type (`type: 'deterministic'`) | Only `exit_code`, `output_contains`, `file_exists`, `custom` are valid |
+| Invalid verification type (`type: 'deterministic'`) | Only `exit_code`, `output_contains`, `file_exists`, `custom`, `pr_url` are valid |
 | Chaining `{{steps.X.output}}` from interactive agents | PTY output is garbled. Use deterministic steps or `preset: 'worker'` |
 | Single step editing 4+ files | Agents modify 1-2 then exit. Split to one file per step with verify gates |
 | Relying on agents to `git commit` | Agents emit markers without running git. Use deterministic commit step |

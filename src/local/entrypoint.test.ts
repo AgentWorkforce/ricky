@@ -3,10 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   CliHandoff,
   ClaudeHandoff,
+  LocalAssistantTurnContextDecision,
   LocalExecutorOptions,
+  LocalEntrypointInput,
+  LocalExecutionStageResult,
+  LocalGenerationStageResult,
   LocalExecutor,
   LocalInvocationRequest,
   LocalResponse,
+  LocalStageMode,
   McpHandoff,
   RawHandoff,
   StructuredSpecHandoff,
@@ -233,6 +238,42 @@ function expectNoTurnContextFallback(logs: string[]): void {
   expect(logs.some((line) => line.startsWith('[local] turn context adapter skipped:'))).toBe(false);
 }
 
+function expectIssue11AssistantTurnContext(
+  actual: LocalAssistantTurnContextDecision | undefined,
+  expectedTurnId: string,
+  expectedBlocks: string[],
+): void {
+  expect(actual).toMatchObject({
+    assistant_id: 'ricky',
+    turn_id: expectedTurnId,
+    adapter: 'ricky-local-turn-context-adapter',
+    package: '@agent-assistant/turn-context',
+    context_blocks: expect.arrayContaining(expectedBlocks),
+    enrichment_ids: expect.arrayContaining([
+      'ricky-request-summary',
+      'ricky-spec-text',
+      'ricky-request-metadata',
+    ]),
+  });
+}
+
+function expectIssue11RickyMetadataKeys(actual: Record<string, unknown> | undefined, label: string): void {
+  expect(actual, label).toBeDefined();
+  for (const key of [
+    'requestId',
+    'source',
+    'sourceMetadata',
+    'structuredSpec',
+    'invocationRoot',
+    'mode',
+    'stageMode',
+    'specPath',
+    'metadata',
+  ]) {
+    expect(Object.prototype.hasOwnProperty.call(actual, key), `${label}.${key}`).toBe(true);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // normalizeRequest
 // ---------------------------------------------------------------------------
@@ -453,6 +494,7 @@ describe('normalizeRequest', () => {
     const result = await normalizeRequest(raw);
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('both');
   });
 
   it('maps top-level auto execution preference to local-first both mode', async () => {
@@ -460,6 +502,7 @@ describe('normalizeRequest', () => {
     const result = await normalizeRequest(raw);
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('auto');
   });
 
   it('reads execution preference from structured spec payloads when top-level mode is absent', async () => {
@@ -472,6 +515,7 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('both');
   });
 
   it('lets top-level mode override nested structured execution preference', async () => {
@@ -485,6 +529,7 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('local');
+    expect(result.executionPreference).toBe('local');
   });
 
   it('maps MCP auto execution preference to both for the local contract', async () => {
@@ -497,6 +542,7 @@ describe('normalizeRequest', () => {
     });
 
     expect(result.mode).toBe('both');
+    expect(result.executionPreference).toBe('auto');
   });
 
   it('accepts generate-and-run as a stageMode alias for run behavior', async () => {
@@ -635,6 +681,44 @@ describe('normalizeRequest', () => {
 // ---------------------------------------------------------------------------
 
 describe('runLocal', () => {
+  it('exports public local invocation contracts from the local barrel', () => {
+    const stageMode: LocalStageMode = 'generate-and-run';
+    const input: LocalEntrypointInput = {
+      _normalized: true,
+      source: 'cli',
+      spec: 'generate a local workflow',
+      mode: 'local',
+      executionPreference: 'local',
+      stageMode,
+      metadata: {},
+    };
+    const generation: LocalGenerationStageResult = {
+      stage: 'generate',
+      status: 'ok',
+    };
+    const execution: LocalExecutionStageResult = {
+      stage: 'execute',
+      status: 'success',
+      execution: {
+        workflow_id: 'wf-public-contract',
+        artifact_path: 'workflows/generated/public-contract.ts',
+        command: '@agent-relay/sdk/workflows runScriptWorkflow workflows/generated/public-contract.ts',
+        workflow_file: 'workflows/generated/public-contract.ts',
+        cwd: '/repo',
+        started_at: '2026-01-01T00:00:00.000Z',
+        finished_at: '2026-01-01T00:00:01.000Z',
+        duration_ms: 1000,
+        steps_completed: 1,
+        steps_total: 1,
+      },
+    };
+
+    expect(input.stageMode).toBe('generate-and-run');
+    expect(input.executionPreference).toBe('local');
+    expect(generation.status).toBe('ok');
+    expect(execution.status).toBe('success');
+  });
+
   it('normalizes and executes a CLI handoff through the injected executor', async () => {
     const executor = mockExecutor();
     const result = await runLocal(
@@ -903,6 +987,79 @@ describe('runLocal', () => {
     expect(result.logs.some((l) => l.includes('[local] spec intake route: execute'))).toBe(true);
   });
 
+  it('runs normalized structured artifact path requests through the local runtime contract', async () => {
+    const cases = [
+      {
+        key: 'artifactPath',
+        workflowFile: 'workflows/generated/normalized-artifact.ts',
+      },
+      {
+        key: 'workflowArtifactPath',
+        workflowFile: 'workflows/generated/normalized-workflow-artifact.ts',
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const launches: RunRequest[] = [];
+      const result = await runLocal(
+        {
+          _normalized: true,
+          source: 'mcp',
+          spec: 'run local workflow artifact',
+          structuredSpec: {
+            intent: 'execute',
+            description: 'run local workflow artifact',
+            [testCase.key]: testCase.workflowFile,
+          },
+          mode: 'local',
+          executionPreference: 'local',
+          stageMode: 'run',
+          metadata: { toolName: 'ricky.runLocal' },
+          sourceMetadata: {
+            mcp: { toolName: 'ricky.runLocal', toolCallId: 'tool-normalized-artifact' },
+          },
+        },
+        {
+          localExecutor: {
+            cwd: '/workspace/ricky',
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                launches.push(request);
+                return coordinatorResult(request, { stdout: [`${testCase.key} executed`] });
+              },
+            },
+            artifactWriter: {
+              async writeArtifact(): Promise<void> {
+                throw new Error(`${testCase.key} execute request should not generate`);
+              },
+            },
+          },
+        },
+      );
+
+      expect(result.ok, testCase.key).toBe(true);
+      expect(launches, testCase.key).toHaveLength(1);
+      expect(launches[0], testCase.key).toMatchObject({
+        workflowFile: testCase.workflowFile,
+        cwd: '/workspace/ricky',
+        metadata: {
+          source: 'mcp',
+          route: 'execute',
+        },
+      });
+      expect(result.artifacts, testCase.key).toEqual([
+        { path: testCase.workflowFile, type: 'text/typescript' },
+      ]);
+      expect(result.logs, testCase.key).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from mcp',
+          '[local] spec intake route: execute',
+          `[stdout] ${testCase.key} executed`,
+        ]),
+      );
+    }
+  });
+
   it('does not skip normalization for raw cli handoffs that include mode and metadata', async () => {
     const executor = mockExecutor();
     const result = await runLocal(
@@ -1006,6 +1163,97 @@ describe('runLocal', () => {
     await runLocal({ source: 'cli', spec: 'test' }, { executor });
 
     expect(executor.calls[0].mode).toBe('local');
+  });
+
+  it('hands CLI, MCP, and Claude structured specs to the injected local executor without Cloud defaults', async () => {
+    const cases: Array<{
+      name: string;
+      handoff: CliHandoff | McpHandoff | ClaudeHandoff;
+      expectedSpec: string;
+      expectedMetadata: Record<string, unknown>;
+      expectedSourceMetadata: NonNullable<LocalInvocationRequest['sourceMetadata']>;
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            description: 'generate a local workflow from CLI',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+        },
+        expectedSpec: 'generate a local workflow from CLI',
+        expectedMetadata: { argv: ['ricky', 'generate', '--local'] },
+        expectedSourceMetadata: {
+          cli: { argv: ['ricky', 'generate', '--local'] },
+        },
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            prompt: 'generate a local workflow from MCP',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          mcpMetadata: { toolCallId: 'tool-local-entrypoint' },
+        },
+        expectedSpec: 'generate a local workflow from MCP',
+        expectedMetadata: {
+          toolCallId: 'tool-local-entrypoint',
+          toolName: 'ricky.generate',
+        },
+        expectedSourceMetadata: {
+          mcp: {
+            toolCallId: 'tool-local-entrypoint',
+            toolName: 'ricky.generate',
+          },
+        },
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            request: 'generate a local workflow from Claude',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          conversationId: 'conv-local-entrypoint',
+          turnId: 'turn-local-entrypoint',
+        },
+        expectedSpec: 'generate a local workflow from Claude',
+        expectedMetadata: {
+          conversationId: 'conv-local-entrypoint',
+          turnId: 'turn-local-entrypoint',
+        },
+        expectedSourceMetadata: {
+          claude: {
+            conversationId: 'conv-local-entrypoint',
+            turnId: 'turn-local-entrypoint',
+          },
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const executor = mockExecutor();
+      const result = await runLocal(testCase.handoff, { executor });
+
+      expect(result.ok, testCase.name).toBe(true);
+      expect(executor.calls, testCase.name).toHaveLength(1);
+      expect(executor.calls[0], testCase.name).toMatchObject({
+        source: testCase.handoff.source,
+        spec: testCase.expectedSpec,
+        structuredSpec: expect.any(Object),
+        mode: 'local',
+        executionPreference: 'local',
+        metadata: testCase.expectedMetadata,
+        sourceMetadata: testCase.expectedSourceMetadata,
+      });
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), testCase.name).toBe(false);
+    }
   });
 
   it('keeps CLI, MCP, and Claude handoffs BYOH-first without Cloud credentials', async () => {
@@ -1170,7 +1418,10 @@ describe('runLocal', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(workflowArtifactWrites(localExecutor.writes)).toHaveLength(1);
+    const generatedArtifacts = workflowArtifactWrites(localExecutor.writes);
+    expect(generatedArtifacts).toHaveLength(1);
+    expect(generatedArtifacts[0].content).toContain('\\"executionPreference\\": \\"local\\"');
+    expect(generatedArtifacts[0].content).not.toContain('\\"executionPreference\\": \\"cloud\\"');
     expect(localExecutor.runner.invocations).toHaveLength(1);
     expect(localExecutor.runner.invocations[0]).toMatchObject({
       command: DEFAULT_LOCAL_ROUTE.command,
@@ -1390,6 +1641,466 @@ describe('runLocal', () => {
     expect(localExecutor.runner.invocations).toHaveLength(0);
   });
 
+  describe('regression: issue #11 turn-context adapter in local path', () => {
+    it('keeps generation-only LocalResponse fields while exercising the real adapter-backed turn context', async () => {
+      const localExecutor = memoryLocalExecutorOptions({ stdout: ['should not launch'] });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          requestId: 'req-issue-11-generation-only',
+          spec: {
+            description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            targetFiles: ['src/local/entrypoint.ts'],
+            stageMode: 'generate',
+          },
+          specFile: 'specs/issue-11-generation.json',
+          invocationRoot: '/repo/issue-11-generation',
+          metadata: { issue: 11, proof: 'generation-only' },
+          cliMetadata: { argv: ['ricky', 'run', '--spec-file', 'specs/issue-11-generation.json'] },
+        },
+        {
+          localExecutor: {
+            ...localExecutor,
+            returnGeneratedArtifactOnly: true,
+          },
+        },
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        artifacts: [
+          {
+            path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+            type: 'text/typescript',
+            content: expect.stringContaining('workflow('),
+          },
+        ],
+        logs: expect.arrayContaining([
+          '[local] received spec from cli',
+          '[local] mode: local',
+          '[local] stage mode: generate',
+          '[local] spec path: specs/issue-11-generation.json',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime launch skipped: returning generated artifact only',
+        ]),
+        nextActions: [
+          expect.stringMatching(/^Run the generated workflow locally: ricky run workflows\/generated\/.+\.ts$/),
+          'Inspect the generated workflow artifact and choose whether to run it locally.',
+        ],
+        exitCode: 0,
+        generation: {
+          stage: 'generate',
+          status: 'ok',
+          artifact: {
+            path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+            workflow_id: expect.any(String),
+            spec_digest: expect.any(String),
+            target_files: expect.arrayContaining(['src/local/entrypoint.ts']),
+          },
+          next: {
+            run_command: expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
+            run_mode_hint: expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
+          },
+        },
+      });
+      expect(result.execution).toBeUndefined();
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+      expect(result.artifacts[0].path).toBe(result.generation?.artifact?.path);
+      expect(localExecutor.runner.invocations).toHaveLength(0);
+      expectNoTurnContextFallback(result.logs);
+      expectIssue11AssistantTurnContext(
+        result.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-generation-only',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-source-metadata',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+    });
+
+    it('preserves artifact-run and generate-and-run stage semantics through the adapter-observed local runtime', async () => {
+      const artifactPath = 'workflows/wave4-local-byoh/issue-11-ready.workflow.ts';
+      const artifactLaunches: RunRequest[] = [];
+      const artifactResult = await runLocal(
+        {
+          source: 'workflow-artifact',
+          artifactPath,
+          requestId: 'req-issue-11-artifact-run',
+          invocationRoot: '/repo/issue-11-artifact',
+          metadata: { issue: 11, proof: 'artifact-run' },
+        },
+        {
+          artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+          localExecutor: {
+            cwd: '/ignored/local-executor-cwd',
+            artifactWriter: {
+              async writeArtifact(): Promise<void> {
+                throw new Error('artifact-run should not generate a replacement workflow');
+              },
+            },
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                artifactLaunches.push(request);
+                return coordinatorResult(request, { stdout: ['artifact run completed'] });
+              },
+            },
+          },
+        },
+      );
+
+      expect(artifactResult.ok).toBe(true);
+      expect(artifactResult.exitCode).toBe(0);
+      expect(artifactResult.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from workflow-artifact',
+          '[local] mode: local',
+          '[local] stage mode: run',
+          `[local] spec path: ${artifactPath}`,
+          '[local] spec intake route: execute',
+          '[local] runtime status: passed',
+          '[stdout] artifact run completed',
+        ]),
+      );
+      expect(artifactResult.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+      expect(artifactResult.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: artifactPath,
+          workflow_id: 'req-issue-11-artifact-run',
+          spec_digest: expect.any(String),
+        },
+        next: {
+          run_command: `ricky run ${artifactPath}`,
+          run_mode_hint: `ricky run ${artifactPath}`,
+        },
+      });
+      expect(artifactResult.execution).toMatchObject({
+        stage: 'execute',
+        status: 'success',
+        execution: {
+          artifact_path: artifactPath,
+          workflow_file: artifactPath,
+          cwd: '/repo/issue-11-artifact',
+        },
+        evidence: {
+          side_effects: {
+            commands_invoked: [`@agent-relay/sdk/workflows runScriptWorkflow ${artifactPath}`],
+          },
+          assertions: [
+            {
+              name: 'runtime_exit_code',
+              status: 'pass',
+              detail: 'Runtime exited with code 0.',
+            },
+          ],
+        },
+      });
+      expect(artifactLaunches).toHaveLength(1);
+      expect(artifactLaunches[0]).toMatchObject({
+        workflowFile: artifactPath,
+        cwd: '/repo/issue-11-artifact',
+        metadata: {
+          requestId: 'req-issue-11-artifact-run',
+          source: 'workflow-artifact',
+          route: 'execute',
+          assistantTurnContext: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-artifact-run',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          },
+        },
+      });
+      expectNoTurnContextFallback(artifactResult.logs);
+      expectIssue11AssistantTurnContext(
+        artifactResult.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-artifact-run',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+
+      const generateAndRunExecutor = memoryLocalExecutorOptions({ stdout: ['generate-and-run completed'] });
+      const generateAndRunResult = await runLocal(
+        {
+          source: 'mcp',
+          requestId: 'req-issue-11-generate-and-run',
+          invocationRoot: '/repo/issue-11-generate-and-run',
+          executionPreference: 'auto',
+          arguments: {
+            prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'generate-and-run',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          mcpMetadata: { toolCallId: 'tool-issue-11-generate-and-run' },
+        },
+        { localExecutor: generateAndRunExecutor },
+      );
+
+      expect(generateAndRunResult.ok).toBe(true);
+      expect(generateAndRunResult.exitCode).toBe(0);
+      expect(generateAndRunResult.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from mcp',
+          '[local] mode: both',
+          '[local] stage mode: run',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime status: passed',
+          '[stdout] generate-and-run completed',
+        ]),
+      );
+      expect(generateAndRunResult.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+          workflow_id: expect.any(String),
+          spec_digest: expect.any(String),
+          target_files: expect.arrayContaining(['src/local/entrypoint.ts']),
+        },
+      });
+      expect(generateAndRunResult.execution).toMatchObject({
+        stage: 'execute',
+        status: 'success',
+        evidence: {
+          logs: {
+            tail: ['generate-and-run completed'],
+            truncated: false,
+          },
+        },
+      });
+      expect(generateAndRunExecutor.runner.invocations).toHaveLength(1);
+      expectNoTurnContextFallback(generateAndRunResult.logs);
+      expectIssue11AssistantTurnContext(
+        generateAndRunResult.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-generate-and-run',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-source-metadata',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+    });
+
+    it('passes the real adapter summary into generated local runtime metadata', async () => {
+      const writes: RecordedWrite[] = [];
+      const launches: RunRequest[] = [];
+      const result = await runLocal(
+        {
+          source: 'structured',
+          requestId: 'req-issue-11-generated-runtime-metadata',
+          invocationRoot: '/repo/issue-11-generated-runtime-metadata',
+          executionPreference: 'both',
+          spec: {
+            description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            targetFiles: ['src/local/entrypoint.ts'],
+            stageMode: 'generate-and-run',
+          },
+          metadata: { issue: 11, proof: 'generated-runtime-metadata' },
+        },
+        {
+          localExecutor: {
+            cwd: '/ignored/generated-runtime-metadata-cwd',
+            artifactWriter: {
+              async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+                writes.push({ path, content, cwd });
+              },
+            },
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                launches.push(request);
+                return coordinatorResult(request, { stdout: ['generated runtime metadata completed'] });
+              },
+            },
+          },
+        },
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(workflowArtifactWrites(writes)).toHaveLength(1);
+      expect(launches).toHaveLength(1);
+      expect(launches[0]).toMatchObject({
+        workflowFile: result.generation?.artifact?.path,
+        cwd: '/repo/issue-11-generated-runtime-metadata',
+        metadata: {
+          requestId: 'req-issue-11-generated-runtime-metadata',
+          source: 'structured',
+          route: 'generate',
+          generatedWorkflowId: result.generation?.artifact?.workflow_id,
+          assistantTurnContext: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-generated-runtime-metadata',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+            context_blocks: expect.arrayContaining([
+              'enrichment-ricky-request-summary',
+              'enrichment-ricky-spec-text',
+              'enrichment-ricky-structured-spec',
+              'enrichment-ricky-request-metadata',
+            ]),
+            enrichment_ids: expect.arrayContaining([
+              'ricky-request-summary',
+              'ricky-spec-text',
+              'ricky-structured-spec',
+              'ricky-request-metadata',
+            ]),
+          },
+        },
+      });
+      expect(result.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from structured',
+          '[local] mode: both',
+          '[local] stage mode: run',
+          '[local] spec intake route: generate',
+          '[local] runtime status: passed',
+          '[stdout] generated runtime metadata completed',
+        ]),
+      );
+      expectNoTurnContextFallback(result.logs);
+      expectIssue11AssistantTurnContext(
+        result.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-generated-runtime-metadata',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+    });
+
+    it('keeps Ricky blocker and evidence fields when adapter-observed local execution fails', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 127,
+        stdout: ['runtime attempted launch'],
+        stderr: ['agent-relay: command not found'],
+      });
+      const result = await runLocal(
+        {
+          source: 'claude',
+          requestId: 'req-issue-11-blocker',
+          invocationRoot: '/repo/issue-11-blocker',
+          stageMode: 'generate-and-run',
+          spec: {
+            request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            targetFiles: ['src/local/entrypoint.ts'],
+          },
+          conversationId: 'conversation-issue-11-blocker',
+          turnId: 'turn-issue-11-blocker',
+          metadata: { issue: 11, proof: 'blocker-evidence' },
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).toBe(2);
+      expect(result.generation).toMatchObject({
+        stage: 'generate',
+        status: 'ok',
+        artifact: {
+          path: expect.stringMatching(/^workflows\/generated\/.+\.ts$/),
+          workflow_id: expect.any(String),
+          spec_digest: expect.any(String),
+          target_files: expect.arrayContaining(['src/local/entrypoint.ts']),
+        },
+      });
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'blocker',
+        execution: {
+          artifact_path: result.generation?.artifact?.path,
+          workflow_file: result.generation?.artifact?.path,
+          cwd: '/repo/issue-11-blocker',
+          steps_completed: 0,
+          steps_total: 1,
+        },
+        blocker: {
+          code: 'MISSING_BINARY',
+          category: 'dependency',
+          detected_during: 'launch',
+          message: expect.stringContaining('Runtime dependency is unavailable'),
+          recovery: {
+            actionable: true,
+            steps: [
+              'npm install',
+              expect.stringMatching(/^ricky run workflows\/generated\/.+\.ts$/),
+            ],
+          },
+          context: {
+            missing: ['@agent-relay/sdk/workflows runtime'],
+            found: ['cwd=/repo/issue-11-blocker'],
+          },
+        },
+        evidence: {
+          outcome_summary: expect.stringContaining('blocked during local runtime execution'),
+          failed_step: { id: 'runtime-launch', name: 'Local runtime execution' },
+          exit_code: 127,
+          logs: {
+            tail: ['runtime attempted launch', 'agent-relay: command not found'],
+            truncated: false,
+          },
+          side_effects: {
+            files_written: expect.arrayContaining([result.generation?.artifact?.path]),
+            commands_invoked: [
+              expect.stringMatching(/^@agent-relay\/sdk\/workflows runScriptWorkflow workflows\/generated\/.+\.ts$/),
+            ],
+          },
+          assertions: [
+            {
+              name: 'runtime_exit_code',
+              status: 'fail',
+              detail: 'Runtime exit code: 127.',
+            },
+          ],
+        },
+      });
+      expect(result.logs).toEqual(
+        expect.arrayContaining([
+          '[local] received spec from claude',
+          '[local] mode: local',
+          '[local] stage mode: run',
+          '[local] spec intake route: generate',
+          '[local] workflow generation: passed',
+          '[local] runtime status: failed',
+          '[stdout] runtime attempted launch',
+          '[stderr] agent-relay: command not found',
+        ]),
+      );
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Runtime dependency is unavailable'),
+        ]),
+      );
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+      expect(result.nextActions).toEqual(result.execution?.blocker?.recovery.steps);
+      expect(localExecutor.runner.invocations).toHaveLength(1);
+      expectNoTurnContextFallback(result.logs);
+      expectIssue11AssistantTurnContext(
+        result.generation?.decisions?.assistant_turn_context,
+        'req-issue-11-blocker',
+        [
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-source-metadata',
+          'enrichment-ricky-request-metadata',
+        ],
+      );
+    });
+  });
+
   it('continues from generated artifact into execution evidence when run mode is explicit', async () => {
     const { mkdtemp, rm } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
@@ -1552,6 +2263,58 @@ describe('runLocal', () => {
       }
     });
 
+    it('blocks package-check generated workflow execution before launching agents when package.json is missing', async () => {
+      const { access, mkdtemp, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const tempCwd = await mkdtemp(`${tmpdir()}/ricky-package-precheck-`);
+
+      try {
+        const result = await runLocal(
+          {
+            source: 'cli',
+            spec: 'generate a workflow for package checks with typecheck and tests',
+            stageMode: 'run',
+            invocationRoot: tempCwd,
+          },
+          { localExecutor: { workforcePersonaWriter: false } },
+        );
+
+        const generatedPath = result.generation?.artifact?.path;
+        expect(result.ok).toBe(false);
+        expect(result.exitCode).toBe(2);
+        expect(generatedPath).toMatch(/^workflows\/generated\/.+\.ts$/);
+        await expect(access(`${tempCwd}/${generatedPath}`)).resolves.toBeUndefined();
+        expect(result.execution).toMatchObject({
+          stage: 'execute',
+          status: 'blocker',
+          execution: {
+            workflow_file: generatedPath,
+            command: `@agent-relay/sdk/workflows runScriptWorkflow ${generatedPath}`,
+            cwd: tempCwd,
+            steps_completed: 0,
+            steps_total: 1,
+          },
+          blocker: {
+            code: 'UNSUPPORTED_RUNTIME',
+            category: 'unsupported',
+            detected_during: 'precheck',
+            context: {
+              missing: [`${tempCwd}/package.json`],
+              found: [`cwd=${tempCwd}`],
+            },
+          },
+          evidence: {
+            failed_step: { id: 'runtime-precheck', name: 'Local runtime precheck' },
+            side_effects: {
+              commands_invoked: [`@agent-relay/sdk/workflows runScriptWorkflow ${generatedPath}`],
+            },
+          },
+        });
+      } finally {
+        await rm(tempCwd, { recursive: true, force: true });
+      }
+    });
+
     it('writes runtime log evidence under result.cwd, not process.cwd()', async () => {
       const { mkdtemp, rm, access } = await import('node:fs/promises');
       const { tmpdir } = await import('node:os');
@@ -1646,6 +2409,82 @@ describe('runLocal', () => {
       });
       expect(result.nextActions).toEqual(result.execution?.blocker?.recovery.steps);
       expect(result.nextActions.join('\n')).not.toMatch(/rerun.*later|vague/i);
+    });
+
+    it('classifies local broker startup timeout as a runtime handoff stall', async () => {
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stdout: [],
+        stderr: ['local broker startup timeout after 30000ms waiting for Agent Relay broker acknowledgement'],
+      });
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).toBe(2);
+      expect(result.execution).toMatchObject({
+        stage: 'execute',
+        status: 'blocker',
+        blocker: {
+          code: 'RUNTIME_HANDOFF_STALLED',
+          category: 'resource',
+          detected_during: 'launch',
+          message: expect.stringContaining('Runtime handoff stalled before workflow execution'),
+          context: {
+            missing: ['local Agent Relay broker startup acknowledgement'],
+          },
+        },
+        evidence: {
+          failed_step: { id: 'runtime-launch', name: 'Local runtime execution' },
+          exit_code: 1,
+          logs: {
+            tail: ['local broker startup timeout after 30000ms waiting for Agent Relay broker acknowledgement'],
+            truncated: false,
+          },
+        },
+      });
+      expect(result.execution?.blocker?.code).not.toBe('UNSUPPORTED_RUNTIME');
+      expect(result.execution?.blocker?.recovery.steps.join('\n')).toContain('retry the same workflow artifact');
+    });
+
+    it('classifies SDK broker readiness failures inside workflow failure output as runtime handoff stalls', async () => {
+      const brokerFailure = [
+        '[workflow] FAILED: Step "implement-slice" failed after 2 retries: Broker did not report API port within 45000ms',
+        '(pid=41079; cwd=/private/tmp/cloud-ricky-309; command=/bin/agent-relay-broker init --name cloud-ricky-309 --channels wf-ricky-child-update-providers;',
+        'stdout_tail=<empty>; stderr_tail=relaycast ws event ignored by inbound mapper)',
+      ].join(' ');
+      const localExecutor = memoryLocalExecutorOptions({
+        exitCode: 1,
+        stdout: [brokerFailure],
+        stderr: ['Workflow runtime reported failure despite a zero process exit: ' + brokerFailure],
+      });
+
+      const result = await runLocal(
+        {
+          source: 'cli',
+          spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'run',
+        },
+        { localExecutor },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.execution?.blocker).toMatchObject({
+        code: 'RUNTIME_HANDOFF_STALLED',
+        category: 'resource',
+        context: {
+          missing: ['local Agent Relay broker startup acknowledgement'],
+          found: expect.arrayContaining(['cwd=/repo', 'status=failed', 'exitCode=1']),
+        },
+      });
+      expect(result.execution?.blocker?.code).not.toBe('INVALID_ARTIFACT');
+      expect(result.execution?.blocker?.code).not.toBe('UNSUPPORTED_RUNTIME');
     });
 
     it('extracts env recovery steps only from explicit missing-env messages', async () => {
@@ -2525,6 +3364,407 @@ describe('runLocal', () => {
       },
     });
     expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+  });
+
+  it('normalizes CLI, MCP, and Claude specs into explicit local adapter requests', async () => {
+    const handoffs: Array<{
+      name: string;
+      handoff: RawHandoff;
+      expected: Partial<LocalInvocationRequest>;
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            description: 'generate a local CLI workflow',
+            workflowFile: 'workflows/local-cli.workflow.ts',
+          },
+          cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+          requestId: 'req-cli-contract',
+        },
+        expected: {
+          source: 'cli',
+          spec: 'generate a local CLI workflow',
+          metadata: { argv: ['ricky', 'generate', '--local'] },
+          requestId: 'req-cli-contract',
+        },
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            prompt: 'generate a local MCP workflow',
+            workflowFile: 'workflows/local-mcp.workflow.ts',
+          },
+          mcpMetadata: { toolCallId: 'tool-contract' },
+        },
+        expected: {
+          source: 'mcp',
+          spec: 'generate a local MCP workflow',
+          metadata: { toolCallId: 'tool-contract', toolName: 'ricky.generate' },
+        },
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            request: 'generate a local Claude workflow',
+            workflowFile: 'workflows/local-claude.workflow.ts',
+          },
+          conversationId: 'conv-contract',
+          turnId: 'turn-contract',
+        },
+        expected: {
+          source: 'claude',
+          spec: 'generate a local Claude workflow',
+          metadata: { conversationId: 'conv-contract', turnId: 'turn-contract' },
+        },
+      },
+    ];
+
+    for (const { name, handoff, expected } of handoffs) {
+      const executor = mockExecutor({
+        logs: [`[mock] accepted ${name} handoff locally`],
+      });
+      const result = await runLocal(handoff, { executor });
+
+      expect(result.ok, name).toBe(true);
+      expect(executor.calls, name).toHaveLength(1);
+      expect(executor.calls[0], name).toMatchObject({
+        _normalized: true,
+        mode: 'local',
+        ...expected,
+      });
+      expect(result.logs, name).toEqual([`[mock] accepted ${name} handoff locally`]);
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), name).toBe(false);
+    }
+  });
+
+  it('proves raw handoff normalization reaches injected adapters in explicit local mode', async () => {
+    const handoffs: Array<{
+      name: string;
+      handoff: RawHandoff;
+      expected: Partial<LocalInvocationRequest>;
+    }> = [
+      {
+        name: 'cli',
+        handoff: {
+          source: 'cli',
+          spec: {
+            description: 'generate a local workflow from CLI',
+            workflowFile: 'workflows/local-cli.workflow.ts',
+          },
+          cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+          requestId: 'req-local-cli-adapter',
+        },
+        expected: {
+          source: 'cli',
+          spec: 'generate a local workflow from CLI',
+          structuredSpec: {
+            description: 'generate a local workflow from CLI',
+            workflowFile: 'workflows/local-cli.workflow.ts',
+          },
+          metadata: { argv: ['ricky', 'generate', '--local'] },
+          sourceMetadata: {
+            cli: { argv: ['ricky', 'generate', '--local'] },
+          },
+          requestId: 'req-local-cli-adapter',
+        },
+      },
+      {
+        name: 'mcp',
+        handoff: {
+          source: 'mcp',
+          toolName: 'ricky.generate',
+          arguments: {
+            prompt: 'generate a local workflow from MCP',
+            workflowFile: 'workflows/local-mcp.workflow.ts',
+          },
+          mcpMetadata: { toolCallId: 'tool-local-adapter' },
+        },
+        expected: {
+          source: 'mcp',
+          spec: 'generate a local workflow from MCP',
+          structuredSpec: {
+            prompt: 'generate a local workflow from MCP',
+            workflowFile: 'workflows/local-mcp.workflow.ts',
+          },
+          metadata: { toolCallId: 'tool-local-adapter', toolName: 'ricky.generate' },
+          sourceMetadata: {
+            mcp: { toolCallId: 'tool-local-adapter', toolName: 'ricky.generate' },
+          },
+        },
+      },
+      {
+        name: 'claude',
+        handoff: {
+          source: 'claude',
+          spec: {
+            request: 'generate a local workflow from Claude',
+            workflowFile: 'workflows/local-claude.workflow.ts',
+          },
+          conversationId: 'conv-local-adapter',
+          turnId: 'turn-local-adapter',
+        },
+        expected: {
+          source: 'claude',
+          spec: 'generate a local workflow from Claude',
+          structuredSpec: {
+            request: 'generate a local workflow from Claude',
+            workflowFile: 'workflows/local-claude.workflow.ts',
+          },
+          metadata: { conversationId: 'conv-local-adapter', turnId: 'turn-local-adapter' },
+          sourceMetadata: {
+            claude: { conversationId: 'conv-local-adapter', turnId: 'turn-local-adapter' },
+          },
+        },
+      },
+    ];
+
+    for (const { name, handoff, expected } of handoffs) {
+      const executor = mockExecutor({ logs: [`[adapter] ${name} ran locally`] });
+      const result = await runLocal(handoff, { executor });
+
+      expect(result.ok, name).toBe(true);
+      expect(executor.calls, name).toHaveLength(1);
+      expect(executor.calls[0], name).toMatchObject({
+        _normalized: true,
+        mode: 'local',
+        executionPreference: 'local',
+        ...expected,
+      });
+      expect(result.logs, name).toEqual([`[adapter] ${name} ran locally`]);
+      expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), name).toBe(false);
+    }
+  });
+
+  it('reads workflow artifact inputs from invocationRoot and routes the relative artifact path locally', async () => {
+    const artifactPath = 'workflows/wave4-local-byoh/relative-entrypoint.workflow.ts';
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'workflow-artifact',
+        artifactPath,
+        invocationRoot: '/caller/repo',
+        requestId: 'req-artifact-invocation-root',
+      },
+      {
+        artifactReader,
+        localExecutor: {
+          cwd: '/ignored/package/root',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                stdout: ['artifact executed from captured caller root'],
+              });
+            },
+          },
+          artifactWriter: {
+            async writeArtifact(): Promise<void> {
+              throw new Error('workflow artifact handoff must not generate a replacement artifact');
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(artifactReader.reads).toEqual([`/caller/repo/${artifactPath}`]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile: artifactPath,
+      cwd: '/caller/repo',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        requestId: 'req-artifact-invocation-root',
+        source: 'workflow-artifact',
+        route: 'execute',
+      },
+    });
+    expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from workflow-artifact',
+        '[local] mode: local',
+        `[local] spec path: ${artifactPath}`,
+        '[local] spec intake route: execute',
+        `[local] runtime command: @agent-relay/sdk/workflows runScriptWorkflow ${artifactPath}`,
+        '[stdout] artifact executed from captured caller root',
+      ]),
+    );
+    expect(result.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+  });
+
+  it('keeps workflow artifact handoffs on the local/BYOH path with response and environment-warning contracts', async () => {
+    const artifactPath = 'workflows/wave4-local-byoh/byoh-entrypoint.workflow.ts';
+    const artifactReader = recordingArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";');
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'workflow-artifact',
+        artifactPath,
+        invocationRoot: '/workspace/project',
+        requestId: 'req-byoh-artifact-contract',
+      },
+      {
+        artifactReader,
+        localExecutor: {
+          cwd: '/workspace/project',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                status: 'failed',
+                exitCode: 1,
+                stdout: ['local runtime accepted artifact handoff'],
+                stderr: ['MISSING_ENV_VAR: RELAYCAST_API_KEY'],
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(artifactReader.reads).toEqual([`/workspace/project/${artifactPath}`]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile: artifactPath,
+      cwd: '/workspace/project',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        requestId: 'req-byoh-artifact-contract',
+        source: 'workflow-artifact',
+        route: 'execute',
+      },
+    });
+    expect(result.artifacts).toEqual([{ path: artifactPath, type: 'text/typescript' }]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from workflow-artifact',
+        '[local] mode: local',
+        `[local] spec path: ${artifactPath}`,
+        '[local] spec intake route: execute',
+        '[local] runtime status: failed',
+        `[local] runtime command: @agent-relay/sdk/workflows runScriptWorkflow ${artifactPath}`,
+        '[stdout] local runtime accepted artifact handoff',
+        '[stderr] MISSING_ENV_VAR: RELAYCAST_API_KEY',
+      ]),
+    );
+    expect(result.execution).toMatchObject({
+      stage: 'execute',
+      status: 'blocker',
+      blocker: {
+        code: 'MISSING_ENV_VAR',
+        category: 'environment',
+        context: {
+          missing: ['RELAYCAST_API_KEY'],
+        },
+      },
+      evidence: {
+        logs: {
+          tail: ['local runtime accepted artifact handoff', 'MISSING_ENV_VAR: RELAYCAST_API_KEY'],
+          truncated: false,
+        },
+      },
+    });
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        'Required runtime environment is missing: MISSING_ENV_VAR: RELAYCAST_API_KEY.',
+      ]),
+    );
+    expect(result.nextActions).toEqual(expect.arrayContaining(['export RELAYCAST_API_KEY=...']));
+    expect(result.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+    expect(result.nextActions.some((action) => action.includes('promote to Cloud'))).toBe(false);
+  });
+
+  it('returns local artifact, logs, and environment recovery warnings without Cloud fallback', async () => {
+    const workflowFile = 'workflows/wave4-local-byoh/env-warning.workflow.ts';
+    const launches: RunRequest[] = [];
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: {
+          description: 'run the local workflow artifact',
+          targetRepo: 'ricky',
+          workflowFile,
+        },
+        stageMode: 'run',
+      },
+      {
+        localExecutor: {
+          cwd: '/workspace/ricky',
+          coordinator: {
+            async launch(request: RunRequest): Promise<CoordinatorResult> {
+              launches.push(request);
+              return coordinatorResult(request, {
+                status: 'failed',
+                exitCode: 1,
+                stdout: ['local runtime started'],
+                stderr: ['MISSING_ENV_VAR: AGENT_RELAY_API_KEY, GITHUB_TOKEN'],
+              });
+            },
+          },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.artifacts).toEqual([{ path: workflowFile, type: 'text/typescript' }]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      workflowFile,
+      cwd: '/workspace/ricky',
+      route: DEFAULT_LOCAL_ROUTE,
+      metadata: {
+        source: 'cli',
+        route: 'execute',
+      },
+    });
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        '[local] received spec from cli',
+        '[local] mode: local',
+        '[local] spec intake route: execute',
+        '[local] runtime status: failed',
+        '[stdout] local runtime started',
+        '[stderr] MISSING_ENV_VAR: AGENT_RELAY_API_KEY, GITHUB_TOKEN',
+      ]),
+    );
+    expect(result.execution).toMatchObject({
+      stage: 'execute',
+      status: 'blocker',
+      blocker: {
+        code: 'MISSING_ENV_VAR',
+        category: 'environment',
+        context: {
+          missing: ['AGENT_RELAY_API_KEY', 'GITHUB_TOKEN'],
+        },
+      },
+      evidence: {
+        logs: {
+          tail: ['local runtime started', 'MISSING_ENV_VAR: AGENT_RELAY_API_KEY, GITHUB_TOKEN'],
+          truncated: false,
+        },
+      },
+    });
+    expect(result.warnings).toEqual([
+      'Required runtime environment is missing: MISSING_ENV_VAR: AGENT_RELAY_API_KEY, GITHUB_TOKEN.',
+    ]);
+    expect(result.nextActions).toEqual([
+      'export AGENT_RELAY_API_KEY=...',
+      'export GITHUB_TOKEN=...',
+    ]);
+    expect(result.warnings.some((warning) => warning.includes('Cloud API surface'))).toBe(false);
+    expect(result.nextActions.some((action) => action.includes('promote to Cloud'))).toBe(false);
   });
 
   it('surfaces injected local coordinator environment failures without Cloud fallback', async () => {
@@ -3670,6 +4910,7 @@ describe('runLocal', () => {
           name: 'ricky-local-turn-context-adapter',
           package: '@agent-assistant/turn-context',
         });
+        expectIssue11RickyMetadataKeys(metadata.ricky, 'live-adapter.metadata.ricky');
         expect(metadata.ricky).toMatchObject({
           requestId: 'req-issue-11-live-adapter',
           source: 'cli',
@@ -3688,6 +4929,516 @@ describe('runLocal', () => {
           cli: {
             argv: ['ricky', 'run', '--spec-file', 'specs/issue-11.live-path.json'],
             specFile: 'specs/issue-11.live-path.json',
+          },
+        });
+      } finally {
+        vi.doUnmock('@agent-assistant/turn-context');
+        vi.resetModules();
+      }
+    });
+
+    it('feeds every handoff surface through the live normalizeRequest-to-adapter boundary with Ricky metadata intact', async () => {
+      const assembledInputs: Array<Record<string, unknown>> = [];
+      const cases: Array<{
+        name: string;
+        handoff: RawHandoff;
+        artifactContent?: string;
+        expected: {
+          requestId: string;
+          source: LocalInvocationRequest['source'];
+          invocationRoot?: string;
+          mode: LocalInvocationRequest['mode'];
+          stageMode: LocalStageMode;
+          specPath?: string;
+          metadata: Record<string, unknown>;
+          structuredSpec?: Record<string, unknown>;
+          sourceMetadata?: Record<string, unknown>;
+        };
+      }> = [
+        {
+          name: 'cli',
+          handoff: {
+            source: 'cli',
+            spec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+            },
+            specFile: 'specs/issue-11.cli-live.json',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-cli-boundary',
+            invocationRoot: '/workspace/issue-11-cli',
+            metadata: { issue: 11, surface: 'cli' },
+            cliMetadata: { argv: ['ricky', 'generate', '--spec-file', 'specs/issue-11.cli-live.json'] },
+          },
+          expected: {
+            requestId: 'req-issue-11-cli-boundary',
+            source: 'cli',
+            invocationRoot: '/workspace/issue-11-cli',
+            mode: 'local',
+            stageMode: 'generate',
+            specPath: 'specs/issue-11.cli-live.json',
+            metadata: {
+              issue: 11,
+              surface: 'cli',
+              argv: ['ricky', 'generate', '--spec-file', 'specs/issue-11.cli-live.json'],
+            },
+            structuredSpec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+            },
+            sourceMetadata: {
+              cli: {
+                argv: ['ricky', 'generate', '--spec-file', 'specs/issue-11.cli-live.json'],
+                specFile: 'specs/issue-11.cli-live.json',
+              },
+            },
+          },
+        },
+        {
+          name: 'mcp',
+          handoff: {
+            source: 'mcp',
+            toolName: 'ricky.generate',
+            arguments: {
+              prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            requestId: 'req-issue-11-mcp-boundary',
+            invocationRoot: '/workspace/issue-11-mcp',
+            metadata: { issue: 11, surface: 'mcp' },
+            mcpMetadata: { toolCallId: 'tool-issue-11-boundary' },
+          },
+          expected: {
+            requestId: 'req-issue-11-mcp-boundary',
+            source: 'mcp',
+            invocationRoot: '/workspace/issue-11-mcp',
+            mode: 'local',
+            stageMode: 'generate',
+            metadata: {
+              issue: 11,
+              surface: 'mcp',
+              toolCallId: 'tool-issue-11-boundary',
+              toolName: 'ricky.generate',
+            },
+            structuredSpec: {
+              prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            sourceMetadata: {
+              mcp: {
+                toolCallId: 'tool-issue-11-boundary',
+                toolName: 'ricky.generate',
+              },
+            },
+          },
+        },
+        {
+          name: 'claude',
+          handoff: {
+            source: 'claude',
+            spec: {
+              request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stage_mode: 'generate',
+            },
+            requestId: 'req-issue-11-claude-boundary',
+            invocationRoot: '/workspace/issue-11-claude',
+            metadata: { issue: 11, surface: 'claude' },
+            conversationId: 'conv-issue-11-boundary',
+            turnId: 'turn-issue-11-boundary',
+          },
+          expected: {
+            requestId: 'req-issue-11-claude-boundary',
+            source: 'claude',
+            invocationRoot: '/workspace/issue-11-claude',
+            mode: 'local',
+            stageMode: 'generate',
+            metadata: {
+              issue: 11,
+              surface: 'claude',
+              conversationId: 'conv-issue-11-boundary',
+              turnId: 'turn-issue-11-boundary',
+            },
+            structuredSpec: {
+              request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stage_mode: 'generate',
+            },
+            sourceMetadata: {
+              claude: {
+                conversationId: 'conv-issue-11-boundary',
+                turnId: 'turn-issue-11-boundary',
+              },
+            },
+          },
+        },
+        {
+          name: 'structured',
+          handoff: {
+            source: 'structured',
+            spec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            requestId: 'req-issue-11-structured-boundary',
+            invocationRoot: '/workspace/issue-11-structured',
+            metadata: { issue: 11, surface: 'structured' },
+          },
+          expected: {
+            requestId: 'req-issue-11-structured-boundary',
+            source: 'structured',
+            invocationRoot: '/workspace/issue-11-structured',
+            mode: 'local',
+            stageMode: 'generate',
+            metadata: { issue: 11, surface: 'structured' },
+            structuredSpec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+          },
+        },
+        {
+          name: 'free-form',
+          handoff: {
+            source: 'free-form',
+            spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-free-form-boundary',
+            invocationRoot: '/workspace/issue-11-free-form',
+            metadata: { issue: 11, surface: 'free-form' },
+          },
+          expected: {
+            requestId: 'req-issue-11-free-form-boundary',
+            source: 'free-form',
+            invocationRoot: '/workspace/issue-11-free-form',
+            mode: 'local',
+            stageMode: 'generate',
+            metadata: { issue: 11, surface: 'free-form' },
+          },
+        },
+        {
+          name: 'workflow-artifact',
+          handoff: {
+            source: 'workflow-artifact',
+            artifactPath: 'workflows/issue-11/boundary.workflow.ts',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-artifact-boundary',
+            invocationRoot: '/workspace/issue-11-artifact',
+            metadata: { issue: 11, surface: 'workflow-artifact' },
+          },
+          artifactContent: 'import { workflow } from "@agent-relay/sdk/workflows";',
+          expected: {
+            requestId: 'req-issue-11-artifact-boundary',
+            source: 'workflow-artifact',
+            invocationRoot: '/workspace/issue-11-artifact',
+            mode: 'local',
+            stageMode: 'generate',
+            specPath: 'workflows/issue-11/boundary.workflow.ts',
+            metadata: { issue: 11, surface: 'workflow-artifact' },
+          },
+        },
+      ];
+
+      vi.resetModules();
+      vi.doMock('@agent-assistant/turn-context', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@agent-assistant/turn-context')>();
+        return {
+          ...actual,
+          createTurnContextAssembler: () => {
+            const assembler = actual.createTurnContextAssembler();
+            return {
+              assemble(input: Parameters<typeof assembler.assemble>[0]) {
+                assembledInputs.push(input as unknown as Record<string, unknown>);
+                return assembler.assemble(input);
+              },
+            };
+          },
+        };
+      });
+
+      try {
+        const { runLocal: runLocalWithObservedAdapter } = await import('./entrypoint.js');
+
+        for (const testCase of cases) {
+          const localExecutor = memoryLocalExecutorOptions({ stdout: [`${testCase.name} runtime should stay idle`] });
+          const result = await runLocalWithObservedAdapter(testCase.handoff, {
+            artifactReader: mockArtifactReader(testCase.artifactContent ?? 'unused artifact'),
+            localExecutor,
+          });
+
+          expect(result.ok, testCase.name).toBe(true);
+          expectNoTurnContextFallback(result.logs);
+          expect(result.exitCode, testCase.name).toBe(0);
+          expect(result.artifacts, testCase.name).toEqual([
+            {
+              path: result.generation?.artifact?.path,
+              type: 'text/typescript',
+              ...(testCase.name === 'workflow-artifact'
+                ? {}
+                : { content: expect.stringContaining('workflow(') }),
+            },
+          ]);
+          expect(result.logs, testCase.name).toEqual(
+            expect.arrayContaining([
+              `[local] received spec from ${testCase.expected.source}`,
+              '[local] stage mode: generate',
+              '[local] runtime launch skipped: returning generated artifact only',
+            ]),
+          );
+          expect(result.nextActions, testCase.name).toEqual([
+            `Run the generated workflow locally: ricky run ${result.generation?.artifact?.path}`,
+            'Inspect the generated workflow artifact and choose whether to run it locally.',
+          ]);
+          expect(result.warnings.some((warning) => warning.includes('Cloud API surface')), testCase.name).toBe(false);
+          expect(result.generation?.decisions?.assistant_turn_context, testCase.name).toMatchObject({
+            assistant_id: 'ricky',
+            turn_id: testCase.expected.requestId,
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+            context_blocks: expect.arrayContaining([
+              'enrichment-ricky-request-summary',
+              'enrichment-ricky-spec-text',
+              'enrichment-ricky-request-metadata',
+              ...(testCase.expected.structuredSpec ? ['enrichment-ricky-structured-spec'] : []),
+              ...(testCase.expected.sourceMetadata ? ['enrichment-ricky-source-metadata'] : []),
+            ]),
+            enrichment_ids: expect.arrayContaining([
+              'ricky-request-summary',
+              'ricky-spec-text',
+              'ricky-request-metadata',
+              ...(testCase.expected.structuredSpec ? ['ricky-structured-spec'] : []),
+              ...(testCase.expected.sourceMetadata ? ['ricky-source-metadata'] : []),
+            ]),
+          });
+          expect(result.execution, testCase.name).toBeUndefined();
+          expect(localExecutor.runner.invocations, testCase.name).toHaveLength(0);
+        }
+
+        expect(assembledInputs).toHaveLength(cases.length);
+        for (const [index, testCase] of cases.entries()) {
+          const adapterInput = assembledInputs[index];
+          const metadata = adapterInput.metadata as { adapter?: Record<string, unknown>; ricky?: Record<string, unknown> };
+
+          expect(adapterInput, testCase.name).toMatchObject({
+            assistantId: 'ricky',
+            turnId: testCase.expected.requestId,
+            shaping: {
+              mode: `ricky-local:${testCase.expected.mode}:${testCase.expected.stageMode}`,
+            },
+          });
+          expect(metadata.adapter, testCase.name).toMatchObject({
+            name: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          });
+          expectIssue11RickyMetadataKeys(metadata.ricky, `${testCase.name}.metadata.ricky`);
+          expect(metadata.ricky, testCase.name).toMatchObject({
+            requestId: testCase.expected.requestId,
+            source: testCase.expected.source,
+            invocationRoot: testCase.expected.invocationRoot,
+            mode: testCase.expected.mode,
+            stageMode: testCase.expected.stageMode,
+            specPath: testCase.expected.specPath,
+            metadata: testCase.expected.metadata,
+          });
+          expect(metadata.ricky?.structuredSpec, testCase.name).toEqual(testCase.expected.structuredSpec);
+          expect(metadata.ricky?.sourceMetadata, testCase.name).toEqual(testCase.expected.sourceMetadata);
+        }
+      } finally {
+        vi.doUnmock('@agent-assistant/turn-context');
+        vi.resetModules();
+      }
+    });
+
+    it('preserves artifact-run and generate-and-run stage semantics at the live adapter boundary', async () => {
+      const assembledInputs: Array<Record<string, unknown>> = [];
+      const artifactPath = 'workflows/issue-11/live-artifact.workflow.ts';
+      const artifactLaunches: RunRequest[] = [];
+
+      vi.resetModules();
+      vi.doMock('@agent-assistant/turn-context', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@agent-assistant/turn-context')>();
+        return {
+          ...actual,
+          createTurnContextAssembler: () => {
+            const assembler = actual.createTurnContextAssembler();
+            return {
+              assemble(input: Parameters<typeof assembler.assemble>[0]) {
+                assembledInputs.push(input as unknown as Record<string, unknown>);
+                return assembler.assemble(input);
+              },
+            };
+          },
+        };
+      });
+
+      try {
+        const { runLocal: runLocalWithObservedAdapter } = await import('./entrypoint.js');
+        const artifactResult = await runLocalWithObservedAdapter(
+          {
+            source: 'workflow-artifact',
+            artifactPath,
+            requestId: 'req-issue-11-live-artifact-run',
+            invocationRoot: '/workspace/issue-11-live-artifact',
+            metadata: { issue: 11, stage: 'artifact-run' },
+          },
+          {
+            artifactReader: mockArtifactReader('import { workflow } from "@agent-relay/sdk/workflows";'),
+            localExecutor: {
+              cwd: '/fallback-cwd',
+              artifactWriter: {
+                async writeArtifact(): Promise<void> {
+                  throw new Error('artifact-run should not generate a replacement workflow');
+                },
+              },
+              coordinator: {
+                async launch(request: RunRequest): Promise<CoordinatorResult> {
+                  artifactLaunches.push(request);
+                  return coordinatorResult(request, { stdout: ['artifact runtime ok'] });
+                },
+              },
+            },
+          },
+        );
+        const generateAndRunExecutor = memoryLocalExecutorOptions({
+          cwd: '/fallback-generate-and-run',
+          stdout: ['generate-and-run runtime ok'],
+        });
+        const generateAndRunResult = await runLocalWithObservedAdapter(
+          {
+            source: 'mcp',
+            toolName: 'ricky.generate',
+            requestId: 'req-issue-11-live-generate-and-run',
+            invocationRoot: '/workspace/issue-11-live-generate-and-run',
+            executionPreference: 'auto',
+            arguments: {
+              prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              stageMode: 'generate-and-run',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+            },
+            metadata: { issue: 11, stage: 'generate-and-run' },
+            mcpMetadata: { toolCallId: 'tool-issue-11-live-generate-and-run' },
+          },
+          { localExecutor: generateAndRunExecutor },
+        );
+
+        expect(artifactResult.ok).toBe(true);
+        expect(generateAndRunResult.ok).toBe(true);
+        expectNoTurnContextFallback(artifactResult.logs);
+        expectNoTurnContextFallback(generateAndRunResult.logs);
+        expect(artifactResult.logs).toEqual(
+          expect.arrayContaining([
+            '[local] stage mode: run',
+            '[local] spec intake route: execute',
+            '[local] runtime status: passed',
+          ]),
+        );
+        expect(generateAndRunResult.logs).toEqual(
+          expect.arrayContaining([
+            '[local] mode: both',
+            '[local] stage mode: run',
+            '[local] spec intake route: generate',
+            '[local] runtime status: passed',
+          ]),
+        );
+        expect(artifactResult.logs.some((line) => line.includes('[local] workflow generation'))).toBe(false);
+        expect(artifactLaunches).toHaveLength(1);
+        expect(artifactLaunches[0]).toMatchObject({
+          workflowFile: artifactPath,
+          cwd: '/workspace/issue-11-live-artifact',
+          metadata: {
+            requestId: 'req-issue-11-live-artifact-run',
+            source: 'workflow-artifact',
+            route: 'execute',
+            assistantTurnContext: {
+              assistant_id: 'ricky',
+              turn_id: 'req-issue-11-live-artifact-run',
+              adapter: 'ricky-local-turn-context-adapter',
+              package: '@agent-assistant/turn-context',
+              context_blocks: expect.arrayContaining([
+                'enrichment-ricky-request-summary',
+                'enrichment-ricky-spec-text',
+                'enrichment-ricky-request-metadata',
+              ]),
+              enrichment_ids: expect.arrayContaining([
+                'ricky-request-summary',
+                'ricky-spec-text',
+                'ricky-request-metadata',
+              ]),
+            },
+          },
+        });
+        expect(generateAndRunExecutor.runner.invocations).toHaveLength(1);
+        expect(assembledInputs).toHaveLength(2);
+
+        const artifactInput = assembledInputs[0];
+        const artifactMetadata = artifactInput.metadata as {
+          adapter?: Record<string, unknown>;
+          ricky?: Record<string, unknown>;
+        };
+        expect(artifactInput).toMatchObject({
+          assistantId: 'ricky',
+          turnId: 'req-issue-11-live-artifact-run',
+          shaping: { mode: 'ricky-local:local:run' },
+        });
+        expect(artifactMetadata.adapter).toMatchObject({
+          name: 'ricky-local-turn-context-adapter',
+          package: '@agent-assistant/turn-context',
+        });
+        expectIssue11RickyMetadataKeys(artifactMetadata.ricky, 'live-artifact-run.metadata.ricky');
+        expect(artifactMetadata.ricky).toMatchObject({
+          requestId: 'req-issue-11-live-artifact-run',
+          source: 'workflow-artifact',
+          invocationRoot: '/workspace/issue-11-live-artifact',
+          mode: 'local',
+          stageMode: 'run',
+          specPath: artifactPath,
+          metadata: { issue: 11, stage: 'artifact-run' },
+        });
+
+        const generateAndRunInput = assembledInputs[1];
+        const generateAndRunMetadata = generateAndRunInput.metadata as {
+          adapter?: Record<string, unknown>;
+          ricky?: Record<string, unknown>;
+        };
+        expect(generateAndRunInput).toMatchObject({
+          assistantId: 'ricky',
+          turnId: 'req-issue-11-live-generate-and-run',
+          shaping: { mode: 'ricky-local:both:generate-and-run' },
+        });
+        expect(generateAndRunMetadata.adapter).toMatchObject({
+          name: 'ricky-local-turn-context-adapter',
+          package: '@agent-assistant/turn-context',
+        });
+        expectIssue11RickyMetadataKeys(
+          generateAndRunMetadata.ricky,
+          'live-generate-and-run.metadata.ricky',
+        );
+        expect(generateAndRunMetadata.ricky).toMatchObject({
+          requestId: 'req-issue-11-live-generate-and-run',
+          source: 'mcp',
+          invocationRoot: '/workspace/issue-11-live-generate-and-run',
+          mode: 'both',
+          stageMode: 'generate-and-run',
+          metadata: {
+            issue: 11,
+            stage: 'generate-and-run',
+            toolCallId: 'tool-issue-11-live-generate-and-run',
+            toolName: 'ricky.generate',
+          },
+        });
+        expect(generateAndRunMetadata.ricky?.structuredSpec).toEqual({
+          prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+          stageMode: 'generate-and-run',
+          targetFiles: ['packages/local/src/entrypoint.ts'],
+        });
+        expect(generateAndRunMetadata.ricky?.sourceMetadata).toEqual({
+          mcp: {
+            toolCallId: 'tool-issue-11-live-generate-and-run',
+            toolName: 'ricky.generate',
           },
         });
       } finally {
@@ -3821,6 +5572,135 @@ describe('runLocal', () => {
       expect(localExecutor.runner.invocations).toHaveLength(0);
     });
 
+    it('surfaces real adapter decisions for generator handoff surfaces without changing generation-only behavior', async () => {
+      const handoffs: Array<{
+        name: string;
+        handoff: RawHandoff;
+        expectedSource: LocalInvocationRequest['source'];
+        expectedTurnId: string;
+      }> = [
+        {
+          name: 'cli',
+          handoff: {
+            source: 'cli',
+            spec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+            },
+            stageMode: 'generate',
+            requestId: 'req-issue-11-cli-live',
+            cliMetadata: { argv: ['ricky', 'generate', '--local'] },
+          },
+          expectedSource: 'cli',
+          expectedTurnId: 'req-issue-11-cli-live',
+        },
+        {
+          name: 'mcp',
+          handoff: {
+            source: 'mcp',
+            toolName: 'ricky.generate',
+            arguments: {
+              prompt: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            requestId: 'req-issue-11-mcp-live',
+            mcpMetadata: { toolCallId: 'tool-issue-11-live' },
+          },
+          expectedSource: 'mcp',
+          expectedTurnId: 'req-issue-11-mcp-live',
+        },
+        {
+          name: 'claude',
+          handoff: {
+            source: 'claude',
+            spec: {
+              request: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stage_mode: 'generate',
+            },
+            requestId: 'req-issue-11-claude-live',
+            conversationId: 'conv-issue-11-live',
+            turnId: 'turn-issue-11-live',
+          },
+          expectedSource: 'claude',
+          expectedTurnId: 'req-issue-11-claude-live',
+        },
+        {
+          name: 'structured',
+          handoff: {
+            source: 'structured',
+            spec: {
+              description: 'generate a local workflow for packages/local/src/entrypoint.ts',
+              targetFiles: ['packages/local/src/entrypoint.ts'],
+              stageMode: 'generate',
+            },
+            requestId: 'req-issue-11-structured-live',
+            metadata: { issue: 11, surface: 'structured' },
+          },
+          expectedSource: 'structured',
+          expectedTurnId: 'req-issue-11-structured-live',
+        },
+        {
+          name: 'free-form',
+          handoff: {
+            source: 'free-form',
+            spec: 'generate a local workflow for packages/local/src/entrypoint.ts',
+            stageMode: 'generate',
+            requestId: 'req-issue-11-free-form-live',
+            metadata: { issue: 11, surface: 'free-form' },
+          },
+          expectedSource: 'free-form',
+          expectedTurnId: 'req-issue-11-free-form-live',
+        },
+      ];
+
+      for (const testCase of handoffs) {
+        const localExecutor = memoryLocalExecutorOptions({ stdout: [`${testCase.name} runtime should stay idle`] });
+        const result = await runLocal(testCase.handoff, { localExecutor });
+
+        expect(result.ok, testCase.name).toBe(true);
+        expectNoTurnContextFallback(result.logs);
+        expect(result.exitCode, testCase.name).toBe(0);
+        expect(result.logs, testCase.name).toEqual(
+          expect.arrayContaining([
+            `[local] received spec from ${testCase.expectedSource}`,
+            '[local] stage mode: generate',
+            '[local] spec intake route: generate',
+            '[local] runtime launch skipped: returning generated artifact only',
+          ]),
+        );
+        expect(result.generation, testCase.name).toMatchObject({
+          stage: 'generate',
+          status: 'ok',
+          decisions: {
+            assistant_turn_context: {
+              assistant_id: 'ricky',
+              turn_id: testCase.expectedTurnId,
+              adapter: 'ricky-local-turn-context-adapter',
+              package: '@agent-assistant/turn-context',
+              context_blocks: expect.arrayContaining([
+                'enrichment-ricky-request-summary',
+                'enrichment-ricky-spec-text',
+                'enrichment-ricky-request-metadata',
+              ]),
+              enrichment_ids: expect.arrayContaining([
+                'ricky-request-summary',
+                'ricky-spec-text',
+                'ricky-request-metadata',
+              ]),
+            },
+          },
+        });
+        expect(result.execution, testCase.name).toBeUndefined();
+        expect(workflowArtifactWrites(localExecutor.writes), testCase.name).toHaveLength(1);
+        expect(localExecutor.runner.invocations, testCase.name).toHaveLength(0);
+        expect(result.nextActions[0], testCase.name).toBe(
+          `Run the generated workflow locally: ricky run ${result.generation?.artifact?.path}`,
+        );
+      }
+    });
+
     it('preserves artifact-run stage semantics through the adapter-backed live local path', async () => {
       const artifactPath = 'workflows/issue-11/ready.workflow.ts';
       const launches: RunRequest[] = [];
@@ -3890,6 +5770,14 @@ describe('runLocal', () => {
           workflow_id: 'req-issue-11-artifact',
           spec_digest: expect.any(String),
         },
+        decisions: {
+          assistant_turn_context: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-artifact',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+          },
+        },
       });
       expect(result.execution).toMatchObject({
         stage: 'execute',
@@ -3919,7 +5807,8 @@ describe('runLocal', () => {
     });
 
     it('preserves generate-and-run stage semantics and Ricky blocker evidence fields', async () => {
-      const successExecutor = memoryLocalExecutorOptions({ stdout: ['generate-and-run completed'] });
+      const generateAndRunLaunches: RunRequest[] = [];
+      const generateAndRunWrites: RecordedWrite[] = [];
       const success = await runLocal(
         {
           source: 'mcp',
@@ -3929,21 +5818,83 @@ describe('runLocal', () => {
           },
           requestId: 'req-issue-11-generate-and-run',
         },
-        { localExecutor: successExecutor },
+        {
+          localExecutor: {
+            cwd: '/repo',
+            artifactWriter: {
+              async writeArtifact(path: string, content: string, cwd: string): Promise<void> {
+                generateAndRunWrites.push({ path, content, cwd });
+              },
+            },
+            coordinator: {
+              async launch(request: RunRequest): Promise<CoordinatorResult> {
+                generateAndRunLaunches.push(request);
+                return coordinatorResult(request, { stdout: ['generate-and-run completed'] });
+              },
+            },
+          },
+        },
       );
 
       expect(success.ok).toBe(true);
       expectNoTurnContextFallback(success.logs);
       expect(success.exitCode).toBe(0);
       expect(success.generation).toMatchObject({ stage: 'generate', status: 'ok' });
+      expect(success.generation?.decisions?.assistant_turn_context).toMatchObject({
+        assistant_id: 'ricky',
+        turn_id: 'req-issue-11-generate-and-run',
+        adapter: 'ricky-local-turn-context-adapter',
+        package: '@agent-assistant/turn-context',
+        context_blocks: expect.arrayContaining([
+          'enrichment-ricky-request-summary',
+          'enrichment-ricky-spec-text',
+          'enrichment-ricky-structured-spec',
+          'enrichment-ricky-request-metadata',
+        ]),
+        enrichment_ids: expect.arrayContaining([
+          'ricky-request-summary',
+          'ricky-spec-text',
+          'ricky-structured-spec',
+          'ricky-request-metadata',
+        ]),
+      });
       expect(success.execution).toMatchObject({
         stage: 'execute',
         status: 'success',
+        execution: {
+          workflow_id: success.generation?.artifact?.workflow_id,
+          artifact_path: success.generation?.artifact?.path,
+          workflow_file: success.generation?.artifact?.path,
+          command: `@agent-relay/sdk/workflows runScriptWorkflow ${success.generation?.artifact?.path}`,
+          cwd: '/repo',
+          steps_completed: 1,
+          steps_total: 1,
+        },
         evidence: {
+          outcome_summary: expect.stringContaining('completed successfully'),
+          artifacts_produced: [
+            {
+              path: success.generation?.artifact?.path,
+              kind: 'workflow',
+              bytes: expect.any(Number),
+            },
+          ],
           logs: {
             tail: ['generate-and-run completed'],
             truncated: false,
           },
+          side_effects: {
+            files_written: expect.arrayContaining([success.generation?.artifact?.path]),
+            commands_invoked: [`@agent-relay/sdk/workflows runScriptWorkflow ${success.generation?.artifact?.path}`],
+            network_calls: [],
+          },
+          assertions: [
+            {
+              name: 'runtime_exit_code',
+              status: 'pass',
+              detail: 'Runtime exited with code 0.',
+            },
+          ],
           workflow_steps: [
             {
               id: 'runtime-launch',
@@ -3962,7 +5913,44 @@ describe('runLocal', () => {
           '[local] runtime status: passed',
         ]),
       );
-      expect(successExecutor.runner.invocations).toHaveLength(1);
+      expect(workflowArtifactWrites(generateAndRunWrites)).toHaveLength(1);
+      expect(generateAndRunLaunches).toHaveLength(1);
+      expect(generateAndRunLaunches[0]).toMatchObject({
+        workflowFile: success.generation?.artifact?.path,
+        cwd: '/repo',
+        metadata: {
+          requestId: 'req-issue-11-generate-and-run',
+          source: 'mcp',
+          route: 'generate',
+          generatedWorkflowId: success.generation?.artifact?.workflow_id,
+          assistantTurnContext: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-generate-and-run',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+            context_blocks: expect.arrayContaining([
+              'enrichment-ricky-request-summary',
+              'enrichment-ricky-spec-text',
+              'enrichment-ricky-structured-spec',
+              'enrichment-ricky-request-metadata',
+            ]),
+            enrichment_ids: expect.arrayContaining([
+              'ricky-request-summary',
+              'ricky-spec-text',
+              'ricky-structured-spec',
+              'ricky-request-metadata',
+            ]),
+          },
+        },
+      });
+      expect(success.artifacts).toEqual([
+        {
+          path: success.generation?.artifact?.path,
+          type: 'text/typescript',
+          content: expect.stringContaining('workflow('),
+        },
+      ]);
+      expect(success.nextActions).toEqual(['Inspect generated artifacts and local run evidence.']);
 
       const blocked = await runLocal(
         {
@@ -3990,6 +5978,24 @@ describe('runLocal', () => {
           path: 'workflows/issue-11/missing-runtime.workflow.ts',
           workflow_id: 'req-issue-11-blocker',
           spec_digest: expect.any(String),
+        },
+        decisions: {
+          assistant_turn_context: {
+            assistant_id: 'ricky',
+            turn_id: 'req-issue-11-blocker',
+            adapter: 'ricky-local-turn-context-adapter',
+            package: '@agent-assistant/turn-context',
+            context_blocks: expect.arrayContaining([
+              'enrichment-ricky-request-summary',
+              'enrichment-ricky-spec-text',
+              'enrichment-ricky-request-metadata',
+            ]),
+            enrichment_ids: expect.arrayContaining([
+              'ricky-request-summary',
+              'ricky-spec-text',
+              'ricky-request-metadata',
+            ]),
+          },
         },
       });
       expect(blocked.execution).toMatchObject({
