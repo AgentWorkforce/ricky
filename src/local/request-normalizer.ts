@@ -213,7 +213,7 @@ export async function normalizeRequest(
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
-        ...runtimeOptionsFor(raw),
+        ...runtimeOptionsFor(raw, raw.spec),
       };
     }
 
@@ -230,7 +230,7 @@ export async function normalizeRequest(
         invocationRoot: normalizeInvocationRoot(raw.invocationRoot),
         metadata: raw.metadata ?? {},
         requestId: raw.requestId,
-        ...runtimeOptionsFor(raw),
+        ...runtimeOptionsFor(raw, raw.spec),
       };
     }
 
@@ -253,7 +253,7 @@ export async function normalizeRequest(
         },
         sourceMetadata: sourceMetadataForCli(raw),
         requestId: raw.requestId,
-        ...runtimeOptionsFor(raw),
+        ...runtimeOptionsFor(raw, raw.spec),
       };
     }
 
@@ -277,7 +277,7 @@ export async function normalizeRequest(
         },
         sourceMetadata: sourceMetadataForMcp(raw),
         requestId: raw.requestId,
-        ...runtimeOptionsFor(raw),
+        ...runtimeOptionsFor(raw, spec),
       };
     }
 
@@ -299,7 +299,7 @@ export async function normalizeRequest(
         metadata,
         sourceMetadata: sourceMetadataForClaude(raw),
         requestId: raw.requestId,
-        ...runtimeOptionsFor(raw),
+        ...runtimeOptionsFor(raw, raw.spec),
       };
     }
 
@@ -324,15 +324,32 @@ export async function normalizeRequest(
   }
 }
 
-function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'reviewDepth' | 'bestJudgement' | 'inputs'> {
+function runtimeOptionsFor(
+  raw: BaseHandoff,
+  spec?: SpecInput,
+): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'reviewDepth' | 'bestJudgement' | 'inputs'> {
+  const reviewDepth = reviewDepthFor(raw, spec);
   return {
     ...(raw.autoFix ? { autoFix: raw.autoFix } : {}),
     ...(raw.retry ? { retry: raw.retry } : {}),
     ...(raw.refine ? { refine: raw.refine } : {}),
-    ...(raw.reviewDepth ? { reviewDepth: raw.reviewDepth } : {}),
+    ...(reviewDepth ? { reviewDepth } : {}),
     ...(raw.bestJudgement ? { bestJudgement: true } : {}),
     ...(raw.inputs && Object.keys(raw.inputs).length > 0 ? { inputs: raw.inputs } : {}),
   };
+}
+
+function reviewDepthFor(raw: BaseHandoff, spec?: SpecInput): LocalReviewDepthOption | undefined {
+  return normalizeReviewDepthOption(raw.reviewDepth) ?? reviewDepthFromStructuredSpec(spec);
+}
+
+function reviewDepthFromStructuredSpec(spec?: SpecInput): LocalReviewDepthOption | undefined {
+  if (!spec || typeof spec === 'string') return undefined;
+  return normalizeReviewDepthOption(spec.reviewDepth) ?? normalizeReviewDepthOption(spec.review_depth);
+}
+
+function normalizeReviewDepthOption(value: unknown): LocalReviewDepthOption | undefined {
+  return value === 'light' || value === 'standard' || value === 'deep' || value === 'auto' ? value : undefined;
 }
 
 function artifactReadPathFor(raw: WorkflowArtifactHandoff): string {
