@@ -123,6 +123,7 @@ function artifactFixture(overrides: { command?: string } = {}): RenderedArtifact
     skillMatches: [],
     toolSelections: [],
     artifactsDir: '.workflow-artifacts/generated/example',
+    reviewDepth: 'deep',
   };
 }
 

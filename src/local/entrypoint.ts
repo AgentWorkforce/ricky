@@ -1205,6 +1205,7 @@ export function createLocalExecutor(options: LocalExecutorOptions = {}): LocalEx
           dryRunEnabled: true,
           artifactPath: artifactPathOverrideFor(activeRequest),
           refine: activeRequest.refine,
+          reviewDepthOverride: activeRequest.reviewDepth,
           ...(workforcePersonaWriter ? { workforcePersonaWriter } : {}),
         };
         onProgress?.('Selecting workflow pattern, agents, and validation gates...');

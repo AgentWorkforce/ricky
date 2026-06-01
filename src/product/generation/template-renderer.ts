@@ -17,6 +17,7 @@ import type {
   DeterministicGate,
   PatternDecision,
   RenderedArtifact,
+  ReviewDepth,
   SkillApplicationEvidence,
   SkillContext,
   ToolSelection,
@@ -25,6 +26,7 @@ import type {
   WorkflowTask,
 } from './types.js';
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
+import { buildFinalReviewPassGateCommand } from './final-review-gate.js';
 import { selectToolsForSteps } from './tool-selector.js';
 
 interface RenderWorkflowInput {
@@ -58,12 +60,13 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
   const fileName = artifactPath.split('/').at(-1) ?? `${workflowId}.ts`;
   const artifactsDir = `.workflow-artifacts/generated/${slug}`;
   const isCodeWorkflow = isCodeWritingWorkflow(input.spec);
-  const team = buildTeam(input.pattern.pattern, isCodeWorkflow);
-  const tasks = buildTasks(input.spec, isCodeWorkflow);
+  const reviewDepth = input.pattern.reviewDepth;
+  const team = buildTeam(input.pattern.pattern, isCodeWorkflow, reviewDepth);
+  const tasks = buildTasks(input.spec, isCodeWorkflow, reviewDepth);
   const toolSelection = input.toolSelection ?? selectToolsForSteps(input.spec, tasks, input.skills);
   applyToolSelection(team, toolSelection.selections);
-  const gates = buildGates(input.spec, artifactsDir, artifactPath, isCodeWorkflow);
-  const skillApplicationEvidence = buildRenderingSkillEvidence(input.skills, tasks, gates);
+  const gates = buildGates(input.spec, artifactsDir, artifactPath, isCodeWorkflow, reviewDepth);
+  const skillApplicationEvidence = buildRenderingSkillEvidence(input.skills, tasks, gates, reviewDepth);
   const content = renderSource({
     spec: input.spec,
     pattern: input.pattern,
@@ -77,6 +80,7 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
     gates,
     isCodeWorkflow,
     toolSelection,
+    reviewDepth,
   });
 
   return {
@@ -94,6 +98,7 @@ export function renderWorkflow(input: RenderWorkflowInput): RenderedArtifact {
     skillMatches: input.skills.matches,
     toolSelections: toolSelection.selections,
     artifactsDir,
+    reviewDepth,
   };
 }
 
@@ -117,8 +122,9 @@ function renderSource(input: {
   gates: DeterministicGate[];
   isCodeWorkflow: boolean;
   toolSelection: ToolSelectionContext;
+  reviewDepth: ReviewDepth;
 }): string {
-  const onError = renderRepairAwareOnError(repairAgentFor(input.isCodeWorkflow));
+  const onError = renderRepairAwareOnError(repairAgentFor(input.isCodeWorkflow, input.reviewDepth));
   const contextSetup = buildGeneratedContextSetup(input.spec, input.artifactsDir, input.pattern, input.skills, input.skillApplicationEvidence, input.toolSelection);
   const lines: string[] = [
     "import { workflow } from '@agent-relay/sdk/workflows';",
@@ -169,21 +175,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'post-fix-validation')!),
     '',
-    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude'), true),
-    '',
-    renderFixLoopStep('final-fix-claude', 'validator-claude', ['final-review-claude'], `${input.artifactsDir}/final-review-claude.md`, `${input.artifactsDir}/claude-final-fix.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-claude'), true),
-    '',
-    renderReviewStep('review-codex', 'reviewer-codex', ['final-fix-claude'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-codex')),
-    '',
-    renderFixLoopStep('fix-loop-codex', 'validator-codex', ['review-codex'], `${input.artifactsDir}/review-codex.md`, `${input.artifactsDir}/codex-fix-loop-report.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop-codex')),
-    '',
-    renderGateStep(input.gates.find((gate) => gate.name === 'codex-fix-loop-report-gate')!),
-    '',
-    renderGateStep(input.gates.find((gate) => gate.name === 'post-codex-fix-validation')!),
-    '',
-    renderReviewStep('final-review-codex', 'reviewer-codex', ['post-codex-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-codex'), true),
-    '',
-    renderFixLoopStep('final-fix-codex', 'validator-codex', ['final-review-codex'], `${input.artifactsDir}/final-review-codex.md`, `${input.artifactsDir}/codex-final-fix.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-codex'), true),
+    ...renderPostFixReviewSteps(input),
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'final-review-pass-gate')!),
     '',
@@ -193,7 +185,7 @@ function renderSource(input: {
     '',
     renderGateStep(input.gates.find((gate) => gate.name === 'regression-gate')!),
     '',
-    renderFinalSignoffStep(input.artifactsDir, input.isCodeWorkflow, selectionFor(input.toolSelection, 'final-signoff')),
+    renderFinalSignoffStep(input.artifactsDir, input.isCodeWorkflow, input.reviewDepth, selectionFor(input.toolSelection, 'final-signoff')),
     '',
     ...renderOptionalGateStep(input.gates.find((gate) => gate.name === 'final-artifact-consistency-gate')),
     '    .run({ cwd: process.cwd() });',
@@ -214,20 +206,26 @@ function renderRepairAwareOnError(repairAgent: string): string {
   return `'retry', { maxRetries: ${DEFAULT_RETRY_MAX_ATTEMPTS}, retryDelayMs: ${DEFAULT_RETRY_BACKOFF_MS}, repairAgent: ${literal(repairAgent)}, repairRetries: ${DEFAULT_REPAIR_RETRY_ATTEMPTS} }`;
 }
 
-function repairAgentFor(isCodeWorkflow: boolean): string {
-  return isCodeWorkflow ? 'validator-claude' : 'validator-codex';
+function repairAgentFor(isCodeWorkflow: boolean, reviewDepth: ReviewDepth): string {
+  if (isCodeWorkflow || reviewDepth !== 'deep') return 'validator-claude';
+  return 'validator-codex';
 }
 
-function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSpec[] {
+function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean, reviewDepth: ReviewDepth): TeamMemberSpec[] {
   if (!isCodeWorkflow) {
-    return [
+    const team: TeamMemberSpec[] = [
       { name: 'lead-codex', cli: 'codex', interactive: false, role: 'Plans the generated workflow deliverables, boundaries, and verification gates.', retries: 1 },
       { name: 'author-codex', cli: 'codex', role: 'Writes the requested bounded artifact and keeps scope to declared files.', retries: 2 },
       { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'First-pass fresh-eyes reviewer for scope, evidence, and product fit.', retries: 1 },
-      { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Second-pass fresh-eyes reviewer for TypeScript/workflow correctness, deterministic gates, and test coverage.', retries: 1 },
       { name: 'validator-claude', cli: 'claude', preset: 'worker', role: 'Applies Claude review findings and proves the fixed state.', retries: 2 },
-      { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
     ];
+    if (reviewDepth === 'deep') {
+      team.push(
+        { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Second-pass fresh-eyes reviewer for TypeScript/workflow correctness, deterministic gates, and test coverage.', retries: 1 },
+        { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Applies bounded fixes and confirms final signoff evidence.', retries: 2 },
+      );
+    }
+    return team;
   }
 
   const implementationRole =
@@ -235,33 +233,47 @@ function buildTeam(pattern: SwarmPattern, isCodeWorkflow: boolean): TeamMemberSp
       ? 'Primary implementer for independent file slices and code changes.'
       : 'Primary implementer for the generated code-writing workflow.';
 
-  return [
+  const team: TeamMemberSpec[] = [
     { name: 'lead-claude', cli: 'claude', interactive: false, role: 'Plans task shape, ownership, non-goals, and verification gates.', retries: 1 },
     { name: 'impl-primary-codex', cli: 'codex', role: implementationRole, retries: 2 },
     { name: 'impl-tests-codex', cli: 'codex', role: 'Adds or updates tests and validation coverage for the changed surface.', retries: 2 },
     { name: 'reviewer-claude', cli: 'claude', preset: 'reviewer', role: 'Reviews product fit, scope control, and workflow evidence quality.', retries: 1 },
-    { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews TypeScript correctness, deterministic gates, and test coverage.', retries: 1 },
     { name: 'validator-claude', cli: 'claude', preset: 'worker', role: 'Runs the 80-to-100 fix loop and verifies final readiness.', retries: 2 },
-    { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Runs the final Codex review-fix loop and verifies final readiness.', retries: 2 },
   ];
+  if (reviewDepth === 'deep') {
+    team.push(
+      { name: 'reviewer-codex', cli: 'codex', preset: 'reviewer', role: 'Reviews TypeScript correctness, deterministic gates, and test coverage.', retries: 1 },
+      { name: 'validator-codex', cli: 'codex', preset: 'worker', role: 'Runs the final Codex review-fix loop and verifies final readiness.', retries: 2 },
+    );
+  }
+  return team;
 }
 
-function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean): WorkflowTask[] {
+function buildTasks(spec: NormalizedWorkflowSpec, isCodeWorkflow: boolean, reviewDepth: ReviewDepth): WorkflowTask[] {
   const implementer = isCodeWorkflow ? 'impl-primary-codex' : 'author-codex';
-  return [
+  const tasks = [
     task('prepare-context', 'Prepare context', 'deterministic', 'Read or materialize the normalized spec and target context.', []),
     task('lead-plan', 'Lead plan', isCodeWorkflow ? 'lead-claude' : 'lead-codex', 'Plan deliverables, non-goals, ownership, and verification gates.', ['prepare-context']),
     task('implement-artifact', 'Implement artifact', implementer, describeImplementation(spec), ['lead-plan']),
     task('review-claude', 'Fresh-eyes review with Claude', 'reviewer-claude', 'Review generated work against scope and evidence expectations.', ['initial-soft-validation']),
     task('fix-loop', 'Claude review-fix loop', 'validator-claude', 'Apply bounded fixes from Claude review and validation feedback.', ['review-claude', 'initial-soft-validation']),
+  ];
+  if (reviewDepth === 'standard' || reviewDepth === 'deep') {
+    tasks.push(
     task('final-review-claude', 'Final review with Claude', 'reviewer-claude', 'Re-review the fixed state only.', ['post-fix-validation']),
     task('final-fix-claude', 'Final Claude review-fix loop', 'validator-claude', 'Apply final Claude findings or record no further fixes.', ['final-review-claude']),
+    );
+  }
+  if (reviewDepth === 'deep') {
+    tasks.push(
     task('review-codex', 'Fresh-eyes review with Codex', 'reviewer-codex', 'Second-pass fresh-eyes review after the Claude loop.', ['final-fix-claude']),
     task('fix-loop-codex', 'Codex review-fix loop', 'validator-codex', 'Apply bounded fixes from Codex review feedback.', ['review-codex']),
     task('final-review-codex', 'Final review with Codex', 'reviewer-codex', 'Re-review implementation and validation after Codex fixes.', ['post-codex-fix-validation']),
     task('final-fix-codex', 'Final Codex review-fix loop', 'validator-codex', 'Apply final Codex findings or record no further fixes.', ['final-review-codex']),
-    task('final-signoff', 'Final signoff', isCodeWorkflow ? 'validator-claude' : 'validator-codex', 'Write final evidence summary after hard deterministic gates.', ['regression-gate']),
-  ];
+    );
+  }
+  tasks.push(task('final-signoff', 'Final signoff', finalSignoffAgent(isCodeWorkflow, reviewDepth), 'Write final evidence summary after hard deterministic gates.', ['regression-gate']));
+  return tasks;
 }
 
 function buildGates(
@@ -269,6 +281,7 @@ function buildGates(
   artifactsDir: string,
   artifactPath: string,
   isCodeWorkflow: boolean,
+  reviewDepth: ReviewDepth,
 ): DeterministicGate[] {
   const outputManifest = `${artifactsDir}/output-manifest.txt`;
   const usingManifest = spec.targetFiles.length === 0;
@@ -295,7 +308,7 @@ function buildGates(
   );
   const regressionCommand = listedValidationOnly ? 'git diff --check' : isCodeWorkflow ? 'npx vitest run' : 'git diff --check';
 
-  return [
+  const gates = [
     gate('lead-plan-gate', buildLeadPlanGateCommand(`${artifactsDir}/lead-plan.md`), 'output_contains', true, ['lead-plan'], 'pre_review'),
     gate('post-implementation-file-gate', fileGateCommand, 'file_exists', true, ['implement-artifact'], 'pre_review'),
     gate('initial-soft-validation', initialValidationCommand, 'exit_code', false, ['post-implementation-file-gate'], 'pre_review'),
@@ -310,39 +323,46 @@ function buildGates(
     gate('post-fix-verification-gate', fileGateCommand, 'file_exists', true, ['fix-loop-report-gate'], 'post_fix'),
     gate('active-reference-gate', activeReferenceCommand, 'deterministic_gate', true, ['post-fix-verification-gate'], 'post_fix'),
     gate('post-fix-validation', hardValidationCommand, 'exit_code', false, ['active-reference-gate'], 'post_fix'),
-    gate(
-      'codex-fix-loop-report-gate',
-      `test -s ${shellQuote(`${artifactsDir}/codex-fix-loop-report.md`)}`,
-      'file_exists',
-      true,
-      ['fix-loop-codex'],
-      'post_fix',
-    ),
-    gate('post-codex-fix-validation', hardValidationCommand, 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
+  ];
+  if (reviewDepth === 'deep') {
+    gates.push(
+      gate(
+        'codex-fix-loop-report-gate',
+        `test -s ${shellQuote(`${artifactsDir}/codex-fix-loop-report.md`)}`,
+        'file_exists',
+        true,
+        ['fix-loop-codex'],
+        'post_fix',
+      ),
+      gate('post-codex-fix-validation', hardValidationCommand, 'exit_code', false, ['codex-fix-loop-report-gate'], 'post_fix'),
+    );
+  }
+  gates.push(
     gate(
       'final-review-pass-gate',
-      buildStructuredFinalReviewPassGateCommand(artifactsDir),
+      buildReviewDepthFinalPassGateCommand(artifactsDir, reviewDepth),
       'deterministic_gate',
       true,
-      ['final-fix-codex'],
+      [finalReviewPassDependency(reviewDepth)],
       'final',
     ),
     gate('final-hard-validation', hardValidationCommand, 'deterministic_gate', true, ['final-review-pass-gate'], 'final'),
     gate('git-diff-gate', gitDiffCommand, 'artifact_exists', true, ['final-hard-validation'], 'final'),
     gate('regression-gate', regressionCommand, 'exit_code', true, ['git-diff-gate'], 'regression'),
-    ...(usingManifest
-      ? [
-          gate(
-            'final-artifact-consistency-gate',
-            buildFinalArtifactConsistencyGateCommand(artifactsDir),
-            'deterministic_gate',
-            true,
-            ['final-signoff'],
-            'final',
-          ),
-        ]
-      : []),
-  ];
+  );
+  if (usingManifest) {
+    gates.push(
+      gate(
+        'final-artifact-consistency-gate',
+        buildFinalArtifactConsistencyGateCommand(artifactsDir, reviewDepth),
+        'deterministic_gate',
+        true,
+        ['final-signoff'],
+        'final',
+      ),
+    );
+  }
+  return gates;
 }
 
 function buildManifestFileGateCommand(outputManifest: string): string {
@@ -521,31 +541,37 @@ function buildActiveReferenceGateCommand(outputManifest: string, evidencePath: s
   ].join('\n');
 }
 
-function buildStructuredFinalReviewPassGateCommand(artifactsDir: string): string {
-  return [
-    'node <<\'NODE\'',
-    "const fs = require('node:fs');",
-    `const base = ${literal(artifactsDir)};`,
-    "const requiredFiles = ['claude-final-fix.md', 'codex-final-fix.md', 'claude-final-fix-status.json', 'codex-final-fix-status.json'];",
-    "for (const name of requiredFiles) {",
-    "  const path = `${base}/${name}`;",
-    "  if (!fs.existsSync(path) || fs.statSync(path).size === 0) throw new Error(`required final review artifact missing or empty: ${path}`);",
-    '}',
-    "const blockedPath = `${base}/BLOCKED_NO_COMMIT.md`;",
-    "if (fs.existsSync(blockedPath)) throw new Error(`final review blocked; see ${blockedPath}`);",
-    "for (const name of ['claude-final-fix-status.json', 'codex-final-fix-status.json']) {",
-    "  const path = `${base}/${name}`;",
-    "  const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));",
-    "  if (!['fixed', 'no_issues_found'].includes(parsed.status)) {",
-    "    throw new Error(`${path} must declare status fixed or no_issues_found`);",
-    '  }',
-    "  if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) {",
-    "    throw new Error(`${path} must include a non-empty summary`);",
-    '  }',
-    '}',
-    "console.log('FINAL_REVIEW_STRUCTURED_GATE_OK');",
-    'NODE',
-  ].join('\n');
+function buildReviewDepthFinalPassGateCommand(artifactsDir: string, reviewDepth: ReviewDepth): string {
+  return buildFinalReviewPassGateCommand({
+    artifactsDir,
+    requiredFiles: finalReviewRequiredFiles(artifactsDir, reviewDepth),
+  });
+}
+
+function finalReviewRequiredFiles(artifactsDir: string, reviewDepth: ReviewDepth): string[] {
+  if (reviewDepth === 'light') {
+    return [
+      `${artifactsDir}/review-claude.md`,
+      `${artifactsDir}/fix-loop-report.md`,
+    ];
+  }
+  const files = [
+    `${artifactsDir}/claude-final-fix.md`,
+    `${artifactsDir}/claude-final-fix-status.json`,
+  ];
+  if (reviewDepth === 'deep') {
+    files.push(
+      `${artifactsDir}/codex-final-fix.md`,
+      `${artifactsDir}/codex-final-fix-status.json`,
+    );
+  }
+  return files;
+}
+
+function finalReviewPassDependency(reviewDepth: ReviewDepth): string {
+  if (reviewDepth === 'light') return 'post-fix-validation';
+  if (reviewDepth === 'standard') return 'final-fix-claude';
+  return 'final-fix-codex';
 }
 
 function applyToolSelection(team: TeamMemberSpec[], selections: ToolSelection[]): void {
@@ -626,7 +652,7 @@ function buildGeneratedContextSetup(
   const files = [
     { path: `${artifactsDir}/normalized-spec.txt`, content: spec.description },
     ...contextPackage,
-    { path: `${artifactsDir}/pattern-decision.txt`, content: `pattern=${pattern.pattern}; reason=${pattern.reason}` },
+    { path: `${artifactsDir}/pattern-decision.txt`, content: `pattern=${pattern.pattern}; reason=${pattern.reason}; reviewDepth=${pattern.reviewDepth}; reviewDepthReason=${pattern.reviewDepthReason}` },
     { path: `${artifactsDir}/loaded-skills.txt`, content: loadedSkillsReport },
     { path: `${artifactsDir}/skill-matches.json`, content: JSON.stringify(normalizeSkillMatchesForArtifact(skills.matches)) },
     { path: `${artifactsDir}/tool-selection.json`, content: JSON.stringify(toolSelection.selections) },
@@ -692,6 +718,10 @@ function buildGeneratedContextPackage(
       reason: pattern.reason,
       riskLevel: pattern.riskLevel,
       specSignals: pattern.specSignals,
+    },
+    reviewDepth: {
+      selected: pattern.reviewDepth,
+      reason: pattern.reviewDepthReason,
     },
     generatedArtifactsDir: artifactsDir,
     requiredLeadPlanHeadings: ['Non-goals', 'Routing contract', 'Implementation contract'],
@@ -816,6 +846,8 @@ function buildGeneratedContextPackage(
       path: `${artifactsDir}/review-checklist.md`,
       content: [
         '# Review Checklist',
+        '',
+        `Review depth tier: ${pattern.reviewDepth}. ${pattern.reviewDepthReason}`,
         '',
         'Assess:',
         '',
@@ -978,10 +1010,51 @@ Re-run ${isCodeWorkflow ? 'typecheck and tests' : 'document sanity checks'} befo
     })`;
 }
 
-function renderFinalSignoffStep(artifactsDir: string, isCodeWorkflow: boolean, selection?: ToolSelection): string {
+function renderPostFixReviewSteps(input: {
+  spec: NormalizedWorkflowSpec;
+  artifactsDir: string;
+  gates: DeterministicGate[];
+  isCodeWorkflow: boolean;
+  reviewDepth: ReviewDepth;
+  toolSelection: ToolSelectionContext;
+}): string[] {
+  if (input.reviewDepth === 'light') return [];
+
+  const steps = [
+    renderReviewStep('final-review-claude', 'reviewer-claude', ['post-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-claude'), true),
+    '',
+    renderFixLoopStep('final-fix-claude', 'validator-claude', ['final-review-claude'], `${input.artifactsDir}/final-review-claude.md`, `${input.artifactsDir}/claude-final-fix.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-claude'), true),
+  ];
+
+  if (input.reviewDepth === 'deep') {
+    steps.push(
+      '',
+      renderReviewStep('review-codex', 'reviewer-codex', ['final-fix-claude'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'review-codex')),
+      '',
+      renderFixLoopStep('fix-loop-codex', 'validator-codex', ['review-codex'], `${input.artifactsDir}/review-codex.md`, `${input.artifactsDir}/codex-fix-loop-report.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'fix-loop-codex')),
+      '',
+      renderGateStep(input.gates.find((gate) => gate.name === 'codex-fix-loop-report-gate')!),
+      '',
+      renderGateStep(input.gates.find((gate) => gate.name === 'post-codex-fix-validation')!),
+      '',
+      renderReviewStep('final-review-codex', 'reviewer-codex', ['post-codex-fix-validation'], input.artifactsDir, Boolean(input.spec.targetContext), selectionFor(input.toolSelection, 'final-review-codex'), true),
+      '',
+      renderFixLoopStep('final-fix-codex', 'validator-codex', ['final-review-codex'], `${input.artifactsDir}/final-review-codex.md`, `${input.artifactsDir}/codex-final-fix.md`, input.spec, input.isCodeWorkflow, input.artifactsDir, selectionFor(input.toolSelection, 'final-fix-codex'), true),
+    );
+  }
+
+  return steps;
+}
+
+function finalSignoffAgent(isCodeWorkflow: boolean, reviewDepth: ReviewDepth): string {
+  if (isCodeWorkflow || reviewDepth !== 'deep') return 'validator-claude';
+  return 'validator-codex';
+}
+
+function renderFinalSignoffStep(artifactsDir: string, isCodeWorkflow: boolean, reviewDepth: ReviewDepth, selection?: ToolSelection): string {
   const selectionLines = renderSelectionFields(selection);
   return `    .step('final-signoff', {
-      agent: ${literal(isCodeWorkflow ? 'validator-claude' : 'validator-codex')},
+      agent: ${literal(finalSignoffAgent(isCodeWorkflow, reviewDepth))},
       dependsOn: ['regression-gate'],
 ${selectionLines}
       timeoutMs: ${DEFAULT_REVIEW_TIMEOUT_MS},
@@ -1127,7 +1200,9 @@ function contextTargetLiteral(targetContext: NonNullable<GeneratedContextSetup['
   return `{ value: ${literal(targetContext.value)}, outputPath: ${literal(targetContext.outputPath)} }`;
 }
 
-function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string {
+function buildFinalArtifactConsistencyGateCommand(artifactsDir: string, reviewDepth: ReviewDepth): string {
+  const reviewArtifactDocs = reviewArtifactNamesForDepth(reviewDepth)
+    .map((name) => `  [${literal(name)}, read(${literal(name)})],`);
   return [
     'node <<\'NODE\'',
     "const fs = require('node:fs');",
@@ -1144,14 +1219,7 @@ function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string 
     '  return match[2];',
     '});',
     'const docs = [',
-    "  ['review-claude.md', read('review-claude.md')],",
-    "  ['fix-loop-report.md', read('fix-loop-report.md')],",
-    "  ['final-review-claude.md', read('final-review-claude.md')],",
-    "  ['claude-final-fix.md', read('claude-final-fix.md')],",
-    "  ['review-codex.md', read('review-codex.md')],",
-    "  ['codex-fix-loop-report.md', read('codex-fix-loop-report.md')],",
-    "  ['final-review-codex.md', read('final-review-codex.md')],",
-    "  ['codex-final-fix.md', read('codex-final-fix.md')],",
+    ...reviewArtifactDocs,
     "  ['signoff.md', read('signoff.md')],",
     '];',
     'for (const [name, body] of docs) {',
@@ -1178,6 +1246,17 @@ function buildFinalArtifactConsistencyGateCommand(artifactsDir: string): string 
   ].join('\n');
 }
 
+function reviewArtifactNamesForDepth(reviewDepth: ReviewDepth): string[] {
+  const names = ['review-claude.md', 'fix-loop-report.md'];
+  if (reviewDepth === 'standard' || reviewDepth === 'deep') {
+    names.push('final-review-claude.md', 'claude-final-fix.md');
+  }
+  if (reviewDepth === 'deep') {
+    names.push('review-codex.md', 'codex-fix-loop-report.md', 'final-review-codex.md', 'codex-final-fix.md');
+  }
+  return names;
+}
+
 function task(id: string, name: string, agentRole: string, description: string, dependsOn: string[]): WorkflowTask {
   return { id, name, agentRole, description, dependsOn };
 }
@@ -1197,6 +1276,7 @@ function buildRenderingSkillEvidence(
   skills: SkillContext,
   tasks: WorkflowTask[],
   gates: DeterministicGate[],
+  reviewDepth: ReviewDepth,
 ): SkillApplicationEvidence[] {
   const loaded = new Set(skills.applicableSkillNames);
   const evidence: SkillApplicationEvidence[] = [...skills.applicationEvidence];
@@ -1242,7 +1322,9 @@ function buildRenderingSkillEvidence(
       effect: 'workflow_contract',
       behavior: 'generation_time_only',
       runtimeEmbodiment: false,
-      evidence: `Rendered dual-reviewer review-fix-signoff loop with ${reviewerTasks} reviewer/fix tasks, repairable post-fix re-review, and final signoff so the workflow exits only on independent Claude and Codex agreement.`,
+      evidence: reviewDepth === 'deep'
+        ? `Rendered deep dual-reviewer review-fix-signoff loop with ${reviewerTasks} reviewer/fix tasks, repairable post-fix re-review, and final signoff so the workflow exits only on independent Claude and Codex agreement.`
+        : `Rendered ${reviewDepth} review-fix-signoff loop with ${reviewerTasks} reviewer/fix tasks, deterministic validation, and final signoff while reserving the dual Claude/Codex loop for deep-tier specs.`,
     });
   }
 

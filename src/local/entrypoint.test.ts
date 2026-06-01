@@ -379,6 +379,31 @@ describe('normalizeRequest', () => {
     });
   });
 
+  it('threads review depth from structured MCP arguments', async () => {
+    const result = await normalizeRequest({
+      source: 'mcp',
+      toolName: 'ricky.generate',
+      arguments: {
+        goal: 'generate a local workflow',
+        reviewDepth: 'light',
+      },
+    });
+
+    expect(result.reviewDepth).toBe('light');
+  });
+
+  it('ignores invalid structured review depth values', async () => {
+    const result = await normalizeRequest({
+      source: 'structured',
+      spec: {
+        description: 'generate a local workflow',
+        review_depth: 'fast',
+      },
+    });
+
+    expect(result.reviewDepth).toBeUndefined();
+  });
+
   it('normalizes a free-form spec handoff', async () => {
     const result = await normalizeRequest({
       source: 'free-form',

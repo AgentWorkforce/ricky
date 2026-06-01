@@ -6,6 +6,7 @@ export type PowerUserCommand = 'run' | 'help' | 'version' | 'status' | 'connect'
 export type PowerUserSurface = 'legacy' | 'local' | 'cloud' | 'workflow' | 'status' | 'connect' | 'schedule';
 export type ConnectTarget = 'cloud' | 'agents' | 'integrations' | 'linear';
 export type StatusTarget = 'linear';
+export type ReviewDepthCliOption = 'light' | 'standard' | 'deep' | 'auto';
 
 const DEFAULT_CLOUD_AGENT_TARGETS = ['claude', 'codex', 'opencode', 'gemini'];
 const DEFAULT_CLOUD_INTEGRATION_TARGETS = ['slack', 'github', 'notion', 'linear'];
@@ -45,6 +46,7 @@ export interface PowerUserParsedArgs {
   verbose?: boolean;
   autoFix?: number;
   refine?: false | { model?: string };
+  reviewDepth?: ReviewDepthCliOption;
   bestJudgement?: boolean;
   login?: boolean;
   connectMissing?: boolean;
@@ -143,6 +145,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   const previousRunId = readFlagValue(effectiveArgv, '--previous-run-id') ?? readFlagValue(effectiveArgv, '--resume-from-run');
   const autoFix = parseAutoFix(effectiveArgv);
   const refine = parseRefine(effectiveArgv);
+  const reviewDepth = parseReviewDepth(effectiveArgv);
   const bestJudgement = effectiveArgv.includes('--best-judgement') || effectiveArgv.includes('--best-judgment');
   const login = effectiveArgv.includes('--login');
   const connectMissing = effectiveArgv.includes('--connect-missing');
@@ -163,6 +166,9 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
   }
   if (inputs.errors.length > 0) {
     errors.push(...inputs.errors);
+  }
+  if (reviewDepth.error) {
+    errors.push(reviewDepth.error);
   }
   if (artifact && (spec !== undefined || specFile !== undefined || stdin)) {
     errors.push('Artifact execution cannot be combined with --spec, --spec-file, --file, or --stdin.');
@@ -188,6 +194,7 @@ export function parsePowerUserArgs(argv: string[]): PowerUserParsedArgs {
     ...(previousRunId !== undefined ? { previousRunId } : {}),
     ...(autoFix !== undefined && autoFix > 0 ? { autoFix } : {}),
     ...(refine ? { refine } : {}),
+    ...(reviewDepth.value ? { reviewDepth: reviewDepth.value } : {}),
     ...(bestJudgement ? { bestJudgement: true } : {}),
     ...(login ? { login: true } : {}),
     ...(connectMissing ? { connectMissing: true } : {}),
@@ -373,6 +380,28 @@ function parseRefine(argv: string[]): undefined | false | { model?: string } {
   return undefined;
 }
 
+function parseReviewDepth(argv: string[]): { value?: ReviewDepthCliOption; error?: string } {
+  const allowed = new Set<ReviewDepthCliOption>(['light', 'standard', 'deep', 'auto']);
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg !== '--review-depth' && !arg.startsWith('--review-depth=')) continue;
+
+    const rawValue = arg.includes('=')
+      ? arg.slice(arg.indexOf('=') + 1).trim()
+      : argv[index + 1]?.trim();
+    if (!rawValue || rawValue.startsWith('--')) {
+      return { error: '--review-depth requires one of: light, standard, deep, auto.' };
+    }
+
+    const value = rawValue.toLowerCase();
+    if (!allowed.has(value as ReviewDepthCliOption)) {
+      return { error: `--review-depth must be one of: light, standard, deep, auto (received ${rawValue}).` };
+    }
+    return { value: value as ReviewDepthCliOption };
+  }
+  return {};
+}
+
 function parseWorkforcePersonaWriterCliFlag(argv: string[]): boolean | undefined {
   if (argv.includes('--no-workforce-persona')) return false;
   if (argv.includes('--workforce-persona')) return true;
@@ -445,7 +474,10 @@ function readRunArtifactPositional(argv: string[]): string | undefined {
 function isValueForRunOption(previous: string | undefined, candidate: string): boolean {
   if (!previous) return false;
   if ((previous === '--auto-fix' || previous === '--repair') && isAutoFixValue(candidate)) return true;
-  return previous === '--start-from' || previous === '--previous-run-id' || previous === '--resume-from-run';
+  return previous === '--start-from' ||
+    previous === '--previous-run-id' ||
+    previous === '--resume-from-run' ||
+    previous === '--review-depth';
 }
 
 function isAutoFixValue(value: string): boolean {

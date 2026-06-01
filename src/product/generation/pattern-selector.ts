@@ -1,15 +1,17 @@
 import type { NormalizedWorkflowSpec } from '../spec-intake/types.js';
 import type { SwarmPattern } from '../../shared/models/workflow-config.js';
-import type { GenerationRiskLevel, PatternDecision, SkillContext } from './types.js';
+import type { GenerationRiskLevel, PatternDecision, ReviewDepth, ReviewDepthOverride, SkillContext } from './types.js';
 
 export function selectPattern(
   spec: NormalizedWorkflowSpec,
   patternOverride?: SwarmPattern,
   skillContext?: SkillContext,
+  reviewDepthOverride?: ReviewDepthOverride,
 ): PatternDecision {
   const usesSwarmPatternSkill = skillContext?.applicableSkillNames.includes('choosing-swarm-patterns') ?? false;
   const signals = collectSignals(spec, usesSwarmPatternSkill);
   const riskLevel = assessRisk(spec, signals);
+  const reviewDepthDecision = reviewDepthForSpec(spec, skillContext, reviewDepthOverride, signals, riskLevel);
 
   if (patternOverride) {
     return {
@@ -17,6 +19,8 @@ export function selectPattern(
       reason: `Pattern override requested: ${patternOverride}. Base risk assessment was ${riskLevel}.`,
       specSignals: signals,
       riskLevel,
+      reviewDepth: reviewDepthDecision.depth,
+      reviewDepthReason: reviewDepthDecision.reason,
       overrideUsed: true,
     };
   }
@@ -29,7 +33,66 @@ export function selectPattern(
     reason: explainPattern(pattern, riskLevel, signals, usesSwarmPatternSkill),
     specSignals: signals,
     riskLevel,
+    reviewDepth: reviewDepthDecision.depth,
+    reviewDepthReason: reviewDepthDecision.reason,
     overrideUsed: false,
+  };
+}
+
+export function reviewDepthForSpec(
+  spec: NormalizedWorkflowSpec,
+  skillContext?: SkillContext,
+  override: ReviewDepthOverride = 'auto',
+  precomputedSignals?: string[],
+  precomputedRiskLevel?: GenerationRiskLevel,
+): { depth: ReviewDepth; reason: string } {
+  if (override && override !== 'auto') {
+    return {
+      depth: override,
+      reason: `Review depth override requested: ${override}.`,
+    };
+  }
+
+  const usesSwarmPatternSkill = skillContext?.applicableSkillNames.includes('choosing-swarm-patterns') ?? false;
+  const signals = precomputedSignals ?? collectSignals(spec, usesSwarmPatternSkill);
+  const riskLevel = precomputedRiskLevel ?? assessRisk(spec, signals);
+  const targetCount = spec.targetFiles.length;
+  const hasProofEvidence = spec.evidenceRequirements.length > 0 ||
+    signals.some((signal) => /proof or deterministic evidence|critical or production/.test(signal));
+  const hasCriticalConstraint = signals.some((signal) => /critical or production/.test(signal));
+  const hasReviewConstraint = signals.some((signal) => /review constraint/.test(signal));
+  const hasAmbiguousTargets = targetCount === 0;
+  const hasDeepScale = targetCount > 5;
+
+  if (riskLevel === 'high' || hasProofEvidence || hasCriticalConstraint || hasReviewConstraint || hasAmbiguousTargets || hasDeepScale) {
+    return {
+      depth: 'deep',
+      reason: `Selected deep review depth for ${riskLevel} risk with signals: ${signals.join(', ')}.`,
+    };
+  }
+
+  if (targetCount <= 2 && hasOnlyDeterministicTestAcceptanceGates(spec)) {
+    return {
+      depth: 'light',
+      reason: 'Selected light review depth because the spec has at most two explicit targets, deterministic/test-only acceptance gates, and no proof or critical signals.',
+    };
+  }
+
+  if (
+    riskLevel === 'medium' ||
+    spec.acceptanceGates.length > 0 ||
+    (targetCount >= 3 && targetCount <= 5) ||
+    spec.executionPreference === 'cloud'
+  ) {
+    return {
+      depth: 'standard',
+      reason: `Selected standard review depth for ${riskLevel} risk with bounded medium-complexity signals.`,
+    };
+  }
+
+  return {
+    depth: 'deep',
+    reason: `Selected deep review depth conservatively for ambiguous ${riskLevel} risk generation.`,
   };
 }
 
@@ -79,6 +142,14 @@ function assessRisk(spec: NormalizedWorkflowSpec, signals: string[]): Generation
   }
 
   return 'low';
+}
+
+function hasOnlyDeterministicTestAcceptanceGates(spec: NormalizedWorkflowSpec): boolean {
+  if (spec.acceptanceGates.length === 0) return false;
+  return spec.acceptanceGates.every((gate) => {
+    if (gate.kind !== 'deterministic') return false;
+    return /\b(vitest|npm test|test|tsc|typecheck|file exists|file_exists|git diff|git diff --check)\b/i.test(gate.gate);
+  });
 }
 
 function choosePattern(spec: NormalizedWorkflowSpec, riskLevel: GenerationRiskLevel, signals: string[]): SwarmPattern {

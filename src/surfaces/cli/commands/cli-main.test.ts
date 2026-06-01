@@ -183,6 +183,18 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses --review-depth overrides', () => {
+    expect(parseArgs(['--spec', 'build a workflow', '--review-depth=standard'])).toMatchObject({
+      command: 'run',
+      spec: 'build a workflow',
+      reviewDepth: 'standard',
+    });
+    expect(parseArgs(['local', '--spec', 'build a workflow', '--review-depth', 'auto'])).toMatchObject({
+      surface: 'local',
+      reviewDepth: 'auto',
+    });
+  });
+
   it('omits refine when no refinement flag is supplied', () => {
     const parsed = parseArgs(['--spec', 'build a workflow']);
 

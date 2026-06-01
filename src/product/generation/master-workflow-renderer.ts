@@ -18,6 +18,7 @@ import type {
   DeterministicGate,
   PatternDecision,
   RenderedArtifact,
+  ReviewDepth,
   SkillApplicationEvidence,
   SkillContext,
   ToolSelection,
@@ -189,7 +190,7 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
   const specSidecarPath = `${artifactPathNoExt}.spec.md`;
   const childrenSidecarPath = `${artifactPathNoExt}.children.json`;
   const childSources = Object.fromEntries(
-    plan.children.map((child) => [child.workflowFilePath, childWorkflowSource(child, input.spec, specSidecarPath)]),
+    plan.children.map((child) => [child.workflowFilePath, childWorkflowSource(child, input.spec, specSidecarPath, input.pattern.reviewDepth)]),
   );
   const content = renderMasterSource({
     spec: input.spec,
@@ -222,6 +223,7 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
       skillMatches: input.skills.matches,
       toolSelections,
       artifactsDir,
+      reviewDepth: input.pattern.reviewDepth,
       sidecarFiles: {
         [specSidecarPath]: input.spec.description,
         [childrenSidecarPath]: `${JSON.stringify(childSources, null, 2)}\n`,
@@ -565,7 +567,12 @@ function renderChildRunStep(child: ChildWorkflowPlan): string[] {
   ];
 }
 
-export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWorkflowSpec, specSidecarPath?: string): string {
+export function childWorkflowSource(
+  child: ChildWorkflowPlan,
+  spec: NormalizedWorkflowSpec,
+  specSidecarPath?: string,
+  reviewDepth: ReviewDepth = 'deep',
+): string {
   const artifactsDir = child.signoffArtifactPath.replace(/\/signoff\.md$/, '');
   const validationCommand = child.validationCommands[0] ?? 'npm run typecheck';
   const targetScope = child.targetFiles.length > 0 ? child.targetFiles.join(' ') : 'NO_TARGET_FILES_DECLARED';
@@ -600,9 +607,8 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
     '    .agent("lead-claude", { cli: "claude", interactive: false, role: "Plans this bounded child workflow slice.", retries: 1 })',
     '    .agent("impl-codex", { cli: "codex", role: "Implements only this child workflow slice and its declared file scope.", retries: 2 })',
     '    .agent("reviewer-claude", { cli: "claude", preset: "reviewer", role: "First-pass fresh-eyes reviewer for scope, evidence, and product fit.", retries: 1 })',
-    '    .agent("reviewer-codex", { cli: "codex", preset: "reviewer", role: "Reviews code, tests, deterministic gates, and PR/result evidence.", retries: 1 })',
     '    .agent("validator-claude", { cli: "claude", preset: "worker", role: "Runs the 80-to-100 fix loop and writes final signoff.", retries: 2 })',
-    '    .agent("validator-codex", { cli: "codex", preset: "worker", role: "Runs the Codex review-fix loop and verifies final readiness.", retries: 2 })',
+    ...childCodexAgentLines(reviewDepth),
     '    .step("prepare-context", {',
     '      type: "deterministic",',
     `      command: ${literal([
@@ -704,90 +710,13 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
     '      captureOutput: true,',
     '      failOnError: false,',
     '    })',
-    '    .step("final-review-claude", {',
-    '      agent: "reviewer-claude",',
-    '      dependsOn: ["post-fix-validation"],',
-    `      task: ${templateLiteral([
-      'Re-review the fixed child state from scratch.',
-      sharedWorktreeScopeRule,
-      'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
-      `Write ${artifactsDir}/final-review-claude.md ending with RICKY_CHILD_CLAUDE_FINAL_REVIEW_READY.`,
-    ].join('\n'))},`,
-    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/final-review-claude.md`)} },`,
-    '    })',
-    '    .step("final-fix-claude", {',
-    '      agent: "validator-claude",',
-    '      dependsOn: ["final-review-claude"],',
-    `      task: ${templateLiteral([
-      `Read ${artifactsDir}/final-review-claude.md.`,
-      'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
-      sharedWorktreeScopeRule,
-      `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
-      `Write ${artifactsDir}/claude-final-fix.md and ${artifactsDir}/claude-final-fix-status.json.`,
-      'The status JSON must have shape {"status":"fixed"|"no_issues_found"|"blocked","summary":"..."}. Use "blocked" only when BLOCKED_NO_COMMIT.md exists.',
-    ].join('\n'))},`,
-    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/claude-final-fix.md`)} },`,
-    '    })',
-    '    .step("review-codex", {',
-    '      agent: "reviewer-codex",',
-    '      dependsOn: ["final-fix-claude"],',
-    `      task: ${templateLiteral([
-      'Second-pass fresh-eyes review after the Claude loop. Read the actual files, diff, review artifacts, and validation evidence.',
-      sharedWorktreeScopeRule,
-      'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
-      `Write ${artifactsDir}/review-codex.md.`,
-    ].join('\n'))},`,
-    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/review-codex.md`)} },`,
-    '    })',
-    '    .step("fix-loop-codex", {',
-    '      agent: "validator-codex",',
-    '      dependsOn: ["review-codex"],',
-    `      task: ${templateLiteral([
-      `Read ${artifactsDir}/review-codex.md.`,
-      'Fix every valid Codex finding and add or update tests/proofs for testable findings.',
-      sharedWorktreeScopeRule,
-      `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
-      `Write ${artifactsDir}/codex-fix-loop-report.md ending with RICKY_CHILD_CODEX_FIX_LOOP_READY.`,
-    ].join('\n'))},`,
-    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/codex-fix-loop-report.md`)} },`,
-    '    })',
-    '    .step("post-codex-fix-validation", {',
-    '      type: "deterministic",',
-    '      dependsOn: ["fix-loop-codex"],',
-    `      command: ${literal(`${validationCommand} 2>&1 | tail -160`)},`,
-    '      captureOutput: true,',
-    '      failOnError: false,',
-    '    })',
-    '    .step("final-review-codex", {',
-    '      agent: "reviewer-codex",',
-    '      dependsOn: ["post-codex-fix-validation"],',
-    `      task: ${templateLiteral([
-      'Final Codex fresh-eyes review after Codex fixes.',
-      sharedWorktreeScopeRule,
-      'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
-      `Write ${artifactsDir}/final-review-codex.md.`,
-    ].join('\n'))},`,
-    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/final-review-codex.md`)} },`,
-    '    })',
-    '    .step("final-fix-codex", {',
-    '      agent: "validator-codex",',
-    '      dependsOn: ["final-review-codex"],',
-    `      task: ${templateLiteral([
-      `Read ${artifactsDir}/final-review-codex.md.`,
-      'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
-      sharedWorktreeScopeRule,
-      `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
-      `Write ${artifactsDir}/codex-final-fix.md and ${artifactsDir}/codex-final-fix-status.json.`,
-      'The status JSON must have shape {"status":"fixed"|"no_issues_found"|"blocked","summary":"..."}. Use "blocked" only when BLOCKED_NO_COMMIT.md exists.',
-    ].join('\n'))},`,
-    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/codex-final-fix.md`)} },`,
-    '    })',
+    ...childPostFixReviewSteps(reviewDepth, artifactsDir, validationCommand, sharedWorktreeScopeRule),
     '    .step("final-review-pass-gate", {',
     '      type: "deterministic",',
-    '      dependsOn: ["final-fix-codex"],',
+    `      dependsOn: ${literal([childFinalReviewPassDependency(reviewDepth)])},`,
     `      command: ${literal(buildFinalReviewPassGateCommand({
       artifactsDir,
-      requiredFiles: [`${artifactsDir}/claude-final-fix.md`, `${artifactsDir}/codex-final-fix.md`, `${artifactsDir}/claude-final-fix-status.json`, `${artifactsDir}/codex-final-fix-status.json`],
+      requiredFiles: childFinalReviewRequiredFiles(artifactsDir, reviewDepth),
     }))},`,
     '      captureOutput: true,',
     '      failOnError: true,',
@@ -832,6 +761,126 @@ export function childWorkflowSource(child: ChildWorkflowPlan, spec: NormalizedWo
     '});',
     '',
   ].join('\n')}`;
+}
+
+function childCodexAgentLines(reviewDepth: ReviewDepth): string[] {
+  if (reviewDepth !== 'deep') return [];
+  return [
+    '    .agent("reviewer-codex", { cli: "codex", preset: "reviewer", role: "Reviews code, tests, deterministic gates, and PR/result evidence.", retries: 1 })',
+    '    .agent("validator-codex", { cli: "codex", preset: "worker", role: "Runs the Codex review-fix loop and verifies final readiness.", retries: 2 })',
+  ];
+}
+
+function childPostFixReviewSteps(
+  reviewDepth: ReviewDepth,
+  artifactsDir: string,
+  validationCommand: string,
+  sharedWorktreeScopeRule: string,
+): string[] {
+  if (reviewDepth === 'light') return [];
+
+  const steps = [
+    '    .step("final-review-claude", {',
+    '      agent: "reviewer-claude",',
+    '      dependsOn: ["post-fix-validation"],',
+    `      task: ${templateLiteral([
+      'Re-review the fixed child state from scratch.',
+      sharedWorktreeScopeRule,
+      'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
+      `Write ${artifactsDir}/final-review-claude.md ending with RICKY_CHILD_CLAUDE_FINAL_REVIEW_READY.`,
+    ].join('\n'))},`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/final-review-claude.md`)} },`,
+    '    })',
+    '    .step("final-fix-claude", {',
+    '      agent: "validator-claude",',
+    '      dependsOn: ["final-review-claude"],',
+    `      task: ${templateLiteral([
+      `Read ${artifactsDir}/final-review-claude.md.`,
+      'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
+      sharedWorktreeScopeRule,
+      `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
+      `Write ${artifactsDir}/claude-final-fix.md and ${artifactsDir}/claude-final-fix-status.json.`,
+      'The status JSON must have shape {"status":"fixed"|"no_issues_found"|"blocked","summary":"..."}. Use "blocked" only when BLOCKED_NO_COMMIT.md exists.',
+    ].join('\n'))},`,
+    `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/claude-final-fix.md`)} },`,
+    '    })',
+  ];
+
+  if (reviewDepth === 'deep') {
+    steps.push(
+      '    .step("review-codex", {',
+      '      agent: "reviewer-codex",',
+      '      dependsOn: ["final-fix-claude"],',
+      `      task: ${templateLiteral([
+        'Second-pass fresh-eyes review after the Claude loop. Read the actual files, diff, review artifacts, and validation evidence.',
+        sharedWorktreeScopeRule,
+        'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
+        `Write ${artifactsDir}/review-codex.md.`,
+      ].join('\n'))},`,
+      `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/review-codex.md`)} },`,
+      '    })',
+      '    .step("fix-loop-codex", {',
+      '      agent: "validator-codex",',
+      '      dependsOn: ["review-codex"],',
+      `      task: ${templateLiteral([
+        `Read ${artifactsDir}/review-codex.md.`,
+        'Fix every valid Codex finding and add or update tests/proofs for testable findings.',
+        sharedWorktreeScopeRule,
+        `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
+        `Write ${artifactsDir}/codex-fix-loop-report.md ending with RICKY_CHILD_CODEX_FIX_LOOP_READY.`,
+      ].join('\n'))},`,
+      `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/codex-fix-loop-report.md`)} },`,
+      '    })',
+      '    .step("post-codex-fix-validation", {',
+      '      type: "deterministic",',
+      '      dependsOn: ["fix-loop-codex"],',
+      `      command: ${literal(`${validationCommand} 2>&1 | tail -160`)},`,
+      '      captureOutput: true,',
+      '      failOnError: false,',
+      '    })',
+      '    .step("final-review-codex", {',
+      '      agent: "reviewer-codex",',
+      '      dependsOn: ["post-codex-fix-validation"],',
+      `      task: ${templateLiteral([
+        'Final Codex fresh-eyes review after Codex fixes.',
+        sharedWorktreeScopeRule,
+        'Use verdict: FINDINGS | NO_ISSUES_FOUND | BLOCKED and include fix_required plus test_required for each finding.',
+        `Write ${artifactsDir}/final-review-codex.md.`,
+      ].join('\n'))},`,
+      `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/final-review-codex.md`)} },`,
+      '    })',
+      '    .step("final-fix-codex", {',
+      '      agent: "validator-codex",',
+      '      dependsOn: ["final-review-codex"],',
+      `      task: ${templateLiteral([
+        `Read ${artifactsDir}/final-review-codex.md.`,
+        'If it says NO_ISSUES_FOUND, record that no fix was needed. Otherwise fix every valid finding and harden tests/proofs.',
+        sharedWorktreeScopeRule,
+        `If blocked, write ${artifactsDir}/BLOCKED_NO_COMMIT.md with exact evidence.`,
+        `Write ${artifactsDir}/codex-final-fix.md and ${artifactsDir}/codex-final-fix-status.json.`,
+        'The status JSON must have shape {"status":"fixed"|"no_issues_found"|"blocked","summary":"..."}. Use "blocked" only when BLOCKED_NO_COMMIT.md exists.',
+      ].join('\n'))},`,
+      `      verification: { type: "file_exists", value: ${literal(`${artifactsDir}/codex-final-fix.md`)} },`,
+      '    })',
+    );
+  }
+
+  return steps;
+}
+
+function childFinalReviewPassDependency(reviewDepth: ReviewDepth): string {
+  if (reviewDepth === 'light') return 'post-fix-validation';
+  if (reviewDepth === 'standard') return 'final-fix-claude';
+  return 'final-fix-codex';
+}
+
+function childFinalReviewRequiredFiles(artifactsDir: string, reviewDepth: ReviewDepth): string[] {
+  if (reviewDepth === 'light') return [`${artifactsDir}/review-claude.md`, `${artifactsDir}/fix-loop-report.md`];
+  const files = [`${artifactsDir}/claude-final-fix.md`, `${artifactsDir}/claude-final-fix-status.json`];
+  if (reviewDepth === 'deep') {
+    files.push(`${artifactsDir}/codex-final-fix.md`, `${artifactsDir}/codex-final-fix-status.json`);
+  }
+  return files;
 }
 
 function repairAwareOnError(repairAgent: string): string {
