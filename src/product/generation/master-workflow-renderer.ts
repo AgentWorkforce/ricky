@@ -222,6 +222,7 @@ export function renderMasterExecutionWorkflow(input: RenderMasterWorkflowInput):
       skillMatches: input.skills.matches,
       toolSelections,
       artifactsDir,
+      reviewDepth: 'deep',
       sidecarFiles: {
         [specSidecarPath]: input.spec.description,
         [childrenSidecarPath]: `${JSON.stringify(childSources, null, 2)}\n`,

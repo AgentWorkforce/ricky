@@ -102,6 +102,7 @@ export interface ParsedArgs {
   verbose?: boolean;
   autoFix?: number;
   refine?: false | { model?: string };
+  reviewDepth?: 'light' | 'standard' | 'deep' | 'auto';
   bestJudgement?: boolean;
   login?: boolean;
   connectMissing?: boolean;
@@ -253,6 +254,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (parsed.verbose) result.verbose = true;
   if (parsed.autoFix !== undefined && parsed.autoFix > 0) result.autoFix = parsed.autoFix;
   if (parsed.refine) result.refine = parsed.refine;
+  if (parsed.reviewDepth) result.reviewDepth = parsed.reviewDepth;
   if (parsed.bestJudgement) result.bestJudgement = true;
   if (parsed.login) result.login = true;
   if (parsed.connectMissing) result.connectMissing = true;
@@ -442,6 +444,7 @@ export function renderHelp(): string[] {
     '  --refine[=model]    Optional LLM pass; off by default',
     '  --no-refine         Disable refinement; emit only the deterministic artifact',
     '  --with-llm[=model]  Alias for --refine',
+    '  --review-depth <tier> Review loop depth: auto, light, standard, or deep',
     '  --best-judgement    Answer unresolved spec questions with implementer assumptions',
     '  --input KEY=VALUE   Set an env var for the workflow run (repeatable); read via process.env.KEY',
     '  --workforce-persona Use Workforce personas to author the workflow',
@@ -619,6 +622,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.reviewDepth ? { reviewDepth: parsed.reviewDepth } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
@@ -640,6 +644,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.reviewDepth ? { reviewDepth: parsed.reviewDepth } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
@@ -660,6 +665,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.reviewDepth ? { reviewDepth: parsed.reviewDepth } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
@@ -681,6 +687,7 @@ async function buildCliHandoff(parsed: ParsedArgs, deps: CliMainDeps): Promise<R
       stageMode,
       ...runAutoFix,
       ...(parsed.refine ? { refine: parsed.refine } : {}),
+      ...(parsed.reviewDepth ? { reviewDepth: parsed.reviewDepth } : {}),
       ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
       ...(parsed.inputs ? { inputs: parsed.inputs } : {}),
       ...(retry ? { retry } : {}),
@@ -720,6 +727,7 @@ function cliMetadataFor(parsed: ParsedArgs, handoff: string): Record<string, unk
     ...(parsed.foreground ? { runMode: 'foreground' } : {}),
     ...(parsed.yes ? { yes: 'non-destructive-confirmations-only' } : {}),
     ...(parsed.bestJudgement ? { bestJudgement: true } : {}),
+    ...(parsed.reviewDepth ? { reviewDepth: parsed.reviewDepth } : {}),
   };
 }
 

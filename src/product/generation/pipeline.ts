@@ -40,7 +40,7 @@ const MAX_WORKFORCE_PERSONA_PREWRITE_REPAIR_ATTEMPTS = 8;
 
 export function generate(input: GenerationInput): GenerationResult {
   const skillContext = loadSkills(input.spec, input.skillOverrides, input.templateOverride);
-  const patternDecision = selectPattern(input.spec, input.patternOverride, skillContext);
+  const patternDecision = selectPattern(input.spec, input.patternOverride, skillContext, input.reviewDepthOverride);
   const masterWorkflow = shouldUseMasterExecutionWorkflow(input.spec)
     ? renderMasterExecutionWorkflow({
         spec: input.spec,
@@ -542,15 +542,15 @@ export function validateGeneratedArtifact(
   if (!/git diff --(?:name-only|name-status)/.test(content) && !/['"]diff['"],\s*['"]--name-status['"]/.test(content)) {
     issues.push(blockingIssue('validation', 'GIT_DIFF_GATE_MISSING', 'Rendered workflow has no git-diff gate.'));
   }
-  if (!/80-to-100|80.?to.?100/i.test(content) || !/fix-loop/.test(content) || !/final-review/.test(content)) {
+  if (!/80-to-100|80.?to.?100/i.test(content) || !/fix-loop/.test(content) || !/final-review-pass-gate/.test(content)) {
     issues.push(blockingIssue('validation', 'EIGHTY_TO_ONE_HUNDRED_LOOP_MISSING', 'Rendered workflow lacks the review/fix/final-review 80-to-100 loop.'));
   }
   const isMasterExecutorWorkflow = isMasterExecutorArtifact(artifact);
-  if (!isMasterExecutorWorkflow && !hasMandatoryFreshEyesReviewLoop(artifact)) {
+  if (!isMasterExecutorWorkflow && !hasReviewDepthFreshEyesLoop(artifact)) {
     issues.push(blockingIssue(
       'validation',
       'MANDATORY_FRESH_EYES_LOOP_MISSING',
-      'Rendered workflow must run Claude review/fix/final-review/final-fix before the Codex review/fix/final-review/final-fix loop, with final acceptance after the Codex loop.',
+      `Rendered workflow does not satisfy the ${artifact.reviewDepth} review-depth fresh-eyes loop contract.`,
     ));
   }
   if (!/prepare-context/.test(content)) {
@@ -635,7 +635,7 @@ export function validateGeneratedArtifact(
 
   const finalReviewPassGate = artifact.gates.find((gate) => gate.name === 'final-review-pass-gate');
   if (!isMasterExecutorWorkflow && finalReviewPassGate) {
-    for (const fixArtifact of ['claude-final-fix.md', 'codex-final-fix.md']) {
+    for (const fixArtifact of expectedFinalReviewGateArtifacts(artifact.reviewDepth)) {
       if (!finalReviewPassGate.command.includes(fixArtifact)) {
         issues.push(blockingIssue(
           'validation',
@@ -704,6 +704,44 @@ function requiresRepairAwareRetry(content: string): boolean {
   );
 }
 
+function hasReviewDepthFreshEyesLoop(artifact: RenderedArtifact): boolean {
+  if (artifact.reviewDepth === 'light') return hasLightFreshEyesReviewLoop(artifact);
+  if (artifact.reviewDepth === 'standard') return hasStandardFreshEyesReviewLoop(artifact);
+  return hasMandatoryFreshEyesReviewLoop(artifact);
+}
+
+function hasLightFreshEyesReviewLoop(artifact: RenderedArtifact): boolean {
+  const taskById = new Map(artifact.tasks.map((task) => [task.id, task]));
+  const gateByName = new Map(artifact.gates.map((gate) => [gate.name, gate]));
+  if (taskById.get('review-claude')?.agentRole !== 'reviewer-claude') return false;
+  const fixLoop = taskById.get('fix-loop');
+  if (fixLoop?.agentRole !== 'validator-claude' || !fixLoop.dependsOn.includes('review-claude')) return false;
+  if (taskById.has('review-codex') || taskById.has('final-review-codex')) return false;
+  const passGate = gateByName.get('final-review-pass-gate');
+  if (!passGate?.dependsOn.includes('post-fix-validation')) return false;
+  return gateByName.get('final-hard-validation')?.dependsOn.includes('final-review-pass-gate') === true;
+}
+
+function hasStandardFreshEyesReviewLoop(artifact: RenderedArtifact): boolean {
+  const taskById = new Map(artifact.tasks.map((task) => [task.id, task]));
+  const gateByName = new Map(artifact.gates.map((gate) => [gate.name, gate]));
+  const requiredOrder = ['review-claude', 'fix-loop', 'final-review-claude', 'final-fix-claude'];
+  const positions = requiredOrder.map((id) => artifact.tasks.findIndex((task) => task.id === id));
+  if (positions.some((position) => position < 0)) return false;
+  if (!positions.every((position, index) => index === 0 || position > positions[index - 1])) return false;
+  if (taskById.has('review-codex') || taskById.has('final-review-codex')) return false;
+  if (taskById.get('review-claude')?.agentRole !== 'reviewer-claude') return false;
+  if (taskById.get('fix-loop')?.agentRole !== 'validator-claude') return false;
+  if (taskById.get('final-review-claude')?.agentRole !== 'reviewer-claude') return false;
+  if (taskById.get('final-fix-claude')?.agentRole !== 'validator-claude') return false;
+  if (!taskById.get('fix-loop')?.dependsOn.includes('review-claude')) return false;
+  if (!taskById.get('final-review-claude')?.dependsOn.includes('post-fix-validation')) return false;
+  if (!taskById.get('final-fix-claude')?.dependsOn.includes('final-review-claude')) return false;
+  const passGate = gateByName.get('final-review-pass-gate');
+  if (!passGate?.dependsOn.includes('final-fix-claude')) return false;
+  return gateByName.get('final-hard-validation')?.dependsOn.includes('final-review-pass-gate') === true;
+}
+
 function hasMandatoryFreshEyesReviewLoop(artifact: RenderedArtifact): boolean {
   const taskById = new Map(artifact.tasks.map((task) => [task.id, task]));
   const gateByName = new Map(artifact.gates.map((gate) => [gate.name, gate]));
@@ -752,6 +790,12 @@ function hasMandatoryFreshEyesReviewLoop(artifact: RenderedArtifact): boolean {
   const passGate = gateByName.get('final-review-pass-gate');
   if (!passGate?.dependsOn.includes('final-fix-codex')) return false;
   return gateByName.get('final-hard-validation')?.dependsOn.includes('final-review-pass-gate') === true;
+}
+
+function expectedFinalReviewGateArtifacts(reviewDepth: RenderedArtifact['reviewDepth']): string[] {
+  if (reviewDepth === 'light') return ['review-claude.md', 'fix-loop-report.md'];
+  if (reviewDepth === 'standard') return ['claude-final-fix.md'];
+  return ['claude-final-fix.md', 'codex-final-fix.md'];
 }
 
 function isMasterExecutorArtifact(artifact: RenderedArtifact): boolean {

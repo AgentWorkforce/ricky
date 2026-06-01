@@ -5,6 +5,10 @@ import type { VerificationType } from '../../shared/models/workflow-evidence.js'
 
 export type GenerationRiskLevel = 'low' | 'medium' | 'high';
 
+export type ReviewDepth = 'light' | 'standard' | 'deep';
+
+export type ReviewDepthOverride = ReviewDepth | 'auto';
+
 export type GenerationIssueSeverity = 'error' | 'warning' | 'info';
 
 export type GenerationIssueStage =
@@ -38,6 +42,7 @@ export interface GenerationIssue {
 export interface GenerationInput {
   spec: NormalizedWorkflowSpec;
   patternOverride?: SwarmPattern;
+  reviewDepthOverride?: ReviewDepthOverride;
   skillOverrides?: string[];
   templateOverride?: string;
   dryRunEnabled?: boolean;
@@ -77,6 +82,8 @@ export interface PatternDecision {
   reason: string;
   specSignals: string[];
   riskLevel: GenerationRiskLevel;
+  reviewDepth: ReviewDepth;
+  reviewDepthReason: string;
   overrideUsed: boolean;
 }
 
@@ -195,6 +202,7 @@ export interface RenderedArtifact {
   skillMatches: SkillMatch[];
   toolSelections: ToolSelection[];
   artifactsDir: string;
+  reviewDepth: ReviewDepth;
   /**
    * Files that must be written alongside `artifactPath` at generation time.
    * Keys are repo-relative paths. The master executor uses this to ship the

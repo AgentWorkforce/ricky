@@ -17,6 +17,7 @@ export type HandoffSource = 'free-form' | 'structured' | 'cli' | 'mcp' | 'claude
 export type LocalExecutionMode = 'local' | 'cloud' | 'both';
 export type LocalExecutionPreference = LocalExecutionMode | 'auto';
 export type LocalStageMode = 'generate' | 'run' | 'generate-and-run';
+export type LocalReviewDepthOption = 'light' | 'standard' | 'deep' | 'auto';
 export type StructuredSpec = Record<string, unknown>;
 export type SpecInput = string | StructuredSpec;
 
@@ -53,6 +54,8 @@ export interface BaseHandoff {
   retry?: Partial<RunRetryMetadata>;
   /** Optional LLM refinement request for generated workflow artifacts. */
   refine?: false | { model?: string };
+  /** Optional generated-workflow review depth override. Defaults to auto. */
+  reviewDepth?: LocalReviewDepthOption;
   /**
    * Let Ricky resolve blocking spec clarifications with conservative implementer
    * assumptions instead of asking the user before generation.
@@ -158,6 +161,8 @@ export interface LocalInvocationRequest {
   retry?: Partial<RunRetryMetadata>;
   /** Optional LLM refinement request for generated workflow artifacts. */
   refine?: false | { model?: string };
+  /** Optional generated-workflow review depth override. Defaults to auto. */
+  reviewDepth?: LocalReviewDepthOption;
   /** Resolve blocking clarification questions using implementer best judgement. */
   bestJudgement?: boolean;
   /**
@@ -319,11 +324,12 @@ export async function normalizeRequest(
   }
 }
 
-function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'bestJudgement' | 'inputs'> {
+function runtimeOptionsFor(raw: BaseHandoff): Pick<LocalInvocationRequest, 'autoFix' | 'retry' | 'refine' | 'reviewDepth' | 'bestJudgement' | 'inputs'> {
   return {
     ...(raw.autoFix ? { autoFix: raw.autoFix } : {}),
     ...(raw.retry ? { retry: raw.retry } : {}),
     ...(raw.refine ? { refine: raw.refine } : {}),
+    ...(raw.reviewDepth ? { reviewDepth: raw.reviewDepth } : {}),
     ...(raw.bestJudgement ? { bestJudgement: true } : {}),
     ...(raw.inputs && Object.keys(raw.inputs).length > 0 ? { inputs: raw.inputs } : {}),
   };

@@ -1170,6 +1170,7 @@ describe('workflow generation pipeline', () => {
     const result = generate({
       spec: loopSpec,
       artifactPath: 'workflows/generated/fresh-eyes-loop.ts',
+      reviewDepthOverride: 'deep',
     });
     const base = artifact(result);
 
@@ -1222,6 +1223,51 @@ describe('workflow generation pipeline', () => {
         expect.objectContaining({ code: 'MANDATORY_FRESH_EYES_LOOP_MISSING' }),
       ]),
     );
+  });
+
+  it('scales generated review depth for light and standard specs without dropping deterministic gates', () => {
+    const light = artifact(generate({
+      spec: spec({
+        description: 'Implement one pure helper and prove it with a focused Vitest test.',
+        targetFiles: ['src/product/generation/pattern-selector.ts', 'src/product/generation/pipeline.test.ts'],
+        acceptanceGates: ['npx vitest run src/product/generation/pipeline.test.ts'],
+      }),
+      artifactPath: 'workflows/generated/light-review.ts',
+    }));
+
+    expect(light.reviewDepth).toBe('light');
+    expect(light.tasks.map((task) => task.id)).toEqual(expect.arrayContaining(['review-claude', 'fix-loop', 'final-signoff']));
+    expect(light.tasks.map((task) => task.id)).not.toContain('final-review-claude');
+    expect(light.tasks.map((task) => task.id)).not.toContain('review-codex');
+    expect(gate(light, 'final-review-pass-gate')).toMatchObject({
+      dependsOn: ['post-fix-validation'],
+      failOnError: true,
+    });
+    expect(gate(light, 'final-hard-validation')).toMatchObject({
+      dependsOn: ['final-review-pass-gate'],
+      failOnError: true,
+    });
+    expect(gate(light, 'final-review-pass-gate').command).toContain('review-claude.md');
+    expect(gate(light, 'final-review-pass-gate').command).toContain('fix-loop-report.md');
+    expect(gate(light, 'final-review-pass-gate').command).not.toContain('codex-final-fix.md');
+
+    const standard = artifact(generate({
+      spec: spec({
+        description: 'Implement a medium local workflow change across several related files.',
+        targetFiles: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
+      }),
+      artifactPath: 'workflows/generated/standard-review.ts',
+    }));
+
+    expect(standard.reviewDepth).toBe('standard');
+    expect(standard.tasks.map((task) => task.id)).toEqual(expect.arrayContaining(['final-review-claude', 'final-fix-claude']));
+    expect(standard.tasks.map((task) => task.id)).not.toContain('review-codex');
+    expect(gate(standard, 'final-review-pass-gate')).toMatchObject({
+      dependsOn: ['final-fix-claude'],
+      failOnError: true,
+    });
+    expect(gate(standard, 'final-review-pass-gate').command).toContain('claude-final-fix-status.json');
+    expect(gate(standard, 'final-review-pass-gate').command).not.toContain('codex-final-fix-status.json');
   });
 
   it('requires the runtime run call itself to pass explicit cwd, ignoring embedded examples', () => {
@@ -1750,14 +1796,14 @@ ASSERT-SANITY`,
       dependsOn: ['final-signoff'],
     });
     const consistencyGate = gate(artifact, 'final-artifact-consistency-gate');
-    expect(consistencyGate.command).toContain("['review-claude.md', read('review-claude.md')]");
-    expect(consistencyGate.command).toContain("['fix-loop-report.md', read('fix-loop-report.md')]");
-    expect(consistencyGate.command).toContain("['final-review-claude.md', read('final-review-claude.md')]");
-    expect(consistencyGate.command).toContain("['claude-final-fix.md', read('claude-final-fix.md')]");
-    expect(consistencyGate.command).toContain("['review-codex.md', read('review-codex.md')]");
-    expect(consistencyGate.command).toContain("['codex-fix-loop-report.md', read('codex-fix-loop-report.md')]");
-    expect(consistencyGate.command).toContain("['final-review-codex.md', read('final-review-codex.md')]");
-    expect(consistencyGate.command).toContain("['codex-final-fix.md', read('codex-final-fix.md')]");
+    expect(consistencyGate.command).toContain('["review-claude.md", read("review-claude.md")]');
+    expect(consistencyGate.command).toContain('["fix-loop-report.md", read("fix-loop-report.md")]');
+    expect(consistencyGate.command).toContain('["final-review-claude.md", read("final-review-claude.md")]');
+    expect(consistencyGate.command).toContain('["claude-final-fix.md", read("claude-final-fix.md")]');
+    expect(consistencyGate.command).toContain('["review-codex.md", read("review-codex.md")]');
+    expect(consistencyGate.command).toContain('["codex-fix-loop-report.md", read("codex-fix-loop-report.md")]');
+    expect(consistencyGate.command).toContain('["final-review-codex.md", read("final-review-codex.md")]');
+    expect(consistencyGate.command).toContain('["codex-final-fix.md", read("codex-final-fix.md")]');
     expect(consistencyGate.command).toContain("['signoff.md', read('signoff.md')]");
     expect(consistencyGate.command).not.toContain('CODEX_FINAL_FIX_COMPLETE');
   });

@@ -26,6 +26,18 @@ describe('power user parser defaults', () => {
     });
   });
 
+  it('parses review-depth overrides and rejects invalid tiers', () => {
+    expect(parsePowerUserArgs(['local', '--spec', 'build a workflow', '--review-depth=light'])).toMatchObject({
+      reviewDepth: 'light',
+    });
+    expect(parsePowerUserArgs(['local', '--spec', 'build a workflow', '--review-depth', 'deep'])).toMatchObject({
+      reviewDepth: 'deep',
+    });
+    expect(parsePowerUserArgs(['local', '--spec', 'build a workflow', '--review-depth', 'fast']).errors).toContain(
+      '--review-depth must be one of: light, standard, deep, auto (received fast).',
+    );
+  });
+
   it('parses best-judgement clarification handling for local generation', () => {
     expect(parsePowerUserArgs(['local', '--spec', 'build a workflow', '--best-judgement'])).toMatchObject({
       command: 'run',
