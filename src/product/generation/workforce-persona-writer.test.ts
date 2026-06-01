@@ -2089,7 +2089,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
       'async function main() {',
       '  await workflow("real")',
-      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2151,6 +2151,51 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
     const mismatches = detectSpecIntentMismatch(spec, malformedWorkflow);
 
     expect(mismatches.some((m) => m.includes('INVALID_GITHUB_STEP') && m.includes('unsupported action "createPullRequest"'))).toBe(true);
+  });
+
+  it('flags action inputs placed at the top level of createGitHubStep config', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const malformedWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("bad-top-level-param")',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, malformedWorkflow);
+
+    expect(mismatches.some((m) => m.includes('INVALID_GITHUB_STEP') && m.includes('must put action input "branch" under params'))).toBe(true);
+  });
+
+  it('flags statically invalid GitHub primitive repo and params fields', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const malformedWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("bad-repo-and-params")',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", repo: "ricky", params: "branch=feat/foo" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, malformedWorkflow);
+
+    expect(mismatches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('repo must be in owner/repo format'),
+        expect.stringContaining('params must be a statically analyzable object'),
+      ]),
+    );
   });
 
   it('accepts createGitHubStep imported from the SDK root when name and action are valid', () => {
@@ -2749,7 +2794,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'async function main() {',
       '  await workflow("mixed")',
       '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
-      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor: githubStepExecutor });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2770,7 +2815,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'const githubStepExecutor = new GitHubStepExecutor();',
       'async function main() {',
       '  await workflow("github-only")',
-      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor: githubStepExecutor });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2787,7 +2832,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'import { workflow } from "@agent-relay/sdk/workflows";',
       'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
       'const githubStepExecutor = new GitHubStepExecutor();',
-      'const openPrStep = createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" });',
+      'const openPrStep = createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } });',
       'async function main() {',
       '  await workflow("github-only")',
       '    .step("open-pr", openPrStep)',
@@ -2810,7 +2855,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'async function main() {',
       '  await workflow("mixed")',
       '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
-      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2829,7 +2874,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
       'const githubStepExecutor = new GitHubStepExecutor();',
       'async function main() {',
-      '  const openPrStep = createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" });',
+      '  const openPrStep = createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } });',
       '  await workflow("github-only")',
       '    .step("open-pr", openPrStep)',
       '    .run({ cwd: process.cwd(), executor: githubStepExecutor });',
@@ -2855,7 +2900,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       '  const executor = new GitHubStepExecutor();',
       '  await workflow("mixed")',
       '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
-      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor });',
       '}',
       'async function unrelated() {',
@@ -2880,7 +2925,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'async function main() {',
       '  await workflow("lookalike")',
       '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
-      '    .step("not-github", createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" }))',
+      '    .step("not-github", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',

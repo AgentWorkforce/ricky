@@ -608,7 +608,7 @@ export function applyCloudRepoSetup<T>(wf: T, opts: CloudRepoSetupOptions): T {
 - **Record residual risks**
 - Call out what was not covered
 - **Ship the result as a PR**
-- Open the pull request from the workflow itself with `createGitHubStep` from `@agent-relay/sdk` — **never** `gh pr create`, never omit `name`, never use `id:` inside the config, never use `command:` inside the config, never use `action: 'createPullRequest'`, never separate `owner`/`repo` fields
+- Open the pull request from the workflow itself with `createGitHubStep` from `@agent-relay/sdk` — **never** `gh pr create`, never omit `name`, never put action inputs like `branch` at the top level instead of `params`, never use `id:` inside the config, never use `command:` inside the config, never use `action: 'createPullRequest'`, never separate `owner`/`repo` fields
 - See [Shipping the Result — Open a PR via `createGitHubStep`](#shipping-the-result--open-a-pr-via-creategithubstep) below
 - A workflow that fixes a bug and stops short of the PR has only done half the loop
 - disposable sandbox / cloud workspace

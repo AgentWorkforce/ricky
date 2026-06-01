@@ -754,6 +754,7 @@ export function buildWorkflowPersonaTask(
     '- Verification must include typecheck/test commands when relevant plus git-diff evidence; diff/manifest gates must combine git diff --name-only with git ls-files --others --exclude-standard so newly-created files are visible.',
     '- Run with an explicit cwd: .run({ cwd: process.cwd() }).',
     '- For mixed workflows with agent/deterministic steps plus GitHub primitive steps, never pass GitHubStepExecutor as the global `.run({ executor })`; it only executes GitHub integration steps and will reject non-github steps. Keep `.run({ cwd: process.cwd() })` and attach PR shipping through `createGitHubStep(...)` steps.',
+    '- Every `createGitHubStep` config must include `name` and `action`; put action inputs such as `branch`, `fromBranch`, `title`, `base`, `head`, `path`, `content`, and `message` under `params`. Top-level config keys are limited to `name`, `dependsOn`, `action`, `repo`, `params`, `config`, `output`, `timeoutMs`, and `retries`.',
     '- If the normalized spec declares `Worktree: <absolute path>`, create or refresh that worktree in an early deterministic step with `git worktree add`, use that exact path for implementation/test/git commands, and include the declared `Target branch` in the workflow. Do not assume the worktree already exists.',
     '- Use `test -f` only for known files. Never use `test -f` for a worktree/repository directory, a package directory, an API route directory, or any path containing glob wildcards; use `test -d`, `find`, `git ls-files`, or a Node filesystem assertion instead.',
     '- Preserve Agent Relay workflow authoring rules: deterministic gates are evidence, agents do production work, and every generated workflow must be locally dry-runnable.',
@@ -1588,6 +1589,18 @@ const GITHUB_ACTION_NAMES = new Set([
   'listOrganizations',
 ]);
 
+const GITHUB_STEP_CONFIG_KEYS = new Set([
+  'name',
+  'dependsOn',
+  'action',
+  'repo',
+  'params',
+  'config',
+  'output',
+  'timeoutMs',
+  'retries',
+]);
+
 interface SpecIntentLike {
   description?: string;
   targetContext?: string | null;
@@ -1833,7 +1846,39 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       issues.push(`createGitHubStep at ${location} must not include separate owner/repo fields; use repo: "owner/repo" or repo: { owner, repo }`);
     }
 
+    const repo = resolveIdentifierInitializer(objectPropertyInitializer(config, 'repo'));
+    if (repo && !isValidGithubStepRepo(repo)) {
+      issues.push(`createGitHubStep at ${location} repo must be in owner/repo format or an object with owner and repo fields`);
+    }
+
+    const params = resolveIdentifierInitializer(objectPropertyInitializer(config, 'params'));
+    if (params && !ts.isObjectLiteralExpression(params)) {
+      issues.push(`createGitHubStep at ${location} params must be a statically analyzable object`);
+    }
+
+    for (const property of config.properties) {
+      const key = objectLiteralPropertyName(property);
+      if (!key || GITHUB_STEP_CONFIG_KEYS.has(key) || key === 'command' || key === 'id' || key === 'owner') continue;
+      issues.push(`createGitHubStep at ${location} must put action input "${key}" under params, not top-level config`);
+    }
+
     return issues;
+  }
+
+  function isValidGithubStepRepo(node: ts.Node): boolean {
+    const text = ts.isExpression(node) ? expressionText(node) : undefined;
+    if (text !== undefined) return /^[^/\s]+\/[^/\s]+$/.test(text);
+    if (!ts.isObjectLiteralExpression(node)) return true;
+    const owner = expressionText(objectPropertyInitializer(node, 'owner'));
+    const repo = expressionText(objectPropertyInitializer(node, 'repo'));
+    return Boolean(owner?.trim() && repo?.trim());
+  }
+
+  function objectLiteralPropertyName(property: ts.ObjectLiteralElementLike): string | undefined {
+    if (ts.isPropertyAssignment(property)) return propertyNameText(property.name);
+    if (ts.isShorthandPropertyAssignment(property)) return property.name.text;
+    if (ts.isMethodDeclaration(property)) return propertyNameText(property.name);
+    return undefined;
   }
 
   function objectPropertyInitializer(
