@@ -220,6 +220,34 @@ describe('workflow generation pipeline', () => {
     expect(rendered.content).toContain('.run({ cwd: process.cwd() })');
   });
 
+  it('threads review-depth overrides into master child workflow sources', () => {
+    const result = generate({
+      spec: spec({
+        description:
+          'Implement nested runner, runtime policy, telemetry, evals, and insights as smaller workflows run by a master executor.',
+        constraints: ['Use independent child workflows with deterministic 80-to-100 validation.'],
+        acceptanceGates: ['npm test'],
+      }),
+      artifactPath: 'workflows/generated/runtime-master-light.ts',
+      reviewDepthOverride: 'light',
+    });
+
+    expect(result.success).toBe(true);
+    const rendered = artifact(result);
+    expect(rendered.reviewDepth).toBe('light');
+    const childSources = JSON.parse(rendered.sidecarFiles!['workflows/generated/runtime-master-light.children.json']) as Record<string, string>;
+    for (const childSource of Object.values(childSources)) {
+      const childStepConfigs = extractStepConfigs(childSource);
+      expect(childStepConfigs.has('review-claude')).toBe(true);
+      expect(childStepConfigs.has('fix-loop')).toBe(true);
+      expect(childStepConfigs.has('final-review-claude')).toBe(false);
+      expect(childStepConfigs.has('review-codex')).toBe(false);
+      expect(childStepConfigs.get('final-review-pass-gate')?.dependsOn).toEqual(['post-fix-validation']);
+      expect(childStepConfigs.get('final-review-pass-gate')?.command).toContain('review-claude.md');
+      expect(childStepConfigs.get('final-review-pass-gate')?.command).not.toContain('codex-final-fix.md');
+    }
+  });
+
   // Regression: the master template historically declared `lead-plan` as
   // an LLM agent step that asked headless claude to read the
   // already-deterministic master-plan.json and write a marker file.
