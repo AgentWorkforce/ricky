@@ -1,0 +1,88 @@
+{
+  "id": "traj_xlgvs5tnpmgf",
+  "version": 1,
+  "task": {
+    "title": "ricky-demo-broken-greeting-workflow",
+    "description": "Deliberately broken demo workflow for exercising Ricky auto-fix.",
+    "source": {
+      "system": "workflow-runner",
+      "id": "a5ba8548ed59e07354b09468"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T18:41:25.329Z",
+  "completedAt": "2026-05-01T18:41:25.983Z",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "role": "workflow-runner",
+      "joinedAt": "2026-05-01T18:41:25.329Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_1jw7hjkqvna4",
+      "title": "Planning",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-01T18:41:25.329Z",
+      "endedAt": "2026-05-01T18:41:25.983Z",
+      "events": [
+        {
+          "ts": 1777660885329,
+          "type": "note",
+          "content": "Purpose: Deliberately broken demo workflow for exercising Ricky auto-fix."
+        },
+        {
+          "ts": 1777660885329,
+          "type": "note",
+          "content": "Approach: 5-step pipeline workflow — Parsed 5 steps, 4 dependent steps, DAG validated, no cycles"
+        },
+        {
+          "ts": 1777660885792,
+          "type": "completion-evidence",
+          "content": "\"emit-done\" verification-based completion — Verification passed (2 signal(s), exit=0; signals=0, COMPLETE; exit=0)",
+          "raw": {
+            "stepName": "emit-done",
+            "completionMode": "verification",
+            "reason": "Verification passed",
+            "evidence": {
+              "summary": "2 signal(s), exit=0",
+              "signals": [
+                "0",
+                "COMPLETE"
+              ],
+              "exitCode": 0
+            }
+          },
+          "significance": "medium"
+        }
+      ]
+    },
+    {
+      "id": "chap_mv17v52qctcx",
+      "title": "Retrospective",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-01T18:41:25.983Z",
+      "endedAt": "2026-05-01T18:41:25.983Z",
+      "events": [
+        {
+          "ts": 1777660885983,
+          "type": "reflection",
+          "content": "All 5 steps completed in 1s. (completed in 1 seconds)",
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "All 5 steps completed in 1s.",
+    "approach": "pipeline workflow (0 agents)",
+    "challenges": [],
+    "learnings": [],
+    "confidence": 0.8
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": []
+}

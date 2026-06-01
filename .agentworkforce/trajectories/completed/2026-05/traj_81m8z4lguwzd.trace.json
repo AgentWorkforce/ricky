@@ -1,0 +1,108 @@
+{
+  "version": "1.0.0",
+  "id": "f4f0b87d-a325-420c-b47b-2b7401086b6a",
+  "timestamp": "2026-05-15T11:24:39.915Z",
+  "trajectory": "traj_81m8z4lguwzd",
+  "files": [
+    {
+      "path": "evals/suites/workflow-authoring/cases.jsonl",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 2,
+              "end_line": 8,
+              "revision": "3f132b2f652faf8df6341438a70ea6ae9157a37d"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "evals/suites/workflow-authoring/cases.md",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 74,
+              "end_line": 80,
+              "revision": "3f132b2f652faf8df6341438a70ea6ae9157a37d"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "scripts/evals/run-ricky-evals.mjs",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 7,
+              "revision": "3f132b2f652faf8df6341438a70ea6ae9157a37d"
+            },
+            {
+              "start_line": 335,
+              "end_line": 371,
+              "revision": "3f132b2f652faf8df6341438a70ea6ae9157a37d"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/product/generation/master-workflow-renderer.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 227,
+              "end_line": 233,
+              "revision": "3f132b2f652faf8df6341438a70ea6ae9157a37d"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/product/generation/pipeline.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 534,
+              "end_line": 540,
+              "revision": "3f132b2f652faf8df6341438a70ea6ae9157a37d"
+            },
+            {
+              "start_line": 688,
+              "end_line": 694,
+              "revision": "3f132b2f652faf8df6341438a70ea6ae9157a37d"
+            },
+            {
+              "start_line": 725,
+              "end_line": 740,
+              "revision": "3f132b2f652faf8df6341438a70ea6ae9157a37d"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

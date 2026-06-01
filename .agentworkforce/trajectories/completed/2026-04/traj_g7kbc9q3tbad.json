@@ -1,0 +1,53 @@
+{
+  "id": "traj_g7kbc9q3tbad",
+  "version": 1,
+  "task": {
+    "title": "Fix Connect tools category prompt UX"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T00:18:56.714Z",
+  "completedAt": "2026-05-01T00:19:29.456Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-01T00:19:14.399Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_bw4xeddfa05x",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-01T00:19:14.399Z",
+      "endedAt": "2026-05-01T00:19:29.456Z",
+      "events": [
+        {
+          "ts": 1777594754400,
+          "type": "decision",
+          "content": "Changed Connect tools category picker from checkbox to select: Changed Connect tools category picker from checkbox to select",
+          "raw": {
+            "question": "Changed Connect tools category picker from checkbox to select",
+            "chosen": "Changed Connect tools category picker from checkbox to select",
+            "alternatives": [],
+            "reasoning": "The category step is navigational; Enter on a highlighted row should take the user to that path instead of requiring Space and showing a validation error."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Replaced the Connect tools category checkbox with a single-choice menu so pressing Enter on Optional integrations opens the Slack/GitHub/Notion/Linear Nango prompt instead of showing a checkbox validation error.",
+    "approach": "Standard approach",
+    "confidence": 0.95
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "0847dd59fd65afdfdec7424ad9340f728dc432a6",
+    "endRef": "0847dd59fd65afdfdec7424ad9340f728dc432a6"
+  }
+}

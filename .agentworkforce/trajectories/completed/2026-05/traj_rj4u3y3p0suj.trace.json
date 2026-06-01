@@ -1,0 +1,57 @@
+{
+  "version": "1.0.0",
+  "id": "8d17757f-a166-431d-aa85-89c584190a49",
+  "timestamp": "2026-05-14T08:49:55.481Z",
+  "trajectory": "traj_rj4u3y3p0suj",
+  "files": [
+    {
+      "path": "src/surfaces/cli/commands/cli-main.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1819,
+              "end_line": 1828,
+              "revision": "bd3897c9f218f33ad805a99099461ad5221ba825"
+            },
+            {
+              "start_line": 1855,
+              "end_line": 1896,
+              "revision": "bd3897c9f218f33ad805a99099461ad5221ba825"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/surfaces/cli/commands/cli-main.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 713,
+              "end_line": 729,
+              "revision": "bd3897c9f218f33ad805a99099461ad5221ba825"
+            },
+            {
+              "start_line": 782,
+              "end_line": 788,
+              "revision": "bd3897c9f218f33ad805a99099461ad5221ba825"
+            },
+            {
+              "start_line": 1876,
+              "end_line": 1882,
+              "revision": "bd3897c9f218f33ad805a99099461ad5221ba825"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

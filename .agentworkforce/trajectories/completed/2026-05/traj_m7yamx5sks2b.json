@@ -1,0 +1,53 @@
+{
+  "id": "traj_m7yamx5sks2b",
+  "version": 1,
+  "task": {
+    "title": "Investigate blocked Ricky local workflow run"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T01:04:03.984Z",
+  "completedAt": "2026-05-01T15:05:47.968Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-01T01:06:26.193Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_t0u8e8hp16v5",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-01T01:06:26.193Z",
+      "endedAt": "2026-05-01T15:05:47.968Z",
+      "events": [
+        {
+          "ts": 1777597586194,
+          "type": "decision",
+          "content": "Fallback local run route uses PATH agent-relay: Fallback local run route uses PATH agent-relay",
+          "raw": {
+            "question": "Fallback local run route uses PATH agent-relay",
+            "chosen": "Fallback local run route uses PATH agent-relay",
+            "alternatives": [],
+            "reasoning": "Ricky status already treats a PATH-installed agent-relay as available, so run-now must not block solely because node_modules/.bin/agent-relay is absent. The no-install route is still used when the workspace-local package exists."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Improved Ricky CLI status UX: interactive Status now renders the real dashboard, compact headers use stored Cloud auth instead of stale config labels, Cloud 401s are treated as login-required, and Cloud agent harness mapping accepts provider-style names like google/gemini.",
+    "approach": "Standard approach",
+    "confidence": 0.9
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "cf43908852e6f30805ff956b7ef6e78cad525a31",
+    "endRef": "cf43908852e6f30805ff956b7ef6e78cad525a31"
+  }
+}

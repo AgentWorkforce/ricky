@@ -1,0 +1,68 @@
+{
+  "id": "traj_a3v29gr78ddf",
+  "version": 1,
+  "task": {
+    "title": "Tighten auto-fix resume with Workforce workflow persona"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T15:48:46.780Z",
+  "completedAt": "2026-05-01T16:02:15.931Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-01T15:52:18.105Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_i57mqjcdw5ng",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-01T15:52:18.105Z",
+      "endedAt": "2026-05-01T16:02:15.931Z",
+      "events": [
+        {
+          "ts": 1777650738106,
+          "type": "decision",
+          "content": "Auto-fix will repair workflow artifacts through the Workforce workflow persona before retrying: Auto-fix will repair workflow artifacts through the Workforce workflow persona before retrying",
+          "raw": {
+            "question": "Auto-fix will repair workflow artifacts through the Workforce workflow persona before retrying",
+            "chosen": "Auto-fix will repair workflow artifacts through the Workforce workflow persona before retrying",
+            "alternatives": [],
+            "reasoning": "The requested behavior is not a shell-level recovery loop; failures should be diagnosed against run evidence, patched into the generated workflow artifact, and resumed with start-from/previous-run metadata while the user tracks one Ricky run."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Implemented default auto-fix/resume for local workflow runs through the Workforce workflow persona. Ricky now diagnoses failed workflow evidence, patches the underlying workflow artifact, resumes with start-from and previous-run metadata, carries stable Ricky tracking ids through background monitors, and covers the repairer/loop with tests. Full npm test and typecheck pass.",
+    "approach": "Standard approach",
+    "confidence": 0.93
+  },
+  "commits": [
+    "b3f1bcf"
+  ],
+  "filesChanged": [
+    "specs/cli-auto-fix-and-resume.md",
+    "src/local/auto-fix-loop.test.ts",
+    "src/local/auto-fix-loop.ts",
+    "src/local/entrypoint.ts",
+    "src/local/request-normalizer.ts",
+    "src/product/generation/workforce-persona-repairer.test.ts",
+    "src/product/generation/workforce-persona-repairer.ts",
+    "src/surfaces/cli/cli/proof/external-cli-proof.ts",
+    "src/surfaces/cli/commands/cli-main.ts",
+    "src/surfaces/cli/flows/local-run-monitor.ts",
+    "src/surfaces/cli/flows/local-workflow-flow.ts"
+  ],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "ec7322e36a25578d9194cd903bdbf19420b31153",
+    "endRef": "b3f1bcf5636bcc55e725b69a509cee749449db26",
+    "traceId": "24e19e16-9384-42f5-a6ab-0cd79cf0fcb6"
+  }
+}

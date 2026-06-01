@@ -1,0 +1,65 @@
+{
+  "id": "traj_9o5uo62ujyub",
+  "version": 1,
+  "task": {
+    "title": "Fix publish workflow stale main failure"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T08:49:37.052Z",
+  "completedAt": "2026-05-07T08:52:50.645Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T08:52:17.080Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_kef5u08s9c0s",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T08:52:17.080Z",
+      "endedAt": "2026-05-07T08:52:50.645Z",
+      "events": [
+        {
+          "ts": 1778143937081,
+          "type": "decision",
+          "content": "Push release commit and tag before npm publish: Push release commit and tag before npm publish",
+          "raw": {
+            "question": "Push release commit and tag before npm publish",
+            "chosen": "Push release commit and tag before npm publish",
+            "alternatives": [],
+            "reasoning": "The failed run published npm first, then could not fast-forward main. Pushing the release commit/tag atomically before npm publish makes stale-main failures occur before the irreversible registry publish."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1778143937162,
+          "type": "decision",
+          "content": "Updated package-lock without npm install: Updated package-lock without npm install",
+          "raw": {
+            "question": "Updated package-lock without npm install",
+            "chosen": "Updated package-lock without npm install",
+            "alternatives": [],
+            "reasoning": "npm version 0.1.26 --no-git-tag-version aligned package metadata only; npm ci verified the lockfile remains installable, so npm i was not needed."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Opened PR #57 to harden publish.yml: require dispatch from current main, serialize publish runs, commit package-lock with version bumps, atomically push the release commit/tag before npm publish, and reconcile package metadata to the already-published 0.1.26. Validated with npm ci, actionlint, and npm test.",
+    "approach": "Standard approach",
+    "confidence": 0.95
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "eb5f110bec18a61645c18dd22546a14e00c9082a",
+    "endRef": "eb5f110bec18a61645c18dd22546a14e00c9082a"
+  }
+}

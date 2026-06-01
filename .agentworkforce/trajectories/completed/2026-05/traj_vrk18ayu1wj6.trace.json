@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "id": "089c3846-b7f7-4ce4-99d0-752811fafa80",
+  "timestamp": "2026-05-01T16:05:47.093Z",
+  "trajectory": "traj_vrk18ayu1wj6",
+  "files": [
+    {
+      "path": "workflows/generated/ricky-resolve-review-findings.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 447,
+              "revision": "08e40289dde773e410d68f45bb69c002adf3bace"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

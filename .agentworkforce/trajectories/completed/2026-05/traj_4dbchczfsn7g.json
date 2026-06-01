@@ -1,0 +1,73 @@
+{
+  "id": "traj_4dbchczfsn7g",
+  "version": 1,
+  "task": {
+    "title": "Investigate spec ambiguity question flow"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-07T08:18:17.580Z",
+  "completedAt": "2026-05-07T08:19:29.761Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-07T08:19:08.977Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_d5soug1j7ep4",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-07T08:19:08.977Z",
+      "endedAt": "2026-05-07T08:19:29.761Z",
+      "events": [
+        {
+          "ts": 1778141948978,
+          "type": "decision",
+          "content": "Model ambiguity as structured clarification requests before generation: Model ambiguity as structured clarification requests before generation",
+          "raw": {
+            "question": "Model ambiguity as structured clarification requests before generation",
+            "chosen": "Model ambiguity as structured clarification requests before generation",
+            "alternatives": [],
+            "reasoning": "Current intake only has suggestedFollowUp strings and goal-only CLI prompts; a reusable question contract can serve CLI, API, Slack/MCP, and persona handoff without forcing best-effort workflow authoring."
+          },
+          "significance": "high"
+        },
+        {
+          "ts": 1778141965045,
+          "type": "reflection",
+          "content": "Investigation found the natural insertion point: deterministic spec intake can emit clarification questions, and the Workforce persona writer can return a needs_clarification contract that Ricky relays through CLI/API/Slack instead of writing an assumed workflow.",
+          "raw": {
+            "focalPoints": [
+              "spec-intake",
+              "persona-writer",
+              "surface-contracts"
+            ],
+            "confidence": 0.82
+          },
+          "significance": "high",
+          "tags": [
+            "focal:spec-intake",
+            "focal:persona-writer",
+            "focal:surface-contracts",
+            "confidence:0.82"
+          ]
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Investigated how Ricky should ask user-facing clarification questions when workflow specs are ambiguous. Found current goal-only clarification, route-level suggestedFollowUp strings, local response nextActions, Cloud assumptions/followUpActions, and one-shot Workforce persona response contract. Recommended structured clarification questions before generation plus a persona needs_clarification response relayed by Ricky surfaces.",
+    "approach": "Standard approach",
+    "confidence": 0.84
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "7a18e972148eb0a0b7f451dd75e7cf4b1934d97e",
+    "endRef": "7a18e972148eb0a0b7f451dd75e7cf4b1934d97e"
+  }
+}

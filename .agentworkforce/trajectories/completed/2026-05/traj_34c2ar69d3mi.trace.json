@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "id": "58164462-7eff-45bf-ad7f-78863024bbb2",
+  "timestamp": "2026-05-07T12:13:10.150Z",
+  "trajectory": "traj_34c2ar69d3mi",
+  "files": [
+    {
+      "path": ".agents/skills/writing-agent-relay-workflows/SKILL.md",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 218,
+              "end_line": 223,
+              "revision": "1f67328f12eddc1c86664b2a3498caea35e414f3"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

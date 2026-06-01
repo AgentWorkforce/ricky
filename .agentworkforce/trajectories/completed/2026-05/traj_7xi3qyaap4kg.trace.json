@@ -1,0 +1,59 @@
+{
+  "version": "1.0.0",
+  "id": "db161e81-088b-4f9f-85d4-ffc98b77b14d",
+  "timestamp": "2026-05-15T11:51:42.984Z",
+  "trajectory": "traj_7xi3qyaap4kg",
+  "files": [
+    {
+      "path": ".trajectories/completed/2026-05/traj_nc2i7uwepync.json",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 53,
+              "revision": "a64a6af0ca0c8e92ffbe8537714c178b336e139b"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": ".trajectories/completed/2026-05/traj_nc2i7uwepync.md",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 31,
+              "revision": "a64a6af0ca0c8e92ffbe8537714c178b336e139b"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "test/generated-workflow-reliability-contract.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 571,
+              "revision": "a64a6af0ca0c8e92ffbe8537714c178b336e139b"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

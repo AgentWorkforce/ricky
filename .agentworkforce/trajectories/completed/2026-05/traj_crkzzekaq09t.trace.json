@@ -1,0 +1,40 @@
+{
+  "version": "1.0.0",
+  "id": "709ca8ce-89f9-4d55-b913-24ad02ceb7b1",
+  "timestamp": "2026-05-08T18:39:40.326Z",
+  "trajectory": "traj_crkzzekaq09t",
+  "files": [
+    {
+      "path": "scripts/evals/run-ricky-evals.mjs",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 65,
+              "end_line": 123,
+              "revision": "e1577f53e4230331a1254407244d2ec4cc238fe4"
+            },
+            {
+              "start_line": 133,
+              "end_line": 147,
+              "revision": "e1577f53e4230331a1254407244d2ec4cc238fe4"
+            },
+            {
+              "start_line": 152,
+              "end_line": 177,
+              "revision": "e1577f53e4230331a1254407244d2ec4cc238fe4"
+            },
+            {
+              "start_line": 179,
+              "end_line": 213,
+              "revision": "e1577f53e4230331a1254407244d2ec4cc238fe4"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

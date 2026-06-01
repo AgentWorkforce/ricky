@@ -1,0 +1,177 @@
+{
+  "id": "traj_7xroxgmthbwm",
+  "version": 1,
+  "task": {
+    "title": "ricky-demo-persona-repair-semantic-contract-workflow",
+    "description": "Semantic contract workflow with deterministic implementation, validation, review, and final signoff gate.",
+    "source": {
+      "system": "workflow-runner",
+      "id": "4b0c251a81422551ebf44caf"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-02T20:13:47.811Z",
+  "completedAt": "2026-05-02T20:13:49.124Z",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "role": "workflow-runner",
+      "joinedAt": "2026-05-02T20:13:47.812Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_kdujm6k0xt73",
+      "title": "Planning",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-02T20:13:47.812Z",
+      "endedAt": "2026-05-02T20:13:49.124Z",
+      "events": [
+        {
+          "ts": 1777752827812,
+          "type": "note",
+          "content": "Purpose: Semantic contract workflow with deterministic implementation, validation, review, and final signoff gate."
+        },
+        {
+          "ts": 1777752827812,
+          "type": "note",
+          "content": "Approach: 6-step pipeline workflow — Parsed 6 steps, 5 dependent steps, DAG validated, no cycles"
+        },
+        {
+          "ts": 1777752828367,
+          "type": "completion-evidence",
+          "content": "\"write-contract\" verification-based completion — Verification passed (2 signal(s), 1 file change(s), exit=0; signals=0, CONTRACT_WRITTEN; files=modified:.workflow-artifacts/demo-persona-repair/semantic-contract/contract.json; exit=0)",
+          "raw": {
+            "stepName": "write-contract",
+            "completionMode": "verification",
+            "reason": "Verification passed",
+            "evidence": {
+              "summary": "2 signal(s), 1 file change(s), exit=0",
+              "signals": [
+                "0",
+                "CONTRACT_WRITTEN"
+              ],
+              "files": [
+                "modified:.workflow-artifacts/demo-persona-repair/semantic-contract/contract.json"
+              ],
+              "exitCode": 0
+            }
+          },
+          "significance": "medium"
+        },
+        {
+          "ts": 1777752828541,
+          "type": "completion-evidence",
+          "content": "\"validate-contract-shape\" verification-based completion — Verification passed (2 signal(s), exit=0; signals=0, CONTRACT_SHAPE_OK; exit=0)",
+          "raw": {
+            "stepName": "validate-contract-shape",
+            "completionMode": "verification",
+            "reason": "Verification passed",
+            "evidence": {
+              "summary": "2 signal(s), exit=0",
+              "signals": [
+                "0",
+                "CONTRACT_SHAPE_OK"
+              ],
+              "exitCode": 0
+            }
+          },
+          "significance": "medium"
+        },
+        {
+          "ts": 1777752828712,
+          "type": "completion-evidence",
+          "content": "\"review-contract\" verification-based completion — Verification passed (2 signal(s), 1 file change(s), exit=0; signals=0, REVIEW_OK; files=modified:.workflow-artifacts/demo-persona-repair/semantic-contract/review.json; exit=0)",
+          "raw": {
+            "stepName": "review-contract",
+            "completionMode": "verification",
+            "reason": "Verification passed",
+            "evidence": {
+              "summary": "2 signal(s), 1 file change(s), exit=0",
+              "signals": [
+                "0",
+                "REVIEW_OK"
+              ],
+              "files": [
+                "modified:.workflow-artifacts/demo-persona-repair/semantic-contract/review.json"
+              ],
+              "exitCode": 0
+            }
+          },
+          "significance": "medium"
+        },
+        {
+          "ts": 1777752828888,
+          "type": "completion-evidence",
+          "content": "\"record-signoff-evidence\" verification-based completion — Verification passed (2 signal(s), 1 file change(s), exit=0; signals=0, SIGNOFF_EVIDENCE_WRITTEN; files=created:.workflow-artifacts/demo-persona-repair/semantic-contract/signoff.json; exit=0)",
+          "raw": {
+            "stepName": "record-signoff-evidence",
+            "completionMode": "verification",
+            "reason": "Verification passed",
+            "evidence": {
+              "summary": "2 signal(s), 1 file change(s), exit=0",
+              "signals": [
+                "0",
+                "SIGNOFF_EVIDENCE_WRITTEN"
+              ],
+              "files": [
+                "created:.workflow-artifacts/demo-persona-repair/semantic-contract/signoff.json"
+              ],
+              "exitCode": 0
+            }
+          },
+          "significance": "medium"
+        },
+        {
+          "ts": 1777752829123,
+          "type": "completion-evidence",
+          "content": "\"verify-contract-ready\" verification-based completion — Verification passed (2 signal(s), 2 file change(s), exit=0; signals=0, CONTRACT_READY_SIGNED_OFF; files=modified:.workflow-artifacts/demo-persona-repair/semantic-contract/review.json, modified:.workflow-artifacts/demo-persona-repair/semantic-contract/signoff.json; exit=0)",
+          "raw": {
+            "stepName": "verify-contract-ready",
+            "completionMode": "verification",
+            "reason": "Verification passed",
+            "evidence": {
+              "summary": "2 signal(s), 2 file change(s), exit=0",
+              "signals": [
+                "0",
+                "CONTRACT_READY_SIGNED_OFF"
+              ],
+              "files": [
+                "modified:.workflow-artifacts/demo-persona-repair/semantic-contract/review.json",
+                "modified:.workflow-artifacts/demo-persona-repair/semantic-contract/signoff.json"
+              ],
+              "exitCode": 0
+            }
+          },
+          "significance": "medium"
+        }
+      ]
+    },
+    {
+      "id": "chap_dwcksxo2xi67",
+      "title": "Retrospective",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-02T20:13:49.124Z",
+      "endedAt": "2026-05-02T20:13:49.124Z",
+      "events": [
+        {
+          "ts": 1777752829124,
+          "type": "reflection",
+          "content": "All 6 steps completed in 1s. (completed in 1 seconds)",
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "All 6 steps completed in 1s.",
+    "approach": "pipeline workflow (0 agents)",
+    "challenges": [],
+    "learnings": [],
+    "confidence": 0.9583333333333334
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": []
+}

@@ -1,0 +1,211 @@
+{
+  "id": "compact_le5nw7vnluaa",
+  "version": 1,
+  "type": "compacted",
+  "compactedAt": "2026-04-27T23:42:03.256Z",
+  "sourceTrajectories": [
+    "traj_6qw68cksy14b",
+    "traj_fgnsrhp00ov6",
+    "traj_41fw8jaornqz",
+    "traj_onwe2sko05wh",
+    "traj_xqmxuojhzkm3",
+    "traj_capeqvy8v8rh",
+    "traj_0jdcqai7r3kq",
+    "traj_galsm4d6cc03",
+    "traj_sqvtdaig7u60",
+    "traj_csde3cov280d",
+    "traj_9yshmeuleyaf",
+    "traj_le9f6eg2wc2z",
+    "traj_hqv08fvhon5n"
+  ],
+  "dateRange": {
+    "start": "2026-04-27T18:25:11.577Z",
+    "end": "2026-04-27T23:41:59.590Z"
+  },
+  "summary": {
+    "totalDecisions": 6,
+    "totalEvents": 50,
+    "uniqueAgents": [
+      "default",
+      "orchestrator",
+      "impl-codex",
+      "review-claude",
+      "writer-claude",
+      "review-codex",
+      "lead-claude",
+      "test-codex"
+    ]
+  },
+  "decisionGroups": [
+    {
+      "category": "tooling",
+      "decisions": [
+        {
+          "question": "Write wave10 follow-up workflows instead of rerunning stalled wave9 doc workflows",
+          "chosen": "Write wave10 follow-up workflows instead of rerunning stalled wave9 doc workflows",
+          "reasoning": "Issue #14 warns that open-ended wave9 doc-writing steps stalled and were SIGKILLed; the follow-up needs bounded implementation, deterministic gates, 80-to-100 fix loops, live proof, and explicit GitHub closure steps.",
+          "fromTrajectory": "traj_6qw68cksy14b"
+        },
+        {
+          "question": "External repo smoke should invoke linked CLI from temp repo",
+          "chosen": "External repo smoke should invoke linked CLI from temp repo",
+          "reasoning": "npm start from the Ricky repo overwrites INIT_CWD, so the artifact can land in the monorepo; invoking packages/cli/bin/ricky from the temp repo proves the user-facing linked CLI path.",
+          "fromTrajectory": "traj_galsm4d6cc03"
+        },
+        {
+          "question": "Group seven GitHub issues into five wave8 workflows",
+          "chosen": "Group seven GitHub issues into five wave8 workflows",
+          "reasoning": "Issues #1 and #2 share caller-root/artifact-path plumbing; #4 and #7 share cofounder-facing messaging/readiness; #3, #5, and #6 each require their own proof boundaries and validation contracts.",
+          "fromTrajectory": "traj_hqv08fvhon5n"
+        }
+      ]
+    },
+    {
+      "category": "naming",
+      "decisions": [
+        {
+          "question": "Include untracked files in skill boundary gate",
+          "chosen": "Include untracked files in skill boundary gate",
+          "reasoning": "The skill boundary doc is created during the workflow, so git diff --name-only misses it until staged. Combining tracked diffs and untracked files makes the deterministic gate match the workflow acceptance contract.",
+          "fromTrajectory": "traj_41fw8jaornqz"
+        },
+        {
+          "question": "Include untracked files in onboarding readiness gate",
+          "chosen": "Include untracked files in onboarding readiness gate",
+          "reasoning": "The cofounder checklist is a new file, so git diff --name-only omits it until staged. Combining tracked diffs with git ls-files --others --exclude-standard makes the deterministic gate work in fresh workflow runs.",
+          "fromTrajectory": "traj_xqmxuojhzkm3"
+        }
+      ]
+    },
+    {
+      "category": "api",
+      "decisions": [
+        {
+          "question": "Cloud start-from support uses SDK env vars",
+          "chosen": "Cloud start-from support uses SDK env vars",
+          "reasoning": "The sandbox already runs workflows through @agent-relay/sdk, whose builder/run paths read RESUME_RUN_ID, START_FROM, and PREVIOUS_RUN_ID. Passing CLI flags through API and launcher env avoids duplicating resume logic in Cloud.",
+          "fromTrajectory": "traj_sqvtdaig7u60"
+        }
+      ]
+    }
+  ],
+  "keyLearnings": [],
+  "keyFindings": [
+    "\"fix-loop\" completed → ```",
+    "\"final-review\" completed → ## Summary\n\nIssue #5 review complete. All four acceptance criteria met:\n\n1. **Skills loaded + when applied** — `docs/pro",
+    "\"fix-loop\" completed → Ends with the required sentinel: `READINESS_COPY_FIX_LOOP_COMPLETE`.",
+    "\"final-review\" completed → ```",
+    "\"decide-product-contract\" completed → PRODUCT_CONTRACT_DECIDED",
+    "\"implement-outcome-loop\" completed → Implemented GitHub issue #3.\n\nChanged:\n- Added explicit local `stageMode: \"generate\" | \"run\"` normalization.\n- Wired CLI",
+    "\"implement-outcome-tests\" completed → **Summary**\nImplemented GitHub issue #3 regression coverage and tightened the local runtime failure contract.\n\n**Changed",
+    "\"fix-loop\" completed → LOCAL_OUTCOME_LOOP_FIX_COMPLETE",
+    "\"final-review\" completed → # Final Review — Issue #3\n\n**Verdict: FINAL_REVIEW_PASS**\n\nWrote `.workflow-artifacts/wave8-github-issues/close-local-ex",
+    "\"final-review\" completed → ## Review summary — Issue #6 external-repo CLI proof\n\n**Verdict: FINAL_REVIEW_PASS**\n\nAll four acceptance criteria are m"
+  ],
+  "filesAffected": [],
+  "commits": [],
+  "narrative": "This session captures a sustained wave8/wave10 push to drive seven open GitHub issues (#1–#7) on the Ricky CLI to closure via Agent Relay DAG workflows. The lead agent grouped the seven issues into five wave8 workflows (path/root propagation #1/#2, external-repo CLI proof #6, local execution outcome loop #3, onboarding readiness copy + checklist #4/#7, skill-embedding boundary #5), each enforcing 80-to-100 fix loops, deterministic file/grep gates, and signoff artifacts under `.workflow-artifacts/wave8-github-issues/<slug>/`. Issue #3 ran the longest (22m, 12 steps, 4 specialists) and produced concrete code changes: a new `stageMode: \"generate\" | \"run\"` normalization wired through `packages/cli/src/commands/cli-main.ts` and `packages/cli/src/entrypoint/interactive-cli.ts`, plus regression tests in `packages/cli/src/commands/cli-main.test.ts` and tightened failure contracts in `@ricky/runtime`/`@ricky/local`. Issues #5, #4/#7, and #6 closed via writer/review specialists producing fix-loop and final-review artifacts. Several cross-cutting infrastructure fixes landed alongside the issue work. Two short sessions patched the deterministic file gates in the skill-boundary and onboarding-readiness workflows to combine `git diff --name-only` with `git ls-files --others --exclude-standard`, since newly created docs/checklists are untracked at gate time. The wave8 issue #6 external-repo smoke was rewritten to invoke the linked CLI (`packages/cli/bin/ricky` or repo `node_modules/.bin/tsx`) from inside a temp repo rather than `npm start` from the Ricky monorepo, because npm overwrites `INIT_CWD` and a registry-resolved `npx agent-relay` could trip on `node:sqlite`. All wave8 prepare-context steps were also rewritten to embed issue summaries into local `issue-N.md` artifacts (with `gh` calls made optional/no-op) so cloud sandboxes are self-contained. A parallel relay/cloud track added cloud start-from/resume plumbing: `relay cloud run` now accepts `--resume`, `--start-from`, `--previous-run-id` and forwards them through `/api/v1/workflows/run`, worker payloads, and sandbox launcher options that write `RESUME_RUN_ID`, `START_FROM`, and `PREVIOUS_RUN_ID` into bootstrap env so the existing `@agent-relay/sdk` resume paths execute unchanged inside cloud sandboxes. Finally, the wave10 follow-up workflows were authored to verify wave9 docs, prove `@agent-assistant/turn-context` adapter adoption on a live Ricky path, and explicitly close the handoff issue — replacing the stalled wave9 open-ended doc-writing pattern that had been SIGKILLed.",
+  "decisions": [
+    {
+      "question": "How to package seven open GitHub issues into Agent Relay workflows",
+      "chosen": "Group into five wave8 workflows by shared boundary",
+      "reasoning": "#1/#2 share caller-root/artifact-path plumbing; #4/#7 share cofounder-facing messaging/readiness; #3, #5, #6 each need their own proof contracts",
+      "impact": "Reduced workflow count while keeping verification scopes coherent; each workflow has its own .workflow-artifacts/wave8-github-issues/<slug>/ tree"
+    },
+    {
+      "question": "How should the local CLI behave after generating a workflow (issue #3)",
+      "chosen": "Explicit stageMode: 'generate' | 'run' with classified-blocker contract",
+      "reasoning": "Product contract decided in decide-product-contract step required executing or returning a structured blocker with evidence rather than silent generation",
+      "impact": "New stageMode normalization in packages/cli/src/commands/cli-main.ts + interactive-cli.ts; regression tests in cli-main.test.ts; tightened @ricky/runtime + @ricky/local failure paths"
+    },
+    {
+      "question": "How to add cloud resume/start-from without duplicating SDK logic",
+      "chosen": "Pipe CLI flags through API → worker → launcher env vars consumed by @agent-relay/sdk",
+      "reasoning": "Sandbox already runs workflows via the SDK whose builder/run paths read RESUME_RUN_ID, START_FROM, PREVIOUS_RUN_ID; reusing them avoids parallel resume implementations in Cloud",
+      "impact": "relay cloud run gained --resume/--start-from/--previous-run-id; cloud route/launcher/script-generator tests added; web typecheck still blocked by unrelated @relayfile/adapter-github export errors"
+    },
+    {
+      "question": "How to prove external-repo CLI invocation for issue #6",
+      "chosen": "Run linked CLI from inside a temp repo, not npm start from Ricky monorepo",
+      "reasoning": "npm overwrites INIT_CWD, so npm start cannot simulate an external caller; raw npx agent-relay can also hit registry parsing for node:sqlite",
+      "impact": "Wave8 issue #6 smoke now uses repo node_modules/.bin/tsx (or packages/cli/bin/ricky) from a temp repo, extracts the reported Artifact path, and asserts it lives under the caller repo not packages/cli"
+    },
+    {
+      "question": "How to keep wave8 prepare-context steps runnable in cloud sandboxes",
+      "chosen": "Embed issue context into local issue-N.md and make gh optional",
+      "reasoning": "Cloud sandboxes lack authenticated gh; workflow runs were failing before any work started",
+      "impact": "All wave8 prepare-context steps now write embedded summaries; gh issue view calls fall back to true; verified no gh references remain via npx tsc --noEmit"
+    },
+    {
+      "question": "Why wave10 instead of rerunning stalled wave9 doc workflows",
+      "chosen": "Author new wave10 workflows with bounded reviews and explicit GitHub closure",
+      "reasoning": "Issue #14 documented that open-ended wave9 doc-writing steps stalled and were SIGKILLed",
+      "impact": "Four new wave10 workflows under workflows/wave10-agent-assistant-adoption/ exercise deterministic grep/file gates, workspace-scoped installs, test-fix-rerun loops, live CLI proof, and explicit gh issue close steps"
+    }
+  ],
+  "conventions": [
+    {
+      "pattern": "Deterministic file gates must combine tracked diffs with untracked files",
+      "rationale": "Workflow steps frequently create new artifacts/docs; git diff --name-only misses them until staged, so gates falsely fail in fresh runs",
+      "scope": "All wave8/wave10 workflow gates that assert a created artifact (skill-boundary, onboarding-readiness, etc.). Pattern: git diff --name-only + git ls-files --others --exclude-standard piped to changed-files.txt"
+    },
+    {
+      "pattern": "Workflow signoff artifacts live under .workflow-artifacts/wave<N>-<theme>/<slug>/<step>.md",
+      "rationale": "Gives verification gates a stable file path and provides durable evidence per step (fix-loop.md, final-review.md, product-contract.md)",
+      "scope": "All wave8 and wave10 Agent Relay workflows in this repo"
+    },
+    {
+      "pattern": "80-to-100 fix loop step terminates with a sentinel string (e.g. FIX LOOP COMPLETE, READINESS_COPY_FIX_LOOP_COMPLETE, LOCAL_OUTCOME_LOOP_FIX_COMPLETE, PRODUCT_CONTRACT_DECIDED)",
+      "rationale": "Allows verification-based completion to deterministically detect that the loop reached a passing rerun rather than just exiting",
+      "scope": "Every wave8/wave10 workflow that uses a 80-to-100 implementation or contract step"
+    },
+    {
+      "pattern": "Embed GitHub issue context as issue-N.md inside the workflow rather than calling gh at runtime",
+      "rationale": "Cloud sandboxes lack authenticated gh; embedding makes runs self-contained and reproducible",
+      "scope": "All wave8 prepare-context steps; should propagate to wave10 and beyond"
+    },
+    {
+      "pattern": "External-repo CLI smoke must invoke the linked CLI from inside a temp caller repo",
+      "rationale": "npm start from the Ricky repo overwrites INIT_CWD, so artifacts can land in the monorepo and falsely pass; raw npx agent-relay can hit registry parsing for node:sqlite",
+      "scope": "Wave8 issue #6 smoke and any future external-repo-invocation proofs"
+    },
+    {
+      "pattern": "Cloud feature flags ride through API → worker payload → launcher env, consumed by @agent-relay/sdk",
+      "rationale": "SDK already implements the behavior (resume/start-from); duplicating it in Cloud creates drift",
+      "scope": "Cloud run plumbing for SDK-controlled flags (RESUME_RUN_ID, START_FROM, PREVIOUS_RUN_ID, and analogous future flags)"
+    }
+  ],
+  "lessons": [
+    {
+      "lesson": "npm start clobbers INIT_CWD, so it cannot stand in for an external caller",
+      "context": "Wave8 issue #6 cloud smoke initially failed because the deterministic check used npm start from the Ricky repo, which let artifacts land back in the monorepo",
+      "recommendation": "For external-repo proofs, always invoke the linked CLI binary directly from the caller repo's cwd; never rely on INIT_CWD when npm wraps the command"
+    },
+    {
+      "lesson": "Open-ended doc-writing steps in long workflows stall and get SIGKILLed",
+      "context": "Wave9 doc workflows were killed; wave10 was authored explicitly to avoid the pattern",
+      "recommendation": "Bound every step with grep/file gates, sentinels, and test-fix-rerun loops; never let a step write prose without a deterministic completion signal"
+    },
+    {
+      "lesson": "Deterministic file gates must account for untracked files when the artifact is created in-step",
+      "context": "Two separate fix sessions (skill-boundary and onboarding-readiness) hit the same root cause: git diff --name-only omitted newly created artifacts",
+      "recommendation": "Codify the tracked + untracked combo as the default gate snippet so future workflow authors don't rediscover this"
+    },
+    {
+      "lesson": "gh CLI is unreliable in cloud sandboxes",
+      "context": "Multiple wave8 workflows initially used gh issue view in prepare-context and failed before reaching any work",
+      "recommendation": "Treat gh as optional in workflow steps; embed required context as in-repo artifacts and only use gh as a best-effort augmentation"
+    },
+    {
+      "lesson": "Reuse SDK env-var contracts instead of reimplementing flags in Cloud",
+      "context": "Cloud start-from/resume support landed by piping CLI flags to RESUME_RUN_ID/START_FROM/PREVIOUS_RUN_ID env vars rather than building parallel logic",
+      "recommendation": "When adding a Cloud-facing flag whose behavior already exists in @agent-relay/sdk, prefer env passthrough; document the env contract so future flags follow suit"
+    }
+  ],
+  "openQuestions": [
+    "Web typecheck remains blocked by unrelated @relayfile/adapter-github export errors discovered during cloud start-from work — needs a separate fix.",
+    "The Relay dry-run for the wave8 issue-bundle workflows was blocked by a missing local agent-relay CLI and a hanging npx install; need a reliable local agent-relay invocation path before cloud-only validation becomes the norm.",
+    "Wave10 workflows assert @agent-assistant/turn-context adapter adoption on a live Ricky path, but adoption status across other consumers (and whether the boundary doc from wave10 matches actual call sites) is not yet verified.",
+    "Issue #5 acceptance proves generation-time skill loading without overclaiming runtime skill embodiment — the deeper runtime embodiment question is intentionally deferred and should be tracked explicitly."
+  ]
+}

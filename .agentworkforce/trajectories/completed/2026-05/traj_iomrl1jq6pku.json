@@ -1,0 +1,136 @@
+{
+  "id": "traj_iomrl1jq6pku",
+  "version": 1,
+  "task": {
+    "title": "ricky-spec-ricky-linear-integration-mention-to-cloud-w-workflow",
+    "description": "Repair and validate the Ricky Linear integration workflow artifact end-to-end with deterministic evidence and signoff.",
+    "source": {
+      "system": "workflow-runner",
+      "id": "01127cfe8521be7fbd8529c9"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-05-06T21:09:20.136Z",
+  "completedAt": "2026-05-06T21:36:53.477Z",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "role": "workflow-runner",
+      "joinedAt": "2026-05-06T21:09:20.137Z"
+    },
+    {
+      "name": "lead-claude",
+      "role": "specialist",
+      "joinedAt": "2026-05-06T21:09:23.905Z"
+    },
+    {
+      "name": "impl-primary-codex",
+      "role": "specialist",
+      "joinedAt": "2026-05-06T21:11:40.719Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_q4dyrsh6f9id",
+      "title": "Planning",
+      "agentName": "orchestrator",
+      "startedAt": "2026-05-06T21:09:20.137Z",
+      "endedAt": "2026-05-06T21:09:23.907Z",
+      "events": [
+        {
+          "ts": 1778101760137,
+          "type": "note",
+          "content": "Purpose: Repair and validate the Ricky Linear integration workflow artifact end-to-end with deterministic evidence and signoff."
+        },
+        {
+          "ts": 1778101760137,
+          "type": "note",
+          "content": "Approach: 22-step pipeline workflow — Parsed 22 steps, 21 dependent steps, DAG validated, no cycles"
+        }
+      ]
+    },
+    {
+      "id": "chap_fm8llqhhvxgq",
+      "title": "Execution: lead-plan",
+      "agentName": "lead-claude",
+      "startedAt": "2026-05-06T21:09:23.907Z",
+      "endedAt": "2026-05-06T21:11:40.720Z",
+      "events": [
+        {
+          "ts": 1778101763907,
+          "type": "note",
+          "content": "\"lead-plan\": Read .workflow-artifacts/generated/spec-ricky-linear-integration-mention-to-cloud-w/normalized-spec.txt and create .work",
+          "raw": {
+            "agent": "lead-claude"
+          }
+        },
+        {
+          "ts": 1778101900548,
+          "type": "completion-evidence",
+          "content": "\"lead-plan\" verification-based completion — Verification passed (2 signal(s), 1 file change(s), exit=0; signals=0, GENERATION_LEAD_PLAN_READY; files=modified:.workflow-artifacts/generated/spec-ricky-linear-integration-mention-to-cloud-w/lead-plan.md; exit=0)",
+          "raw": {
+            "stepName": "lead-plan",
+            "completionMode": "verification",
+            "reason": "Verification passed",
+            "evidence": {
+              "summary": "2 signal(s), 1 file change(s), exit=0",
+              "signals": [
+                "0",
+                "GENERATION_LEAD_PLAN_READY"
+              ],
+              "files": [
+                "modified:.workflow-artifacts/generated/spec-ricky-linear-integration-mention-to-cloud-w/lead-plan.md"
+              ],
+              "exitCode": 0
+            }
+          },
+          "significance": "medium"
+        },
+        {
+          "ts": 1778101900548,
+          "type": "finding",
+          "content": "\"lead-plan\" completed → File ends with `GENERATION_LEAD_PLAN_READY` as required.",
+          "significance": "medium"
+        }
+      ]
+    },
+    {
+      "id": "chap_53p9f4cn4n2w",
+      "title": "Execution: implement-artifact",
+      "agentName": "impl-primary-codex",
+      "startedAt": "2026-05-06T21:11:40.720Z",
+      "endedAt": "2026-05-06T21:36:53.477Z",
+      "events": [
+        {
+          "ts": 1778101900720,
+          "type": "note",
+          "content": "\"implement-artifact\": Implement the required Linear integration artifacts in this repository based on the normalized spec and lead plan",
+          "raw": {
+            "agent": "impl-primary-codex"
+          }
+        },
+        {
+          "ts": 1778102011074,
+          "type": "decision",
+          "content": "Implement Linear OSS surface as pure modules with injected Cloud dependencies: Implement Linear OSS surface as pure modules with injected Cloud dependencies",
+          "raw": {
+            "question": "Implement Linear OSS surface as pure modules with injected Cloud dependencies",
+            "chosen": "Implement Linear OSS surface as pure modules with injected Cloud dependencies",
+            "alternatives": [],
+            "reasoning": "The lead plan assigns HTTP ingress, DB dedup, OAuth, and workflow execution side effects to Cloud; Ricky should expose reusable types, workflow generation, readiness formatting, and an injectable orchestrator."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Generated replacement TypeScript Agent Relay workflow artifact with deterministic context, skill-boundary evidence, typecheck/test gates, review-fix-final-review loop, hard validation, regression proof, and GitHub PR shipping path.",
+    "approach": "Standard approach",
+    "confidence": 0.86
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": []
+}

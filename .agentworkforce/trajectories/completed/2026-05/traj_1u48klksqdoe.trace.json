@@ -1,0 +1,162 @@
+{
+  "version": "1.0.0",
+  "id": "16ef5e6a-8eef-4059-918b-967044b1bcdc",
+  "timestamp": "2026-05-12T09:53:54.263Z",
+  "trajectory": "traj_1u48klksqdoe",
+  "files": [
+    {
+      "path": ".github/workflows/pre-merge.yml",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 1,
+              "end_line": 35,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "README.md",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 155,
+              "end_line": 161,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            },
+            {
+              "start_line": 165,
+              "end_line": 171,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "package.json",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 42,
+              "end_line": 48,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/local/auto-fix-loop.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 868,
+              "end_line": 873,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            },
+            {
+              "start_line": 954,
+              "end_line": 959,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/local/auto-fix-loop.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 98,
+              "end_line": 103,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            },
+            {
+              "start_line": 354,
+              "end_line": 359,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            },
+            {
+              "start_line": 370,
+              "end_line": 376,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            },
+            {
+              "start_line": 393,
+              "end_line": 398,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            },
+            {
+              "start_line": 459,
+              "end_line": 464,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "test/package-proof/package-layout-proof.test.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 72,
+              "end_line": 81,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "test/package-proof/package-layout-proof.ts",
+      "conversations": [
+        {
+          "contributor": {
+            "type": "ai"
+          },
+          "ranges": [
+            {
+              "start_line": 93,
+              "end_line": 99,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            },
+            {
+              "start_line": 412,
+              "end_line": 448,
+              "revision": "aa2c3c394e24e88454b945c73d3132b683711e74"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "traj_0cr4uk0kvh9g",
+  "version": 1,
+  "task": {
+    "title": "Honor guided workflow names in Ricky local generated artifacts"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T15:06:16.876Z",
+  "completedAt": "2026-05-01T15:12:28.741Z",
+  "agents": [],
+  "chapters": [],
+  "retrospective": {
+    "summary": "Fixed Ricky generated workflow names so guided workflow names and local --name become the artifact path and rendered workflow identity. Verified repo-tidying now outputs workflows/generated/repo-tidying.ts with workflow id ricky-repo-tidying.",
+    "approach": "Standard approach",
+    "confidence": 0.9
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "cf43908852e6f30805ff956b7ef6e78cad525a31",
+    "endRef": "cf43908852e6f30805ff956b7ef6e78cad525a31"
+  }
+}

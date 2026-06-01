@@ -1,0 +1,146 @@
+{
+  "id": "traj_22ccacb1vscp",
+  "version": 1,
+  "task": {
+    "title": "ricky-wave8-tighten-onboarding-readiness-copy-and-checklist-workflow",
+    "description": "Resolve GitHub issues #4 and #7 by making onboarding/readiness messaging truthful and adding a cofounder-facing interactive readiness checklist.",
+    "source": {
+      "system": "workflow-runner",
+      "id": "62a09c127589cda489553592"
+    }
+  },
+  "status": "completed",
+  "startedAt": "2026-04-27T21:00:19.386Z",
+  "completedAt": "2026-04-27T21:12:00.761Z",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "role": "workflow-runner",
+      "joinedAt": "2026-04-27T21:00:19.387Z"
+    },
+    {
+      "name": "writer-claude",
+      "role": "specialist",
+      "joinedAt": "2026-04-27T21:00:22.180Z"
+    },
+    {
+      "name": "test-codex",
+      "role": "specialist",
+      "joinedAt": "2026-04-27T21:09:05.015Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_4kr6h2lmkd09",
+      "title": "Planning",
+      "agentName": "orchestrator",
+      "startedAt": "2026-04-27T21:00:19.387Z",
+      "endedAt": "2026-04-27T21:00:22.185Z",
+      "events": [
+        {
+          "ts": 1777323619387,
+          "type": "note",
+          "content": "Purpose: Resolve GitHub issues #4 and #7 by making onboarding/readiness messaging truthful and adding a cofounder-facing interactive readiness checklist."
+        },
+        {
+          "ts": 1777323619387,
+          "type": "note",
+          "content": "Approach: 10-step dag workflow — Parsed 10 steps, 9 dependent steps, DAG validated, no cycles"
+        }
+      ]
+    },
+    {
+      "id": "chap_fjkonbrs3vsn",
+      "title": "Execution: tighten-copy-and-checklist",
+      "agentName": "writer-claude",
+      "startedAt": "2026-04-27T21:00:22.185Z",
+      "endedAt": "2026-04-27T21:09:05.016Z",
+      "events": [
+        {
+          "ts": 1777323622185,
+          "type": "note",
+          "content": "\"tighten-copy-and-checklist\": Resolve GitHub issues #4 and #7",
+          "raw": {
+            "agent": "writer-claude"
+          }
+        },
+        {
+          "ts": 1777324145010,
+          "type": "completion-evidence",
+          "content": "\"tighten-copy-and-checklist\" verification-based completion — Verification passed (4 signal(s), 1 relevant channel post(s), 6 file change(s), exit=0; signals=0, ## Summary, docs/product/ricky-cofounder-interactive-readiness-checklist.md, **[tighten-copy-and-checklist] Output:**; channel=**[tighten-copy-and-checklist] Output:**\n```\n-generated artifacts.\n  - `renderRecoveryGuidance()` — concrete handoff retry forms, classified blocker code list (; files=created:.workflow-artifacts/ricky-local-runs/003343f7-c903-493c-a6ae-b701b4fac016/stderr.log, created:.workflow-artifacts/ricky-local-runs/003343f7-c903-493c-a6ae-b701b4fac016/stdout.log, created:.workflow-artifacts/ricky-local-runs/01195952-675d-460b-a259-65774ba6e12c/stderr.log, created:.workflow-artifacts/ricky-local-runs/01195952-675d-460b-a259-65774ba6e12c/stdout.log, created:.workflow-artifacts/ricky-local-runs/01748e0b-e74a-45e2-996d-ce2efff022dc/stderr.log, created:.workflow-artifacts/ricky-local-runs/01748e0b-e74a-45e2-996d-ce2efff022dc/stdout.log; exit=0)",
+          "raw": {
+            "stepName": "tighten-copy-and-checklist",
+            "completionMode": "verification",
+            "reason": "Verification passed",
+            "evidence": {
+              "summary": "4 signal(s), 1 relevant channel post(s), 6 file change(s), exit=0",
+              "signals": [
+                "0",
+                "## Summary",
+                "docs/product/ricky-cofounder-interactive-readiness-checklist.md",
+                "**[tighten-copy-and-checklist] Output:**"
+              ],
+              "channelPosts": [
+                "**[tighten-copy-and-checklist] Output:**\n```\n-generated artifacts.\n  - `renderRecoveryGuidance()` — concrete handoff retry forms, classified blocker code list ("
+              ],
+              "files": [
+                "created:.workflow-artifacts/ricky-local-runs/003343f7-c903-493c-a6ae-b701b4fac016/stderr.log",
+                "created:.workflow-artifacts/ricky-local-runs/003343f7-c903-493c-a6ae-b701b4fac016/stdout.log",
+                "created:.workflow-artifacts/ricky-local-runs/01195952-675d-460b-a259-65774ba6e12c/stderr.log",
+                "created:.workflow-artifacts/ricky-local-runs/01195952-675d-460b-a259-65774ba6e12c/stdout.log",
+                "created:.workflow-artifacts/ricky-local-runs/01748e0b-e74a-45e2-996d-ce2efff022dc/stderr.log",
+                "created:.workflow-artifacts/ricky-local-runs/01748e0b-e74a-45e2-996d-ce2efff022dc/stdout.log"
+              ],
+              "exitCode": 0
+            }
+          },
+          "significance": "medium"
+        },
+        {
+          "ts": 1777324145010,
+          "type": "finding",
+          "content": "\"tighten-copy-and-checklist\" completed → All 535 tests across 24 files pass.",
+          "significance": "medium"
+        }
+      ]
+    },
+    {
+      "id": "chap_f4af4qnmzixh",
+      "title": "Execution: add-copy-tests",
+      "agentName": "test-codex",
+      "startedAt": "2026-04-27T21:09:05.016Z",
+      "endedAt": "2026-04-27T21:12:00.761Z",
+      "events": [
+        {
+          "ts": 1777324145016,
+          "type": "note",
+          "content": "\"add-copy-tests\": Add or update deterministic tests for issues #4 and #7",
+          "raw": {
+            "agent": "test-codex"
+          }
+        },
+        {
+          "ts": 1777324209874,
+          "type": "decision",
+          "content": "Add deterministic regression assertions for issues #4 and #7: Add deterministic regression assertions for issues #4 and #7",
+          "raw": {
+            "question": "Add deterministic regression assertions for issues #4 and #7",
+            "chosen": "Add deterministic regression assertions for issues #4 and #7",
+            "alternatives": [],
+            "reasoning": "Existing coverage was adjacent, but the requested contracts should be asserted directly: artifact-only copy, supported recovery inputs, local output separation, and checklist readiness areas."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Added deterministic CLI/onboarding tests for issues #4 and #7 covering artifact-only copy, generation-versus-execution output, supported recovery inputs, and cofounder checklist readiness areas. Verified with the @ricky/cli Vitest suite for the targeted files.",
+    "approach": "Standard approach",
+    "confidence": 0.92
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": []
+}

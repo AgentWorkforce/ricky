@@ -1,0 +1,53 @@
+{
+  "id": "traj_z4raobkwuun4",
+  "version": 1,
+  "task": {
+    "title": "Fix Ricky SDK workflow failure detection for auto-fix"
+  },
+  "status": "completed",
+  "startedAt": "2026-05-01T17:07:17.640Z",
+  "completedAt": "2026-05-01T17:11:48.888Z",
+  "agents": [
+    {
+      "name": "default",
+      "role": "lead",
+      "joinedAt": "2026-05-01T17:11:45.238Z"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "chap_ud2u40i9d9uh",
+      "title": "Work",
+      "agentName": "default",
+      "startedAt": "2026-05-01T17:11:45.238Z",
+      "endedAt": "2026-05-01T17:11:48.888Z",
+      "events": [
+        {
+          "ts": 1777655505239,
+          "type": "decision",
+          "content": "Treat zero-exit workflow failure output as a Ricky runtime blocker: Treat zero-exit workflow failure output as a Ricky runtime blocker",
+          "raw": {
+            "question": "Treat zero-exit workflow failure output as a Ricky runtime blocker",
+            "chosen": "Treat zero-exit workflow failure output as a Ricky runtime blocker",
+            "alternatives": [],
+            "reasoning": "Relay script runners can complete with process exit 0 while the workflow engine reports [workflow] FAILED; Ricky must convert that signal into a failed local execution so auto-fix/resume can engage."
+          },
+          "significance": "high"
+        }
+      ]
+    }
+  ],
+  "retrospective": {
+    "summary": "Fixed Ricky's SDK workflow coordinator to detect workflow-level failure signals even when the underlying runner exits zero, classify them as workflow blockers, and added regression coverage for text and structured failure results.",
+    "approach": "Standard approach",
+    "confidence": 0.88
+  },
+  "commits": [],
+  "filesChanged": [],
+  "projectId": "/Users/khaliqgant/Projects/AgentWorkforce/ricky",
+  "tags": [],
+  "_trace": {
+    "startRef": "bed64d7f2804e2a4a10e05d3fefbf3ec268d901f",
+    "endRef": "bed64d7f2804e2a4a10e05d3fefbf3ec268d901f"
+  }
+}
