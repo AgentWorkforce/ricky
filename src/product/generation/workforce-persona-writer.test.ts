@@ -2089,11 +2089,144 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
       'async function main() {',
       '  await workflow("real")',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
     ].join('\n');
+    expect(detectSpecIntentMismatch(spec, realWorkflow)).toEqual([]);
+  });
+
+  it('flags malformed createGitHubStep calls before workflow startup (#144)', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const malformedWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("bad-github-step")',
+      '    .step("push-branch", { type: "deterministic", command: "git push" })',
+      '    .step("open-pr", createGitHubStep({',
+      '      dependsOn: ["push-branch"],',
+      '      id: "open-pr",',
+      '      owner: "AgentWorkforce",',
+      '      repo: "ricky",',
+      '      command: ["gh pr create --title x"],',
+      '    }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, malformedWorkflow);
+
+    expect(mismatches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('INVALID_GITHUB_STEP'),
+        expect.stringContaining('requires a non-empty name field'),
+        expect.stringContaining('requires a non-empty action field'),
+        expect.stringContaining('must not include command'),
+        expect.stringContaining('must not include id'),
+        expect.stringContaining('must not include separate owner/repo fields'),
+      ]),
+    );
+  });
+
+  it('flags unsupported literal GitHub primitive actions', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const malformedWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/sdk";',
+      'async function main() {',
+      '  await workflow("bad-action")',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPullRequest" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, malformedWorkflow);
+
+    expect(mismatches.some((m) => m.includes('INVALID_GITHUB_STEP') && m.includes('unsupported action "createPullRequest"'))).toBe(true);
+  });
+
+  it('flags action inputs placed at the top level of createGitHubStep config', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const malformedWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("bad-top-level-param")',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", branch: "feat/foo" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, malformedWorkflow);
+
+    expect(mismatches.some((m) => m.includes('INVALID_GITHUB_STEP') && m.includes('must put action input "branch" under params'))).toBe(true);
+  });
+
+  it('flags statically invalid GitHub primitive repo and params fields', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const malformedWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/github-primitive";',
+      'async function main() {',
+      '  await workflow("bad-repo-and-params")',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", repo: "ricky", params: "branch=feat/foo" }))',
+      '    .run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    const mismatches = detectSpecIntentMismatch(spec, malformedWorkflow);
+
+    expect(mismatches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('repo must be in owner/repo format'),
+        expect.stringContaining('params must be a statically analyzable object'),
+      ]),
+    );
+  });
+
+  it('accepts createGitHubStep imported from the SDK root when name and action are valid', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const realWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { createGitHubStep } from "@agent-relay/sdk";',
+      'async function main() {',
+      '  await workflow("real-sdk-root").step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" })).run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
+    expect(detectSpecIntentMismatch(spec, realWorkflow)).toEqual([]);
+  });
+
+  it('accepts the SDK root github namespace import when name and action are valid', () => {
+    const spec = {
+      description: 'Outcome: **one pull request in `cloud` opened against `origin/main`.**',
+    };
+    const realWorkflow = [
+      'import { workflow } from "@agent-relay/sdk/workflows";',
+      'import { github } from "@agent-relay/sdk";',
+      'async function main() {',
+      '  await workflow("real-sdk-namespace").step("open-pr", github.createGitHubStep({ name: "open-pr", action: "createPR" })).run({ cwd: process.cwd() });',
+      '}',
+      'main().catch((e) => { console.error(e); process.exitCode = 1; });',
+    ].join('\n');
+
     expect(detectSpecIntentMismatch(spec, realWorkflow)).toEqual([]);
   });
 
@@ -2105,7 +2238,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       'import { workflow } from "@agent-relay/sdk/workflows";',
       'import { createGitHubStep } from "@agent-relay/sdk/github";',
       'async function main() {',
-      '  await workflow("real").step("open-pr", createGitHubStep({ action: "openPullRequest" })).run({ cwd: process.cwd() });',
+      '  await workflow("real").step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" })).run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
     ].join('\n');
@@ -2121,7 +2254,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       'import { createGitHubStep } from "@agent-relay/github-primitive";',
       'async function main() {',
       '  await workflow("tiny")',
-      '    .step("only-step", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("only-step", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2138,7 +2271,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       'import { workflow } from "@agent-relay/sdk/workflows";',
       'import { createGitHubStep } from "@agent-relay/github-primitive";',
       'async function main() {',
-      '  await workflow("tiny-spec").step("open-pr", createGitHubStep({ action: "openPullRequest" })).run({ cwd: process.cwd() });',
+      '  await workflow("tiny-spec").step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" })).run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
     ].join('\n');
@@ -2163,7 +2296,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       'import { workflow } from "@agent-relay/sdk/workflows";',
       'import { createGitHubStep } from "@agent-relay/github-primitive";',
       'async function main() {',
-      '  await workflow("tiny-structured-spec").step("open-pr", createGitHubStep({ action: "openPullRequest" })).run({ cwd: process.cwd() });',
+      '  await workflow("tiny-structured-spec").step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" })).run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
     ].join('\n');
@@ -2322,7 +2455,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       'async function main() {',
       '  await workflow("missing-worktree")',
       '    .step("implement", { type: "deterministic", command: "npm test" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2357,7 +2490,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '      command: `# git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming\\ncat <<\\\'EOF\\\' > /tmp/note\\ngit worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming\\nEOF`,',
       '    })',
       '    .step("implement", { type: "deterministic", command: "npm test" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2392,7 +2525,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '  await workflow("with-worktree")',
       '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
       '    .step("implement", { type: "deterministic", command: "git -C /private/tmp/cloud-relay-slack-bridge-outbound-streaming status --short" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2416,7 +2549,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '  await workflow("late-worktree")',
       '    .step("implement", { type: "deterministic", command: "git -C /private/tmp/cloud-relay-slack-bridge-outbound-streaming status --short" })',
       '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2442,7 +2575,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '  await workflow("generic-worktree-use")',
       '    .step("inspect", { type: "deterministic", command: "git -C /private/tmp/cloud-relay-slack-bridge-outbound-streaming status --short" })',
       '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2468,7 +2601,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '  await workflow("wrong-worktree")',
       '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/other-worktree feat/other-branch" })',
       '    .step("implement", { type: "deterministic", command: "git -C /private/tmp/cloud-relay-slack-bridge-outbound-streaming status --short && echo feat/relay-slack-bridge-outbound-streaming" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2498,7 +2631,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '  await workflow("extensionless-file-gates")',
       '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
       '    .step("file-gates", { type: "deterministic", command: "test -f packages/web/Dockerfile && test -f services/api/Makefile && test -f README" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2522,7 +2655,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '  await workflow("extensionless-executable-file-gates")',
       '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
       '    .step("file-gates", { type: "deterministic", command: "test -f packages/cli/bin/ricky && test -f tools/scripts/provision" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2546,7 +2679,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '  await workflow("with-worktree")',
       '    .step("setup-worktree", { type: "deterministic", command: "git worktree add /private/tmp/cloud-relay-slack-bridge-outbound-streaming feat/relay-slack-bridge-outbound-streaming" })',
       '    .step("implement", { type: "deterministic", command: "git -C /private/tmp/cloud-relay-slack-bridge-outbound-streaming status --short && test -d /private/tmp/cloud-relay-slack-bridge-outbound-streaming" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2580,7 +2713,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '      ].join("\\n"),',
       '    })',
       '    .step("implement", { type: "deterministic", command: `git -C ${WORKTREE} status --short` })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2612,7 +2745,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '      ].join("\\n"),',
       '    })',
       '    .step("implement", { type: "deterministic", command: `git -C ${WORKTREE} status --short` })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2638,7 +2771,7 @@ describe('detectSpecIntentMismatch (writer first-emit guard)', () => {
       '    .step("bad-directory-gate", { type: "deterministic", command: "test -f /private/tmp/cloud-relay-slack-bridge-outbound-streaming" })',
       '    .step("bad-glob-gate", { type: "deterministic", command: "test -f packages/web/app/api/v1/slack/*" })',
       '    .step("bad-api-directory-gate", { type: "deterministic", command: "test -f packages/web/app/api/v1/slack" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({ cwd: process.cwd() });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2661,7 +2794,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'async function main() {',
       '  await workflow("mixed")',
       '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor: githubStepExecutor });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2672,7 +2805,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
     expect(result.stripped).toBe(true);
     expect(result.content).toContain('.run({ cwd: process.cwd() });');
     expect(result.content).not.toContain('executor: githubStepExecutor');
-    expect(result.content).toContain('createGitHubStep({ action: "openPullRequest"');
+    expect(result.content).toContain('createGitHubStep({ name: "open-pr", action: "createPR"');
   });
 
   it('keeps a GitHub-only workflow run executor intact', () => {
@@ -2682,7 +2815,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'const githubStepExecutor = new GitHubStepExecutor();',
       'async function main() {',
       '  await workflow("github-only")',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor: githubStepExecutor });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2699,7 +2832,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'import { workflow } from "@agent-relay/sdk/workflows";',
       'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
       'const githubStepExecutor = new GitHubStepExecutor();',
-      'const openPrStep = createGitHubStep({ action: "openPullRequest", branch: "feat/foo" });',
+      'const openPrStep = createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } });',
       'async function main() {',
       '  await workflow("github-only")',
       '    .step("open-pr", openPrStep)',
@@ -2722,7 +2855,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'async function main() {',
       '  await workflow("mixed")',
       '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2741,7 +2874,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'import { GitHubStepExecutor, createGitHubStep } from "@agent-relay/github-primitive";',
       'const githubStepExecutor = new GitHubStepExecutor();',
       'async function main() {',
-      '  const openPrStep = createGitHubStep({ action: "openPullRequest", branch: "feat/foo" });',
+      '  const openPrStep = createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } });',
       '  await workflow("github-only")',
       '    .step("open-pr", openPrStep)',
       '    .run({ cwd: process.cwd(), executor: githubStepExecutor });',
@@ -2767,7 +2900,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       '  const executor = new GitHubStepExecutor();',
       '  await workflow("mixed")',
       '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor });',
       '}',
       'async function unrelated() {',
@@ -2792,7 +2925,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'async function main() {',
       '  await workflow("lookalike")',
       '    .step("implement", { type: "agent", agent: "coder", prompt: "Edit files" })',
-      '    .step("not-github", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+      '    .step("not-github", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
       '    .run({ cwd: process.cwd(), executor });',
       '}',
       'main().catch((e) => { console.error(e); process.exitCode = 1; });',
@@ -2810,7 +2943,7 @@ describe('stripGlobalGithubExecutorForMixedWorkflow', () => {
       'async function main() {',
       '  await workflow("mixed")',
       '    .step("implement", { type: "deterministic", command: "true" })',
-      '    .step("open-pr", createGitHubStep({ action: "openPullRequest" }))',
+      '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR" }))',
       '    .run({',
       '      cwd: process.cwd(),',
       '      executor: new GitHubStepExecutor(),',

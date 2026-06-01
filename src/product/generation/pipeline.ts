@@ -684,7 +684,9 @@ function validateWorkforcePersonaArtifact(
   const specIntentIssues = detectSpecIntentMismatch(spec, artifact.content).map((mismatch) =>
     blockingIssue(
       'validation',
-      'WORKFORCE_PERSONA_SPEC_INTENT_MISMATCH',
+      mismatch.startsWith('INVALID_GITHUB_STEP')
+        ? 'INVALID_GITHUB_STEP'
+        : 'WORKFORCE_PERSONA_SPEC_INTENT_MISMATCH',
       `Workforce persona writer output does not satisfy spec-declared intent: ${mismatch}.`,
     ),
   );

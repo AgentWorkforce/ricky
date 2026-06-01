@@ -395,7 +395,7 @@ function workflowWithGithubShipping(stepCount: number = 8): string {
     '    .pattern("dag")',
     '    .channel("wf-ricky-ship")',
     steps,
-    '    .step("open-pr", createGitHubStep({ action: "openPullRequest", branch: "feat/foo" }))',
+    '    .step("open-pr", createGitHubStep({ name: "open-pr", action: "createPR", params: { head: "feat/foo", base: "main", title: "Ship fix" } }))',
     '    .step("verify", { type: "deterministic", command: "echo ok" })',
     '    .run({ cwd: process.cwd() });',
     '}',

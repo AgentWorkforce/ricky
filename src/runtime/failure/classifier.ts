@@ -57,6 +57,18 @@ const ENV_ERROR_PATTERNS: readonly RegExp[] = [
   /\benvironment\s+variable\b.*\bnot\s+set\b/i,
 ];
 
+const GITHUB_STEP_CONFIG_ERROR_PATTERNS: readonly RegExp[] = [
+  /\bGitHub step requires a non-empty name\b/i,
+  /\bGitHub step "[^"]*" requires an action(?: name)?\b/i,
+  /\bGitHub step "[^"]*" uses unsupported action\b/i,
+  /\bGitHub step "[^"]*" params must be an object\b/i,
+  /\bGitHub step params\.[^ ]+ must be (?:a JSON object|valid JSON)\b/i,
+  /\bGitHub step repo must be in owner\/repo format\b/i,
+  /\bGitHub repo must be in owner\/repo format\b/i,
+  /\bGitHub repo object requires owner and repo\b/i,
+  /\bUnsupported GitHub action:/i,
+];
+
 // ── Step overflow threshold ──────────────────────────────────────────
 
 export const RETRY_OVERFLOW_THRESHOLD = 5;
@@ -110,6 +122,10 @@ function classifyFromOutcome(outcome: EvidenceOutcome): FailureClassification {
 
   if (detectOutcomeTimeout(outcome, signals)) {
     detected.push(FailureClass.Timeout);
+  }
+
+  if (detectOutcomeWorkflowInvalid(outcome, signals)) {
+    detected.push(FailureClass.WorkflowInvalid);
   }
 
   if (detectOutcomeEnvironmentError(outcome, signals)) {
@@ -183,27 +199,32 @@ function classifyWithFullEvidence(
     detected.push(FailureClass.Timeout);
   }
 
-  // 2. Environment error detection
+  // 2. Workflow artifact/configuration errors
+  if (detectWorkflowInvalid(summary, evidence, signals)) {
+    detected.push(FailureClass.WorkflowInvalid);
+  }
+
+  // 3. Environment error detection
   if (detectEnvironmentError(summary, evidence, signals)) {
     detected.push(FailureClass.EnvironmentError);
   }
 
-  // 3. Deadlock detection
+  // 4. Deadlock detection
   if (detectDeadlock(summary, signals)) {
     detected.push(FailureClass.Deadlock);
   }
 
-  // 4. Step overflow detection
+  // 5. Step overflow detection
   if (detectStepOverflow(summary, evidence, signals)) {
     detected.push(FailureClass.StepOverflow);
   }
 
-  // 5. Agent drift detection
+  // 6. Agent drift detection
   if (detectAgentDrift(evidence, signals)) {
     detected.push(FailureClass.AgentDrift);
   }
 
-  // 6. Verification failure detection
+  // 7. Verification failure detection
   if (detectVerificationFailure(summary, evidence, signals)) {
     detected.push(FailureClass.VerificationFailure);
   }
@@ -241,6 +262,16 @@ function classifyFromSummaryOnly(summary: EvidenceSummary): FailureClassificatio
       strength: Confidence.High,
     });
     detected.push(FailureClass.Timeout);
+  }
+
+  // Workflow artifact/configuration errors from summary-only evidence
+  if (summary.firstError && matchesWorkflowInvalidPattern(summary.firstError)) {
+    signals.push({
+      observation: `First error matches workflow-invalid pattern: ${truncate(summary.firstError, 120)}`,
+      source: 'run-summary',
+      strength: Confidence.High,
+    });
+    detected.push(FailureClass.WorkflowInvalid);
   }
 
   // Environment errors from summary-only evidence
@@ -331,6 +362,11 @@ function classifyFromPlainSummary(summaryText: PlainValidationSummary): FailureC
   if (matchesEnvironmentPattern(text) || /\b(missing env|MISSING_ENV_VAR|module not found|dependency missing)\b/i.test(text)) {
     signals.push(plainSignal(`Plain summary indicates environment error: ${truncate(text, 120)}`, Confidence.High));
     detected.push(FailureClass.EnvironmentError);
+  }
+
+  if (matchesWorkflowInvalidPattern(text)) {
+    signals.push(plainSignal(`Plain summary indicates workflow artifact configuration error: ${truncate(text, 120)}`, Confidence.High));
+    detected.push(FailureClass.WorkflowInvalid);
   }
 
   if (/\b(deadlock|stuck|no progress|no terminal progress|pending forever|running forever)\b/i.test(text)) {
@@ -461,6 +497,63 @@ function detectEnvironmentError(
   if (!found && summary.firstError && matchesEnvironmentPattern(summary.firstError)) {
     signals.push({
       observation: `Summary first error matches environment pattern: ${truncate(summary.firstError, 120)}`,
+      source: 'run-summary',
+      strength: Confidence.High,
+    });
+    found = true;
+  }
+
+  return found;
+}
+
+function detectWorkflowInvalid(
+  summary: EvidenceSummary,
+  evidence: WorkflowRunEvidence,
+  signals: EvidenceSignal[],
+): boolean {
+  let found = false;
+
+  for (const step of evidence.steps) {
+    if (step.error && matchesWorkflowInvalidPattern(step.error)) {
+      signals.push({
+        observation: `Step "${step.stepName}" error matches workflow-invalid pattern: ${truncate(step.error, 120)}`,
+        source: `step:${step.stepId}`,
+        strength: Confidence.High,
+      });
+      found = true;
+    }
+
+    for (const log of step.logs) {
+      if (log.excerpt && matchesWorkflowInvalidPattern(log.excerpt)) {
+        signals.push({
+          observation: `Step "${step.stepName}" log excerpt matches workflow-invalid pattern: ${truncate(log.excerpt, 120)}`,
+          source: `step:${step.stepId}/log`,
+          strength: Confidence.High,
+        });
+        found = true;
+      }
+    }
+  }
+
+  for (const log of evidence.logs) {
+    if (log.excerpt && matchesWorkflowInvalidPattern(log.excerpt)) {
+      signals.push({
+        observation: `Run log excerpt matches workflow-invalid pattern: ${truncate(log.excerpt, 120)}`,
+        source: 'run-level/log',
+        strength: Confidence.High,
+      });
+      found = true;
+    }
+  }
+
+  found = scanGatesForWorkflowInvalid(evidence.deterministicGates, 'run-level', signals) || found;
+  for (const step of evidence.steps) {
+    found = scanGatesForWorkflowInvalid(step.deterministicGates, `step:${step.stepId}`, signals) || found;
+  }
+
+  if (!found && summary.firstError && matchesWorkflowInvalidPattern(summary.firstError)) {
+    signals.push({
+      observation: `Summary first error matches workflow-invalid pattern: ${truncate(summary.firstError, 120)}`,
       source: 'run-summary',
       strength: Confidence.High,
     });
@@ -683,6 +776,24 @@ function detectOutcomeEnvironmentError(outcome: EvidenceOutcome, signals: Eviden
   return found;
 }
 
+function detectOutcomeWorkflowInvalid(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
+  let found = false;
+  const texts = [
+    outcome.failureMessage,
+    ...outcome.commands.flatMap((command) => textFields(command.command, command.stdoutExcerpt, command.stderrExcerpt, command.outputExcerpt)),
+    ...outcome.outputSnippets.map((snippet) => snippet.text),
+    ...outcome.deterministicGates.flatMap((gate) => gate.outputSnippets.map((snippet) => snippet.text)),
+  ].filter((value): value is string => Boolean(value));
+  for (const text of texts) {
+    if (matchesWorkflowInvalidPattern(text)) {
+      signals.push({ observation: `Outcome text matches workflow-invalid pattern: ${truncate(text, 120)}`, source: 'run-level', strength: Confidence.High });
+      found = true;
+      break;
+    }
+  }
+  return found;
+}
+
 function detectOutcomeStepOverflow(outcome: EvidenceOutcome, signals: EvidenceSignal[]): boolean {
   let found = false;
   if (outcome.retryExhaustedStepIds.length >= RETRY_OVERFLOW_THRESHOLD) {
@@ -746,6 +857,10 @@ function isEvidenceSummary(input: WorkflowRunEvidence | EvidenceSummary): input 
 
 function matchesEnvironmentPattern(text: string): boolean {
   return ENV_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function matchesWorkflowInvalidPattern(text: string): boolean {
+  return GITHUB_STEP_CONFIG_ERROR_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function summaryForPlainText(text: string): EvidenceSummary {
@@ -836,6 +951,28 @@ function scanGatesForEnvErrors(
         `${sourcePrefix}/gate:${gate.gateName}`,
         signals,
       ) || found;
+    }
+  }
+  return found;
+}
+
+function scanGatesForWorkflowInvalid(
+  gates: DeterministicGateResult[],
+  sourcePrefix: string,
+  signals: EvidenceSignal[],
+): boolean {
+  let found = false;
+  for (const gate of gates) {
+    const texts = textFields(gate.stderrExcerpt, gate.stdoutExcerpt, gate.outputExcerpt);
+    for (const text of texts) {
+      if (matchesWorkflowInvalidPattern(text)) {
+        signals.push({
+          observation: `Gate "${gate.gateName}" output matches workflow-invalid pattern: ${truncate(text, 120)}`,
+          source: `${sourcePrefix}/gate:${gate.gateName}`,
+          strength: Confidence.High,
+        });
+        found = true;
+      }
     }
   }
   return found;
@@ -1059,6 +1196,13 @@ const CLASS_CONFIG: Record<FailureClass, ClassConfig> = {
     nextAction: NextAction.FixAndRetry,
     summarize: (s) =>
       `Run "${s.workflowName}" failed verification — ${s.failedSteps} steps failed deterministic checks`,
+  },
+
+  [FailureClass.WorkflowInvalid]: {
+    severity: () => Severity.High,
+    nextAction: NextAction.FixAndRetry,
+    summarize: (s) =>
+      `Run "${s.workflowName}" failed because the workflow artifact has an invalid startup configuration`,
   },
 
   [FailureClass.AgentDrift]: {
