@@ -608,7 +608,7 @@ export function applyCloudRepoSetup<T>(wf: T, opts: CloudRepoSetupOptions): T {
 - **Record residual risks**
 - Call out what was not covered
 - **Ship the result as a PR**
-- Open the pull request from the workflow itself with `createGitHubStep` from `@agent-relay/sdk` — **never** `gh pr create`, never `id:` inside the config, never `action: 'createPullRequest'`, never separate `owner`/`repo` fields
+- Open the pull request from the workflow itself with `createGitHubStep` from `@agent-relay/sdk` — **never** `gh pr create`, never omit `name`, never use `id:` inside the config, never use `command:` inside the config, never use `action: 'createPullRequest'`, never separate `owner`/`repo` fields
 - See [Shipping the Result — Open a PR via `createGitHubStep`](#shipping-the-result--open-a-pr-via-creategithubstep) below
 - A workflow that fixes a bug and stops short of the PR has only done half the loop
 - disposable sandbox / cloud workspace
@@ -640,14 +640,16 @@ async function runWorkflow() {
 
     // Branch off main on the remote.
     .step('create-branch', createGitHubStep({
+      name: 'create-branch',
       dependsOn: ['write-marker'],
       action: 'createBranch',
       repo: REPO,
-      params: { branch: BRANCH, source: 'main' },
+      params: { branch: BRANCH, fromBranch: 'main' },
     }))
 
     // Commit the change to the branch via Contents API.
     .step('commit-change', createGitHubStep({
+      name: 'commit-change',
       dependsOn: ['create-branch'],
       action: 'createFile',
       repo: REPO,
@@ -661,6 +663,7 @@ async function runWorkflow() {
 
     // Open the PR. This is the load-bearing step.
     .step('open-pr', createGitHubStep({
+      name: 'open-pr',
       dependsOn: ['commit-change'],
       action: 'createPR',
       repo: REPO,
@@ -682,6 +685,8 @@ runWorkflow().catch((error) => {
   process.exit(1);
 });
 ```
+
+`createGitHubStep` validates its config before the workflow starts. The config object must include a non-empty `name` field and a valid `action` such as `createPR`; the outer `.step('open-pr', ...)` name alone is not enough. Do not pass deterministic shell-step fields such as `command` to `createGitHubStep`.
 
 
 ### Key Concepts
@@ -1439,7 +1444,7 @@ When you set `.pattern('supervisor')` (or `hub-spoke`, `fan-out`), the runner au
 | Hardcoding all channels at spawn time | Use `agent.subscribe()` / `agent.unsubscribe()` for dynamic channel membership post-spawn |
 | Using `preset: 'worker'` for Codex in *interactive team* patterns when coordination is needed | Codex interactive mode works fine with PTY channel injection. Drop the preset for interactive team patterns (keep it for one-shot DAG workers where clean stdout matters) |
 | Treating the lead's informal review as final signoff | The lead may review during implementation, but final signoff still requires the selected review-depth fresh-eyes loop and final deterministic acceptance |
-| Not printing PR URL after `createGitHubStep({ action: 'createPR' })` | Capture `html_url` with `output: { mode: 'data', format: 'json', path: 'html_url' }` and echo or write it in a final deterministic step |
+| Not printing PR URL after `createGitHubStep({ name: 'open-pr', action: 'createPR' })` | Capture `html_url` with `output: { mode: 'data', format: 'json', path: 'html_url' }` and echo or write it in a final deterministic step |
 | Workflow ending without worktree + PR for cross-repo changes | Add `setup-worktree` at start and `push-and-pr` + `cleanup-worktree` at end |
 
 ### YAML Alternative

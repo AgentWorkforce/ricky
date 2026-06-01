@@ -109,6 +109,7 @@ export interface LocalGenerationStageResult {
 export type LocalBlockerCode =
   | 'MISSING_ENV_VAR'
   | 'MISSING_BINARY'
+  | 'INVALID_GITHUB_STEP'
   | 'INVALID_ARTIFACT'
   | 'UNSUPPORTED_RUNTIME'
   | 'RUNTIME_HANDOFF_STALLED'
@@ -2475,6 +2476,22 @@ function classifyCoordinatorBlocker(
     });
   }
 
+  if (matchesInvalidGithubStepConfig(combined)) {
+    return blocker({
+      code: 'INVALID_GITHUB_STEP',
+      category: 'workflow_invalid',
+      detectedDuring: 'launch',
+      message: `Workflow declares a malformed GitHub primitive step: ${signal}.`,
+      missing: ['createGitHubStep config with non-empty name and valid action'],
+      found: [`cwd=${result.cwd}`, `status=${result.status}`, `exitCode=${result.exitCode ?? 'unknown'}`],
+      steps: [
+        'Edit the workflow artifact so every createGitHubStep call uses name, action, repo, and params fields.',
+        'Do not pass deterministic shell-step fields such as command to createGitHubStep.',
+        command,
+      ],
+    });
+  }
+
   if (/Workflow runtime reported failure despite a zero process exit|\[workflow\]\s+FAILED:/i.test(combined)) {
     return blocker({
       code: 'INVALID_ARTIFACT',
@@ -2610,6 +2627,22 @@ function matchesRuntimeHandoffStall(text: string): boolean {
     /\b(?:broker|agent[-\s]?relay\s+broker).{0,80}\b(?:startup|start|ack|acknowledg(?:e|ement)).{0,80}\b(?:timeout|timed\s+out|stall(?:ed)?|hung)\b/i,
     /\b(?:timeout|timed\s+out).{0,80}\b(?:broker|agent[-\s]?relay\s+broker).{0,80}\b(?:startup|ack|acknowledg(?:e|ement))\b/i,
     /\bUNSUPPORTED_RUNTIME\b.{0,120}\b(?:broker|handoff|runtime\s+startup)\b/i,
+  ];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine);
+    if (patterns.some((pattern) => pattern.test(line))) return true;
+  }
+  return false;
+}
+
+function matchesInvalidGithubStepConfig(text: string): boolean {
+  const patterns = [
+    /\bGitHub step requires a non-empty name\b/i,
+    /\bGitHub step "[^"]*" requires an action name\b/i,
+    /\bGitHub step "[^"]*" uses unsupported action\b/i,
+    /\bGitHub step "[^"]*" params must be an object\b/i,
+    /\bGitHub repo must be in owner\/repo format\b/i,
+    /\bGitHub repo object requires owner and repo\b/i,
   ];
   for (const rawLine of text.split(/\r?\n/)) {
     const line = stripAnsi(rawLine);

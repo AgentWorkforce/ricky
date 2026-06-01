@@ -16,6 +16,7 @@ import type {
 export const FailureClass = {
   Timeout: 'timeout',
   VerificationFailure: 'verification_failure',
+  WorkflowInvalid: 'workflow_invalid',
   AgentDrift: 'agent_drift',
   EnvironmentError: 'environment_error',
   Deadlock: 'deadlock',

@@ -1456,10 +1456,15 @@ export function detectSpecIntentMismatch(
   workflowContent: string,
 ): string[] {
   const mismatches: string[] = [];
+  const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
+
+  for (const issue of facts.githubStepConfigIssues) {
+    mismatches.push(`INVALID_GITHUB_STEP: ${issue}`);
+  }
+
   const description = specIntentText(spec);
   if (!description) return mismatches;
   const descriptionLength = spec.description?.length ?? 0;
-  const facts = analyzeWorkflowSourceForSpecIntent(workflowContent);
 
   // `(?<!\w)` instead of a leading `\b` so the `@agent-relay/...` token
   // matches when preceded by whitespace / line start — `\b` between a
@@ -1544,6 +1549,7 @@ interface WorkflowSourceIntentFacts {
   readonly hasNonGithubStep: boolean;
   readonly githubExecutorRunPropertySpans: TextSpan[];
   readonly stepCommands: WorkflowStepCommand[];
+  readonly githubStepConfigIssues: string[];
 }
 
 interface TextSpan {
@@ -1556,6 +1562,31 @@ interface WorkflowStepCommand {
   command: string;
   sourceStart: number;
 }
+
+const GITHUB_ACTION_NAMES = new Set([
+  'listRepos',
+  'getRepo',
+  'listIssues',
+  'createIssue',
+  'updateIssue',
+  'closeIssue',
+  'listPRs',
+  'getPR',
+  'createPR',
+  'updatePR',
+  'mergePR',
+  'listFiles',
+  'readFile',
+  'createFile',
+  'updateFile',
+  'deleteFile',
+  'createBranch',
+  'listBranches',
+  'listCommits',
+  'createCommit',
+  'getUser',
+  'listOrganizations',
+]);
 
 interface SpecIntentLike {
   description?: string;
@@ -1600,6 +1631,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
       hasNonGithubStep: false,
       githubExecutorRunPropertySpans: [],
       stepCommands: [],
+      githubStepConfigIssues: [],
     };
   }
   const workflowSourceFile = sourceFile;
@@ -1613,9 +1645,11 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
   let hasNonGithubStep = false;
   const githubExecutorRunPropertySpans: TextSpan[] = [];
   const stepCommands: WorkflowStepCommand[] = [];
+  const githubStepConfigIssues: string[] = [];
 
   const trackedIdentifiers = new Set<string>(['GitHubStepExecutor', 'createGitHubStep']);
   const githubPrimitiveModules = new Set([
+    '@agent-relay/sdk',
     '@agent-relay/github-primitive',
     '@agent-relay/github-primitive/workflow-step',
     '@agent-relay/sdk/github',
@@ -1666,6 +1700,9 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     if (ts.isIdentifier(node) && trackedIdentifiers.has(node.text)) {
       referencedIdentifiers.add(node.text);
     }
+    if (ts.isCallExpression(node) && isCreateGithubStepExpression(node)) {
+      githubStepConfigIssues.push(...validateCreateGithubStepCall(node));
+    }
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
@@ -1713,6 +1750,7 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     hasNonGithubStep,
     githubExecutorRunPropertySpans,
     stepCommands: [...stepCommands].sort((left, right) => left.sourceStart - right.sourceStart),
+    githubStepConfigIssues,
   };
 
   function isGithubExecutorExpression(node: ts.Node | undefined): boolean {
@@ -1757,6 +1795,56 @@ function analyzeWorkflowSourceForSpecIntent(content: string): WorkflowSourceInte
     if (seen.has(seenKey)) return node;
     seen.add(seenKey);
     return resolveIdentifierInitializer(binding.initializer, seen);
+  }
+
+  function validateCreateGithubStepCall(node: ts.CallExpression): string[] {
+    const issues: string[] = [];
+    const rawConfig = node.arguments[0];
+    const config = resolveIdentifierInitializer(rawConfig);
+    const location = sourceLocation(node);
+    if (!config || !ts.isObjectLiteralExpression(config)) {
+      return [
+        `createGitHubStep at ${location} must use a statically analyzable object config with name and action`,
+      ];
+    }
+
+    const name = expressionText(objectPropertyInitializer(config, 'name'));
+    if (name === undefined || name.trim().length === 0) {
+      issues.push(`createGitHubStep at ${location} requires a non-empty name field`);
+    }
+
+    const action = expressionText(objectPropertyInitializer(config, 'action'));
+    if (action === undefined || action.trim().length === 0) {
+      issues.push(`createGitHubStep at ${location} requires a non-empty action field`);
+    } else if (!GITHUB_ACTION_NAMES.has(action)) {
+      issues.push(`createGitHubStep at ${location} uses unsupported action "${action}"`);
+    }
+
+    if (objectPropertyInitializer(config, 'command')) {
+      issues.push(`createGitHubStep at ${location} must not include command; use name/action/repo/params instead of deterministic shell-step shape`);
+    }
+
+    return issues;
+  }
+
+  function objectPropertyInitializer(
+    object: ts.ObjectLiteralExpression,
+    propertyName: string,
+  ): ts.Expression | undefined {
+    for (const property of object.properties) {
+      if (ts.isPropertyAssignment(property) && propertyNameText(property.name) === propertyName) {
+        return property.initializer;
+      }
+      if (ts.isShorthandPropertyAssignment(property) && propertyName === property.name.text) {
+        return property.name;
+      }
+    }
+    return undefined;
+  }
+
+  function sourceLocation(node: ts.Node): string {
+    const position = workflowSourceFile.getLineAndCharacterOfPosition(node.getStart(workflowSourceFile));
+    return `${position.line + 1}:${position.character + 1}`;
   }
 
   function referencesGithubBinding(identifier: ts.Identifier, kind: GithubIdentifierBindingKind): boolean {

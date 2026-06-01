@@ -4248,6 +4248,32 @@ describe('runLocal', () => {
     }
   });
 
+  it('classifies malformed GitHub primitive startup errors with a specific blocker code', async () => {
+    const localExecutor = memoryLocalExecutorOptions({
+      exitCode: 1,
+      stderr: ['Error: GitHub step requires a non-empty name'],
+    });
+
+    const result = await runLocal(
+      {
+        source: 'cli',
+        spec: 'generate a local workflow that opens a pull request',
+        stageMode: 'run',
+      },
+      { localExecutor },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.execution?.blocker).toMatchObject({
+      code: 'INVALID_GITHUB_STEP',
+      category: 'workflow_invalid',
+      context: {
+        missing: ['createGitHubStep config with non-empty name and valid action'],
+      },
+    });
+    expect(result.execution?.blocker?.recovery.steps.join('\n')).toContain('createGitHubStep');
+  });
+
   it('treats structured SDK runner failure results as runtime blockers', async () => {
     const { mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
