@@ -2,14 +2,62 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DEFAULT_RUNNER="${AGENT_RELAY_BIN:-}"
-if [[ -z "$DEFAULT_RUNNER" ]]; then
-  DEFAULT_RUNNER="$(command -v agent-relay 2>/dev/null || true)"
-fi
-if [[ -z "$DEFAULT_RUNNER" ]]; then
-  DEFAULT_RUNNER="$HOME/.local/bin/agent-relay"
-fi
-RUNNER="$DEFAULT_RUNNER"
+RUNNER_LABEL=""
+RUNNER_KIND=""
+RUNNER_PREFIX=()
+RUNNER_SHELL_PREFIX=""
+
+runner_works() {
+  local candidate="$1"
+  [[ -n "$candidate" ]] || return 1
+  [[ -x "$candidate" ]] || return 1
+  "$candidate" --help >/dev/null 2>&1
+}
+
+resolve_runner() {
+  local configured_runner="${AGENT_RELAY_BIN:-}"
+  local path_runner="$(command -v agent-relay 2>/dev/null || true)"
+  local legacy_runner="$HOME/.local/bin/agent-relay"
+
+  if runner_works "$configured_runner"; then
+    RUNNER_LABEL="$configured_runner"
+    RUNNER_KIND="cli"
+    RUNNER_PREFIX=("$configured_runner")
+    return 0
+  fi
+
+  if runner_works "$path_runner"; then
+    RUNNER_LABEL="$path_runner"
+    RUNNER_KIND="cli"
+    RUNNER_PREFIX=("$path_runner")
+    return 0
+  fi
+
+  if runner_works "$legacy_runner"; then
+    RUNNER_LABEL="$legacy_runner"
+    RUNNER_KIND="cli"
+    RUNNER_PREFIX=("$legacy_runner")
+    return 0
+  fi
+
+  if node --input-type=module -e "await import('@agent-relay/sdk/workflows')" >/dev/null 2>&1; then
+    RUNNER_LABEL="@agent-relay/sdk/workflows runScriptWorkflow"
+    RUNNER_KIND="sdk"
+    RUNNER_PREFIX=(node --input-type=module -e "import { runScriptWorkflow } from '@agent-relay/sdk/workflows'; const args = process.argv.slice(1); const dryRun = args[0] === '--dry-run'; const filePath = dryRun ? args[1] : args[0]; if (!filePath) throw new Error('workflow path required'); await runScriptWorkflow(filePath, { dryRun });" --)
+    return 0
+  fi
+
+  echo "error: no usable agent-relay runner found. Tried AGENT_RELAY_BIN, agent-relay on PATH, $legacy_runner, and local @agent-relay/sdk/workflows runtime." >&2
+  if [[ -n "$path_runner" ]]; then
+    echo "note: PATH resolves agent-relay to $path_runner, but it does not execute successfully." >&2
+  fi
+  return 1
+}
+
+resolve_runner
+printf -v RUNNER_SHELL_PREFIX '%q ' "${RUNNER_PREFIX[@]}"
+RUNNER_SHELL_PREFIX="${RUNNER_SHELL_PREFIX% }"
+
 DURATION_HOURS="${RICKY_OVERNIGHT_HOURS:-7}"
 POLL_SECONDS="${RICKY_OVERNIGHT_POLL_SECONDS:-15}"
 PASSES="${RICKY_OVERNIGHT_PASSES:-3}"
@@ -1930,23 +1978,30 @@ start_runner() {
   RUNNER_WAIT_PID=""
   rm -f "$runner_pid_file"
 
+  local runner_command="$RUNNER_SHELL_PREFIX"
+  if [[ "$RUNNER_KIND" == "sdk" ]]; then
+    runner_command="$runner_command \"$workflow_path\""
+  else
+    runner_command="$runner_command run \"$workflow_path\""
+  fi
+
   if command -v setsid >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
-    setsid "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+    setsid bash -lc "$runner_command" > >(tee -a "$runner_output") 2>&1 &
     RUNNER_START_PID="$!"
     RUNNER_WAIT_PID="$RUNNER_START_PID"
     return 0
   elif command -v python3 >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
     log "setsid unavailable; detaching runner via python3 subprocess fallback" >&2
-    python3 - "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file" <<'PY' &
+    python3 - "$runner_command" "$runner_output" "$runner_pid_file" <<'PY' &
 import subprocess
 import sys
 
-runner, workflow_path, runner_output, runner_pid_file = sys.argv[1:5]
+command, runner_output, runner_pid_file = sys.argv[1:4]
 with open(runner_output, 'ab', buffering=0) as stream:
     proc = subprocess.Popen(
-        [runner, 'run', workflow_path],
+        ['/bin/bash', '-lc', command],
         stdin=subprocess.DEVNULL,
         stdout=stream,
         stderr=subprocess.STDOUT,
@@ -1961,11 +2016,15 @@ PY
   elif command -v perl >/dev/null 2>&1; then
     RUNNER_EXPECTS_DETACHED_PGID="true"
     log "setsid unavailable; detaching runner via perl subprocess fallback" >&2
-    perl -e 'use strict; use warnings; use POSIX qw(setsid); my ($runner, $workflow, $output, $pidfile) = @ARGV; my $pid = fork(); die "fork: $!" unless defined $pid; if ($pid == 0) { setsid() or die "setsid: $!"; open STDIN, q{<}, q{/dev/null} or die "stdin: $!"; open my $fh, q{>>}, $output or die "open $output: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {$runner} $runner, q{run}, $workflow or die "exec $runner: $!"; } open my $pidfh, q{>}, $pidfile or die "open $pidfile: $!"; print {$pidfh} "$pid\n"; close $pidfh or die "close $pidfile: $!"; waitpid($pid, 0); exit($? >> 8);' "$RUNNER" "$workflow_path" "$runner_output" "$runner_pid_file" &
+    perl -e 'use strict; use warnings; use POSIX qw(setsid); my ($runner_command, $output, $pidfile) = @ARGV; my $pid = fork(); die "fork: $!" unless defined $pid; if ($pid == 0) { setsid() or die "setsid: $!"; open STDIN, q{<}, q{/dev/null} or die "stdin: $!"; open my $fh, q{>>}, $output or die "open $output: $!"; open STDOUT, q{>&}, $fh or die "dup stdout: $!"; open STDERR, q{>&}, $fh or die "dup stderr: $!"; exec {q{/bin/bash}} q{/bin/bash}, q{-lc}, $runner_command or die "exec bash: $!"; } open my $pidfh, q{>}, $pidfile or die "open $pidfile: $!"; print {$pidfh} "$pid\n"; close $pidfh or die "close $pidfile: $!"; waitpid($pid, 0); exit($? >> 8);' "$runner_command" "$runner_output" "$runner_pid_file" &
     RUNNER_WAIT_PID="$!"
   else
     log "setsid unavailable and no python3/perl fallback found; launching runner without detached process-group isolation" >&2
-    "$RUNNER" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+    if [[ "$RUNNER_KIND" == "sdk" ]]; then
+      "${RUNNER_PREFIX[@]}" "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+    else
+      "${RUNNER_PREFIX[@]}" run "$workflow_path" > >(tee -a "$runner_output") 2>&1 &
+    fi
     RUNNER_START_PID="$!"
     RUNNER_WAIT_PID="$RUNNER_START_PID"
     return 0
@@ -2325,11 +2384,6 @@ should_stop_before_next_workflow() {
 
   return 1
 }
-
-if [[ ! -x "$RUNNER" ]]; then
-  echo "ERROR: agent-relay runner not found at $RUNNER"
-  exit 1
-fi
 
 cd "$REPO_ROOT"
 reconcile_stale_state_dirs

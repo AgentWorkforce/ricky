@@ -2,30 +2,79 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DEFAULT_RUNNER="${AGENT_RELAY_BIN:-}"
-if [[ -z "$DEFAULT_RUNNER" ]]; then
-  DEFAULT_RUNNER="$(command -v agent-relay 2>/dev/null || true)"
-fi
-if [[ -z "$DEFAULT_RUNNER" ]]; then
-  DEFAULT_RUNNER="$HOME/.local/bin/agent-relay"
-fi
-RUNNER="$DEFAULT_RUNNER"
 MODE="${1:-help}"
 DRY_FLAG="${2:-}"
 
-if [[ ! -x "$RUNNER" ]]; then
-  echo "error: agent-relay runner not found at $RUNNER" >&2
-  exit 1
-fi
+RUNNER_LABEL=""
+RUNNER_KIND=""
+RUNNER_PREFIX=()
+
+runner_works() {
+  local candidate="$1"
+  [[ -n "$candidate" ]] || return 1
+  [[ -x "$candidate" ]] || return 1
+  "$candidate" --help >/dev/null 2>&1
+}
+
+resolve_runner() {
+  local configured_runner="${AGENT_RELAY_BIN:-}"
+  local path_runner="$(command -v agent-relay 2>/dev/null || true)"
+  local legacy_runner="$HOME/.local/bin/agent-relay"
+
+  if runner_works "$configured_runner"; then
+    RUNNER_LABEL="$configured_runner"
+    RUNNER_KIND="cli"
+    RUNNER_PREFIX=("$configured_runner")
+    return 0
+  fi
+
+  if runner_works "$path_runner"; then
+    RUNNER_LABEL="$path_runner"
+    RUNNER_KIND="cli"
+    RUNNER_PREFIX=("$path_runner")
+    return 0
+  fi
+
+  if runner_works "$legacy_runner"; then
+    RUNNER_LABEL="$legacy_runner"
+    RUNNER_KIND="cli"
+    RUNNER_PREFIX=("$legacy_runner")
+    return 0
+  fi
+
+  if node --input-type=module -e "await import('@agent-relay/sdk/workflows')" >/dev/null 2>&1; then
+    RUNNER_LABEL="@agent-relay/sdk/workflows runScriptWorkflow"
+    RUNNER_KIND="sdk"
+    RUNNER_PREFIX=(node --input-type=module -e "import { runScriptWorkflow } from '@agent-relay/sdk/workflows'; const args = process.argv.slice(1); const dryRun = args[0] === '--dry-run'; const filePath = dryRun ? args[1] : args[0]; if (!filePath) throw new Error('workflow path required'); await runScriptWorkflow(filePath, { dryRun });" --)
+    return 0
+  fi
+
+  echo "error: no usable agent-relay runner found. Tried AGENT_RELAY_BIN, agent-relay on PATH, $legacy_runner, and local @agent-relay/sdk/workflows runtime." >&2
+  if [[ -n "$path_runner" ]]; then
+    echo "note: PATH resolves agent-relay to $path_runner, but it does not execute successfully." >&2
+  fi
+  return 1
+}
+
+resolve_runner
 
 run_workflow() {
   local workflow_path="$1"
   echo
   echo ">>> Running $workflow_path"
+  if [[ "$RUNNER_KIND" == "sdk" ]]; then
+    if [[ "$DRY_FLAG" == "--dry-run" ]]; then
+      "${RUNNER_PREFIX[@]}" --dry-run "$workflow_path"
+    else
+      "${RUNNER_PREFIX[@]}" "$workflow_path"
+    fi
+    return
+  fi
+
   if [[ "$DRY_FLAG" == "--dry-run" ]]; then
-    "$RUNNER" run --dry-run "$workflow_path"
+    "${RUNNER_PREFIX[@]}" run --dry-run "$workflow_path"
   else
-    "$RUNNER" run "$workflow_path"
+    "${RUNNER_PREFIX[@]}" run "$workflow_path"
   fi
 }
 
