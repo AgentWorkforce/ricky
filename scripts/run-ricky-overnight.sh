@@ -2,7 +2,14 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RUNNER="${AGENT_RELAY_BIN:-$HOME/.local/bin/agent-relay}"
+DEFAULT_RUNNER="${AGENT_RELAY_BIN:-}"
+if [[ -z "$DEFAULT_RUNNER" ]]; then
+  DEFAULT_RUNNER="$(command -v agent-relay 2>/dev/null || true)"
+fi
+if [[ -z "$DEFAULT_RUNNER" ]]; then
+  DEFAULT_RUNNER="$HOME/.local/bin/agent-relay"
+fi
+RUNNER="$DEFAULT_RUNNER"
 DURATION_HOURS="${RICKY_OVERNIGHT_HOURS:-7}"
 POLL_SECONDS="${RICKY_OVERNIGHT_POLL_SECONDS:-15}"
 PASSES="${RICKY_OVERNIGHT_PASSES:-3}"
