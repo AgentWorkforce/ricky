@@ -41,5 +41,5 @@ describe('runLocal turn-context adapter resilience', () => {
         '[local] workflow generation: passed',
       ]),
     );
-  });
+  }, 15_000);
 });

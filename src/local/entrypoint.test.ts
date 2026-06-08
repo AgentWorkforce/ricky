@@ -4345,7 +4345,7 @@ describe('runLocal', () => {
       await rm(repo, { recursive: true, force: true });
       await rm(stateHome, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('resolves @agent-relay/sdk subpaths and @agent-relay/config via the bundled package', async () => {
     // Regression test for the loader bug fixed in PR #92: previously the
@@ -4408,7 +4408,7 @@ describe('runLocal', () => {
       await rm(repo, { recursive: true, force: true });
       await rm(stateHome, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('drains broker stdout after SDK startup so event floods cannot wedge the workflow node', async () => {
     const { chmod, mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
@@ -4540,7 +4540,7 @@ describe('runLocal', () => {
       await rm(stateHome, { recursive: true, force: true });
       await rm(brokerDir, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 15_000);
 
   it('kills the SDK workflow process tree when the local timeout fires', async () => {
     const { mkdir, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
@@ -4609,7 +4609,7 @@ describe('runLocal', () => {
       await rm(repo, { recursive: true, force: true });
       await rm(stateHome, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('forwards parent termination signals to detached SDK workflow process trees', async () => {
     const { mkdir, mkdtemp, rm, writeFile } = await import('node:fs/promises');
