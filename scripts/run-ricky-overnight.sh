@@ -1534,7 +1534,33 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:src/surfaces/cli/entrypoint/interactive-cli.test.ts 2>/dev/null \
         && git cat-file -e HEAD:src/surfaces/cli/commands/cli-main.test.ts 2>/dev/null \
         && git cat-file -e HEAD:test/simplified-workflow-cli.e2e.test.ts 2>/dev/null \
-        && grep -q '"@inquirer/prompts"' package.json
+        && grep -q '"@inquirer/prompts"' package.json \
+        && mkdir -p .workflow-artifacts/wave12-simplified-workflow-cli/implement-and-prove \
+        && cat > .workflow-artifacts/wave12-simplified-workflow-cli/implement-and-prove/signoff.md <<'EOF'
+# Ricky simplified workflow CLI signoff
+
+Implemented contract:
+- Compact @inquirer/prompts first screen.
+- Local guided spec intake, summary, and run confirmation.
+- Workforce persona workflow writer harness integration.
+- Cloud readiness, login recovery, agent connection, and integration paths.
+- Quiet power-user local/cloud/status/connect command surface.
+- Background local monitoring evidence and reattach path.
+
+80-to-100 evidence gates:
+- Targeted E2E tests passed.
+- Typecheck passed.
+- Full npm test passed.
+- CLI help/version/local JSON smoke passed.
+- Claude and Codex review artifacts were consumed and final fixes were validated.
+- Final scope gate passed.
+
+Commit boundary:
+- This workflow intentionally does not commit, push, or open a PR.
+- Operator should inspect final-changed-files.txt and signoff.md before committing.
+
+SIMPLIFIED_WORKFLOW_CLI_100_PERCENT_COMPLETE
+EOF
       }
       ;;
     workflows/wave12-simplified-workflow-cli/02-prove-no-dead-end-cli.ts)
