@@ -11,7 +11,7 @@ runner_works() {
   local candidate="$1"
   [[ -n "$candidate" ]] || return 1
   [[ -x "$candidate" ]] || return 1
-  "$candidate" --help >/dev/null 2>&1
+  "$candidate" run --help >/dev/null 2>&1
 }
 
 resolve_runner() {
@@ -47,9 +47,9 @@ resolve_runner() {
     return 0
   fi
 
-  echo "error: no usable agent-relay runner found. Tried AGENT_RELAY_BIN, agent-relay on PATH, $legacy_runner, and local @agent-relay/sdk/workflows runtime." >&2
+  echo "error: no usable workflow runner found. Tried AGENT_RELAY_BIN, agent-relay on PATH, $legacy_runner, and local @agent-relay/sdk/workflows runtime." >&2
   if [[ -n "$path_runner" ]]; then
-    echo "note: PATH resolves agent-relay to $path_runner, but it does not execute successfully." >&2
+    echo "note: PATH resolves agent-relay to $path_runner, but it does not support 'run' here." >&2
   fi
   return 1
 }
