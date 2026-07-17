@@ -9,15 +9,24 @@ RUNNER_SHELL_PREFIX=""
 
 runner_works() {
   local candidate="$1"
+  local help_output=""
   [[ -n "$candidate" ]] || return 1
   [[ -x "$candidate" ]] || return 1
-  "$candidate" run --help >/dev/null 2>&1
+  help_output="$($candidate --help 2>/dev/null || true)"
+  grep -Eq '(^|[[:space:]])run([[:space:]]|$)' <<<"$help_output"
 }
 
 resolve_runner() {
   local configured_runner="${AGENT_RELAY_BIN:-}"
   local path_runner="$(command -v agent-relay 2>/dev/null || true)"
   local legacy_runner="$HOME/.local/bin/agent-relay"
+
+  if node --input-type=module -e "await import('@agent-relay/sdk/workflows')" >/dev/null 2>&1; then
+    RUNNER_LABEL="@agent-relay/sdk/workflows runScriptWorkflow"
+    RUNNER_KIND="sdk"
+    RUNNER_PREFIX=(node --input-type=module -e "import { runScriptWorkflow } from '@agent-relay/sdk/workflows'; const args = process.argv.slice(1); const dryRun = args[0] === '--dry-run'; const filePath = dryRun ? args[1] : args[0]; if (!filePath) throw new Error('workflow path required'); await runScriptWorkflow(filePath, { dryRun });" --)
+    return 0
+  fi
 
   if runner_works "$configured_runner"; then
     RUNNER_LABEL="$configured_runner"
@@ -37,13 +46,6 @@ resolve_runner() {
     RUNNER_LABEL="$legacy_runner"
     RUNNER_KIND="cli"
     RUNNER_PREFIX=("$legacy_runner")
-    return 0
-  fi
-
-  if node --input-type=module -e "await import('@agent-relay/sdk/workflows')" >/dev/null 2>&1; then
-    RUNNER_LABEL="@agent-relay/sdk/workflows runScriptWorkflow"
-    RUNNER_KIND="sdk"
-    RUNNER_PREFIX=(node --input-type=module -e "import { runScriptWorkflow } from '@agent-relay/sdk/workflows'; const args = process.argv.slice(1); const dryRun = args[0] === '--dry-run'; const filePath = dryRun ? args[1] : args[0]; if (!filePath) throw new Error('workflow path required'); await runScriptWorkflow(filePath, { dryRun });" --)
     return 0
   fi
 
