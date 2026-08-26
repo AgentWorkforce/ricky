@@ -60,7 +60,7 @@ const DEFAULT_RUNNER: ExternalCliProofRunner = {
         stderr += chunk;
       });
       child.once('error', rejectPromise);
-      child.once('exit', (code, signal) => {
+      child.once('close', (code, signal) => {
         if (code === null) {
           rejectPromise(new Error(`command exited from signal ${signal ?? 'unknown'}`));
           return;
