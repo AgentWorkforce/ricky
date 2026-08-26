@@ -16,6 +16,9 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const esmRequireBanner = {
+  js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
+};
 
 const rootPkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
 const externals = Object.keys(rootPkg.dependencies ?? {});
@@ -33,6 +36,7 @@ await build({
   resolveExtensions: ['.ts', '.tsx', '.mjs', '.js'],
   sourcemap: 'inline',
   logLevel: 'info',
+  banner: esmRequireBanner,
 });
 
 await build({
@@ -46,6 +50,7 @@ await build({
   resolveExtensions: ['.ts', '.tsx', '.mjs', '.js'],
   sourcemap: 'inline',
   logLevel: 'info',
+  banner: esmRequireBanner,
 });
 
 emitDeclarations();
