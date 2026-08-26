@@ -102,7 +102,7 @@ Non-goals:
 Verification:
 - package.json must expose honest scripts for typecheck and test.
 - tsconfig.json must support the generated TypeScript workflow files without pretending the whole future app exists.
-- vitest.config.ts and test/setup.ts must make \`npx vitest run\` meaningful.
+- vitest.config.ts and test/setup.ts must make \`./node_modules/.bin/vitest run\` meaningful.
 - Post-edit gates must verify tracked and untracked changes only in the declared toolchain files.
 
 Commit/PR boundary:
@@ -131,8 +131,8 @@ Non-goals:
 
 Verification:
 - Keep the setup small and deterministic.
-- Make \`npx tsc --noEmit\` and \`npx vitest run\` honest first-run contracts for the repo.
-- Preserve direct executability of representative heavier suites by keeping \`test/local-auto-fix-workflow-failures.e2e.test.ts\` and \`src/local/proof/local-entrypoint-proof.test.ts\` runnable via explicit \`npx vitest run <file>\` invocation.
+- Make \`./node_modules/.bin/tsc --noEmit\` and \`./node_modules/.bin/vitest run\` honest first-run contracts for the repo.
+- Preserve direct executability of representative heavier suites by keeping \`test/local-auto-fix-workflow-failures.e2e.test.ts\` and \`src/local/proof/local-entrypoint-proof.test.ts\` runnable via explicit \`./node_modules/.bin/vitest run <file>\` invocation.
 - Stop after writing the toolchain files.`,
       verification: { type: 'exit_code', value: '0' },
     })
@@ -157,7 +157,7 @@ Verification:
     .step('initial-soft-validation', {
       type: 'deterministic',
       dependsOn: ['post-implementation-file-gate'],
-      command: 'npm install && npx tsc --noEmit && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && npx vitest run',
+      command: 'test -x ./node_modules/.bin/tsc && test -x ./node_modules/.bin/vitest && ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && ./node_modules/.bin/vitest run',
       captureOutput: true,
       failOnError: false,
     })
@@ -214,7 +214,7 @@ EOF`,
     .step('post-fix-validation', {
       type: 'deterministic',
       dependsOn: ['post-fix-verification-gate'],
-      command: 'npm install && npx tsc --noEmit && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && npx vitest run',
+      command: 'test -x ./node_modules/.bin/tsc && test -x ./node_modules/.bin/vitest && ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && ./node_modules/.bin/vitest run',
       captureOutput: true,
       failOnError: false,
     })
@@ -243,7 +243,7 @@ Confirm prior findings are fixed or explicitly non-blocking. Write .workflow-art
     .step('final-hard-validation', {
       type: 'deterministic',
       dependsOn: ['final-review-pass-gate'],
-      command: 'npm install && npx tsc --noEmit && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && npx vitest run',
+      command: 'test -x ./node_modules/.bin/tsc && test -x ./node_modules/.bin/vitest && ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run test/local-auto-fix-workflow-failures.e2e.test.ts src/local/proof/local-entrypoint-proof.test.ts && ./node_modules/.bin/vitest run',
       captureOutput: true,
       failOnError: true,
     })

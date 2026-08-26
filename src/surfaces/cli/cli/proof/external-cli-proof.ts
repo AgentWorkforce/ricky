@@ -208,7 +208,7 @@ async function linkRickyCliIntoExternalRepo(repoRoot: string, repoDir: string): 
 }
 
 async function ensureLinkedCliTargetExists(repoRoot: string, targetPath: string): Promise<void> {
-  const bundleResult = await DEFAULT_RUNNER.run('npm', ['run', 'bundle'], { cwd: repoRoot });
+  const bundleResult = await DEFAULT_RUNNER.run('node', ['scripts/bundle-cli.mjs'], { cwd: repoRoot });
   if (bundleResult.exitCode !== 0) {
     throw new Error(
       `Failed to prepare linked Ricky CLI bundle at ${targetPath}.\nstdout:\n${bundleResult.stdout}\nstderr:\n${bundleResult.stderr}`,
