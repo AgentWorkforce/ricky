@@ -2421,6 +2421,11 @@ quarantine_repo_runtime_state
 echo "running" > "$STATUS_FILE"
 git rev-parse HEAD > "$LAST_COMMIT_FILE"
 INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
+# Persist a bootstrap checkpoint before expensive repo-state filtering so a
+# later invocation can see that this artifact still belongs to a live harness
+# instead of misclassifying it as an orphaned running artifact with no
+# checkpoint.
+persist_checkpoint
 restore_checkpoint
 # A resumed invocation may restore an older checkpoint baseline after we've
 # already synced local main to origin/main for this fresh run. Reset the
@@ -2428,6 +2433,7 @@ restore_checkpoint
 # any no-op runs report truthful commit state for this invocation.
 git rev-parse HEAD > "$LAST_COMMIT_FILE"
 INITIAL_GIT_HEAD="$(cat "$LAST_COMMIT_FILE")"
+persist_checkpoint
 write_queue
 filter_queue_for_repo_state
 fallback_to_expanded_queue_when_flight_safe_exhausted
