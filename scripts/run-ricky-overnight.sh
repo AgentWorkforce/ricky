@@ -1080,6 +1080,26 @@ artifact_review_declares_pass() {
     && ! grep -Eq '^(FAIL|\*\*FAIL\*\*)$' "$review_path"
 }
 
+run_repo_typecheck() {
+  ./node_modules/.bin/tsc --noEmit
+}
+
+run_repo_typecheck_quiet() {
+  run_repo_typecheck >/dev/null
+}
+
+run_repo_test() {
+  ./node_modules/.bin/vitest run
+}
+
+run_repo_test_quiet() {
+  run_repo_test >/dev/null
+}
+
+run_repo_vitest_quiet() {
+  ./node_modules/.bin/vitest run "$@" >/dev/null
+}
+
 append_unique_lines_from_file() {
   local source_file="$1"
   local destination_file="$2"
@@ -1136,8 +1156,8 @@ workflow_is_already_satisfied() {
         && artifact_signoff_has_marker \
         .workflow-artifacts/wave1-runtime/local-run-coordinator/final-review-codex.md \
         'FINAL_REVIEW_CODEX_PASS' \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/runtime/local-coordinator.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/runtime/local-coordinator.test.ts
       ;;
     workflows/wave1-runtime/03-workflow-failure-classification.ts)
       artifact_signoff_has_marker \
@@ -1149,8 +1169,8 @@ workflow_is_already_satisfied() {
         && artifact_signoff_has_marker \
         .workflow-artifacts/wave1-runtime/workflow-failure-classification/final-review-codex.md \
         'FINAL_REVIEW_CODEX_PASS' \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/runtime/failure/classifier.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/runtime/failure/classifier.test.ts
       ;;
     workflows/wave2-product/04-workflow-validator-specialist.ts)
       artifact_signoff_has_marker \
@@ -1162,8 +1182,8 @@ workflow_is_already_satisfied() {
         && artifact_signoff_has_marker \
         .workflow-artifacts/wave2-product/workflow-validator-specialist/final-review-codex.md \
         'FINAL_REVIEW_CODEX_PASS' \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/product/specialists/validator/ >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/product/specialists/validator/
       ;;
     workflows/wave1-runtime/05-prove-runtime-environment-orchestration-unblockers.ts)
       artifact_signoff_has_marker \
@@ -1176,7 +1196,7 @@ workflow_is_already_satisfied() {
         'LOCAL_BYOH_PROOF_COMPLETE' \
         && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.ts 2>/dev/null \
         && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.test.ts 2>/dev/null \
-        && npx vitest run src/local/proof/local-entrypoint-proof.test.ts >/dev/null
+        && run_repo_vitest_quiet src/local/proof/local-entrypoint-proof.test.ts
       ;;
     workflows/wave5-scale-and-ops/01-workflow-health-analytics.ts)
       artifact_signoff_has_marker \
@@ -1193,8 +1213,8 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:src/product/analytics/types.ts 2>/dev/null \
         && git cat-file -e HEAD:src/product/analytics/health-analyzer.test.ts 2>/dev/null \
         && git cat-file -e HEAD:src/product/analytics/index.ts 2>/dev/null \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/product/analytics/health-analyzer.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/product/analytics/health-analyzer.test.ts
       ;;
     workflows/wave4-local-byoh/03-cli-onboarding-ux-spec.ts)
       git cat-file -e HEAD:docs/product/ricky-cli-onboarding-ux-spec.md 2>/dev/null \
@@ -1221,8 +1241,8 @@ workflow_is_already_satisfied() {
     workflows/wave5-scale-and-ops/04-prove-ricky-package-layout-and-script-parity.ts)
       git cat-file -e HEAD:test/package-proof/package-layout-proof.ts 2>/dev/null \
         && git cat-file -e HEAD:test/package-proof/package-layout-proof.test.ts 2>/dev/null \
-        && npm run typecheck >/dev/null \
-        && npm test >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_test_quiet
       ;;
     workflows/wave6-proof/01-close-first-wave-signoff-and-blockers.ts)
       test -f .workflow-artifacts/wave6-proof/close-first-wave-signoff-and-blockers/closure-summary.md \
@@ -1319,8 +1339,8 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:src/local/entrypoint-turn-context-resilience.test.ts 2>/dev/null \
         && grep -q '@agent-assistant/turn-context' src/local/assistant-turn-context-adapter.ts \
         && grep -q 'assembleRickyTurnContext' src/local/entrypoint.ts \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/local/assistant-turn-context-adapter.test.ts src/local/entrypoint-turn-context-resilience.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/local/assistant-turn-context-adapter.test.ts src/local/entrypoint-turn-context-resilience.test.ts
       ;;
     workflows/wave10-agent-assistant-adoption/03-prove-live-product-path.ts)
       artifact_signoff_has_marker \
@@ -1332,8 +1352,8 @@ workflow_is_already_satisfied() {
         && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/adapter-runtime-smoke.json \
         && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/external-generate.json \
         && test -f .workflow-artifacts/wave10-agent-assistant-adoption/prove-live-product-path/external-generate-and-run.json \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/local src/surfaces/cli >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/local src/surfaces/cli
       ;;
     workflows/wave10-agent-assistant-adoption/04-close-agent-assistant-handoff-issue.ts)
       artifact_signoff_has_marker \
@@ -1350,8 +1370,8 @@ workflow_is_already_satisfied() {
         && artifact_signoff_has_marker \
         .workflow-artifacts/wave3-cloud-api/cloud-connect-and-auth/final-review-codex.md \
         'FINAL_REVIEW_CODEX_PASS' \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/cloud/auth/ >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/cloud/auth/
       ;;
     workflows/wave3-cloud-api/02-generate-endpoint.ts)
       artifact_signoff_has_marker \
@@ -1363,8 +1383,8 @@ workflow_is_already_satisfied() {
         && artifact_signoff_has_marker \
         .workflow-artifacts/wave3-cloud-api/generate-endpoint/final-review-codex.md \
         'FINAL_REVIEW_CODEX_PASS' \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts
       ;;
     workflows/wave3-cloud-api/03-implement-ricky-cloud-generate-slice.ts)
       artifact_signoff_has_marker \
@@ -1376,8 +1396,8 @@ workflow_is_already_satisfied() {
         && artifact_signoff_has_marker \
         .workflow-artifacts/wave3-cloud-api/implement-ricky-cloud-generate-slice/final-review-codex.md \
         'FINAL_REVIEW_CODEX_PASS' \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts
       ;;
     workflows/wave3-cloud-api/04-prove-cloud-connect-and-generate-happy-path.ts)
       artifact_signoff_has_marker \
@@ -1389,8 +1409,8 @@ workflow_is_already_satisfied() {
         && artifact_signoff_has_marker \
         .workflow-artifacts/wave3-cloud-api/prove-cloud-connect-and-generate-happy-path/final-review-codex.md \
         'FINAL_REVIEW_CODEX_PASS' \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/cloud/auth/ src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/cloud/auth/ src/cloud/api/proof/cloud-generate-proof.test.ts src/cloud/api/generate-endpoint.test.ts
       ;;
     workflows/wave4-local-byoh/01-cli-onboarding-and-welcome.ts)
       artifact_signoff_has_marker \
@@ -1422,8 +1442,8 @@ workflow_is_already_satisfied() {
         && grep -q '"test"' package.json \
         && grep -q 'typescript' package.json \
         && grep -q 'vitest' package.json \
-        && npm run typecheck >/dev/null \
-        && npm test >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_test_quiet
       ;;
     workflows/wave4-local-byoh/02-local-invocation-entrypoint.ts)
       artifact_signoff_has_marker \
@@ -1438,8 +1458,8 @@ workflow_is_already_satisfied() {
         && git cat-file -e HEAD:src/local/entrypoint.ts 2>/dev/null \
         && git cat-file -e HEAD:src/local/entrypoint.test.ts 2>/dev/null \
         && git cat-file -e HEAD:src/local/proof/local-entrypoint-proof.test.ts 2>/dev/null \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/local/entrypoint.test.ts src/local/proof/local-entrypoint-proof.test.ts src/local/entrypoint-turn-context-resilience.test.ts
       ;;
     workflows/wave4-local-byoh/04-implement-cli-onboarding-from-ux-spec.ts)
       artifact_signoff_has_marker \
@@ -1466,8 +1486,8 @@ workflow_is_already_satisfied() {
         && artifact_signoff_has_marker \
         .workflow-artifacts/wave2-product/workflow-spec-intake/final-review-codex.md \
         'FINAL_REVIEW_CODEX_PASS' \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/product/spec-intake/ >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/product/spec-intake/
       ;;
     workflows/wave2-product/02-workflow-generation-pipeline.ts)
       artifact_signoff_has_marker \
@@ -1504,8 +1524,8 @@ workflow_is_already_satisfied() {
         && grep -Eq 'help|mode|interactive|runInteractiveCli' src/surfaces/cli/commands/cli-main.ts src/surfaces/cli/commands/cli-main.test.ts \
         && grep -q '"bin"' package.json \
         && grep -q '"start"' package.json \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/surfaces/cli/commands/cli-main.test.ts src/surfaces/cli/entrypoint/interactive-cli.test.ts
       ;;
     workflows/wave11-flat-layout-collapse/01-collapse-packages-into-src.ts)
       git cat-file -e HEAD:test/flat-layout-proof/flat-layout-proof.ts 2>/dev/null \
@@ -1586,8 +1606,8 @@ EOF
         && test -f src/product/orchestration/index.ts \
         && test -f src/product/orchestration/master-executor.test.ts \
         && grep -q "export \* as orchestration from './orchestration/index.js'" src/product/index.ts \
-        && npm run typecheck >/dev/null \
-        && npx vitest run src/product/orchestration/master-executor.test.ts >/dev/null
+        && run_repo_typecheck_quiet \
+        && run_repo_vitest_quiet src/product/orchestration/master-executor.test.ts
       ;;
     workflows/generated/ricky-i-want-to-clean-up-the-codebase-to-remove-outdat.ts)
       artifact_signoff_has_marker \
@@ -1874,8 +1894,8 @@ mark_status() {
 
 validate_repo() {
   log "running repo validation"
-  npm run typecheck
-  npm test
+  run_repo_typecheck
+  run_repo_test
 }
 
 capture_meaningful_git_status() {
