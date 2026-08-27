@@ -50,6 +50,21 @@ const DEFAULT_RUNNER: ExternalCliProofRunner = {
 
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      let closeGraceTimer: NodeJS.Timeout | undefined;
+      let exitCode: number | null = null;
+      let exitSignal: NodeJS.Signals | null = null;
+
+      const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
+        if (settled) return;
+        settled = true;
+        if (closeGraceTimer) clearTimeout(closeGraceTimer);
+        if (code === null) {
+          rejectPromise(new Error(`command exited from signal ${signal ?? 'unknown'}`));
+          return;
+        }
+        resolvePromise({ exitCode: code, stdout, stderr });
+      };
 
       child.stdout?.setEncoding('utf8');
       child.stderr?.setEncoding('utf8');
@@ -59,14 +74,20 @@ const DEFAULT_RUNNER: ExternalCliProofRunner = {
       child.stderr?.on('data', (chunk) => {
         stderr += chunk;
       });
-      child.once('error', rejectPromise);
+      child.once('error', (error) => {
+        if (closeGraceTimer) clearTimeout(closeGraceTimer);
+        if (settled) return;
+        settled = true;
+        rejectPromise(error);
+      });
+      child.once('exit', (code, signal) => {
+        exitCode = code;
+        exitSignal = signal;
+        closeGraceTimer = setTimeout(() => finish(exitCode, exitSignal), 1000);
+        closeGraceTimer.unref?.();
+      });
       child.once('close', (code, signal) => {
-        if (code === null) {
-          rejectPromise(new Error(`command exited from signal ${signal ?? 'unknown'}`));
-          return;
-        }
-
-        resolvePromise({ exitCode: code, stdout, stderr });
+        finish(code ?? exitCode, signal ?? exitSignal);
       });
     });
   },
