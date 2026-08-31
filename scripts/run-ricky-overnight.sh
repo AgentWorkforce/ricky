@@ -479,32 +479,43 @@ iterate_known_state_dirs() {
   fi
 }
 
+iterate_recent_overnight_artifact_dirs() {
+  local artifact_dir=""
+  local limit="${RICKY_OVERNIGHT_RECONCILE_ARTIFACT_LIMIT:-200}"
+
+  if ! [[ "$limit" =~ ^[0-9]+$ ]] || (( limit <= 0 )); then
+    limit=200
+  fi
+
+  while IFS= read -r artifact_dir; do
+    [[ -d "$artifact_dir" ]] || continue
+    printf '%s\n' "$artifact_dir"
+  done < <(ls -1dt "$REPO_ROOT"/.workflow-artifacts/overnight-* 2>/dev/null | head -n "$limit")
+}
+
 iterate_known_artifact_checkpoints() {
+  local artifact_dir=""
   local checkpoint_file=""
 
-  shopt -s nullglob
-  for checkpoint_file in "$REPO_ROOT"/.workflow-artifacts/overnight-*/checkpoint.env; do
+  while IFS= read -r artifact_dir; do
+    checkpoint_file="$artifact_dir/checkpoint.env"
     [[ -f "$checkpoint_file" ]] || continue
     printf '%s\n' "$checkpoint_file"
-  done
-  shopt -u nullglob
+  done < <(iterate_recent_overnight_artifact_dirs)
 }
 
 iterate_running_artifact_dirs_without_checkpoints() {
   local artifact_dir=""
   local status_file=""
 
-  shopt -s nullglob
-  for artifact_dir in "$REPO_ROOT"/.workflow-artifacts/overnight-*; do
-    [[ -d "$artifact_dir" ]] || continue
+  while IFS= read -r artifact_dir; do
     [[ "$artifact_dir" == "$ARTIFACT_DIR" ]] && continue
     status_file="$artifact_dir/status.txt"
     [[ -f "$status_file" ]] || continue
     grep -Eqx 'running|checkpointed' "$status_file" || continue
     [[ ! -f "$artifact_dir/checkpoint.env" ]] || continue
     printf '%s\n' "$artifact_dir"
-  done
-  shopt -u nullglob
+  done < <(iterate_recent_overnight_artifact_dirs)
 }
 
 reconcile_stale_state_dirs() {
