@@ -445,8 +445,8 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
         const missing = required.filter((name) => typeof scripts[name] !== 'string' || (scripts[name] as string).length === 0);
         const extra = declared.filter((name) => !required.includes(name as (typeof REQUIRED_PACKAGE_SCRIPTS)[number]));
         const premerge = typeof scripts.premerge === 'string' ? scripts.premerge : '';
-        const premergeRunsTypecheck = premerge.includes('npm run typecheck');
-        const premergeRunsFullSuite = premerge.includes('npm test');
+        const premergeRunsTypecheck = premerge.includes('npm run typecheck') || premerge.includes('./node_modules/.bin/tsc --noEmit');
+        const premergeRunsFullSuite = premerge.includes('npm test') || premerge.includes('./node_modules/.bin/vitest run');
         const premergeRunsAutoFixLadder = premerge.includes('test/local-auto-fix-workflow-failures.e2e.test.ts');
 
         return result(
@@ -472,8 +472,8 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
           [
             ...missing.map((name) => `Missing required npm script: ${name}`),
             ...extra.map((name) => `Unexpected npm script not in canonical allowlist: ${name}`),
-            ...(premergeRunsTypecheck ? [] : ['package.json scripts.premerge does not run npm run typecheck']),
-            ...(premergeRunsFullSuite ? [] : ['package.json scripts.premerge does not run npm test']),
+            ...(premergeRunsTypecheck ? [] : ['package.json scripts.premerge does not run typecheck via npm run typecheck or direct tsc']),
+            ...(premergeRunsFullSuite ? [] : ['package.json scripts.premerge does not run the full suite via npm test or direct vitest']),
             ...(premergeRunsAutoFixLadder ? [] : ['package.json scripts.premerge does not run the local auto-fix workflow ladder e2e']),
           ],
         );

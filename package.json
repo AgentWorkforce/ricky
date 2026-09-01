@@ -51,7 +51,7 @@
     "build": "npm run bundle",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "premerge": "npm run typecheck && npm test && npx vitest run test/local-auto-fix-workflow-failures.e2e.test.ts",
+    "premerge": "./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run && ./node_modules/.bin/vitest run test/local-auto-fix-workflow-failures.e2e.test.ts",
     "evals:compile": "node scripts/evals/compile-ricky-evals.mjs",
     "evals": "npm run evals:compile && node scripts/evals/run-ricky-evals.mjs",
     "evals:provider": "npm run build && npm run evals -- --provider --executor openrouter",
