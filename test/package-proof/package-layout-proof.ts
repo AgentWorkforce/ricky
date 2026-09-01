@@ -445,9 +445,19 @@ export function getPackageLayoutProofCases(): PackageLayoutProofCase[] {
         const missing = required.filter((name) => typeof scripts[name] !== 'string' || (scripts[name] as string).length === 0);
         const extra = declared.filter((name) => !required.includes(name as (typeof REQUIRED_PACKAGE_SCRIPTS)[number]));
         const premerge = typeof scripts.premerge === 'string' ? scripts.premerge : '';
-        const premergeRunsTypecheck = premerge.includes('npm run typecheck') || premerge.includes('./node_modules/.bin/tsc --noEmit');
-        const premergeRunsFullSuite = premerge.includes('npm test') || premerge.includes('./node_modules/.bin/vitest run');
-        const premergeRunsAutoFixLadder = premerge.includes('test/local-auto-fix-workflow-failures.e2e.test.ts');
+        const premergeDelegatesToScript = premerge === 'node scripts/run-premerge.mjs';
+        const premergeScript = premergeDelegatesToScript && fileExists('scripts/run-premerge.mjs')
+          ? readText('scripts/run-premerge.mjs')
+          : '';
+        const premergeEvidence = premergeDelegatesToScript ? premergeScript : premerge;
+        const premergeRunsTypecheck = premergeEvidence.includes('npm run typecheck')
+          || premergeEvidence.includes('./node_modules/.bin/tsc')
+          || premergeEvidence.includes("label: 'typecheck'");
+        const premergeRunsFullSuite = premergeEvidence.includes('npm test')
+          || premergeEvidence.includes('./node_modules/.bin/vitest')
+          || premergeEvidence.includes("label: 'full-test-suite'");
+        const premergeRunsAutoFixLadder = premergeEvidence.includes('test/local-auto-fix-workflow-failures.e2e.test.ts')
+          || premergeEvidence.includes("label: 'local-auto-fix-ladder-e2e'");
 
         return result(
           'package-script-allowlist',
