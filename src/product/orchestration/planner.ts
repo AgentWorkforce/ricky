@@ -7,7 +7,8 @@ import type {
 } from './types.js';
 
 const DEFAULT_WAVE_PREFIX = 'wave13-master-executor';
-const DEFAULT_VALIDATION_COMMAND = 'npm run typecheck';
+const DEFAULT_VALIDATION_COMMAND =
+  'if [ -x ./node_modules/.bin/tsc ]; then ./node_modules/.bin/tsc --noEmit; elif [ "$(npm pkg get scripts.typecheck 2>/dev/null)" != "{}" ]; then npm run typecheck; else npx tsc --noEmit; fi';
 const DEFAULT_RETRY_POLICY = { maxAttempts: 2, backoffMs: 1000 } as const;
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 

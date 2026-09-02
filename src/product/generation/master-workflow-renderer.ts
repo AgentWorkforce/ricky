@@ -37,18 +37,13 @@ interface RenderedMasterWorkflow {
   plan: MasterExecutionPlan;
 }
 
-// Workspace-aware typecheck: prefer the project's own `npm run typecheck`
-// script when one exists (the right thing for monorepos like
-// `npm run typecheck -ws` or custom build pipelines), and fall back to
-// `npx tsc --noEmit` when the project is a flat single-tsconfig repo.
+// Workspace-aware typecheck: prefer the local TypeScript binary when the
+// repo has installed dependencies, otherwise fall back to the project's own
+// `npm run typecheck` script, and only then to bare `npx tsc --noEmit`.
 //
-// Without this guard, `npx tsc --noEmit` invoked from a monorepo root with
-// no top-level tsconfig.json (npm workspaces, packages/*/tsconfig.json
-// layout — common in MSD-style repos) finds neither input files nor a
-// config and dumps the full `tsc --help` text on stdout while exiting 1.
-// The auto-fix loop then "repairs" the workflow 7×, all failing identically
-// because the workflow command is correct in general — just wrong for this
-// repo shape.
+// This keeps monorepos working, but also avoids a newer failure mode seen in
+// Ricky itself where `npm run typecheck` can hang as a bare npm wrapper even
+// though `./node_modules/.bin/tsc --noEmit` exits cleanly.
 //
 // `npm pkg get scripts.typecheck` returns `"<command>"` when the script
 // exists and `{}` when it does not (npm v7.20.0+, shipped with Node 16+).
@@ -56,7 +51,7 @@ interface RenderedMasterWorkflow {
 // any package layout. The substring `npx tsc --noEmit` is preserved so
 // downstream tools and human readers still recognize the intent.
 const TYPECHECK_COMMAND =
-  'if [ "$(npm pkg get scripts.typecheck 2>/dev/null)" != "{}" ]; then npm run typecheck; else npx tsc --noEmit; fi';
+  'if [ -x ./node_modules/.bin/tsc ]; then ./node_modules/.bin/tsc --noEmit; elif [ "$(npm pkg get scripts.typecheck 2>/dev/null)" != "{}" ]; then npm run typecheck; else npx tsc --noEmit; fi';
 
 const MASTER_EXPLICIT_PATTERN =
   /\b(master executor|master orchestration|smaller workflows|child workflows|several workflows|multiple workflows|break(?:ing)? (?:it )?(?:out|up)|divvy|decompos(?:e|ition)|workflow waves?)\b/i;

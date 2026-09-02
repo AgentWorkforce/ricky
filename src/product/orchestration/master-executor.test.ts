@@ -68,7 +68,9 @@ describe('planMasterExecution', () => {
       signoffArtifactPath:
         '.workflow-artifacts/wave99-billing/implement-billing-api/signoff.md',
       signoffMarker: 'RICKY_IMPLEMENT_BILLING_API_IMPLEMENTED',
-      validationCommands: ['npm run typecheck'],
+      validationCommands: [
+        'if [ -x ./node_modules/.bin/tsc ]; then ./node_modules/.bin/tsc --noEmit; elif [ "$(npm pkg get scripts.typecheck 2>/dev/null)" != "{}" ]; then npm run typecheck; else npx tsc --noEmit; fi',
+      ],
       retryPolicy: { maxAttempts: 2, backoffMs: 1000 },
     });
     expect(apiChild.gates).toEqual(
@@ -91,7 +93,8 @@ describe('planMasterExecution', () => {
         expect.objectContaining({
           kind: 'test_command',
           required: true,
-          command: 'npm run typecheck',
+          command:
+            'if [ -x ./node_modules/.bin/tsc ]; then ./node_modules/.bin/tsc --noEmit; elif [ "$(npm pkg get scripts.typecheck 2>/dev/null)" != "{}" ]; then npm run typecheck; else npx tsc --noEmit; fi',
         }),
         expect.objectContaining({
           kind: 'dryrun_command',

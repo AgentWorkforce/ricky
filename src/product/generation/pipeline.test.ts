@@ -492,11 +492,11 @@ describe('workflow generation pipeline', () => {
   // MSD-style repos). The auto-fix loop then "repaired" the workflow 7×,
   // all failing identically because the workflow command was correct in
   // general — just wrong for that repo shape. The renderer now emits a
-  // workspace-aware shell snippet that prefers `npm run typecheck` when the
-  // project defines that script and falls back to `npx tsc --noEmit`
-  // otherwise. The fallback path keeps `npx tsc --noEmit` as a literal
-  // substring so downstream tests, evidence capture, and human readers
-  // still recognize the intent.
+  // workspace-aware shell snippet that prefers the local TypeScript binary,
+  // then falls back to `npm run typecheck`, and only then to
+  // `npx tsc --noEmit`. The fallback path keeps `npx tsc --noEmit` as a
+  // literal substring so downstream tests, evidence capture, and human
+  // readers still recognize the intent.
   it('emits a workspace-aware typecheck command in master-rendered final-hard-validation', () => {
     const result = generate({
       spec: spec({
@@ -510,8 +510,10 @@ describe('workflow generation pipeline', () => {
     expect(result.masterExecutionPlan).toBeDefined();
     const rendered = artifact(result).content;
 
-    // The final-hard-validation step body must include both branches of the
-    // workspace-aware fallback so monorepos and flat repos both succeed.
+    // The final-hard-validation step body must include the local-binary,
+    // script, and final fallback branches so installed repos, monorepos,
+    // and flat repos all succeed.
+    expect(rendered).toContain('./node_modules/.bin/tsc --noEmit');
     expect(rendered).toContain('npm pkg get scripts.typecheck');
     expect(rendered).toContain('npm run typecheck');
     expect(rendered).toContain('npx tsc --noEmit');
