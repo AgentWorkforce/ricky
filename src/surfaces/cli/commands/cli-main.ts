@@ -38,6 +38,7 @@ import type {
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { reconcilePersistedRunState } from '../../../scheduled-agent.js';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ora from 'ora';
@@ -1144,6 +1145,7 @@ async function renderRunMonitorStatus(runId: string, cwd: string, parsed: Parsed
     }
   }
   state = { ...state, statePath: state.statePath ?? loadedStatePath };
+  state = await reconcilePersistedRunState(state);
 
   if (parsed.json) {
     return [JSON.stringify(state, null, 2)];

@@ -1,5 +1,5 @@
 import { agent, type AgentHandle, type Context } from "@agent-relay/agent";
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { localRunStateRoot, repoStateKey } from "./shared/state-paths.js";
@@ -8,6 +8,7 @@ import type { LocalRunMonitorState } from "./surfaces/cli/flows/local-run-monito
 const DEFAULT_RICKY_WORKSPACE = "ricky";
 const DEFAULT_MONITOR_CHANNEL = "#ricky";
 const DEFAULT_MONITOR_SCHEDULE = "*/5 * * * *";
+const STALE_ACTIVE_RUN_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Tuning knobs accepted by {@link createRickyScheduledAgent}. */
 export interface RickyScheduledAgentOptions {
@@ -74,6 +75,68 @@ async function readRunStatesInRoot(stateRoot: string): Promise<LocalRunMonitorSt
   }
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function reconcilePersistedRunState(
+  state: LocalRunMonitorState,
+  options: { nowMs?: number } = {},
+): Promise<LocalRunMonitorState> {
+  if (state.status !== "queued" && state.status !== "running") {
+    return state;
+  }
+
+  let stateStats;
+  try {
+    stateStats = await stat(state.statePath);
+  } catch {
+    return state;
+  }
+
+  const nowMs = options.nowMs ?? Date.now();
+  const ageMs = nowMs - stateStats.mtimeMs;
+  if (ageMs < STALE_ACTIVE_RUN_AGE_MS) {
+    return state;
+  }
+
+  const [hasLog, hasEvidence, hasFixes] = await Promise.all([
+    pathExists(state.logPath),
+    pathExists(state.evidencePath),
+    pathExists(state.fixesPath),
+  ]);
+
+  if (hasLog || hasEvidence || hasFixes || state.response) {
+    return state;
+  }
+
+  const staleMessage = [
+    "Persisted background run state is stale.",
+    `No run.log, evidence.json, or fixes.json was written under ${state.artifactDir}.`,
+    `state.json last changed at ${new Date(stateStats.mtimeMs).toISOString()}.`,
+  ].join(" ");
+
+  return {
+    ...state,
+    status: "failed",
+    response: {
+      ok: false,
+      artifacts: [],
+      logs: [staleMessage],
+      warnings: [staleMessage],
+      nextActions: [
+        "Inspect the stale artifact directory, then rerun the workflow if the original process is gone.",
+      ],
+      exitCode: 1,
+    },
+  };
+}
+
 /**
  * Loads persisted `LocalRunMonitorState` documents from one or more state
  * roots. Mirrors the dual-path lookup used by `ricky status --run` so the
@@ -94,7 +157,8 @@ export async function listPersistedRunStates(
       }
     }
   }
-  return [...byRunId.values()].sort((left, right) => left.runId.localeCompare(right.runId));
+  const reconciled = await Promise.all([...byRunId.values()].map((run) => reconcilePersistedRunState(run)));
+  return reconciled.sort((left, right) => left.runId.localeCompare(right.runId));
 }
 
 /** Returns true when a run state has reached a terminal status worth alerting on. */

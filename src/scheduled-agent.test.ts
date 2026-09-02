@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   listPersistedRunStates,
+  reconcilePersistedRunState,
   renderRunMonitorAlert,
   shouldNotifyRunState,
 } from "./scheduled-agent.js";
@@ -79,6 +80,20 @@ describe("ricky scheduled agent helpers", () => {
     const runs = await listPersistedRunStates([xdgRoot, artifactRoot]);
     expect(runs.map((run) => run.runId)).toEqual(["run-artifact-only", "run-shared"]);
     expect(runs.find((run) => run.runId === "run-shared")?.status).toBe("failed");
+  });
+
+  it("reclassifies ancient active run state with no evidence as failed", async () => {
+    const stateRoot = await makeStateRoot();
+    const run = buildRunState("run-stale", "running", { response: undefined });
+    await writePersistedRun(stateRoot, run);
+
+    const reconciled = await reconcilePersistedRunState(
+      { ...run, statePath: join(stateRoot, run.runId, "state.json") },
+      { nowMs: Date.now() + 2 * 24 * 60 * 60 * 1000 },
+    );
+
+    expect(reconciled.status).toBe("failed");
+    expect(reconciled.response?.warnings?.[0]).toContain("Persisted background run state is stale");
   });
 
   it("renders actionable alerts for terminal monitor states", () => {
