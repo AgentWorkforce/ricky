@@ -8,6 +8,9 @@
 # bound to publish.yml, so this workflow cannot authenticate to the registry.
 # Instead it uploads the `npm pack` tarball as a workflow artifact named
 # ricky-npm-<sha>. It never bumps the version, tags git or moves a dist-tag.
+#
+# Caches are restore-only: this builds unreviewed refs, so it never saves into
+# a cache that normal CI or release workflows restore.
 name: fast-path
 run-name: fast-path ${{ inputs.ref }} (${{ inputs.reason }})
 on:
@@ -23,7 +26,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: fast-path-${{ inputs.ref }}
+  # run_id: a run waiting for approval must not let a later dispatch cancel it.
+  group: fast-path-${{ inputs.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 jobs:
   test:
