@@ -1,0 +1,92 @@
+# Fast path: run Ricky's pre-merge gate (typecheck, full test suite, local
+# auto-fix ladder e2e), build and pack @agentworkforce/ricky on Blacksmith
+# runners, outside the shared GitHub-hosted queue. Anyone with write access
+# (people or agents) may start it; nothing runs until Khaliq approves the
+# fast-path environment.
+#
+# It does not publish to npm: the package uses npm trusted publishing (OIDC)
+# bound to publish.yml, so this workflow cannot authenticate to the registry.
+# Instead it uploads the `npm pack` tarball as a workflow artifact named
+# ricky-npm-<sha>. It never bumps the version, tags git or moves a dist-tag.
+#
+# Caches are restore-only: this builds unreviewed refs, so it never saves into
+# a cache that normal CI or release workflows restore.
+name: fast-path
+run-name: fast-path ${{ inputs.ref }} (${{ inputs.reason }})
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build (a PR branch is fine)
+        required: true
+        default: main
+      reason:
+        description: Why this needs the fast path
+        required: true
+permissions:
+  contents: read
+concurrency:
+  # run_id: a run waiting for approval must not let a later dispatch cancel it.
+  group: fast-path-${{ inputs.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  test:
+    environment: fast-path
+    timeout-minutes: 30
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Install deps
+        run: npm ci
+      - name: Run pre-merge gate
+        run: npm run premerge
+  pack:
+    needs: test
+    timeout-minutes: 15
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.test.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Install deps
+        run: npm ci
+      - name: Build package
+        run: npm run build
+      - name: Pack
+        id: pack
+        run: |
+          mkdir -p dist-pack
+          file=$(npm pack --ignore-scripts --pack-destination dist-pack | tail -n 1)
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ricky-npm-${{ needs.test.outputs.sha }}
+          path: dist-pack/*.tgz
+          if-no-files-found: error
+      - name: Summary
+        env:
+          REF: ${{ inputs.ref }}
+          SHA: ${{ needs.test.outputs.sha }}
+          REASON: ${{ inputs.reason }}
+          FILE: ${{ steps.pack.outputs.file }}
+        run: |
+          {
+            echo "### ricky fast path"
+            echo "- ref: \`$REF\` at \`$SHA\`"
+            echo "- reason: $REASON"
+            echo "- npm tarball: \`$FILE\` in artifact \`ricky-npm-$SHA\` (not published: npm trusted publishing is bound to publish.yml)"
+          } >> "$GITHUB_STEP_SUMMARY"
