@@ -252,7 +252,7 @@ Required loop:
 5. fresh independent self-review agents read the actual final files, AGENTS.md / CLAUDE.md, recent local conventions, and related rules
 6. implementers repair valid review findings
 7. deterministic validation gates run from captured output
-8. final Claude and Codex reviewers review independently
+8. task-appropriate reviewers assess the final state independently
 9. final reviewers compare notes and write a merged final review artifact
 10. fresh fix agents address final-review findings, self-reflect, and hand the fixed state back for post-fix review
 11. final signoff happens only after post-fix review and deterministic gates prove the spec is complete, or a blocker artifact records exact evidence
@@ -316,7 +316,7 @@ When possible, use a reviewer that is distinct from the writer.
 Preferred review shapes:
 - writer = codex, reviewer = claude
 - writer = claude, reviewer = codex
-- for critical workflows, both Claude and Codex as final reviewers
+- for critical workflows, task-appropriate review
 - for serious implementation workflows, shadow review and implementer self-reflection happen before final review
 
 ### 8.3 Review outputs should be materialized

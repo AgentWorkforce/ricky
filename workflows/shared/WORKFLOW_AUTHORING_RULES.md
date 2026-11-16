@@ -20,7 +20,7 @@ Compact execution rules for agents writing Ricky workflows.
 14. Load repo-local `.env.local`/`.env` before `.run(...)` without overwriting exported values, and fail fast with `MISSING_ENV_VAR: NAME` for required env vars before long-running agent steps.
 15. For generation tasks, read `workflows/meta/spec/generated-workflow-template.md` before authoring.
 16. Set `.channel()`, `.pattern()`, `.maxConcurrency()`, and `.timeout()` explicitly; add `.onError()` for long-running or multi-agent workflows.
-17. Prefer named roles over generic numbering. Default serious implementation shape is one or more small squads with `lead-claude`, `impl-<scope>-codex`, `shadow-<scope>-claude` or `shadow-<scope>-codex`, optional `validator-<scope>-claude`, then `final-reviewer-claude` and `final-reviewer-codex`; doc/spec workflows may use `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer.
+17. Prefer named roles over generic numbering. Default serious implementation shape is one or more small squads with `lead-claude`, `impl-<scope>-codex`, `shadow-<scope>-claude` or `shadow-<scope>-codex`, optional `validator-<scope>-claude`, then task-appropriate final review; doc/spec workflows may use `lead-claude`, `author-codex` or `author-claude`, and a distinct reviewer.
 18. State the expected branch naming pattern and whether PR creation is in or out of scope; use `ricky/<wave-or-meta>-<workflow-slug>` by default unless a local spec narrows it.
 19. Use scoped change detection after implementation steps with `git diff --name-only` and `git ls-files --others --exclude-standard` limited to declared file targets.
 20. Write final signoff artifacts under `.workflow-artifacts/` for significant implementation or generation workflows.
@@ -68,7 +68,7 @@ Use this loop when the workflow changes runtime behavior, generated workflows, u
 5. The implementer writes `.workflow-artifacts/<slug>/<scope>-self-reflection.md` covering changed files, spec coverage, tests/proofs, repo-rule alignment, and remaining risks.
 6. A fresh self-review agent reads the final files, AGENTS.md / CLAUDE.md, recent local conventions, and the self-reflection artifact. It writes findings to disk.
 7. The implementer repairs valid findings, then deterministic gates run or rerun from captured output.
-8. After squads converge, `final-reviewer-claude` and `final-reviewer-codex` review independently.
+8. After squads converge, task-appropriate reviewers assess the final state independently.
 9. The final reviewers compare notes and write one merged final review artifact.
 10. Fresh fix agents address final-review findings. Those fix agents self-reflect, and the final reviewers re-check the post-fix state.
 11. Sign off only when the spec is fully satisfied by post-fix review and deterministic evidence, or write a blocker artifact with exact evidence.
